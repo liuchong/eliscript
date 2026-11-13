@@ -79,16 +79,23 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
-  The latest normalized local sample has eight of nine medians below native
-  Emacs; the 64-element tail slice remains slower. Comparisons against 0.1.2
-  still reject first, last, that tail slice, reference-identity equality and
-  the deep zipper. Sorting improves from 0.521826 to 0.382755 ms/op; aggregation
-  and numeric scoring also pass in this sample. Raw sample variation needs
-  diagnosis and does not automatically waive a slower median.
+  The latest normalized local sample has all nine medians below native
+  Emacs, with the 64-element tail slice only narrowly ahead (0.730 vs 0.735
+  microseconds/op). Comparisons against 0.1.2 still reject first, last, that
+  tail slice, reference-identity equality, the deep zipper and numeric scoring.
+  Sorting measures 0.370196 vs 0.563929 ms/op; grouping and frequencies also
+  pass in this sample. Raw sample variation needs diagnosis and does not
+  automatically waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
   the final independent acceptance, and clean used generated outputs.
+
+The vector `count`, `from` and `sliceVector` bridges have distinct host call
+sites while their Eli algorithms, method signatures, descriptors and public
+factory overrides remain unchanged. Counter-helper and native chunk-copy
+experiments were rejected after slower measurements; the retained bridge
+change does not close the remaining previous-version performance failures.
 
 Dense safe-integer collections now use a stable counting sort in both the
 JavaScript runtime and the managed WASM/native provider. The path requires at
@@ -111,7 +118,7 @@ can be accepted after checking duplication, growth proportion and installation
 cost, with actual bytes and the reason documented before adjusting the automated
 budget. Required source and debug assets take priority over shaving a few bytes.
 
-The current candidate produces a 4,851,866-byte tarball (729 entries,
+The last installed candidate (`6992faaf`) produced a 4,851,866-byte tarball (729 entries,
 33,110,394 bytes unpacked). Clean installation and installed JS/WASM/native
 execution pass. The size budget is unchanged. This package measurement does
 not waive the version-comparison failures above; those remain release blockers.

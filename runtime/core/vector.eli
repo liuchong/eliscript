@@ -525,21 +525,27 @@
     (define-binary-static-method PersistentVector "rawSlot" "rawSlot"
       (lambda (vector index)
         (get (get (aref vector VECTOR_STATE) :tail) index)))
-    (define-unary-static-method PersistentVector "from" "from"
-      (lambda (iterable)
-        (cond
-          ((funcall instance-of? iterable PersistentVector)
-           iterable)
-          ((and (Array/isArray iterable)
-                (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
-                (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
-                (eq (aref iterable (get globalThis/Symbol :iterator))
-                    (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
-           (vector-from-array iterable))
-          (t
-           (vector-from-iterable iterable)))))
-    (define-getter proto "count" "count"
-      (lambda (self) (get (aref self VECTOR_STATE) :count)))
+    ;; Give hot callbacks distinct host call sites instead of sharing the
+    ;; polymorphic bridge used by unrelated methods. Algorithms remain Eli.
+    (define-method-value PersistentVector "from"
+      (funcall (js* "(fn) => ({ from(value) { return fn(value); } }).from")
+        (lambda (iterable)
+          (cond
+            ((funcall instance-of? iterable PersistentVector)
+             iterable)
+            ((and (Array/isArray iterable)
+                  (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
+                  (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
+                  (eq (aref iterable (get globalThis/Symbol :iterator))
+                      (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
+             (vector-from-array iterable))
+            (t
+             (vector-from-iterable iterable))))))
+    (Object/defineProperty proto "count"
+      (js-object :configurable t
+        :get (funcall
+          (js* "(fn) => Object.getOwnPropertyDescriptor({ get count() { return fn(this); } }, 'count').get")
+          (lambda (self) (get (aref self VECTOR_STATE) :count)))))
     (define-getter proto "size" "size"
       (lambda (self) (get (aref self VECTOR_STATE) :count)))
     (define-method-value proto "nth"
@@ -735,27 +741,28 @@
             (js-call values :push value)
             values)
           (js-array))))
-    (define-binary-method proto "sliceVector" "sliceVector"
-      (lambda (self start end)
-        (let* ((state (aref self VECTOR_STATE))
-               (length (index-subtract end start)))
-          (cond
-            ((<= length 0) EMPTY_VECTOR)
-            ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
-             self)
-            (t
-             (let ((values (new globalThis.Array length)) (out-index 0) (index start))
-               (while (index-less? index end)
-                 (let* ((chunk (array-for state index))
-                        (chunk-offset (funcall bit-and index BRANCH_MASK))
-                        (chunk-base (index-subtract index chunk-offset))
-                        (chunk-end (Math/min (index-subtract end chunk-base) (js-length chunk)))
-                        (offset chunk-offset))
-                   (while (index-less? offset chunk-end)
-                     (put values out-index (aref chunk offset))
-                     (setq out-index (1+ out-index) offset (1+ offset)))
-                   (setq index (+ chunk-base chunk-end))))
-               (js-call PersistentVector :from values)))))))
+    (define-method-value proto "sliceVector"
+      (funcall (js* "(fn) => ({ sliceVector(start, end) { return fn(this, start, end); } }).sliceVector")
+        (lambda (self start end)
+          (let* ((state (aref self VECTOR_STATE))
+                 (length (index-subtract end start)))
+            (cond
+              ((<= length 0) EMPTY_VECTOR)
+              ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
+               self)
+              (t
+               (let ((values (new globalThis.Array length)) (out-index 0) (index start))
+                 (while (index-less? index end)
+                   (let* ((chunk (array-for state index))
+                          (chunk-offset (funcall bit-and index BRANCH_MASK))
+                          (chunk-base (index-subtract index chunk-offset))
+                          (chunk-end (Math/min (index-subtract end chunk-base) (js-length chunk)))
+                          (offset chunk-offset))
+                     (while (index-less? offset chunk-end)
+                       (put values out-index (aref chunk offset))
+                       (setq out-index (1+ out-index) offset (1+ offset)))
+                     (setq index (+ chunk-base chunk-end))))
+                 (js-call PersistentVector :from values))))))))
     (define-binary-method proto VALUE_EQUAL "[eliscript.value.equal]"
       (lambda (self other equal)
         (cond
