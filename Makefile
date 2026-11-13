@@ -29,6 +29,7 @@ ORIGINALS_SUITE_STEPS = test-pre-bootstrap-originals/node-originals
 FULL_TEST_SUITE_STEPS = $(CORE_SUITE_STEPS),$(APPLICATION_SUITE_STEPS),$(ORIGINALS_SUITE_STEPS)
 ARTIFACT_SUITE_STEPS = prepare-bootstrap-artifacts,artifact-bun-files,artifact-node-selfhosted
 RELEASE_CI_SUITE_STEPS = check-release-workflow,bootstrap-selfhosted-tests,prepare-release-package,check-stage3-targets,check-release-package,$(ARTIFACT_SUITE_STEPS)
+PLATFORM_CI_SUITE_STEPS = check-release-workflow,platform-selfhosted-tests,prepare-release-package,check-release-package,platform-artifact-tests,strict-byte-compile
 ELISCRIPT_JS_RUNTIME ?= $(shell command -v node)
 BOOTSTRAP_RELEASE_OUT ?= dist/bootstrap-release
 BOOTSTRAP_RELEASE_MANIFEST ?= $(BOOTSTRAP_RELEASE_OUT)/bootstrap.json
@@ -36,7 +37,7 @@ NATIVE_TARGET ?= $(if $(filter Linux,$(shell uname -s)),arm64-linux,arm64-macos)
 STAGE3_FUNCTIONAL_RUNTIME_PROFILE ?=
 STAGE3_FUNCTIONAL_RUNTIME_OPTION = $(if $(strip $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE)),--functional-runtime-profile $(STAGE3_FUNCTIONAL_RUNTIME_PROFILE),)
 
-.PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package check-release-package compiler-release-ci check-release-workflow
+.PHONY: bootstrap-release verify-bootstrap check-stage3-targets prepare-release-package check-release-package compiler-release-ci compiler-platform-ci check-release-workflow
 
 # All compiler hosts in this release are JavaScript. Binary targets below are
 # generated user programs, never alternative compiler hosts.
@@ -62,6 +63,18 @@ check-release-package: prepare-release-package
 
 check-release-workflow:
 	$(NODE) tools/ci/dist/compiler-release.mjs --check
+
+# Cross-platform build and actual installed three-target execution. The full
+# corpus remains in compiler-release-ci; this gate never claims its coverage.
+compiler-platform-ci: bootstrap-release
+	$(MAKE) verify-bootstrap
+	$(SUITE_STEP) compiler-platform-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
+	$(SUITE_STEP) compiler-platform-ci platform-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
+	$(SUITE_PREREQ) compiler-platform-ci prepare-release-package "" -- $(MAKE) prepare-release-package
+	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(SUITE_STEP) compiler-platform-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
+	$(SUITE_STEP) compiler-platform-ci platform-artifact-tests prepare-release-package -- $(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs
+	$(SUITE_STEP) compiler-platform-ci strict-byte-compile "" -- $(MAKE) byte-compile
+	@$(SUITE_FINALIZE) compiler-platform-ci "$(PLATFORM_CI_SUITE_STEPS)"
 
 compiler-release-ci: bootstrap-release
 	$(MAKE) verify-bootstrap

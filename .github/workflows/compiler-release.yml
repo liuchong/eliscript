@@ -3,6 +3,11 @@ name: Compiler bootstrap and final outputs
 
 on:
   workflow_dispatch:
+    inputs:
+      exhaustive:
+        description: Run the full 861-record three-target corpus in addition to platform acceptance
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,7 +20,7 @@ jobs:
   bootstrap:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 360
+    timeout-minutes: ${{ inputs.exhaustive && 360 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,23 +85,30 @@ jobs:
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Install browser engines for final compiler validation
+        if: inputs.exhaustive
         run: bun node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
-      - name: Build the JS stages and verify final outputs
+      - name: Build the JS stages and verify selected acceptance scope
         id: compiler-release
-        run: make compiler-release-ci
+        run: |
+          if [ "${{ inputs.exhaustive }}" = "true" ]; then
+            make compiler-release-ci
+          else
+            make compiler-platform-ci
+          fi
       - name: Strict byte compilation
         if: "!cancelled() && steps.compiler-release.outcome != 'skipped'"
         run: make byte-compile
       - name: Prune workspace symlinks before artifact upload
         if: always()
         run: if [ -d dist/bootstrap-release ]; then find dist/bootstrap-release -type l -delete; fi
-      - name: Preserve compiler acceptance evidence
-        if: always()
+      - name: Preserve failed compiler diagnostics
+        if: failure()
         env:
           NODE_OPTIONS: "--max-old-space-size=8192"
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: compiler-release-${{ matrix.name }}-${{ github.sha }}
+          retention-days: 1
           path: |
             dist/bootstrap-release/
             .eliscript-cache/test-results/

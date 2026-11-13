@@ -120,12 +120,15 @@
             (js-call assert :strictEqual (get record :version) 1)
             (js-call assert :ok (Object/hasOwn record "error")))))))
 
-  (test "release workflow executes the full JS chain and final three outputs on both native platforms"
+  (test "release workflow preserves the full corpus on demand and defaults to real three-output platform acceptance"
     (async ()
       (let* ((matrix (JSON/parse (await (readFile (resolve root "contracts/compatibility-matrix.json") "utf8"))))
              (workflow (renderCompilerReleaseWorkflow matrix)))
-        (js-call (js-array "on:\n  workflow_dispatch:\n\n" "name: linux-arm64-stage3" "name: macos-stage3"
-                   "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "id: compiler-release"
+        (js-call (js-array "on:\n  workflow_dispatch:\n" "name: linux-arm64-stage3" "name: macos-stage3"
+                   "ubuntu-24\\.04-arm" "macos-15" "make compiler-release-ci" "make compiler-platform-ci" "id: compiler-release"
+                   "exhaustive:" "type: boolean" "default: false" "inputs.exhaustive && 360 \\|\\| 45"
+                   "Preserve failed compiler diagnostics\n        if: failure\\(\\)" "retention-days: 1"
+                   "Install browser engines for final compiler validation\n        if: inputs.exhaustive"
                    "if: \"!cancelled\\(\\) && steps\\.compiler-release\\.outcome != 'skipped'\""
                    "make byte-compile" "upload-artifact" "\\.eliscript-cache/test-results/"
                    "BUN_TEST_RUNNER: tools/testing/final-functional-scope\\.mjs")
@@ -133,6 +136,18 @@
         (js-call assert :doesNotMatch workflow (pattern "STAGE3_SHARD_INDEX|STAGE3_SHARD_COUNT|--shard-index|-shard-|branches: \\[master"))
         (js-call assert :doesNotMatch workflow (pattern "record-grid|bootstrap-all|--host wasm|--host native"))
         (js-call assert :doesNotMatch workflow (pattern "timeout-minutes: (10|30)\\b"))
+        (let* ((makefile (await (readFile (resolve root "Makefile") "utf8")))
+               (start (js-call makefile :indexOf "\ncompiler-platform-ci: bootstrap-release\n"))
+               (end (js-call makefile :indexOf "\ncompiler-release-ci: bootstrap-release\n" start))
+               (platform (js-call makefile :slice start end)))
+          (js-call assert :ok (and (>= start 0) (> end start)))
+          (js-call (js-array "verify-bootstrap" "stage3-targets-selfhosted"
+                            "release-package-install-selfhosted" "package-surface.test.mjs"
+                            "byte-compile" "SUITE_FINALIZE")
+            :forEach (lambda (required) (js-call assert :ok (js-call platform :includes required))))
+          (js-call assert :doesNotMatch platform (pattern "release-cli[.]mjs targets|check-stage3-targets|bootstrap-js-stages-selfhosted|compiler-browser-session.test.mjs"))
+          (js-call assert :ok (js-call (js-call makefile :slice end) :includes "tests/bootstrap-js-stages-selfhosted.test.mjs"))
+          (js-call assert :ok (js-call makefile :includes "./tests/compiler-browser-session.test.mjs")))
         (let ((changed (globalThis.structuredClone matrix)))
           (put changed :operatingSystems (js-array
             (js-object :id "linux" :runner "ubuntu-24.04" :architecture "x64")))

@@ -34,6 +34,28 @@ handoff; public producers and retained archives keep their wire snapshots.
 Each record reports compilation, archive, execution and independent comparison
 times, including a failed phase, so expensive work can be located directly.
 
+The manual compiler workflow defaults to `make compiler-platform-ci`: one
+four-stage build and fixed point, bootstrap and acceptance-interface tests,
+the actual installed JS/WASM/native package, public package surface and
+strict byte compilation on both ARM64 platforms. Its result is platform
+acceptance, not a complete corpus or performance acceptance. It has a
+45-minute job deadline. The additional bootstrap fault-injection suite, which
+constructs its own full four-stage chain, stays in the exhaustive gate instead
+of repeating the platform job's real build.
+Actual browser and Worker execution stays in Browser compatibility and the
+exhaustive artifact suite. The default compiler job does not install browser
+engines or repeat those separately available tests.
+Successful jobs discard their build workspace without uploading compiler
+copies. Failed-job diagnostics expire after one day and are removed after
+their investigation is finished.
+
+The complete 861-record corpus for each of the three output targets remains
+available locally through `make compiler-release-ci` or `make
+check-stage3-targets`. The workflow's explicit `exhaustive` input selects that
+full gate with its six-hour ceiling. Use it only when current measurements
+fit the selected runner; cancelled and deferred records never count as
+passes. The default platform job does not run or claim that exhaustive gate.
+
 ## Release Latch
 
 `package.json` sets `"private": true`. npm refuses to publish a private
