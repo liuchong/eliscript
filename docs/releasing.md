@@ -79,10 +79,9 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
-  The latest local run has eight medians below native Emacs; the tail slice
-  remains slightly slower. Comparisons against 0.1.2 still reject first, last,
-  the 64-element tail slice,
-  same-reference equality, sorting and the deep zipper workload. Raw sample
+  The latest local sample has all nine medians below native Emacs. Comparisons
+  against 0.1.2 still reject first, last, the 64-element tail slice, sorting,
+  the deep zipper and numeric scoring workloads. Raw sample
   variation needs diagnosis and does not automatically waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
@@ -95,6 +94,12 @@ The compressed size baseline is 5 MB. A small increase for necessary payload
 can be accepted after checking duplication, growth proportion and installation
 cost, with actual bytes and the reason documented before adjusting the automated
 budget. Required source and debug assets take priority over shaving a few bytes.
+
+The current compact lexical-binding emission produces a 4,871,324-byte tarball
+(731 entries, 33,234,008 bytes unpacked), down from 4,984,006 compressed bytes
+before this emission change. Clean installation and installed JS/WASM/native
+execution pass. The size budget is unchanged. This reduction is a payload
+improvement; the current version-comparison failures above remain release blockers.
 
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the

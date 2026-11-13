@@ -400,9 +400,10 @@
     (if (eliscript-ir-emitter--boolean-p node) output
       (format "__eliscript_truthy(%s)" output))))
 
-(defun eliscript-ir-emitter--context-sequential-safe-p (bindings)
-  "Whether BINDINGS can share one scope without TDZ or capture changes."
-  (if (<= (length bindings) 1) nil
+(defun eliscript-ir-emitter--context-sequential-safe-p (bindings &optional parallel)
+  "Whether BINDINGS can share one scope without TDZ or capture changes.
+With PARALLEL, reject references to any of the new bindings."
+  (if (if parallel (null bindings) (<= (length bindings) 1)) nil
   (let ((names (make-hash-table :test #'equal)) (index 0)
         (safe t))
     (dolist (binding bindings)
@@ -421,7 +422,7 @@
                 (let* ((name (eliscript-symbol-reference-name (eliscript-ir-node-value node)))
                        (root (car (split-string name "\\.")))
                        (position (gethash root names)))
-                  (when (and position (> position index)) (setq safe nil))))
+                  (when (and position (or parallel (> position index))) (setq safe nil))))
               (dolist (child (eliscript-ir-emitter--children node)) (push child pending))))))
       (setq index (1+ index)))
     safe)))
@@ -433,7 +434,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
   (if (null bindings)
       (if returning (eliscript-ir-emitter--emit-returning-body body)
         (eliscript-ir-emitter--emit-statement-body body))
-    (if (and sequential (eliscript-ir-emitter--context-sequential-safe-p bindings))
+    (if (eliscript-ir-emitter--context-sequential-safe-p bindings (not sequential))
         (let ((declarations
                (mapcar (lambda (binding)
                          (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
@@ -553,7 +554,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
        (cond
         ((null bindings) (list :children (list (list :body body options))
                                (lambda (results) (list :value (car results)))))
-        ((and sequential (eliscript-ir-emitter--context-sequential-safe-p bindings))
+        ((eliscript-ir-emitter--context-sequential-safe-p bindings (not sequential))
          (list :children (append (mapcar (lambda (binding) (list :declaration binding nil)) bindings)
                                  (list (list :body body options)))
                (lambda (results)

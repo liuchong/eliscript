@@ -17,7 +17,7 @@
   (defconst suite "tests/wasm-managed-array-text.test.mjs")
   (js-call assert :ok (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root suite)))))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-    "aeb2367a4af2a6c0c39c5e3b079c142c1169cd02f7326e7c2b7125fc5d73541c")
+    "029501252f3274bcf4b304e7b49fbce4c45983f7c38b50f414c0d5f1a8bb13ec")
   (defvar backend undefined)
   (defasync buildBackends (&rest arguments)
     (setq backend (await (Reflect/apply (get actual-build :buildBackends) actual-build arguments))) backend)

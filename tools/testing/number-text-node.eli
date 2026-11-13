@@ -6,7 +6,7 @@
   (import "node:url" pathToFileURL)
   (import "../backends/build.mjs" root)
   (defconst numberTextSuite "tests/wasm-managed-number-text.test.mjs")
-  (defconst numberTextSuiteSHA "31010ff9c63c925008282fc20f58d8c87ffa7fbc8bab18333ba681093e15cbcf")
+  (defconst numberTextSuiteSHA "243924b3b0cf2eb522ce98188b371a2b53d20fede1b1bc1aead85d239806d1e9")
   (defconst numberTextSuiteURL (get (pathToFileURL (resolve root numberTextSuite)) :href))
   (defun verifyNumberTextSource ()
     (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root numberTextSuite))) :digest "hex") numberTextSuiteSHA))

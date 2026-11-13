@@ -10,11 +10,11 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst rows (js-array
     (js-array "tests/wasm-managed-source-collections.test.mjs" "tests/wasm-managed-source-collections-test-ground.mjs"
-      "a5c915b017553e1106afd4abc86702093b9c494cf16c7a960b648966134d13c9"
+      "398d375a39d276e1696f622e62f261dd87534c4f18f67752742a1fe7620f453d"
       "source table capacity failures leave committed entries intact and unwind only private roots" sourceCollectionCases
       "512 source table writes preserve every committed value at the normal functional budget" sourceCollectionNormalCapacity)
     (js-array "tests/wasm-managed-collection-for-each.test.mjs" "tests/wasm-managed-collection-for-each-test-ground.mjs"
-      "cd713977f7871090a4fc459a5527b13e87a9cfe3aae713bcd2feb562008fb3df"
+      "a304ce8dfcb5680bff95e4be3bd22828c9e79321252d4422374f347ae940908a"
       "Given callback allocation pressure, when live iteration exhausts capacity, then prior effects remain and only private roots unwind" (js-object)
       "all 128 original Map and Set callback inputs complete with caller roots at the normal functional budget" collectionForEachNormalCapacity)))
   (defvar selected undefined)

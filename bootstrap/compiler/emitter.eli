@@ -674,10 +674,10 @@
       (if (boolean-p node) output
         (combine (js-array "__eliscript_truthy(" output ")")))))
 
-  ;; Share a sequential scope only when no initializer can observe its TDZ.
-  ;; Other initializers retain their original individual binding scopes.
-  (defun context-sequential-safe-p (bindings)
-    (if (<= (js-length bindings) 1) false
+  ;; Direct declarations are safe only when initializers cannot observe a new
+  ;; TDZ or capture a new binding. Parallel groups exclude every new name.
+  (defun context-sequential-safe-p (bindings &optional parallel)
+    (if (if parallel (= (js-length bindings) 0) (<= (js-length bindings) 1)) false
     (let ((names (new globalThis.Map)) (index 0) (safe t))
       (while (and safe (< index (js-length bindings)))
         (let ((name (binding-name (ir-value (js-nth index bindings)))))
@@ -697,7 +697,7 @@
                   (when (or (= kind "reference") (= kind "assignment-pair"))
                     (let* ((name (reference-name (ir-value node)))
                            (root (js-nth 0 (js-call name :split "."))))
-                      (when (and (js-call names :has root) (>= (js-call names :get root) index))
+                      (when (and (js-call names :has root) (or parallel (>= (js-call names :get root) index)))
                         (setq safe false))))
                   (js-call (children node) :forEach (lambda (child) (js-call pending :push child))))))))
         (setq index (1+ index))) safe)))
@@ -705,7 +705,7 @@
   (defun emit-context-let (bindings body sequential returning)
     (if (= (get bindings :length) 0)
         (if returning (emit-returning-body body) (emit-statement-body body))
-      (if (and sequential (context-sequential-safe-p bindings))
+      (if (context-sequential-safe-p bindings (not sequential))
           (let ((declarations (js-array)))
             (js-call bindings :forEach (lambda (binding)
               (let ((initializer (binding-initializer binding)))

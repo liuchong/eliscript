@@ -11,7 +11,7 @@
   (defconst archive (resolve root "tests/direct-wasm-backend-test-ground.mjs"))
   (defconst source (readFileSync archive))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-    "02c58915e78372b7cd669d0b2cb711ce5ad2b03c2eb1cd3d48cbd1919e58404b"
+    "542fd41674f45c68e0f8e1bddd574d57f5d14cc7df80e906f23452cf304cbace"
     "the full original direct WASM suite must retain its exact bytes")
   (defconst registration (createDirectWasmRegistration original
     (js-object

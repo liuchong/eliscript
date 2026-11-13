@@ -29,7 +29,7 @@
     (should (equal-including-properties (eliscript-ir-emitter-emit-expression node) marked))))
 
 (ert-deftest eliscript-emitter-depth-conditional-binding-contexts-retain-exact-bytes ()
-  "96 if/let pairs preserve fresh names, scopes and discarded/returned values."
+  "96 independent if/let pairs preserve scopes without temporary bindings."
   (dolist (returning '(nil t))
     (let ((form 'value)
           (node (eliscript-ir-make-node 'reference nil 'value))
@@ -45,24 +45,21 @@
                                                  (list (eliscript-ir-make-node 'reference nil 'unit)
                                                        (eliscript-ir-make-node 'literal nil index) node)))
                     '(:binding-count 1 :sequential nil))))
-      ;; The tree was assembled inside-out: index zero is its deepest branch,
-      ;; whose temporary is allocated last by source-order emission.
+      ;; The initializers reference only the outer value, so each binding can
+      ;; initialize directly without changing parallel binding semantics.
       (dotimes (index width)
-        (let* ((temporary (format "__eliscript_value_%d" (- width index)))
-               (conditional (format "if (__eliscript_truthy(unit)) {\n  %s%d;\n} else {\n%s\n}"
+        (let* ((conditional (format "if (__eliscript_truthy(unit)) {\n  %s%d;\n} else {\n%s\n}"
                                     (if returning "return " "") index
                                     (eliscript-emitter--indent expected)))
-               (declarations (concat "let unit = " temporary ";\n" conditional)))
+               (declarations (concat "let unit = value;\n" conditional)))
           (setq expected
-                (concat "{\n" (eliscript-emitter--indent
-                                (concat "const " temporary " = value;\n{\n"
-                                        (eliscript-emitter--indent declarations) "\n}")) "\n}"))))
+                (concat "{\n" (eliscript-emitter--indent declarations) "\n}"))))
       (let ((eliscript-emitter--temporary-counter 0))
         (should (equal (eliscript-emitter--emit-context form returning) expected))
-        (should (= eliscript-emitter--temporary-counter width)))
+        (should (= eliscript-emitter--temporary-counter 0)))
       (let ((eliscript-emitter--temporary-counter 0))
         (should (equal (eliscript-ir-emitter--emit-context node returning) expected))
-        (should (= eliscript-emitter--temporary-counter width))))))
+        (should (= eliscript-emitter--temporary-counter 0))))))
 
 (defun eliscript-emitter-depth-tests--ground (source filename)
   "Emit SOURCE through the independent form representation."

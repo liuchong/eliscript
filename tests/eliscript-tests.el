@@ -549,7 +549,7 @@
           "(defun add-one (value) (let ((step 1)) (+ value step)))")))
     (should (string-match-p "function add_one(value)" output))
     (should (string-match-p
-             (regexp-quote "let step = __eliscript_value_1;\n      return (value + step);")
+             (regexp-quote "let step = 1;\n    return (value + step);")
              output))))
 
 (ert-deftest eliscript-supports-optional-and-rest-parameters ()
@@ -1932,7 +1932,7 @@ already nested suffix, or use either production emitter to build the oracle."
              (regexp-quote "let item = __eliscript_value_1;") output))
     (should (string-match-p "thread\\$G[0-9]+" output))
     (should (string-match-p
-             (regexp-quote "if (__eliscript_truthy(item)) {\n        return item;") output))
+             (regexp-quote "if (__eliscript_truthy(item)) {\n      return item;") output))
     (should (string-match-p
              (regexp-quote "item === null") output))
     (should (string-match-p

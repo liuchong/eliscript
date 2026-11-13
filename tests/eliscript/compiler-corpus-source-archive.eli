@@ -123,7 +123,7 @@
            (source (await (readFile "tests/bootstrap-emitter.test.mjs" "utf8")))
            (assertion (get original :assertionSource)))
       (ok record "source archive assertion at maintained line 108")
-      (eq-check (get original :sourceSha256) "fa39c912b4d5bd3cc0a143f79432cf6fc96893144c8f3c21e2f239bc5d587450")
+      (eq-check (get original :sourceSha256) "a02c76af88e3cbec19496284040391c959517c8024a7327f4a3260c9a9ccffa5")
       (eq-check (get assertion :sourceSha256) (hash source))
       (deep (get assertion :regions) (get original :regions))
       (eq-check (js-length (get assertion :regions)) 2)
@@ -371,7 +371,7 @@
           (eq-check (js-length (get record :modules)) 13)
           (eq-check (get original :suite) archive)
           (eq-check (get original :sourceSha256) (hash source))
-          (eq-check (get original :sourceSha256) "89ac4d161e407df3eb3e02152887b6bb4ad3043593ea357d50f941952edbe9c1")
+          (eq-check (get original :sourceSha256) "543282bab4e513ab5e2f19817fc352a4b5059b75793278b114062989b92672d1")
           (deep (get original :regions) (js-array (js-object :start 0 :end (js-length source)
             :byteStart 0 :byteEnd (js-call Buffer :byteLength source) :sha256 (hash source))))
           (each locators (lambda (locator ignored) (ok (includes (get record :coverage) (get locator :id)) "source archive assertion at maintained line 360")))
@@ -819,7 +819,7 @@
                  (assertion (get migration :assertionSource)))
             (eq-check (get migration :executedSuite) "tests/wasm-memory-static-data.test.mjs")
             (eq-check (get assertion :file) "tests/wasm-memory-static-data-test-ground.mjs")
-            (eq-check (get assertion :sourceSha256) "90034727ef290ad6ec5b3b3c58fc181580296d2fe722f811469ebd3b948b9273")
+            (eq-check (get assertion :sourceSha256) "d0b9839cd2a5c75b6412e5d40985eb4c8b5d340e217a3381866b4452e7d2e7e5")
             (eq-check (js-length (get assertion :cases)) 19)
             (eq-check (js-length (get migration :sourceAssets)) 34)
             (await (each-await (get migration :sourceAssets) (async (asset ignored)
@@ -881,7 +881,7 @@
             (let ((persistent (find (get repairs :suites)
                     (lambda (item) (= (get item :file) "tests/wasm-managed-persistent-literals.test.mjs")))))
               (ok persistent "source archive assertion at maintained line 866")
-              (eq-check (get persistent :sourceSha256) "65f2e793ec63b62677aec16b74bbdaddb1e21cc56d5f38154784b07f51eabf78")
+              (eq-check (get persistent :sourceSha256) "db8cfe591e9ed7b2d439affda53d9a20e719a1e42f490bd5e375b525d463952b")
               (eq-check (get persistent :sourceSha256) (hash (await (readFile (get persistent :file))))))
             (eq-check (get repairs :targetExecution) false)
             (eq-check (get repairs :execution) "complete-original-final-make-gates")
@@ -893,7 +893,7 @@
             (ok entry "source archive assertion at maintained line 876")
             (eq-check (get archive :file) "tests/direct-wasm-backend-test-ground.mjs")
             (eq-check (get original :suite) (get archive :file))
-            (eq-check (get archive :sourceSha256) "02c58915e78372b7cd669d0b2cb711ce5ad2b03c2eb1cd3d48cbd1919e58404b")
+            (eq-check (get archive :sourceSha256) "542fd41674f45c68e0f8e1bddd574d57f5d14cc7df80e906f23452cf304cbace")
             (eq-check (get archive :sourceSha256) (hash (await (readFile (get archive :file)))))
             (eq-check (get migration :executedSuite) "tests/direct-wasm-backend.test.mjs")
             (eq-check (js-length (get migration :sourceAssets)) 28)
@@ -1318,6 +1318,30 @@
         (eq-check (get (new globalThis.Set (array-map locators (lambda (item) (get (get item :originalCase) :sha256)))) :size) 1)
         (eq-check (get (new globalThis.Set (array-map locators (lambda (item) (get item :id)))) :size) 4)
         (js-call assert :throws (lambda () (originalSourceCaseLocators "../outside.test.mjs" source)) (rx "relative source suite")))))
+
+  (test "Given emitted iterator bindings When dynamic registrations are read Then direct and isolated bindings require the exact iterator value"
+    (lambda ()
+      (let* ((file "tests/persistent-zipper.test.mjs")
+             (prefix "((__eli_iteration_9_sequence)=>{const __eli_iteration_9_step={value:'node'};")
+             (suffix "test('original '+engine,()=>{},30000);})(['bun','node']);")
+             (direct "let engine=(__eli_iteration_9_step)[\"value\"];")
+             (isolated "const temporary=(__eli_iteration_9_step)[\"value\"];let engine=temporary;"))
+        (js-call (js-array direct isolated) :forEach
+          (lambda (binding)
+            (let ((locators (originalSourceCaseLocators file (str prefix binding suffix))))
+              (deep (array-map locators (lambda (item) (get item :contains)))
+                (js-array "original bun" "original node"))
+              (deep (array-map locators (lambda (item) (get (get item :originalCase) :parameters)))
+                (js-array (js-object :engine "bun") (js-object :engine "node"))))))
+        (js-call (js-array
+          "let engine=(__eli_iteration_9_step)[\"value\"]+'changed';"
+          "let engine=(__eli_iteration_8_step)[\"value\"];"
+          "let engine=(__eli_iteration_9_step)[\"other\"];"
+          "const temporary=(__eli_iteration_9_step)[\"value\"]+'changed';let engine=temporary;")
+          :forEach (lambda (binding)
+            (js-call assert :throws
+              (lambda () (originalSourceCaseLocators file (str prefix binding suffix)))
+              (rx "lost its enclosing input loop")))))))
 
   (test "Given the complete original identity and Value JSON suites When source cases and the module-order helper are retained Then every original registration and actual execution region keeps its exact provenance"
     (async ()

@@ -16,6 +16,14 @@
   ;; Seed and selfhost must agree on the whole output, including all map fields;
   ;; executing both products also prevents identical missing guards from passing.
   (defconst cases (js-array
+    (js-object :name "parallel-order"
+      :source "(defvar trace (js-array))\n(defun mark (value) (js-call trace :push value) value)\n(defun read-values () (let ((a (mark 1)) (b (mark 2))) (js-array a b (js-call trace :join \",\"))))\n(export read-values)\n")
+    (js-object :name "parallel-capture"
+      :source "(defvar outer 41)\n(defun read-values () (let ((outer 7) (reader (lambda () outer))) (js-array outer (funcall reader))))\n(export read-values)\n")
+    (js-object :name "parallel-write"
+      :source "(defvar outer 11)\n(defun read-outer () outer)\n(defun read-values () (let ((outer 7) (assigned (setq outer 13))) (js-array outer assigned (read-outer))))\n(export read-values)\n")
+    (js-object :name "parallel-raw"
+      :source "(defvar outer 11)\n(defun read-values () (let ((outer 7) (before (js* \"outer\"))) (js-array outer before)))\n(export read-values)\n")
     (js-object :name "module-bindings"
       :source "(defvar 你好 -0.0)\n(defconst base-12l4 4)\n(defconst arguments 6)\n(defun read-values () (js-array 你好 base-12l4 arguments))\n(defun replace-value (value) (setq 你好 value))\n(export read-values replace-value)\n")
     (js-object :name "scalar-shadow"
@@ -120,6 +128,14 @@
 
   (defun verify-values (name namespace)
     (cond
+      ((= name "parallel-order")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 1 2 "1,2")))
+      ((= name "parallel-capture")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 7 41)))
+      ((= name "parallel-write")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 7 13 13)))
+      ((= name "parallel-raw")
+       (js-call assert :deepStrictEqual (js-call namespace :read_values) (js-array 7 11)))
       ((= name "module-bindings")
        (let ((values (js-call namespace :read_values)))
          (js-call assert :strictEqual (Object/is (aref values 0) -0) t)

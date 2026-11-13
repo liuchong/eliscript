@@ -566,9 +566,10 @@ must retain their ordinary property identity and receiver."
     (if (eliscript-emitter--boolean-p form) output
       (format "__eliscript_truthy(%s)" output))))
 
-(defun eliscript-emitter--context-sequential-safe-p (bindings)
-  "Whether parsed BINDINGS can share a scope without observing a TDZ."
-  (when (> (length bindings) 1)
+(defun eliscript-emitter--context-sequential-safe-p (bindings &optional parallel)
+  "Whether parsed BINDINGS can share a scope without observing a TDZ.
+With PARALLEL, every initializer must be independent of every new binding."
+  (when (if parallel bindings (> (length bindings) 1))
     (let ((names (make-hash-table :test #'equal)) (index 0) (safe t))
       (dolist (binding bindings)
         (let ((name (eliscript-emitter--binding-name (car binding))))
@@ -607,7 +608,7 @@ must retain their ordinary property identity and receiver."
                       (not (memq form '(t false undefined))))
                  (let* ((name (eliscript-emitter--reference-name form))
                         (position (gethash (car (split-string name "\\.")) names)))
-                   (when (and position (> position index)) (setq safe nil))))
+                   (when (and position (or parallel (> position index))) (setq safe nil))))
                 ((vectorp form) (mapc #'walk (append form nil)))
                 ((consp form)
                  (let ((operator (car form)) (arguments (cdr form)))
@@ -666,7 +667,7 @@ Keep initializer and binding scopes separate, including sequential shadowing."
   (if (null bindings)
       (if returning (eliscript-emitter--emit-returning-body body)
         (eliscript-emitter--emit-statement-body body))
-    (if (and sequential (eliscript-emitter--context-sequential-safe-p bindings))
+    (if (eliscript-emitter--context-sequential-safe-p bindings (not sequential))
         (concat "{\n" (eliscript-emitter--indent
          (string-join
           (append (mapcar (lambda (binding)
@@ -787,7 +788,7 @@ when temporary allocation or binding setup must occur between child groups."
        (cond
         ((null bindings) (list :children (list (list :body body options))
                                (lambda (results) (list :value (car results)))))
-        ((and sequential (eliscript-emitter--context-sequential-safe-p bindings))
+        ((eliscript-emitter--context-sequential-safe-p bindings (not sequential))
          (list :children (append (mapcar (lambda (binding) (list :declaration binding nil)) bindings)
                                  (list (list :body body options)))
                (lambda (results)

@@ -20,9 +20,9 @@
   (defconst native-skip-if (get (get original-tests :test) :skipIf))
   (defconst root (get original :root))
   (defconst plans (js-array
-    (js-object :suite "tests/compiler-portable-predicates.test.mjs" :sha256 "9236ee0cc52ab947a4ad685af4200e22d22f99aff28a87987ef78ef6b0d1ea15")
-    (js-object :suite "tests/compiler-portable-reader.test.mjs" :sha256 "cdb9e69ab1fb9fac6791b7061fcaed2f5723f1a8a87375797bb40a32c73b4918")
-    (js-object :suite "tests/native-node-memory.test.mjs" :sha256 "f7ca65f1440f0f0bf17e26705705fe53d771bd9fba67ce4003dfec2006996aa6")))
+    (js-object :suite "tests/compiler-portable-predicates.test.mjs" :sha256 "f1ca973d64a0c13c22385daf6107f8da5a2b73effbb57d5dfda3caa1731193f2")
+    (js-object :suite "tests/compiler-portable-reader.test.mjs" :sha256 "df338e1fc1c2ccae20230185ab7e261c27cc9aa2d373c1748ce6cb1e6c4eec70")
+    (js-object :suite "tests/native-node-memory.test.mjs" :sha256 "5627fb45eeab22493b8e6213a461be5ccf23205f1fdf9648acd999b6289fb246")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))
   (js-call assert :strictEqual (js-length selected) 1)
