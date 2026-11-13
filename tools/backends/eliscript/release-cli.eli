@@ -106,7 +106,8 @@
     ;; the compiler's result or original exception.
     (try
       (let ((record (js-object))
-            (fields (js-array "phase" "stage" "generation" "target" "filename" "index" "completed" "total"))
+            (fields (js-array "phase" "stage" "generation" "target" "filename" "id" "index" "completed" "total"
+                      "elapsedMs" "inputArchiveMs" "compilationMs" "archiveMs" "executionMs" "comparisonMs"))
             (index 0))
         (while (< index (js-length fields))
           (let* ((key (aref fields index)) (value (get event key)))

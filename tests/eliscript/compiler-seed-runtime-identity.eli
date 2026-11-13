@@ -10,7 +10,8 @@
   (import "../dist/bootstrap/compiler.mjs" compile-string)
   (import "../tools/backends/build.mjs" root loadLiteralSources)
   (import "../tools/backends/compiler-corpus-process.mjs" readOriginalCorpusExecutionContext)
-  (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle executeCompilerCorpusRecord)
+  (import "../tools/backends/compiler-corpus-execution.mjs" createOriginalSeedOracle executeCompilerCorpusRecord
+    prepareCompilerCorpusNativeProviders)
   (import "../tools/backends/compiler-corpus-source-archive.mjs"
     archiveCompilerCorpusSources readArchivedCompilerCorpusSources)
 
@@ -716,5 +717,121 @@
               (js-call assert :strictEqual (get actual :stdout) "standard identities preserved\n"))
             (js-call assert :strictEqual (JSON/stringify record) before))
           (setq index (1+ index))))))
+
+  (test "real literal Seed corpus record authenticates archived providers and per-record runtime declarations without mutating inputs"
+    (async ()
+      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+             (evidence (get (get corpus :document) :evidence))
+             (record (js-call (get corpus :records) :find
+               (lambda (item) (= (get item :id) "original-program:compiler-literal-runtime-complete")))))
+        (setq corpus undefined)
+        (js-call assert :ok record)
+        (js-call assert :strictEqual (Object/hasOwn (get record :request) "hostSources") false)
+        (let* ((before (JSON/stringify record))
+               (evidence-length (js-length evidence))
+               (map-index (js-call evidence :findIndex (lambda (item) (= (get item :file) "runtime/core/map.mjs"))))
+               (bit-index (js-call evidence :findIndex (lambda (item) (= (get item :file) "stdlib/bit.mjs"))))
+               (literals-asset (js-call evidence :find (lambda (item) (= (get item :file) "runtime/literals.mjs"))))
+               (map-before (JSON/stringify (aref evidence map-index)))
+               (product (resolve directory "real-literal-seed-declaration"))
+               (artifact (js-object :target "javascript" :entry (get record :entry)
+                 :path (resolve product (get record :entry)) :directory product
+                 :modules (js-call (get record :modules) :map (lambda (item)
+                   (js-object :id (get item :id) :path (resolve product (get item :id)))))))
+               (hex64 (new globalThis.RegExp "^[0-9a-f]{64}$"))
+               (refused (lambda (error)
+                 (and (= (get error :name) "TypeError")
+                      (= (get error :message)
+                         "original canonical native provider identity conflicts with the selected product"))))
+               (with-evidence (lambda (index replacement)
+                 (let ((copy (js-call evidence :slice)))
+                   (if (undefined? replacement) (js-call copy :splice index 1) (put copy index replacement))
+                   copy)))
+               (with-record-assets (lambda (next-assets)
+                 (Object/assign (js-object) record (js-object :original
+                   (Object/assign (js-object) (get record :original) (js-object :sourceAssets next-assets))))))
+               (with-explicit-hosts (lambda (value)
+                 (let ((req (Object/assign (js-object) (get record :request))))
+                   (Object/defineProperty req "hostSources"
+                     (js-object :value value :enumerable t :writable t :configurable t))
+                   (js-call assert :strictEqual (Object/hasOwn req "hostSources") t)
+                   (Object/assign (js-object) record (js-object :request req)))))
+               (invoke (lambda (candidate next-evidence)
+                 (prepareCompilerCorpusNativeProviders (js-object
+                   :artifact artifact :record candidate :target "javascript" :independentSeedProgram t
+                   :sourceRoot root :sourceAssets next-evidence :transportEvidence (js-object))))))
+          (js-call assert :ok (>= map-index 0))
+          (js-call assert :ok (>= bit-index 0))
+          (js-call assert :ok literals-asset)
+          (await (mkdir product (js-object :recursive t)))
+          (try
+            (progn
+              (let* ((selected-ctx (js-object :artifact artifact :record record :target "javascript"
+                       :sourceRoot root :sourceAssets evidence))
+                     (unchanged (await (prepareCompilerCorpusNativeProviders selected-ctx)))
+                     (transport (js-object))
+                     (configured (await (prepareCompilerCorpusNativeProviders (js-object
+                       :artifact artifact :record record :target "javascript" :independentSeedProgram t
+                       :sourceRoot root :sourceAssets evidence :transportEvidence transport))))
+                     (proof (get configured :nativeProviderIdentity)))
+                (js-call assert :strictEqual unchanged selected-ctx)
+                (js-call assert :strictEqual (get proof :policy) "canonical-source-runtime")
+                (js-call assert :strictEqual (get proof :runtimeRoot) (await (realpath (resolve root "runtime"))))
+                (js-call assert :strictEqual (js-length (get proof :files)) (1- (js-length providers)))
+                (js-call assert :match (get proof :packageSha256) hex64)
+                (js-call assert :match (get proof :identitySha256) hex64)
+                (js-call assert :strictEqual (get transport :nativeProviderIdentity) proof)
+                (js-call assert :notStrictEqual (get configured :record) record)
+                (js-call assert :notStrictEqual (get (get configured :record) :request) (get record :request))
+                (js-call assert :deepStrictEqual (get (get (get configured :record) :request) :hostSources) (js-array)))
+              (let* ((map-item (aref evidence map-index))
+                     (altered-bytes (js-call Buffer :concat (js-array
+                       (js-call Buffer :from (get map-item :content) "base64")
+                       (js-call Buffer :from "\n" "utf8"))))
+                     (declared (get (get record :original) :sourceAssets))
+                     (declared-map-index (js-call declared :findIndex
+                       (lambda (item) (= (get item :file) "runtime/core/map.mjs"))))
+                     (cases (js-array
+                       (js-array record undefined)
+                       (js-array record (js-object))
+                       (js-array record (funcall with-evidence map-index undefined))
+                       (js-array record (funcall with-evidence bit-index undefined))
+                       (js-array record (let ((dup (js-call evidence :slice))) (js-call dup :push map-item) dup))
+                       (js-array record (funcall with-evidence map-index
+                         (Object/assign (js-object) map-item (js-object :sha256 (js-call "0" :repeat 64)))))
+                       (js-array record (funcall with-evidence map-index
+                         (Object/assign (js-object) map-item (js-object :encoding "utf8"))))
+                       (js-array record (funcall with-evidence map-index
+                         (Object/assign (js-object) map-item (js-object
+                           :bytes (js-length altered-bytes) :sha256 (digest altered-bytes)
+                           :content (js-call altered-bytes :toString "base64")))))
+                       (js-array (funcall with-record-assets nil) evidence)
+                       (js-array (funcall with-record-assets
+                         (js-call declared :filter (lambda (item) (/= (get item :file) "runtime/core/map.mjs")))) evidence)
+                       (js-array (funcall with-record-assets
+                         (let ((dup (js-call declared :slice)))
+                           (js-call dup :push (aref declared declared-map-index)) dup)) evidence)
+                       (js-array (funcall with-record-assets
+                         (let ((tampered (js-call declared :slice)))
+                           (put tampered declared-map-index (Object/assign (js-object) (aref declared declared-map-index)
+                             (js-object :sourceSha256 (js-call "0" :repeat 64)))) tampered)) evidence)
+                       (js-array (funcall with-record-assets
+                         (let ((extra (js-call declared :slice)))
+                           (js-call extra :push (js-object :file "runtime/literals.mjs"
+                             :sourceSha256 (get literals-asset :sha256))) extra)) evidence)
+                       (js-array (funcall with-explicit-hosts (js-array)) evidence)
+                       (js-array (funcall with-explicit-hosts undefined) evidence)))
+                     (idx 0))
+                (while (< idx (js-length cases))
+                  (let ((entry (aref cases idx)))
+                    (await (js-call assert :rejects (funcall invoke (aref entry 0) (aref entry 1)) refused)))
+                  (setq idx (1+ idx))))
+              (js-call assert :strictEqual (Object/hasOwn (get record :request) "hostSources") false)
+              (js-call assert :strictEqual (JSON/stringify record) before)
+              (js-call assert :strictEqual (js-length evidence) evidence-length)
+              (js-call assert :strictEqual (JSON/stringify (aref evidence map-index)) map-before))
+            (finally
+              (setq record undefined evidence undefined)
+              (await (rm product (js-object :recursive t :force t)))))))))
 
 )

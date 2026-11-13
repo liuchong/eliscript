@@ -50,7 +50,7 @@ verify-bootstrap:
 
 # Deliberately does not rebuild an already authenticated four-stage chain.
 check-stage3-targets: prepare-release-package
-	$(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
+	$(NODE) --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" $(STAGE3_FUNCTIONAL_RUNTIME_OPTION)
 
 prepare-release-package:
 	$(NODE) tools/backends/dist/release-cli.mjs prepare-release-package --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)"
@@ -68,7 +68,7 @@ compiler-release-ci: bootstrap-release
 	$(SUITE_STEP) compiler-release-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
 	$(SUITE_STEP) compiler-release-ci bootstrap-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
 	$(SUITE_PREREQ) compiler-release-ci prepare-release-package "" -- $(MAKE) prepare-release-package
-	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" --functional-runtime-profile small
+	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" --functional-runtime-profile small
 	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(SUITE_STEP) compiler-release-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.

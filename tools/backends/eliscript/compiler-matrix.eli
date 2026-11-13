@@ -3,6 +3,8 @@
   (import "node:path" resolve join relative)
   (import "node:child_process" spawn)
   (import "node:buffer" Buffer)
+  (import "node:perf_hooks" performance)
+  (import "../testing/original-regression-product.mjs" requestOriginalCompilerProduct)
   (import "./build.mjs" root)
   (import "./compiler-build.mjs" loadCompilerSources compilerMetadataDigest decodeCompilerBinary compilerFunctionalRuntimeProfile)
   (import "./compiler-corpus.mjs" loadOriginalCompilerCorpus compilerCorpusRequest cloneCompilerCorpusData compilerCorpusResourceDeferred)
@@ -15,7 +17,7 @@
     executeCompilerCorpusRecord compareCompilerCorpusObservation createOriginalSeedOracle compilerCorpusRuntimeAcceptance prepareCompilerCorpusExecutionScope)
   (import "./managed-module-graph.mjs" createManagedProjectFacades)
   (import "./compiler-corpus-source-archive.mjs" archiveCompilerCorpusSources)
-  (import "./compiler-session.mjs" encodeCompilerMetadata encodeCompilerIR)
+  (import "./compiler-session.mjs" encodeCompilerMetadata encodeCompilerIR isOwnedCompilerBuildProduct)
   (import "./compiler-metadata.mjs" readCompilerMetadata)
   (import "./compiler-matrix-resume.mjs" loadCompilerMatrixResume)
   (import "./compiler-bootstrap.mjs"
@@ -57,6 +59,20 @@
             (matrix-type-error "nativeTarget must be arm64-macos or arm64-linux"))
           value))))
   (defun clone (value) (funcall globalThis.structuredClone value))
+  (defun collect-disposable-graphs (options)
+    (when (= (get options :retainArtifacts) false)
+      ;; Optional host maintenance must not replace a program's first error.
+      (try
+        (let ((bun-host globalThis.Bun))
+          (cond
+            ((and (not (nullish? bun-host)) (= (value-type (get bun-host :gc)) "function"))
+             (js-call bun-host :gc t))
+            ((= (value-type globalThis.gc) "function") (funcall globalThis.gc))))
+        (catch ignored nil))))
+  (defasync matrix-phase (outcome name run)
+    (let ((started (js-call performance :now)))
+      (try (await (funcall run))
+        (finally (put (get outcome :timing) name (- (js-call performance :now) started))))))
   (defun matrix-spread (&rest sources)
     ;; CopyDataProperties semantics: own enumerable keys, getter order, symbols
     ;; and an own __proto__ data field are retained without invoking setters.
@@ -621,10 +637,17 @@
           (put outcome :compilation (js-object :kind "reused" :fromCase (get previous :caseId) :requestSha256 key)))
         (progn
           (js-call sorted-response-cache :delete session)
-          (setq response (await (js-call session :request request
-            (matrix-spread (js-object :signal signal)
-              (if (undefined? mode) (js-object) (js-object :responseMode mode))))))
+          ;; A replaced snapshot must not stay live in this async frame while
+          ;; the next project is being compiled.
+          (setq previous undefined)
+          (let ((request-options (matrix-spread (js-object :signal signal)
+                    (if (undefined? mode) (js-object) (js-object :responseMode mode)))))
+            (setq response (await (if (= (get options :retainArtifacts) false)
+              (requestOriginalCompilerProduct session request request-options)
+              (js-call session :request request request-options)))))
           (when eligible (put outcome :compilation (js-object :kind "compiled" :requestSha256 key)))))
+      (put outcome :responseTransfer (if reused "retained-snapshot"
+        (if (isOwnedCompilerBuildProduct response) "owned-build" "public-wire")))
       (when eligible
         (if (and part (= index (1- (js-length (get bound :parts)))))
           (js-call sorted-response-cache :delete session)
@@ -635,9 +658,10 @@
   (defasync matrix-case-execution (record index host target session mode cell-directory metadata manifest corpus execution-options options cell
                                   literal-sources literal-identity)
     (aborted (get options :signal))
-    (let* ((directory (join cell-directory (+ (js-call (funcall globalThis.String index) :padStart 6 "0") "-"
+    (let* ((started (js-call performance :now))
+           (directory (join cell-directory (+ (js-call (funcall globalThis.String index) :padStart 6 "0") "-"
                          (js-call (compilerDigest (get record :id)) :slice 0 16))))
-           (outcome (js-object :id (get record :id) :status "compiling" :verification "unverified" :directory directory))
+           (outcome (js-object :id (get record :id) :status "compiling" :verification "unverified" :directory directory :timing (js-object)))
            (runtime-acceptance (compilerCorpusRuntimeAcceptance record execution-options))
            (request (compilerCorpusRequest record target
                       (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)
@@ -651,7 +675,8 @@
         (unless (get metadata :resourceOutcomes) (put metadata :resourceOutcomes (js-array)))
         (js-call (get metadata :resourceOutcomes) :push
           (matrix-spread (js-object :id (get record :id)) runtime-acceptance)))
-      (put outcome :sourceIdentity (await (archiveCompilerCorpusSources record (join directory "sources"))))
+      (put outcome :sourceIdentity (await (matrix-phase outcome "inputArchiveMs"
+        (async () (await (archiveCompilerCorpusSources record (join directory "sources")))))))
       (when (and request (Object/hasOwn request "runtimeImportTransport"))
         (put outcome :runtimeImportTransport (get request :runtimeImportTransport)))
       (when (and (not (nil? request)) (/= target "javascript") (= (get request :target) target))
@@ -660,7 +685,7 @@
       (unless (nullish? (get options :onStage))
         (await (js-call options :onStage (js-object :host host :target target :id (get record :id) :phase "compile" :directory directory))))
       (let* ((traced-session (js-object :host (get session :host) :request (async (input request-options)
-               (let* ((position (js-length trace))
+               (let* ((request-started (js-call performance :now)) (position (js-length trace))
                       (entry (js-object :position position :operation (field input "operation") :status "started"))
                       (event (js-object :host host :target target :id (get record :id) :index position
                                :operation (get entry :operation))))
@@ -674,6 +699,14 @@
                      (put (aref trace position) :status "returned") result)
                    (catch error (put (aref trace position) :status "failed") (throw error))
                    (finally
+                     ;; Timing is observational. Keep the authenticated request
+                     ;; trace's original deterministic wire shape unchanged.
+                     (let ((elapsed (- (js-call performance :now) request-started)))
+                       (unless (Object/hasOwn outcome "requestTimings")
+                         (put outcome :requestTimings (js-array)))
+                       (js-call (get outcome :requestTimings) :push
+                         (js-object :position position :elapsedMs elapsed))
+                       (put event :elapsedMs elapsed))
                      (if (= (get entry :status) "returned")
                        (await (matrix-progress options directory
                          (matrix-spread event (js-object :phase "record-request-complete"))))
@@ -696,7 +729,8 @@
         (try
           (progn
             (unless (nil? request)
-              (setq response (await (matrix-project-response record request session mode options outcome index)))
+              (setq response (await (matrix-phase outcome "compilationMs"
+                (async () (await (matrix-project-response record request session mode options outcome index))))))
               (if (= (get record :kind) "stage")
                 (progn
                   (await (saveCompilerMetadata (join directory "stage-response.json") response))
@@ -704,12 +738,20 @@
                     (put outcome :stageIdentitySha256 (compilerDigest (JSON/stringify
                       (js-object :stage (get response :stage) :filename (get response :filename) :data (get response :data)))))))
                 (progn
-                  (setq product (await (archiveProduct response target (join directory "product"))))
+                  (setq product (await (matrix-phase outcome "archiveMs"
+                    (async () (await (archiveProduct response target (join directory "product")))))))
                   (put outcome :productIdentitySha256 (get product :identitySha256))))
               (put outcome :status "produced"))
             (setq execution-started t)
-            (setq observation (await (funcall (otherwise (get options :execute) executeCompilerCorpusRecord)
-              (matrix-spread context (js-object :response response :artifact product)))))
+            ;; The built-in executor consumes archived products, except for
+            ;; stage envelopes. Custom executors retain the public response.
+            (when (and (= (get options :retainArtifacts) false)
+                       (undefined? (get options :execute)) (/= (get record :kind) "stage"))
+              (setq response undefined)
+              (collect-disposable-graphs options))
+            (setq observation (await (matrix-phase outcome "executionMs" (async ()
+              (await (funcall (otherwise (get options :execute) executeCompilerCorpusRecord)
+                (matrix-spread context (js-object :response response :artifact product))))))))
             (await (saveCompilerMetadata (join directory "execution.json") observation))
             (put outcome :status (if (= (field observation "status") "executor-required") "executor-required" "executed"))
             (when (and (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
@@ -729,14 +771,16 @@
         ;; pin decoded and detached typed/debug graphs during the independent
         ;; Seed comparison; its inputs are the record and observation.
         (setq response undefined product undefined)
+        (collect-disposable-graphs options)
         (when (Object/hasOwn (get context :transportEvidence) "nativeProviderIdentity")
           (put outcome :nativeProviderIdentity (get (get context :transportEvidence) :nativeProviderIdentity)))
         (when (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
           (await (saveCompilerMetadata (join directory "suite-request-trace.json") trace)))
         (unless (undefined? observation)
           (try
-            (let ((comparison (await (funcall (otherwise (get options :compare) compareCompilerCorpusObservation)
-                                  (matrix-spread context (js-object :observation observation))))))
+            (let ((comparison (await (matrix-phase outcome "comparisonMs" (async ()
+              (await (funcall (otherwise (get options :compare) compareCompilerCorpusObservation)
+                (matrix-spread context (js-object :observation observation)))))))))
               (setq comparison-result comparison)
               (await (saveCompilerMetadata (join directory "comparison.json") comparison))
               (cond ((= (field comparison "status") "equivalent") (put outcome :verification "equivalent"))
@@ -746,10 +790,12 @@
       (unless (undefined? runtime-acceptance)
         (put outcome :functionalVerification (if (= (get outcome :verification) "equivalent") "passed"
           (if (= (get outcome :verification) "different") "failed" "unverified"))))
+      (put (get outcome :timing) :elapsedMs (- (js-call performance :now) started))
       (await (saveCompilerMetadata (join directory "outcome.json") outcome))
       (await (saveCompilerMetadata manifest metadata))
       (await (matrix-progress options directory
-        (js-object :host host :target target :id (get record :id) :index index :phase "record-complete")))
+        (matrix-spread (js-object :host host :target target :id (get record :id) :index index :phase "record-complete")
+          (get outcome :timing))))
       ;; Release successful working products after the independent comparison.
       ;; The manifest is an optional same-input execution checkpoint, not
       ;; reauthentication of artifacts that no longer exist.
@@ -954,7 +1000,8 @@
                         (when stage3-scope (await (matrix-output-space cell-directory target)))
                         (await (matrix-case-execution record index host target session mode cell-directory
                         metadata manifest corpus execution-options options cell (get sources :literalSources)
-                        (get source-identity :literalSources)))))) (setq index (1+ index))))
+                        (get source-identity :literalSources)))
+                        (collect-disposable-graphs options)))) (setq index (1+ index))))
               (await (saveCompilerMetadata manifest metadata))))
           (put cell :status "constructed")
           (await (matrix-progress options cell-directory

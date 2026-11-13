@@ -1300,19 +1300,23 @@
                          (= (field (get record :original) "suite") "tests/core-stdlib.test.mjs"))))
             (native-provider-fail))
           (let* ((artifact (get context :artifact)) (modules (field artifact "modules"))
-                 ;; These four selected sorted recipes acquire their native
-                 ;; providers when the compiler request is completed from the
-                 ;; archive. The raw record deliberately has no hostSources.
+                 ;; These four selected sorted recipes and the complete literal
+                 ;; Seed host acquire their native providers from the archive.
+                 ;; Their raw records deliberately have no hostSources.
                  ;; Authenticate that same archive here, as for sequence, but
                  ;; never let it override an explicit provider declaration.
                  (archived-providers (or sequence
-                   (and sorted (not (Object/hasOwn (get record :request) "hostSources")))))
+                   (and (or sorted literal-seed)
+                        (not (Object/hasOwn (get record :request) "hostSources")))))
                  (sources (if archived-providers
-                   (js-call (fallback (get context :sourceAssets) (js-array)) :filter
-                     (lambda (asset) (and (= (value-type (get asset :file)) "string")
-                       (or (and (js-call (get asset :file) :startsWith "runtime/")
-                                (js-call (get asset :file) :endsWith ".mjs"))
-                           (= (get asset :file) "stdlib/bit.mjs")))))
+                   (if (Array/isArray (get context :sourceAssets))
+                     (js-call (get context :sourceAssets) :filter
+                       (lambda (asset) (let ((file (field asset "file")))
+                         (and (= (value-type file) "string")
+                           (or (and (js-call file :startsWith "runtime/")
+                                    (js-call file :endsWith ".mjs"))
+                               (= file "stdlib/bit.mjs"))))))
+                     (if (undefined? (get context :sourceAssets)) (js-array) undefined))
                    (field (get record :request) "hostSources")))
                  (source-root (get context :sourceRoot))
                  (runtime-root (await (realpath (resolve source-root "runtime"))))
@@ -1361,7 +1365,32 @@
                     (t (js-call retained :push item))))
                 (setq index (1+ index)))
               (unless (and (= (get seen :size) (js-length files)) (or seen-bit emitted-bit))
-                (native-provider-fail)))
+                (native-provider-fail))
+              (when (and literal-seed archived-providers)
+                (let* ((declared-assets (field (get record :original) "sourceAssets"))
+                       (host-runtime (js-array
+                         "runtime/core/identifier.mjs" "runtime/core/list.mjs"
+                         "runtime/core/map.mjs" "runtime/core/set.mjs"
+                         "runtime/core/value.mjs" "runtime/core/vector.mjs"
+                         "runtime/worker-value-codec.mjs"))
+                       (digests (new globalThis.Map
+                         (js-call proofs :map (lambda (item) (js-array (get item :id) (get item :sha256))))))
+                       (declared-seen (new globalThis.Set)) (asset-index 0))
+                  (unless (Array/isArray declared-assets) (native-provider-fail))
+                  (while (< asset-index (js-length declared-assets))
+                    (let* ((asset (aref declared-assets asset-index))
+                           (file (field asset "file")))
+                      (unless (= (value-type file) "string") (native-provider-fail))
+                      (when (or (= file "runtime") (js-call file :startsWith "runtime/")
+                                (= file "stdlib") (js-call file :startsWith "stdlib/"))
+                        (unless (and (js-call host-runtime :includes file)
+                                     (not (js-call declared-seen :has file))
+                                     (= (field asset "sourceSha256") (js-call digests :get file)))
+                          (native-provider-fail))
+                        (js-call declared-seen :add file)))
+                    (setq asset-index (1+ asset-index)))
+                  (unless (= (get declared-seen :size) (js-length host-runtime))
+                    (native-provider-fail)))))
             (let* ((directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
                    (runtime (resolve directory "runtime"))
                    (package-source (await (readFile (resolve source-root "package.json"))))
@@ -1389,8 +1418,10 @@
                     (copy (get record :request) (js-object :hostSources
                       (if archived-providers (fallback (field (get record :request) "hostSources") (js-array)) retained))))))))))))))
   (defun request-native-provider-source (asset)
+    (unless (and (= (value-type (field asset "content")) "string")
+                 (= (field asset "encoding") "base64")) (native-provider-fail))
     (let ((bytes (js-call Buffer :from (get asset :content) "base64")))
-      (unless (and (= (get asset :encoding) "base64") (= (get asset :bytes) (js-length bytes))
+      (unless (and (= (get asset :bytes) (js-length bytes))
                    (= (get asset :content) (js-call bytes :toString "base64"))
                    (= (get asset :sha256) (execution-digest bytes))) (native-provider-fail))
       (js-call (new globalThis.TextDecoder "utf-8" (js-object :fatal t :ignoreBOM t)) :decode bytes)))

@@ -28,6 +28,12 @@ investigating that run. Delete these workspaces and the checkpoint when their
 purpose ends, using `make clean-all` for checkout-generated products and
 removing any explicitly selected external output directory too.
 
+The Make targets expose Node GC at completed graph lifetimes. Disposable
+binary projects use the authenticated compiler's existing owned-product
+handoff; public producers and retained archives keep their wire snapshots.
+Each record reports compilation, archive, execution and independent comparison
+times, including a failed phase, so expensive work can be located directly.
+
 ## Release Latch
 
 `package.json` sets `"private": true`. npm refuses to publish a private
@@ -119,9 +125,11 @@ unpacked), including `dist/bootstrap/compiler.mjs` and
 Then install that artifact and use it the way a consumer would:
 
 ```sh
-npm pack --pack-destination /tmp
-mkdir /tmp/consumer && cd /tmp/consumer && npm init -y
-npm install /tmp/eliscript-0.1.1.tgz
+consumer_dir=$(mktemp -d)
+trap 'rm -rf "$consumer_dir"' EXIT
+npm pack --pack-destination "$consumer_dir"
+mkdir "$consumer_dir/app" && cd "$consumer_dir/app" && npm init -y
+npm install "$consumer_dir"/eliscript-*.tgz
 ./node_modules/.bin/eliscript --help
 ```
 
