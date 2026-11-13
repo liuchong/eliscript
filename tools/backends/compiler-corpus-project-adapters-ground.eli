@@ -152,7 +152,7 @@
                   (setq transported
                     (replace-setup transported "async function compile(source, output) {\n"
                       (str "async function compile(source, output) {\n"
-                           "  return await (runSuccessful([(__eliscript_tdz_read_3()), \"--source-map\", \"--output\", output, source], {ELISCRIPT_BOOTSTRAP_MODULE_DIR: __frontend_reference}));\n"
+                           "  return await (runSuccessful([(__eliscript_tdz_ready_3 === true ? COMPILER : __eliscript_tdz_error(\"COMPILER\")), \"--source-map\", \"--output\", output, source], {ELISCRIPT_BOOTSTRAP_MODULE_DIR: __frontend_reference}));\n"
                            "}\nasync function __unused_original_compile(source, output) {\n")
                       changes)))
                 (let* ((mod-names (js-call modules :map (lambda (m) (js-call (get m :id) :slice (js-length "bootstrap/compiler/") -4))))

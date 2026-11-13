@@ -79,8 +79,9 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
-  The latest local run has nine medians below native Emacs, but comparisons
-  against 0.1.2 still reject first, last, the 64-element tail slice,
+  The latest local run has eight medians below native Emacs; the tail slice
+  remains slightly slower. Comparisons against 0.1.2 still reject first, last,
+  the 64-element tail slice,
   same-reference equality, sorting and the deep zipper workload. Raw sample
   variation needs diagnosis and does not automatically waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,

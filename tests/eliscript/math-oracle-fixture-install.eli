@@ -13,7 +13,7 @@
     (lambda (argument) (= (resolve root argument) (resolve root suite)))))
   (js-call assert :strictEqual
     (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-    "85aaba1cc11ef07741d8a511b3466038f41fc860285b77d7b66b495ca5b0ff6f")
+    "1e294e687be93c24baf811ab6ed54e88d308df4b58cdb84e6099c38817c1ab53")
   (defasync buildBackends (&rest arguments)
     (let* ((backend (await (Reflect/apply (get actual :buildBackends) actual arguments)))
            (scanner (new globalThis.Bun.Transpiler (js-object :loader "js")))

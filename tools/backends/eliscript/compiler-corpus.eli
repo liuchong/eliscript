@@ -1371,7 +1371,7 @@
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
               (when (and (= filename "bootstrap/host/project-cli-ground.mjs")
-                         (/= (get asset :sha256) "cbaaf12e9aa56c696e555d2cd101c17ac8c3177046c513d0fbe8655a10f916d2"))
+                         (/= (get asset :sha256) "a47e54fd619f09d7eeed8daf7429ced21234c334de5993fd0ee04bdffa7b2bfc"))
                 (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
                 (unless (and (= (get existing :bytes) (get asset :bytes))

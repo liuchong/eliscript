@@ -245,7 +245,6 @@
             (tdz-walk node scope state)))
         (tdz-finalize state))
       state))
-  (defun tdz-reader-name (record) (str "__eliscript_tdz_read_" (get record :index)))
   (defun tdz-writer-name (record) (str "__eliscript_tdz_write_" (get record :index)))
   (defun tdz-prologue ()
     (let ((records (if (nil? tdz-state) (js-array) (js-call (get tdz-state :variables) :filter tdz-guarded-p))))
@@ -256,10 +255,6 @@
               (let ((ready (tdz-ready-name record)) (name (binding-name (get record :name)))
                     (argument (str "__eliscript_tdz_value_" (get record :index))))
                 (str "var " ready ";\n"
-                  (if (get record :read)
-                      (str "function " (tdz-reader-name record) "() { if (" ready
-                        " !== true) __eliscript_tdz_error(" (json-string name) "); return " name "; }\n")
-                    "")
                   (if (get record :write)
                       (str "function " (tdz-writer-name record) "(" argument ") { if (" ready
                         " !== true) __eliscript_tdz_error(" (json-string name) "); "
@@ -269,7 +264,11 @@
     (let ((record (and tdz-state (js-call (get tdz-state :reads) :get node))))
       (if (not record) (text-fragment (reference-name (ir-value node)))
         (let* ((name (binding-name (get record :name))) (reference (reference-name (ir-value node))))
-          (text-fragment (str "(" (tdz-reader-name record) "())" (js-call reference :slice (js-length name))))))))
+          ;; Keep the initialized lexical value visible to host JITs while
+          ;; retaining the exact guard, error helper and property receiver.
+          (text-fragment (str "(" (tdz-ready-name record) " === true ? " name
+            " : __eliscript_tdz_error(" (json-string name) "))"
+            (js-call reference :slice (js-length name))))))))
   (defun tdz-assignment (pair)
     (let* ((record (and tdz-state (js-call (get tdz-state :writes) :get pair)))
            (value (emit-expression (js-nth 0 (children pair)))))

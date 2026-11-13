@@ -116,12 +116,15 @@
                       (js-call assert :ok (not (js-call javascript :includes "function __eliscript_tdz_write_0(value)")))
                       (when (= (get item :shape) "tdz")
                         ;; Record 0 is the unguarded early reader; only its read of the later constant is guarded.
-                        (js-call assert :ok (not (js-call javascript :includes "function __eliscript_tdz_read_0()")))
-                        (js-call assert :ok (js-call javascript :includes "function __eliscript_tdz_read_1()"))
-                        (js-call assert :ok (js-call javascript :includes "const before = (__eliscript_tdz_read_1());"))
+                        (js-call assert :ok (not (js-call javascript :includes "var __eliscript_tdz_ready_0;")))
+                        (js-call assert :ok (js-call javascript :includes "var __eliscript_tdz_ready_1;"))
+                        (js-call assert :ok (js-call javascript :includes
+                          (str "const before = (__eliscript_tdz_ready_1 === true ? base_" (get item :suffix)
+                            " : __eliscript_tdz_error(\"base_" (get item :suffix) "\"));")))
                         (js-call assert :ok (js-call javascript :includes (+ "return (value + base_" (get item :suffix) ");"))))
                       (when (= (get item :shape) "mutable-value")
-                        (js-call assert :ok (js-call javascript :includes "function __eliscript_tdz_read_0()"))
+                        (js-call assert :ok (js-call javascript :includes
+                          "return (__eliscript_tdz_ready_0 === true ? value : __eliscript_tdz_error(\"value\"));"))
                         (js-call assert :ok (js-call javascript :includes "function __eliscript_tdz_write_0(__eliscript_tdz_value_0)"))
                         (js-call assert :ok (js-call javascript :includes "return (value = __eliscript_tdz_value_0);")))
                       (await (writeFile seed-path (get oracle :javascript))) (await (writeFile self-path javascript))

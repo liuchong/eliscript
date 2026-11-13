@@ -77,8 +77,6 @@
 (defconst eliscript-emitter--tdz-assignment-tag (make-symbol "eliscript-tdz-assignment"))
 (defun eliscript-emitter--tdz-ready-name (record)
   (format "__eliscript_tdz_ready_%d" (plist-get record :index)))
-(defun eliscript-emitter--tdz-reader-name (record)
-  (format "__eliscript_tdz_read_%d" (plist-get record :index)))
 (defun eliscript-emitter--tdz-writer-name (record)
   (format "__eliscript_tdz_write_%d" (plist-get record :index)))
 (defun eliscript-emitter--tdz-root (name)
@@ -91,7 +89,11 @@
   (if (null record) (eliscript-emitter--reference-name reference)
     (let* ((name (eliscript-emitter--binding-name (plist-get record :name)))
            (text (eliscript-emitter--reference-name reference)))
-      (concat "(" (eliscript-emitter--tdz-reader-name record) "())" (substring text (length name))))))
+      ;; Expose the actual lexical binding on the initialized branch. A reader
+      ;; call obscures constant constructors and intrinsics from host JITs.
+      (concat "(" (eliscript-emitter--tdz-ready-name record) " === true ? " name
+              " : __eliscript_tdz_error(" (eliscript-emitter--json-string name) "))"
+              (substring text (length name))))))
 (defun eliscript-emitter--tdz-write-text (record name value)
   (if record (concat (eliscript-emitter--tdz-writer-name record) "(" value ")")
     (format "(%s = %s)" (eliscript-emitter--binding-name name) value)))
@@ -178,9 +180,6 @@ call any function. Return the decision of each recorded access in order."
                    (argument (format "__eliscript_tdz_value_%d" (plist-get record :index)))
                    (quoted (eliscript-emitter--json-string name)))
               (concat "var " ready ";\n"
-                (when (plist-get record :read)
-                  (concat "function " (eliscript-emitter--tdz-reader-name record) "() { if (" ready
-                          " !== true) __eliscript_tdz_error(" quoted "); return " name "; }\n"))
                 (when (plist-get record :write)
                   (concat "function " (eliscript-emitter--tdz-writer-name record) "(" argument ") { if (" ready
                           " !== true) __eliscript_tdz_error(" quoted "); "

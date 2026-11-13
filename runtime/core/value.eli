@@ -31,9 +31,8 @@
     (extendProtocolType IHash ctor (js-object :hash (get implementations :hash)))
     ctor)
 
-  (defun equalValues (left right)
+  (defun equal-values-distinct (left right)
     (cond
-      ((eq left right) t)
       ((and (= (funcall typeof-value left) "number")
             (= (funcall typeof-value right) "number"))
        (and (Number/isNaN left) (Number/isNaN right)))
@@ -49,6 +48,11 @@
        false)
       (t
        (eq (dispatchValueEqual left right equalValues) t))))
+
+  (defun equalValues (left right)
+    ;; The overwhelmingly common identity path stays small enough to inline;
+    ;; protocol discovery and recursive comparison remain on the cold path.
+    (if (eq left right) t (equal-values-distinct left right)))
 
   (defun hashValue (value)
     (recordHashValueCall)

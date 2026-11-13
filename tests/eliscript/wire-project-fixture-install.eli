@@ -69,7 +69,7 @@
   (defconst original-source-sha (js-call (js-call (createHash "sha256") :update
     (readFileSync (resolve root "tests/wasm-managed-wire-test-ground.mjs"))) :digest "hex"))
   (js-call assert :strictEqual original-source-sha
-    "f799b8f9557288ade36df506fdd77dafb40d144159bc3168636c1f0c1674a0d2")
+    "35f46dc5aa1eb3a3ff4c6262e999783a79b09a6a863a33193138e6483073c598")
   (defun functional-settings (settings)
     (let ((selection (wireFixtureRuntimeOptions original-source-sha (get globalThis.process :env) settings)))
       (js-call globalThis.console :error "wire original capacity acceptance"

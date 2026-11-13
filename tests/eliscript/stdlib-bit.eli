@@ -47,7 +47,7 @@
              (other (aref (get document :records) 0)) (gate (get document :originalGateEvidence))
              (before (globalThis.structuredClone record)))
         (js-call assert :strictEqual (get (get record :original) :sourceSha256)
-          "6fec188d05dd741b1e0d5bae7ac330a6f6171f75b4c17c8411d94664c17a278c")
+          "e0dcc8d6977c7df2426bc49d8c11e5a012ea470e0f54101299a6703dd907f1f4")
         (js-call assert :strictEqual (await (transportOriginalStdlibBitCorpus document (js-object :sourceRoot root))) document)
         (js-call assert :strictEqual (aref (get document :records) 0) other)
         (js-call assert :strictEqual (get document :originalGateEvidence) gate)

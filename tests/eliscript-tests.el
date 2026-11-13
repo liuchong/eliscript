@@ -21,25 +21,23 @@
   "Assert OUTPUT guards the actual module BINDING, returning its read text."
   (let ((pattern
          (concat
-          "function \\(__eliscript_tdz_read_[0-9]+\\)() { if ("
-          "\\(__eliscript_tdz_ready_[0-9]+\\) !== true) "
+          "(\\(__eliscript_tdz_ready_[0-9]+\\)"
+          (regexp-quote " === true ? ")
           (regexp-quote
-           (format "__eliscript_tdz_error(%S); return %s; }" binding binding)))))
+           (format "%s : __eliscript_tdz_error(%S))" binding binding)))))
     (should (string-match pattern output))
-    (let* ((reader (match-string 1 output))
-           (ready (match-string 2 output))
+    (let* ((read (match-string 0 output))
+           (ready (match-string 1 output))
            (declaration
             (string-match
              (concat "^\\(?:const\\|let\\) " (regexp-quote binding) " = ")
              output)))
-      (should (equal (substring reader (length "__eliscript_tdz_read_"))
-                     (substring ready (length "__eliscript_tdz_ready_"))))
       (should (string-match-p (regexp-quote (concat "var " ready ";")) output))
       (should declaration)
       (should (string-match-p
                (regexp-quote (concat ready " = true;"))
                (substring output declaration)))
-      (format "(%s())" reader))))
+      read)))
 
 (defun eliscript-tests--plain-module-read (output binding)
   "Assert OUTPUT reads module BINDING without a guard, returning its read text."
@@ -1407,8 +1405,10 @@ already nested suffix, or use either production emitter to build the oracle."
           (eliscript-compile-string
            "(defun peek () answer) (defun update () (setq answer 43)) (peek) (update) (defvar answer 42)"))
          (reader (eliscript-tests--guarded-module-read output "answer"))
-         (writer (replace-regexp-in-string "_read_" "_write_" (substring reader 1 -3)))
-         (ready (replace-regexp-in-string "_write_" "_ready_" writer))
+         (ready (progn
+                  (should (string-match "__eliscript_tdz_ready_[0-9]+" reader))
+                  (match-string 0 reader)))
+         (writer (replace-regexp-in-string "_ready_" "_write_" ready))
          (argument (replace-regexp-in-string "_write_" "_value_" writer)))
     (should (string-match-p
              (regexp-quote

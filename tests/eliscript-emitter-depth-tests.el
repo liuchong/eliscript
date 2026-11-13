@@ -162,7 +162,9 @@
         (should (eq (eq leaf 'tracked)
                     (and (string-match-p (regexp-quote "__eliscript_tdz_ready_0 = true;") direct) t)))
         (should (string-match-p
-                 (regexp-quote (if (eq leaf 'tracked) "return (__eliscript_tdz_read_0());" "return value;")) direct))
+                 (regexp-quote (if (eq leaf 'tracked)
+                     "return (__eliscript_tdz_ready_0 === true ? tracked : __eliscript_tdz_error(\"tracked\"));"
+                     "return value;")) direct))
         (should-not (string-match-p (regexp-quote "eliscript/runtime/literals.mjs") direct))
         (should-not (string-match-p (regexp-quote "const __eliscript_host_identity_token") direct))))))
 

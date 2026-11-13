@@ -201,7 +201,7 @@
              (js-array "tests/eliscript/wasm-static-snapshot-install.eli" "tests/helpers/wasm-static-snapshot-install.mjs")
              (js-array "tests/eliscript/wasm-static-snapshot-fixture.eli" "tests/wasm-static-snapshot-fixture-selfhosted.test.mjs")))
            (index 0))
-      (unless (and (= (get proof :sourceSha256) "ad8c6c48bf1a732d3b2a86b0cc4e31d27900939486516b8e176a489597a81332")
+      (unless (and (= (get proof :sourceSha256) "90034727ef290ad6ec5b3b3c58fc181580296d2fe722f811469ebd3b948b9273")
                    (= (js-length cases) 19))
         (throw (new globalThis.TypeError "original static-data fixture suite identity or case inventory changed")))
       (while (< index (js-length pairs))
@@ -240,13 +240,13 @@
         (Object/assign (js-object) original (js-object :sourceAssets assets :staticDataFixtureMigration migration))))))
   (defconst final-fixture-plans (js-array
     (js-object :suite "tests/wasm-managed-runtime.test.mjs" :archive "tests/wasm-managed-runtime-test-ground.mjs"
-      :sha256 "3eeb17219d0881366d53943b82e67213b88da15e00422d2a8c214e83007bf415" :count 64 :replay t
+      :sha256 "36723ae4a6d5e854bf7b6601c232cae58c7594433559d24c82dc571543df46fc" :count 64 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-runtime.eli" "tests/wasm-managed-runtime.test.mjs")
         (js-array "tests/eliscript/managed-runtime-cases.eli" "tests/helpers/managed-runtime-cases.mjs")
         (js-array "tests/eliscript/managed-runtime-install.eli" "tests/helpers/managed-runtime-install.mjs")))
     (js-object :suite "tests/wasm-managed-wire.test.mjs" :executedSuite "tests/wasm-managed-wire-selfhosted.test.mjs"
-      :archive "tests/wasm-managed-wire-test-ground.mjs" :sha256 "f799b8f9557288ade36df506fdd77dafb40d144159bc3168636c1f0c1674a0d2" :count 5 :replay t
+      :archive "tests/wasm-managed-wire-test-ground.mjs" :sha256 "35f46dc5aa1eb3a3ff4c6262e999783a79b09a6a863a33193138e6483073c598" :count 5 :replay t
       :inputs (js-array "stdlib/managed-wire-http-rpc.eli" "stdlib/managed-wire-schema.eli" "stdlib/managed-wire-markdown.eli")
       :pairs (js-array
         (js-array "tools/testing/wire-project-fixture.eli" "tools/testing/wire-project-fixture.mjs")
@@ -257,7 +257,7 @@
         (js-array "tests/eliscript/wire-default-node.eli" "tests/helpers/wire-default-node.mjs")
         (js-array "tests/eliscript/wire-project-fixture.eli" "tests/wire-project-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-source-collections.test.mjs" :archive "tests/wasm-managed-source-collections-test-ground.mjs"
-      :sha256 "af5668131358665fc6e4f1406cd7c23f951f93ff2f7497d224b21abe4864327e" :count 17 :replay t
+      :sha256 "a5c915b017553e1106afd4abc86702093b9c494cf16c7a960b648966134d13c9" :count 17 :replay t
       :pairs (js-array
         (js-array "tests/eliscript/managed-source-collections-test.eli" "tests/wasm-managed-source-collections.test.mjs")
         (js-array "tests/eliscript/managed-collection-affected.eli" "tests/helpers/managed-collection-affected.mjs")
@@ -269,7 +269,7 @@
         (js-array "tests/eliscript/managed-collection-affected.eli" "tests/helpers/managed-collection-affected.mjs")
         (js-array "tests/eliscript/managed-collection-install.eli" "tests/helpers/managed-collection-install.mjs")))
     (js-object :suite "tests/compiler-response-events.test.mjs" :archive "tests/compiler-response-events-test-ground.mjs"
-      :sha256 "ff3379f2a92d29df6b33789687f4aba37cd3d3a34868fb9ff1a470760dbc8be9" :count 25 :replay false
+      :sha256 "21e44029c4a5b89e6f18beab273be4812f28126e206af963728c92e69f2c85fa" :count 25 :replay false
       :inputs (js-array "bootstrap/host/compiler-session.eli" "bootstrap/host/compiler-tools.eli")
       :pairs (js-array
         (js-array "tests/eliscript/compiler-response-events.eli" "tests/compiler-response-events.test.mjs")
@@ -296,19 +296,19 @@
         (js-array "tests/eliscript/standard-library-fixture-install.eli" "tests/helpers/standard-library-fixture-install.mjs")
         (js-array "tests/eliscript/standard-library-fixture-tests.eli" "tests/standard-library-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-primitive-properties.test.mjs" :archive "tests/wasm-managed-primitive-properties-test-ground.mjs"
-      :sha256 "002b75456ce00299e9e609a038b84db22e60c52391665be8a16aa1da2300f7e4" :count 11 :replay false
+      :sha256 "4f4501005ffe4c3dd04373a182aac3dd8f866430eaf022e74364afb04df0a9e9" :count 11 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-primitive-properties.eli" "tests/wasm-managed-primitive-properties.test.mjs")
         (js-array "tests/eliscript/managed-primitive-properties-install.eli" "tests/helpers/managed-primitive-properties-install.mjs")
         (js-array "tests/eliscript/managed-primitive-properties-cases.eli" "tests/helpers/managed-primitive-properties-cases.mjs")))
     (js-object :suite "tests/wasm-managed-objects.test.mjs" :archive "tests/wasm-managed-objects-test-ground.mjs"
-      :sha256 "d82df73a1dde99292fd85b5b6d9ccac7cbbaf386ef4b1c7878c50ea83846f843" :count 23 :replay false
+      :sha256 "a43635e62ca11de571a4834201fdd06e03f79c222176e1171811e0f92130882e" :count 23 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-objects.eli" "tests/wasm-managed-objects.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
         (js-array "tests/eliscript/managed-container-install.eli" "tests/helpers/managed-container-install.mjs")))
     (js-object :suite "tests/wasm-managed-arrays.test.mjs" :archive "tests/wasm-managed-arrays-test-ground.mjs"
-      :sha256 "dc57d5a9ccf05c1928a05cd5ba6729829477746a684a054a1e7e27e52c70e781" :count 24 :replay false
+      :sha256 "6e68510e9fd1f70c759d1afb53ce3f91e0d77c6a71deec72766e05c73b898cf9" :count 24 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-arrays.eli" "tests/wasm-managed-arrays.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
@@ -317,13 +317,13 @@
       :sha256 "406a2a984c7ff046422eca3ff5064a26d351ac59712f52008c1fabb23e29ddf4" :count 5 :replay false
       :pairs (js-array (js-array "tests/eliscript/backend-cli-isolation.eli" "tests/backend-cli-isolation.test.mjs")))
     (js-object :suite "tests/wasm-managed-project-sharing.test.mjs" :archive "tests/wasm-managed-project-sharing.test.mjs"
-      :sha256 "6d1aa4324a50eb91d602b0db246de3676fcee1b3c0a7b2ad3fe5f7e0cea71306" :count 16 :replay false
+      :sha256 "6355c4e96cb492899ee55db1da4a742b1145d3b1218011bc37eafafb6efa84b3" :count 16 :replay false
       :pairs (js-array
         (js-array "tools/testing/managed-sharing-fixture.eli" "tools/testing/managed-sharing-fixture.mjs")
         (js-array "tests/eliscript/managed-sharing-fixture-install.eli" "tests/helpers/managed-sharing-fixture-install.mjs")
         (js-array "tests/eliscript/managed-sharing-fixture.eli" "tests/managed-sharing-fixture-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-builtins.test.mjs" :archive "tests/wasm-managed-builtins-test-ground.mjs"
-      :sha256 "ec3cdff8ad68f5fb8da09cae10aa044c59e9b55b8409c721ee58c64e18740acc" :count 12 :replay false
+      :sha256 "8345e323d233b2e193d448c4d1c949cb88b5edb97a70f6daf30b7ea8d64ec335" :count 12 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/wasm-managed-builtins.eli" "tests/wasm-managed-builtins.test.mjs")
         (js-array "tests/eliscript/managed-container-cases.eli" "tests/helpers/managed-container-cases.mjs")
@@ -341,17 +341,17 @@
         (js-array "tests/eliscript/managed-integrity-cases.eli" "tests/helpers/managed-integrity-cases.mjs")
         (js-array "tests/eliscript/managed-integrity-install.eli" "tests/helpers/managed-integrity-install.mjs")))
     (js-object :suite "tests/wasm-managed-function-properties.test.mjs" :archive "tests/wasm-managed-function-properties.test.mjs"
-      :sha256 "acecc8e15b6ddf408361e0511862ae77157f1dd16c95f263af9b27ee33dcd955" :count 9 :replay false
+      :sha256 "979497f27aa77e1349ec60055e2dddf98ebefd6d109cb8a55881cc1e962d79bf" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tools/testing/managed-function-properties-repairs.eli" "tools/testing/managed-function-properties-repairs.mjs")
         (js-array "tests/eliscript/managed-function-properties-install.eli" "tests/helpers/managed-function-properties-install.mjs")))
     (js-object :suite "tests/eliscript-protocol.test.mjs" :archive "tests/eliscript-protocol-test-ground.mjs"
-      :sha256 "fb3cacfc35e1b03d6c11b9a15e4964f84c8eba535d677c2075db62e89df559fb" :count 1 :replay false
+      :sha256 "6bd801e843b360ae25b74fd9571305a45dadc22a14149b083861afe13656c56c" :count 1 :replay false
       :executedSuite "tests/eliscript-protocol-selfhosted.test.mjs"
       :pairs (js-array (js-array "tests/eliscript/eliscript-protocol.eli" "tests/eliscript-protocol-selfhosted.test.mjs")))
     (js-object :suite "tests/compiler-portable-guards.test.mjs" :archive "tests/compiler-portable-guards-test-ground.mjs"
-      :sha256 "11588f03a29593318908caa21953bc56178774c3b5c052a8079308d8a0e3d7a6" :count 3 :replay false
+      :sha256 "2f0973abeb662725a89b37f820192404d442f8c119158026edbfcebe06231bf2" :count 3 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tools/testing/portable-node-fixtures.eli" "tools/testing/portable-node-fixtures.mjs")
@@ -363,7 +363,7 @@
         (js-array "tools/testing/number-text-node.eli" "tools/testing/number-text-node.mjs")
         (js-array "tests/eliscript/compiler-portable-guards.eli" "tests/compiler-portable-guards.test.mjs")))
     (js-object :suite "tests/compiler-portable-predicates.test.mjs" :archive "tests/compiler-portable-predicates.test.mjs"
-      :sha256 "6f257b924d8812074aea1a533bb02c03cdc7db4403df42c29f7f6bc971e9c0e3" :count 17 :replay false
+      :sha256 "9236ee0cc52ab947a4ad685af4200e22d22f99aff28a87987ef78ef6b0d1ea15" :count 17 :replay false
       :pairs (js-array
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
@@ -374,19 +374,19 @@
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
     (js-object :suite "tests/emacs-analysis-evidence.test.mjs" :archive "tests/emacs-analysis-evidence.test.mjs"
-      :sha256 "e815b667fe16fe5158b36ddb709d1d29f4816f726a3d5d1026f0cb110a05f052" :count 2 :replay false
+      :sha256 "8bc983c33fd476e786d53852369d17eb14da66d5fb414885ea1c28ba7a60d818" :count 2 :replay false
       :pairs (js-array
         (js-array "tests/eliscript/managed-capacity-registration.eli" "tests/helpers/managed-capacity-registration.mjs")
         (js-array "tests/eliscript/managed-capacity-registration-tests.eli" "tests/managed-capacity-registration-selfhosted.test.mjs")))
     (js-object :suite "tests/native-node-memory.test.mjs" :archive "tests/native-node-memory.test.mjs"
-      :sha256 "2222e7bdfc7c7ded467e2652b662a8bc337dad4e5cb3ecd1abb0d42fa04391c6" :count 9 :replay false
+      :sha256 "f7ca65f1440f0f0bf17e26705705fe53d771bd9fba67ce4003dfec2006996aa6" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/native-node-fixtures.eli" "tools/testing/native-node-fixtures.mjs")
         (js-array "tests/eliscript/native-node-boundaries.eli" "tests/helpers/native-node-boundaries.mjs")
         (js-array "tools/testing/compiler-portable-fixtures.eli" "tools/testing/compiler-portable-fixtures.mjs")
         (js-array "tests/eliscript/compiler-portable-fixtures-install.eli" "tests/helpers/compiler-portable-fixtures-install.mjs")))
     (js-object :suite "tests/wasm-managed-number-text.test.mjs" :archive "tests/wasm-managed-number-text.test.mjs"
-      :sha256 "c8438c1e8018e36fdfca81a4800ac1332ddf11a0f094aa2788fe147e5740b5fc" :count 9 :replay false
+      :sha256 "31010ff9c63c925008282fc20f58d8c87ffa7fbc8bab18333ba681093e15cbcf" :count 9 :replay false
       :pairs (js-array
         (js-array "tools/testing/number-text-regressions.eli" "tools/testing/number-text-regressions.mjs")
         (js-array "tests/eliscript/number-text-cross-host.eli" "tests/helpers/number-text-cross-host.mjs")
@@ -395,7 +395,7 @@
         (js-array "tests/eliscript/number-text-node-install.eli" "tests/helpers/number-text-node-install.mjs")
         (js-array "tests/eliscript/number-text-node-bridge.eli" "tests/number-text-node-bridge-selfhosted.test.mjs")))
     (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :archive "tests/wasm-managed-primitive-operators.test.mjs"
-      :sha256 "e6ce0d9d0d3cd060ad6389dc1f7c3d362ca4ba63997ea0338cb790efbc8e492d" :count 17 :replay false
+      :sha256 "a4bdb10eb1effd053952b5fc16121fed9391aa338cf4fc313125b3d579e29f0e" :count 17 :replay false
       :pairs (js-array
         (js-array "tools/testing/generated-fixture-module.eli" "tools/testing/generated-fixture-module.mjs")
         (js-array "tests/eliscript/numeric-seed-node.eli" "tests/helpers/numeric-seed-node.mjs")
@@ -559,31 +559,31 @@
     (let ((assets (js-array)) (suites (js-array))
           (plans (js-array
             (js-array "tests/wasm-managed-empty-bindings.test.mjs" "294b9b417b200868ac47e1592400b12fe21efda264135cdf0da990394eb9aeb0")
-            (js-array "tests/wasm-managed-callables.test.mjs" "cee9be3c91c710ae48d39f3e88bb718cec0719f407806d717805afdae7ed1fd6")
+            (js-array "tests/wasm-managed-callables.test.mjs" "4827e502204d3e1f4a0612b7d399aa7f5ea47696f11b861081003db6e0ea143a")
             (js-array "tests/wasm-managed-realm-lifetime.test.mjs" "d9d80dd95a24071d9e976141cc9553c9b1797aec1ed2e9fd23130e906a812c58")
-            (js-array "tests/wasm-managed-native-prototype-callables.test.mjs" "cf843508f3e620428fce5fdccd35f02c3add2270c124d23d57f567a1d62b7e5f")
-            (js-array "tests/wasm-managed-str.test.mjs" "022576e2232b9b021e88e03abfdfdee8e3520d01dce237bd66222bd26e382356")
+            (js-array "tests/wasm-managed-native-prototype-callables.test.mjs" "344f4d1304c383416b181add8c348bf8ab1609b5f638c9d416a4b94ff9f8cf77")
+            (js-array "tests/wasm-managed-str.test.mjs" "b46837d55d31732525e417eecd4d9700e1d4cd7cd8efa0d590df847938bd3411")
             (js-array "tests/wasm-managed-array-inheritance.test.mjs" "211463fb402584e65337b1faf2ce25fc6216e4015165f2a6bd0246ef3864b560")
             (js-array "tests/wasm-managed-array-index-storage.test.mjs" "18e766fe9888fcf23ed549e48048c92d932aa5ffa8820e0880b407a9196affaf")
-            (js-array "tests/wasm-managed-variadic-calls.test.mjs" "7c53c987fd8b7763a87635646593d7383aa35e2bb244235976b2d9d978b21c55")
-            (js-array "tests/wasm-managed-typeof.test.mjs" "2d7f2eed94d3e9fcd24ce7eb1363d186ea54c775dc788c291144336bf0021a36")
-            (js-array "tests/wasm-managed-typeof-paths.test.mjs" "6229e2a20b3aa45b6d658b24c054b61964112535b83a811058c53406973e6087")
+            (js-array "tests/wasm-managed-variadic-calls.test.mjs" "694d5517a4d277f40b7bfc4a6b9caa5b8dd67bb1415bced5c39d7e06d01a21de")
+            (js-array "tests/wasm-managed-typeof.test.mjs" "e8e7cd9b592698450d24ac8f0cc8e7b323d7702ad566d43419e015be62066095")
+            (js-array "tests/wasm-managed-typeof-paths.test.mjs" "f327120ac7279f1405065cf6005ae0b691d45dd1a0eecdeeae33f3cfcf67ab21")
             (js-array "tests/wasm-managed-array-callbacks.test.mjs" "1f151891db7e3fdc19f057deaeafc62f569cdbd1c9c6edaa0da0b5369ef10732")
             (js-array "tests/wasm-managed-array-splice.test.mjs" "947ceebb36b4822653b18f9e4d1cf3dd0131091a0405f212389fb8c416063fe0")
-            (js-array "tests/wasm-managed-project-linking.test.mjs" "3e3d62a38a8b908da9096b3d030a40e12fb1153ee8c5356c8352b61a9b171e99")
-            (js-array "tests/wasm-managed-strings.test.mjs" "2b1becfabbbe4ec6b1f298ab41d4546cd275492d229dfe854f64526207d62f0a")
-            (js-array "tests/wasm-managed-text-constructors.test.mjs" "2ab2f0098ad2bca26ea59a0cf74e86fabf72ed9c8b81d77e6fe5c3c326f8db96")
-            (js-array "tests/wasm-managed-regexp.test.mjs" "0b73637961c9771b18c6011df6a7cbfcd9331608999fa9e3709dbbf2bcc1c355")
-            (js-array "tests/wasm-managed-regexp-exact.test.mjs" "48b631444152567f8c4f4800c76b51ec74d6302886c28975973434456c34c7ed")
-            (js-array "tests/wasm-managed-regexp-indices.test.mjs" "143f20554e35abb0ba93b8639b6e5ad110f066196e272955cc2a73d9c65a331c")
-            (js-array "tests/regexp-property-outlining.test.mjs" "0b042be538725eefec12e80ef0a7eeb75033ad9a821aea23bc1170354ebefda7")
+            (js-array "tests/wasm-managed-project-linking.test.mjs" "e1edd928e8d2ef473cc4dcd967e46f4b3ee5554fcb86d626977ec0a2984a65ef")
+            (js-array "tests/wasm-managed-strings.test.mjs" "404d147587e7dfebfe3615d6165bc93bfdc572f7d17a8a389720b005e6e1a407")
+            (js-array "tests/wasm-managed-text-constructors.test.mjs" "f108c58a837fba06c8bf09a47f6451885acc81d553b680fab54236f50c0b8bff")
+            (js-array "tests/wasm-managed-regexp.test.mjs" "7794135562e2f47ef6b216fe2f74598140be9218c34d0ac80e351975726f9a15")
+            (js-array "tests/wasm-managed-regexp-exact.test.mjs" "2ccde8c5b2be64bf695c0ead6e3436eabb95df897fd80438371c47e60b499109")
+            (js-array "tests/wasm-managed-regexp-indices.test.mjs" "dce20ac464d9689a11d8a30073d793653c9742eb91fb28a8e8042833fc519a54")
+            (js-array "tests/regexp-property-outlining.test.mjs" "4b8b7e5e4fda7d845a72394468b1d4c0bb5c9a4431b80b710353810002749105")
             (js-array "tests/compiler-fragment-combine.test.mjs" "56008689c55c4d937bdb74ab62a4abb204b3808e193130b53526c61d7b438583")
-            (js-array "tests/wasm-managed-persistent-literals.test.mjs" "152779357c15d3f15774b06cfdde54cffc8284bc13cd598212e3204a97cb8fa0")
-            (js-array "tests/js-array-text-fast-path.test.mjs" "d19ea168377140f45f2427a44fa5fc42b4e9155412d450f9df55e60a2702c752")
-            (js-array "tests/wasm-managed-initializer-outlining.test.mjs" "a391042184e2b3483738ffc4d7450222daa20f061238c03ae5ae5ad3c9642633")
-            (js-array "tests/wasm-managed-primitive-own-runtime.test.mjs" "8ccfce1fadd98bae4cc14cde7c96b9356dbb06975a289f03b88bf5e5476495c6")
-            (js-array "tests/wasm-managed-operand-conversion.test.mjs" "e40b989be5921f9de32bd89c97a676eee0938f631d74fde7eb8be40d44462751")
-            (js-array "tests/wasm-managed-math.test.mjs" "85aaba1cc11ef07741d8a511b3466038f41fc860285b77d7b66b495ca5b0ff6f")))
+            (js-array "tests/wasm-managed-persistent-literals.test.mjs" "65f2e793ec63b62677aec16b74bbdaddb1e21cc56d5f38154784b07f51eabf78")
+            (js-array "tests/js-array-text-fast-path.test.mjs" "f81a7e2aa134bb6156d8479197ef551e3a63a0804623ad2931c497d6f6f6ee01")
+            (js-array "tests/wasm-managed-initializer-outlining.test.mjs" "8c66aee2389e6d5a5506d0dbe9585244f68740dfe97dcaee2b5c43423d37ba30")
+            (js-array "tests/wasm-managed-primitive-own-runtime.test.mjs" "d0b9cdd0cc6014f85bb1ead1ba6537a677d449fce0b591d145ee034dca1a02db")
+            (js-array "tests/wasm-managed-operand-conversion.test.mjs" "58029c98a4e10cf7ef1c5a9ad434e2224d70ad36755d14ed35636e44e13f0c91")
+            (js-array "tests/wasm-managed-math.test.mjs" "1e294e687be93c24baf811ab6ed54e88d308df4b58cdb84e6099c38817c1ab53")))
           (pairs (js-array
             (js-array "tools/testing/managed-fixture-repairs.eli" "tools/testing/managed-fixture-repairs.mjs")
             (js-array "tools/testing/array-text-fixture.eli" "tools/testing/array-text-fixture.mjs")
@@ -665,7 +665,7 @@
              (js-array "tests/eliscript/direct-wasm-error-profile-tests.eli" "tests/direct-wasm-error-profile-selfhosted.test.mjs")
              (js-array "tests/eliscript/direct-wasm-registration-tests.eli" "tests/direct-wasm-registration-selfhosted.test.mjs")))
            (index 0))
-      (unless (= (get proof :sourceSha256) "bdcd362f1963d75327647dfee33241f62738bc81ce7e9eec2825811dfe6fdcba")
+      (unless (= (get proof :sourceSha256) "02c58915e78372b7cd669d0b2cb711ce5ad2b03c2eb1cd3d48cbd1919e58404b")
         (throw (new globalThis.TypeError "original direct WASM assertion archive identity changed")))
       (while (< index (js-length pairs))
         (let* ((pair (aref pairs index)) (source (await (browser-source-asset options (aref pair 0))))

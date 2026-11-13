@@ -9,7 +9,7 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/wasm-managed-primitive-properties-test-ground.mjs")))
   (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-             "002b75456ce00299e9e609a038b84db22e60c52391665be8a16aa1da2300f7e4")
+             "4f4501005ffe4c3dd04373a182aac3dd8f866430eaf022e74364afb04df0a9e9")
     (throw (new globalThis.TypeError "the complete original primitive properties suite identity changed")))
   (defconst counts (new globalThis.Map))
   (defvar restored false)

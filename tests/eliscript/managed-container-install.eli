@@ -7,11 +7,11 @@
   (import "./managed-container-cases.mjs" managedContainerCases prepareManagedContainer closeManagedContainer)
   (defconst plans (js-array
     (js-object :kind "objects" :suite "tests/wasm-managed-objects.test.mjs"
-      :archive "tests/wasm-managed-objects-test-ground.mjs" :sha256 "d82df73a1dde99292fd85b5b6d9ccac7cbbaf386ef4b1c7878c50ea83846f843")
+      :archive "tests/wasm-managed-objects-test-ground.mjs" :sha256 "a43635e62ca11de571a4834201fdd06e03f79c222176e1171811e0f92130882e")
     (js-object :kind "arrays" :suite "tests/wasm-managed-arrays.test.mjs"
-      :archive "tests/wasm-managed-arrays-test-ground.mjs" :sha256 "dc57d5a9ccf05c1928a05cd5ba6729829477746a684a054a1e7e27e52c70e781")
+      :archive "tests/wasm-managed-arrays-test-ground.mjs" :sha256 "6e68510e9fd1f70c759d1afb53ce3f91e0d77c6a71deec72766e05c73b898cf9")
     (js-object :kind "builtins" :suite "tests/wasm-managed-builtins.test.mjs"
-      :archive "tests/wasm-managed-builtins-test-ground.mjs" :sha256 "ec3cdff8ad68f5fb8da09cae10aa044c59e9b55b8409c721ee58c64e18740acc")
+      :archive "tests/wasm-managed-builtins-test-ground.mjs" :sha256 "8345e323d233b2e193d448c4d1c949cb88b5edb97a70f6daf30b7ea8d64ec335")
     (js-object :kind "identity" :suite "tests/wasm-managed-identity.test.mjs"
       :archive "tests/wasm-managed-identity-test-ground.mjs" :sha256 "1b080efd7a90c9bd493adc37ae320c11279f61c0465462970b624d3c66605630")))
   (defconst selected (js-call plans :filter (lambda (plan)
