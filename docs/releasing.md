@@ -82,11 +82,22 @@ publication, a GitHub Release or a signed release tag.
   unrounded measurements before producing release assets.
 - [ ] Complete the current candidate's four-dimension benchmark and resolve
   substantive performance failures. Of the 14 retained performance/capacity
-  reports, the refreshed core baseline passes all 11 original budgets across
-  three independent processes and seven warm samples per path. Its source
-  binding includes maintained Eli, generated runtime modules and build inputs.
-  The other 13 reports remain unaccepted until independently measured;
-  producing a report alone does not pass its gate.
+  reports, nine now have current passing evidence: compiler runtime scanning,
+  IR-kind decisions, mark location, binary comparison emission, HAMT layout,
+  Emacs analysis, analysis soak, worker lifecycle soak and the full 256 MiB
+  value-stream probe. The probe retains its original 2048/1024/2560 MiB budgets;
+  HAMT retains the measured 32/24 thresholds across Bun, Node 24 and Chrome.
+  The analysis report now binds Unicode casing and its table-generation inputs.
+  Five report units remain unaccepted. Reader complete-compiler speedup is
+  1.003 against 1.08; SourceMap pipeline/compiler speedups are 0.789/0.990
+  against 1.5/1.08; indentation is 4.946 against 10; transient Vector speedup
+  is 0.737 against 1.5 although its allocation bound passes. A fresh core run
+  passes 9/11 budgets: clean-build maximum/spread are 59.425 ms/2.877 against
+  40 ms/2, and no-op median is 4.238 ms against 4 ms. All three independent
+  processes and seven samples per path were collected. Historical passing
+  reports for these five units do not establish current acceptance.
+  Failed measurements retain their original thresholds; no unchanged failure
+  is rerun to obtain a favorable sample.
   The latest local comparison isolates every workload in its own process in
   both languages, retaining the original timed expressions, calibration and
   sample counts. Each worker has a ten-second deadline; independent failures
@@ -103,6 +114,18 @@ publication, a GitHub Release or a signed release tag.
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
   the final independent acceptance, and clean used generated outputs.
+
+Already-cased ASCII now returns the identical primitive text; changed ASCII
+and every non-ASCII value still use the selected Unicode 15.1/16/17 tables
+and final-sigma rules. Full scalar and sigma checks plus receiver/prototype
+protections pass. Speculative SourceMap cursor and indentation micro-optimizations
+were withdrawn after no demonstrated gain; they are not part of this candidate.
+
+The current compact installation check passes all seven checks, including the
+installed public CLI and JS/WASM/native outputs, at 4,960,144 bytes. Seed-only
+`dist/bootstrap/runtime` and its private self-named package scope are excluded;
+they must not duplicate or shadow the final installed runtime. The original
+5 MB guard remains unchanged.
 
 The vector `count`, `from` and `sliceVector` bridges have distinct host call
 sites while their Eli algorithms, method signatures, descriptors and public

@@ -677,3 +677,52 @@ CI101：完成最终三输出 WASM/native 剩余矩阵项的整批修复、正�
 CI102：远端 `Compatibility` 分片与本地保护闭环。修复 `managed-host-runtime.eli` 中 `using` / `withHostValues` 跨轮次累积 `pinnedFieldTokens` 并在异步 `advance` 的 `sourceThrown` 路径未包裹 `using` 导致连续 252 个 wire 用例在第 248 项耗尽 8,192 句柄槽的问题；修正 `core-syntax.eli` 在 GitHub Actions 无本地外部 `../termini-platform/che` 检出时的可选条件保护（本地仍强制断言 `che-available`）；将派生 Emacs 种子编译的套件加入 `file-workers.eli` 独占队列以消除 2–3 vCPU runner 双并发争用导致的 30 秒超时；补齐 `wasm-managed-sorted-core`、`wasm-managed-core-modules`、`managed-stdlib-value-json`、`wasm-managed-regexp`、`backend-cli-isolation`、`bootstrap-expander` 在功能延期模式下的时间预算及 `sorted-error-constructor` 稳定语料选择，并将功能延期模式工作流 `timeout-minutes` 调为 90 分钟。重新生成稳定兼容与同偶语料清单及工作流后，`verify-bootstrap`（318 文件固定点一致）、`check-release-package`、`check-contracts`、`byte-compile` 及全部 12 份受影响测试套件均 0 失败通过。14 份当前源码性能绑定与原小容量门槛仍未验收，版本保持 0.1.2，不发布 npm。
 
 CI103：基于 `bbfe90a` 远端 `Pages`（通过）、`Browser compatibility`（9/9 通过）与 `Compatibility` 实际运行证据，一次补齐剩余 6 类跨平台 runner 预算与架构边界：`wasm-managed-sorted-core.test.eli` 与 `compiler-corpus-sorted-observation.eli` 将功能分区截止统一对齐实测上限（`recovery-*` / `rotations` / `sharing` 1,800s、`randomized` 600s、普通分区 120s），`standard-library-fixture.eli` 将 sorted WASM provider 与 `wasm-managed-math-transcendental.test.mjs` 的显式功能截止分别设为 240s 与 120s；`wire-call-cases.eli` 与 `wire-project-fixture.eli` 对 WASM 与 native 的 `[tail/http-contracts]` 统一赋予 240s 功能截止，消除超时后异步回调跨用例重叠；`compiler-corpus-implicit-resources.eli`、`compiler-corpus-managed-adapters.eli`、`compiler-session-protocol.eli`、`math-oracle-fixture.eli` 与 `compiler-corpus-original-regressions.eli` 在 `linux-x64` / `linux-arm64` 上按主机平台选择 `arm64-linux` / `arm64-macos` 目标并在非 `arm64` 主机上仅执行发射与归档验证而不加载 `arm64` 动态库；`compiler-corpus-process.eli` 对 `portable-persistent-list-1`（case 604）WASM 与 native 均启用 360s 实测功能截止；`Makefile` `test-bootstrap-artifacts` 在干净检出下自动补齐 `bootstrap-release` 与 `prepare-release-package`，并将 `render-workflow.eli` 功能延期模式 `timeout-minutes` 调为 240 分钟。本地契约、受影响 Bun/Node 套件与严格字节编译全部通过，版本保持 0.1.2，不发布 npm。
+
+
+### 0.1.3 当前性能收口（固定分母 14 份报告）
+
+当前 9/14 份报告有对应源码的通过证据；其余 5/14 未验收。这不是整体项目完成率。
+已通过：编译器 runtime-scan、ir-kind、locate、binary-comparison，HAMT 三宿主布局，
+Emacs analysis / analysis-soak，worker lifecycle-soak，以及完整 256 MiB value-stream。
+后者实际完成 268435456 字节往返，保持原 2048/1024/2560 MiB 内存预算；
+只复用源码摘要逐项一致的测量，不以小样本替代。Unicode 全标量、sigma 与新增 ASCII、
+单次接收者转换、替换 RegExp.exec 的 9 项检查通过，独立窄审 ACCEPT。
+
+| 问题 | 当前事实及保持的原门槛 | 本批失败记录 |
+| --- | --- | --- |
+| PERF13-01 | analysis 主项因 ASCII 规范化重复查表而退化；增加已规范 ASCII 身份路径，非 ASCII 与变更字符保留版本表算法。完整输入与原 2 倍门槛已通过，报告补齐真实 casing/生成器摘要。 | 实际性能失败至少 1 次；修复后 0 次。 |
+| PERF13-02 | HAMT 浏览器缺少迁移后的 runtime/bit 闭包及 import map；完整 500000/100000 操作、7 次计时与 20000 节点内存测量三宿主通过，32/24 不变。Node 预检复用同一 Bun 解析器，不依赖宿主位置。 | 原始浏览器超时 1 次；预检修复时 nil/undefined 分支错误 1 次，修正后保护通过。 |
+| PERF13-03 | SourceMap 原 HEAD 实测 pipeline/compiler 约 0.789/0.990，未达 1.5/1.08。两次候选分别约 0.775/0.975 与 0.794/0.975；均撤回，相关源码与测试恢复 HEAD，不将旧报告当当前通过。 | 实际失败至少 3 次；两个行为修复候选均失败并关闭。 |
+| PERF13-04 | Reader 完整编译 1.003，未达 1.08；不放宽。 | 实际性能失败至少 1 次。 |
+| PERF13-05 | 缩进原实现约 4.946，未达 10；裸数字关系候选约 5.223，无可证足够收益，已撤回。失败 CLI 现在仍输出完整报告并非零退出。 | 实际性能失败至少 3 次；行为修复候选 1 次失败。 |
+| PERF13-06 | transient Vector 时间比约 0.737，未达 1.5；分配比约 0.270 已满足 1/3，但不能替代时间门槛。两个有界分派实验无可证收益，均已恢复源码。 | 正式性能失败至少 2 次；诊断实验 2 次，不冒充正式验收。 |
+| PERF13-07 | 核心基准 3 个独立进程、每路 7 个样本，正确性全过、预算 9/11。clean 最大值/离散比 59.425ms/2.877 超过 40ms/2；no-op 中位数 4.238ms 超过 4ms。准备动作先于摘要冻结，测量结束仍严格复核。 | 生成物身份检查中断 1 次，单记非性能断言；之后真实预算失败 1 次。 |
+
+一次旧的已完成自举目录因源码身份改变被严格拒绝（启动/复用拒绝 1 次，非功能断言）；
+清理已用完 stage1–3 后，复用刚生成且已验真的 stage0 继续官方四阶段链，
+338 文件 stage2/stage3 逐字节一致。此后只改外围测量工具与证据，不改变正式编译器。
+测量入口重建 seed 后直接运行安装测试发生一次正确的 stage3 产物身份拒绝；
+正式 `make check-release-package` 会先从已认证 stage3 重新准备运输目录，禁止拿 seed 冒充 stage3。
+最终安装包、干净源码构建与契约核验按当前候选继续收口；四维三项原失败与最终 SHA 的
+四个远端门禁仍未通过，不能据此宣布 0.1.3 达到发布标准。
+
+
+本批运输包第一次完整安装验收收齐 5 个子项通过与体积失败（连同父项为 5/7）；
+实际 5012367 字节。原因是 benchmark seed 在 dist/bootstrap 下留下私有 runtime/同名
+package scope，随整个目录重复进入 npm 包。只排除这两个 seed 运输副本后，
+正式 `make check-release-package` 7/7 通过，实际 4959978 字节，仍保持原 <5MB 门槛。
+普通 .el/.eli CLI、已安装 JS/WASM/native、Source/Producer 身份与精确包内容检查均保留。
+测量和打包会使用不同的正式生成阶段；报告必须对应最终准备完成后的实际 runtime 字节，
+不能用“同一 Eli 源码”替换生成物摘要，也不能把先前 stage0 测量标成 stage3 当前通过。
+
+
+本批最终核收：已认证 338 文件固定点；从 0 个生成 JS 的候选源码树完成正式
+bootstrap-backends 与 14 项定向语义检查，新增历史报告认证在带真实 Git 元数据的
+干净候选中独立 10/10；当前报告/来源保护 20/20；Unicode 9/9；包表面 8/8；
+严格字节编译通过。最终两条精确历史报告路径仅在显式延期时核验接受时的 Git commit、
+tree 与报告 SHA，保持当前性能 NOT ACCEPTED，原 run、manifest、markdown 字节未改。
+完整契约 17/17（当前性能仍明确延期）；最后同批实际安装包再次 7/7，4960144 字节。
+裸源码归档未带 Git 元数据时，历史来源检查出现 3 项环境失败；补齐真实 Git 克隆元数据
+后全部通过，不把缺少 Git 对象改成免验。以上是本批范围的通过，仍有 5/14 性能报告、
+四维原三项与最终签名 SHA 的四个远端门禁未通过。已用完的源码快照、历史工作树、
+日志、包与生成物在本批签名交付后清理；正式输入、生成规则与必要结论均在 Git。

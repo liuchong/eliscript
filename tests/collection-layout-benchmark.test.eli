@@ -1,11 +1,12 @@
 (module tests.collection-layout-benchmark.test
   (import "node:process" :default process)
+  (import "node:child_process" spawnSync)
   (import "./helpers/performance-acceptance.mjs" currentPerformanceTest)
   (import "bun:test" expect test)
   (import "node:fs/promises" readFile)
   (import "node:url" fileURLToPath)
   (import "../tools/collections/layout-benchmark.mjs" runLayoutHostBenchmark validateLayoutHostReport)
-  (import "../tools/collections/benchmark.mjs" analyzeLayoutSuite benchmarkSourceDigest validateLayoutSuiteReport)
+  (import "../tools/collections/benchmark.mjs" analyzeLayoutSuite benchmarkSourceDigest validateLayoutSuiteReport BROWSER_MODULE_FILES validateBrowserModuleFiles)
   (defun moduleURL (relative) (new globalThis.URL relative (js* "import.meta.url")))
   (defun be (actual expected) (js-call (expect actual) :toBe expected))
   (defun same (actual expected) (js-call (expect actual) :toEqual expected))
@@ -51,6 +52,33 @@
       (js-call (expect source) :toContain "\"tools/collections/browser/main.mjs\"")
       (js-call (expect source) :toContain "(await (copyFile (js-call path :join project-directory relative) destination))")
       (js-call (expect source) :toContain "/tools/collections/browser/index.html?"))))
+  (test "HAMT browser assets close native and package imports before browser startup" (async ()
+    (be (await (validateBrowserModuleFiles)) t)
+    (await (Promise/all
+      (js-call (js-array "stdlib/bit.mjs" "runtime/primitives.mjs") :map (lambda (missing)
+        (js-call (get (expect (validateBrowserModuleFiles
+          (js-call BROWSER_MODULE_FILES :filter (lambda (file) (/= file missing))))) :rejects)
+          :toThrow "undeclared HAMT browser import")))))
+    (await (js-call (get (expect (validateBrowserModuleFiles (js-array))) :rejects)
+      :toThrow "requires its HTML and ESM entries"))
+    (let* ((html (await (readFile (moduleURL "../tools/collections/browser/index.html") "utf8")))
+           (matched (js-call html :match
+             (new globalThis.RegExp "<script type=\"importmap\">([\\s\\S]*?)</script>"))))
+      (same (JSON/parse (aref matched 1)) (js-object :imports (js-object "eliscript/" "/"))))))
+  (test "Node checks the same HAMT browser import closure through the Bun host parser" (lambda ()
+    (let* ((selected (get (get process :env) :NODE))
+           (node (if (nullish? selected) "node" selected))
+           (script (fileURLToPath (moduleURL "../tools/collections/benchmark.mjs")))
+           (options (js-object :encoding "utf8" :timeout 10000 :killSignal "SIGKILL"))
+           (valid (spawnSync node (js-array script "--validate-browser-files"
+                     (JSON/stringify BROWSER_MODULE_FILES)) options))
+           (invalid (spawnSync node (js-array script "--validate-browser-files"
+                     (JSON/stringify (js-call BROWSER_MODULE_FILES :filter
+                       (lambda (file) (/= file "stdlib/bit.mjs"))))) options)))
+      (be (get valid :status) 0)
+      (be (get valid :stdout) "")
+      (be (get invalid :status) 1)
+      (js-call (expect (get invalid :stderr)) :toContain "undeclared HAMT browser import"))))
   (test "committed HAMT layout baseline proves the 32/24 threshold decision" (async ()
     (let* ((baselineFile (fileURLToPath (moduleURL "../benchmarks/hamt-layout-macos-arm64.json"))) (baseline (JSON/parse (await (readFile baselineFile "utf8")))))
       (be (validateLayoutSuiteReport baseline) baseline)

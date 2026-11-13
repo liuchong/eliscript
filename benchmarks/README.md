@@ -3,6 +3,10 @@
 [Project README](../README.md) | [Tests](../tests/README.md) |
 [Specifications](../specs/README.md)
 
+The current candidate's accepted and open gates are listed in
+[releasing](../docs/releasing.md). A historical passing report is not current
+acceptance when its source binding differs.
+
 Benchmark reports are evidence, not universal performance promises. Every
 committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
@@ -43,24 +47,30 @@ hashing, allocation counters, and source identity are checked outside the
 timed region. Eleven samples alternate path order after two warmups. Default
 tests validate the committed report without rerunning wall-clock timings.
 
+Compiler benchmark commands can prepare the Emacs seed in `dist/bootstrap`.
+After measuring, run `make check-release-package` to reinstall and authenticate
+the accepted final stage3 before testing its actual archive; running the raw
+installation test against the seed directory must fail its product identity.
+
 ## Compiler Ordered Source Map Cursors
 
 Create the exact pre-specialization baseline, generate both compilers, and run:
 
 ```sh
-git worktree add --detach /tmp/eliscript-source-map-cursor-baseline \
+git worktree add --detach _worktree/performance-baselines/source-map \
   a6013833226af047622aceca42d687b6e33e3701
-(cd /tmp/eliscript-source-map-cursor-baseline && bun run build:bootstrap)
 bun run build:bootstrap
 bun tools/compiler/source-map-cursor-benchmark.mjs \
-  --baseline-root /tmp/eliscript-source-map-cursor-baseline \
+  --baseline-root _worktree/performance-baselines/source-map \
   --output benchmarks/compiler-source-map-cursor-macos-arm64.json
-git worktree remove /tmp/eliscript-source-map-cursor-baseline
+git worktree remove _worktree/performance-baselines/source-map
 ```
 
-The benchmark refuses another baseline. It compares ordered generated-mark and
+The benchmark refuses another baseline. Its controlled build restores only the
+named historical cursor functions into today's otherwise identical compiler;
+it does not require building the historical checkout. It compares ordered generated-mark and
 source-location cursors with retained complete-scan Eliscript references over
-all eleven compiler artifacts and explicit Source Map boundaries. Both
+all thirteen compiler artifacts and explicit Source Map boundaries. Both
 compilers must then emit byte-identical ESM and Source Maps for the same current
 sources before alternating timing begins. The committed report records both
 the cursor-pipeline and complete-compiler decisions.
@@ -70,20 +80,21 @@ the cursor-pipeline and complete-compiler decisions.
 Create the exact pre-specialization baseline, generate both compilers, and run:
 
 ```sh
-git worktree add --detach /tmp/eliscript-reader-baseline \
+git worktree add --detach _worktree/performance-baselines/reader \
   d6822134a187d4247611db56822ef47164a76a61
-(cd /tmp/eliscript-reader-baseline && bun run build:bootstrap)
 bun run build:bootstrap
 bun tools/compiler/reader-character-benchmark.mjs \
-  --baseline-root /tmp/eliscript-reader-baseline \
+  --baseline-root _worktree/performance-baselines/reader \
   --output benchmarks/compiler-reader-character-macos-arm64.json
-git worktree remove /tmp/eliscript-reader-baseline
+git worktree remove _worktree/performance-baselines/reader
 ```
 
-The benchmark refuses another baseline. It checks production whitespace and
+The benchmark refuses another baseline. Its controlled build restores only the
+named historical reader predicates into today's otherwise identical compiler;
+it does not require building the historical checkout. It checks production whitespace and
 delimiter predicates against retained Eliscript references over the real
 compiler source trace, then requires both compilers to emit identical ESM and
-Source Maps for all eleven current modules before alternating complete-compiler
+Source Maps for all thirteen current modules before alternating complete-compiler
 timings. [`compiler-reader-character-macos-arm64.json`](compiler-reader-character-macos-arm64.json)
 records the reviewed predicate and whole-compiler evidence. Default tests add
 an exhaustive Unicode decision check and validate the report digest.
@@ -93,22 +104,21 @@ an exhaustive Unicode decision check and validate the report digest.
 Create an exact detached baseline worktree, generate both compilers, and run:
 
 ```sh
-git worktree add --detach /tmp/eliscript-comparison-baseline \
+git worktree add --detach _worktree/performance-baselines/binary \
   a123937b275d89e833434e84064e4e120cf5495b
-(cd /tmp/eliscript-comparison-baseline && bun run build:bootstrap)
+(cd _worktree/performance-baselines/binary && bun run build:bootstrap)
 bun run build:bootstrap
 bun tools/compiler/binary-comparison-benchmark.mjs \
-  --baseline-root /tmp/eliscript-comparison-baseline \
+  --baseline-root _worktree/performance-baselines/binary \
   --output benchmarks/compiler-binary-comparison-macos-arm64.json
-git worktree remove /tmp/eliscript-comparison-baseline
+git worktree remove _worktree/performance-baselines/binary
 ```
 
 The benchmark refuses a different baseline revision. Both generated compilers
 compile the same current thirteen-module corpus with Source Maps in alternating
 order. [`compiler-binary-comparison-macos-arm64.json`](compiler-binary-comparison-macos-arm64.json)
-records source-bound byte counts (`747,647` optimized bytes vs `800,209`
-baseline bytes, `-6.57%`), checksums, raw samples, medians (`720.620 ms` vs
-`1,495.501 ms`, `2.075x` speedup), and the complete-compiler threshold decision.
+records source-bound optimized and baseline byte counts, checksums, raw samples,
+medians, and the complete-compiler threshold decision.
 Default tests separately execute binary and n-ary side-effect ordering and
 validate the report digest.
 
@@ -287,13 +297,16 @@ bun run benchmark:hamt-layout
 
 The command measures the same real `mapFind` path over equivalent
 bitmap-indexed and dense 32-slot roots under Bun, Node.js, and local headless
-Chrome. It starts a temporary Vite build on fixed loopback port 8740 and uses
+Chrome. It serves a copied native-ESM closure with a package import map on fixed
+loopback port 8740 and uses
 Chrome DevTools Protocol on fixed port 8741. Both listeners and the exact
 Chrome process are closed before the command returns.
 
 Use `--output` when intentionally refreshing a reviewed baseline:
 
 ```sh
+ELISCRIPT_LAYOUT_ITERATIONS=500000 \
+ELISCRIPT_LAYOUT_MUTATION_ITERATIONS=100000 \
 bun tools/collections/benchmark.mjs \
   --output benchmarks/hamt-layout-macos-arm64.json
 ```

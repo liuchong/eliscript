@@ -103,6 +103,39 @@
                 (js-call assert :strictEqual (Reflect/apply lower (aref pair 0) (js-array)) (aref pair 1)))))
             (setq index (1+ index)))))))
 
+  (test "already-cased ASCII retains every code unit and coerces generic receivers once under each profile"
+    (async ()
+      (let* ((module (await (runtime))) (install (get module :installUnicodeCaseProfile))
+             (all-ascii (js-call (Array/from (js-object :length 128)
+               (lambda (_ code) (String/fromCharCode code))) :join "")))
+        (js-call (js-array 15.1 16 17) :forEach (lambda (version)
+          (let* ((host (realm)) (prototype (get (get host :String) :prototype))
+                 (expected-upper (Reflect/apply (get prototype :toUpperCase) all-ascii (js-array)))
+                 (expected-lower (Reflect/apply (get prototype :toLowerCase) all-ascii (js-array)))
+                 (state (funcall install version host))
+                 (upper (get state :upper)) (lower (get state :lower)))
+            (js-call assert :strictEqual (Reflect/apply upper all-ascii (js-array)) expected-upper)
+            (js-call assert :strictEqual (Reflect/apply lower all-ascii (js-array)) expected-lower)
+            (js-call assert :strictEqual (Reflect/apply upper expected-upper (js-array)) expected-upper)
+            (js-call assert :strictEqual (Reflect/apply lower expected-lower (js-array)) expected-lower)
+            (js-call assert :strictEqual (Reflect/apply lower "" (js-array)) "")
+            (let ((trace (js-array)) (receiver (js-object)))
+              (put receiver (get globalThis.Symbol :toPrimitive)
+                (lambda (hint) (js-call trace :push hint) expected-lower))
+              (js-call assert :strictEqual (Reflect/apply lower receiver (js-array)) expected-lower)
+              (js-call assert :deepStrictEqual trace (js-array "string")))))))))
+
+  (test "Unicode casing does not consult a later RegExp exec replacement"
+    (async ()
+      (let* ((module (await (runtime))) (host (realm))
+             (state (funcall (get module :installUnicodeCaseProfile) 17 host))
+             (prototype (get globalThis.RegExp :prototype)) (original (get prototype :exec)))
+        (try
+          (put prototype :exec (lambda () (throw (new globalThis.Error "unrelated RegExp exec was invoked"))))
+          (js-call assert :strictEqual (Reflect/apply (get state :lower) "already lowercase 09" (js-array)) "already lowercase 09")
+          (js-call assert :strictEqual (Reflect/apply (get state :lower) "AΣ" (js-array)) "aς")
+          (finally (put prototype :exec original))))))
+
   (test "the selected compiled String program executes all scalar and sigma golden hashes in isolated explicit-profile JS processes"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-unicode-selected-"))))

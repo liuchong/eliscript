@@ -286,8 +286,11 @@
   (defasync emacsVersion ()
     (js-call (get (await (capture (js-array (coalesce (get (get process :env) :EMACS) "emacs") "--batch" "-Q" "--eval" "(princ emacs-version)") (js-object))) :stdout) "trim"))
   (defasync runCorePerformanceBenchmark (options)
-    (let* ((parameters (parametersFrom options)) (source (await (coreBenchmarkSourceDigest))) (runs (js-array)))
+    (let* ((parameters (parametersFrom options)) (source undefined) (runs (js-array)))
       (await (capture (js-array bootstrapCommand) (js-object :env (copyHostRecord (get process :env)))))
+      ;; Preparing the compiler can regenerate runtime modules. Freeze their
+      ;; identities after that prerequisite and before all timed child runs.
+      (setq source (await (coreBenchmarkSourceDigest)))
       (let ((__eli_count_29 (get parameters :baselineRuns)) (index 0)) (while (< index __eli_count_29) (let ((result (await (capture (js-array (get process :execPath) toolPath "--single-run")
                         (js-object :env (copyHostRecord (get process :env) (js-object :ELISCRIPT_CORE_BENCHMARK_PARAMETERS (JSON/stringify parameters))))))))
           (js-call runs "push" (JSON/parse (get result :stdout)))) (setq index (1+ index))))

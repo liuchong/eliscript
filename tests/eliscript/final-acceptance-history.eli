@@ -1,16 +1,19 @@
 (module tests.final-acceptance-history
   (import "bun:test" :as framework)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile mkdtemp rm)
+  (import "node:fs/promises" readFile mkdir mkdtemp rm)
   (import "node:path" resolve)
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" root)
   (import "../tools/acceptance/finalize.mjs" FinalAcceptanceError
-    verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact validateFinalAcceptanceContract buildFinalAcceptance
+    verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact verifyHistoricalBenchmarkReport verifyHistoricalSoakReport
+    validateFinalAcceptanceContract buildFinalAcceptance
     verifyFinalAcceptance generateFinalAcceptance validateFinalManifest humanFinalAcceptanceReport)
 
   (defconst fuzz-file "tests/reader-program-fuzz.test.mjs")
   (defconst scale-file "tests/project-scale.test.mjs")
+  (defconst benchmark-report-file "benchmarks/emacs-analysis-macos-arm64.json")
+  (defconst soak-report-file "benchmarks/worker-value-stream-macos-arm64.json")
   (defun test (title run) (js-call framework :test title run 300000))
   (defasync data (file) (JSON/parse (await (readFile (resolve root file) "utf8"))))
   (defasync retained-run () (await (data "acceptance/runs/m13-01.json")))
@@ -97,6 +100,7 @@
                 (funcall (aref mutations index) changed)
                 (await (js-call assert :rejects (verifyHistoricalScaleArtifact root scale-file changed) typed-error)))
               (setq index (1+ index)))))
+        (await (mkdir (resolve root "_worktree/ci-closure") (js-object :recursive t)))
         (let ((directory (await (mkdtemp (resolve root "_worktree/ci-closure/scale-history-")))))
           (try
             (let ((initialized (spawnSync "git" (js-array "init" "--bare" directory)
@@ -109,7 +113,9 @@
   (defun rejects-current-source-drift (error)
     (and (typed-error error)
       (js-call (get error :message) :includes (str "fuzz artifact changed after the source run: " fuzz-file))
-      (js-call (get error :message) :includes (str "scale artifact changed after the source run: " scale-file))))
+      (js-call (get error :message) :includes (str "scale artifact changed after the source run: " scale-file))
+      (js-call (get error :message) :includes (str "benchmark artifact changed after the source run: " benchmark-report-file))
+      (js-call (get error :message) :includes (str "soak artifact changed after the source run: " soak-report-file))))
 
   (test "default and explicit false reject current fuzz and scale drift even with an outer deferral environment"
     (async ()
@@ -134,7 +140,7 @@
         (js-call assert :strictEqual (await (validateFinalAcceptanceContract value run options)) value)
         (await (validateFinalAcceptanceContract value run options))
         (js-call assert :deepStrictEqual (js-call historical :map (lambda (item) (get item :artifact)))
-          (js-array fuzz-file scale-file))
+          (js-array benchmark-report-file fuzz-file scale-file soak-report-file))
         (js-call historical :forEach (lambda (item)
           (js-call assert :strictEqual (get item :historicalSourcesVerified) t)
           (js-call assert :strictEqual (get item :currentSourceClaim) false)
@@ -180,8 +186,80 @@
         (js-call assert :ok (js-call (get child :stdout) :includes "Historical scale source:"))
         (js-call assert :ok (js-call (get child :stdout) :includes
           "current scale acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted"))
+        (js-call assert :ok (js-call (get child :stdout) :includes "Historical benchmark source:"))
+        (js-call assert :ok (js-call (get child :stdout) :includes
+          "current benchmark acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted"))
+        (js-call assert :ok (js-call (get child :stdout) :includes "Historical soak source:"))
+        (js-call assert :ok (js-call (get child :stdout) :includes
+          "current soak acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted"))
         (js-call assert :ok (js-call (get child :stdout) :includes "DEFERRED / NOT ACCEPTED"))
         (let ((index 0))
           (while (< index (js-length files))
             (js-call assert :deepStrictEqual (await (readFile (resolve root (aref files index)))) (aref before index))
-            (setq index (1+ index)))))) 30000))
+            (setq index (1+ index)))))) 30000)
+
+  (test "historical benchmark and soak reports authenticate accepted Git bytes without current-source acceptance"
+    (async ()
+      (let* ((run (await (retained-run))) (before (JSON/stringify run))
+             (benchmark (await (verifyHistoricalBenchmarkReport root benchmark-report-file run)))
+             (soak (await (verifyHistoricalSoakReport root soak-report-file run))))
+        (js-call assert :strictEqual (get benchmark :artifact) benchmark-report-file)
+        (js-call assert :strictEqual (get benchmark :artifactSha256)
+          "a5eeb3adc2bd5ae44a64833683c77a837ee0798cf3018b6cbfecebdc6e1029dc")
+        (js-call assert :strictEqual (get soak :artifact) soak-report-file)
+        (js-call assert :strictEqual (get soak :artifactSha256)
+          "7fdf64d25067722b265d4a4b377e62b87e8b8c678fe15c045c9a5a8876578dd3")
+        (js-call (js-array benchmark soak) :forEach (lambda (proof)
+          (js-call assert :strictEqual (get proof :sourceCommit) (get (get run :source) :commit))
+          (js-call assert :strictEqual (get proof :sourceTree) (get (get run :source) :tree))
+          (js-call assert :strictEqual (get proof :historicalSourcesVerified) t)
+          (js-call assert :strictEqual (get proof :currentSourceClaim) false)
+          (js-call assert :strictEqual (get proof :currentSourceAcceptance) "not-asserted")))
+        (js-call assert :strictEqual (JSON/stringify run) before))))
+
+  (test "historical benchmark and soak authentication rejects other paths, missing or duplicated bindings, tampered digests and forged Git identities"
+    (async ()
+      (let* ((run (await (retained-run)))
+             (cases (js-array
+               (js-object :file benchmark-report-file :verify verifyHistoricalBenchmarkReport
+                 :other "only the retained Emacs analysis benchmark report")
+               (js-object :file soak-report-file :verify verifyHistoricalSoakReport
+                 :other "only the retained worker value-stream soak report")))
+             (index 0))
+        (while (< index (js-length cases))
+          (let* ((entry (aref cases index)) (file (get entry :file)) (verify (get entry :verify)))
+            (await (js-call assert :rejects (funcall verify root fuzz-file run)
+              (rejection (get entry :other))))
+            (let ((mutations (js-array
+              (lambda (value) (put (get value :source) :commit (js-call "0" :repeat 40)))
+              (lambda (value) (put (get value :source) :tree (js-call "0" :repeat 40)))
+              (lambda (value) (put (get value :source) :commit "HEAD"))
+              (lambda (value) (put value :source nil))
+              (lambda (value) (put value :artifacts nil))
+              (lambda (value) (put (js-call (get value :artifacts) :find
+                                       (lambda (item) (= (get item :file) file)))
+                               :sha256 (js-call "0" :repeat 64)))
+              (lambda (value) (js-call (get value :artifacts) :push
+                               (globalThis.structuredClone
+                                 (js-call (get value :artifacts) :find
+                                   (lambda (item) (= (get item :file) file))))))
+              (lambda (value) (put value :artifacts (js-call (get value :artifacts) :filter
+                                       (lambda (item) (/= (get item :file) file)))))))
+                  (mutation-index 0))
+              (while (< mutation-index (js-length mutations))
+                (let ((changed (globalThis.structuredClone run)))
+                  (funcall (aref mutations mutation-index) changed)
+                  (await (js-call assert :rejects (funcall verify root file changed) typed-error)))
+                (setq mutation-index (1+ mutation-index)))))
+          (setq index (1+ index))))
+      (await (mkdir (resolve root "_worktree/ci-closure") (js-object :recursive t)))
+      (let ((directory (await (mkdtemp (resolve root "_worktree/ci-closure/report-history-")))))
+        (try
+          (let ((initialized (spawnSync "git" (js-array "init" "--bare" directory)
+                               (js-object :encoding "utf8" :timeout 10000))))
+            (js-call assert :strictEqual (get initialized :status) 0 (get initialized :stderr))
+            (await (js-call assert :rejects
+              (verifyHistoricalBenchmarkReport directory benchmark-report-file (await (retained-run)))
+              (rejection "historical benchmark Git source authentication failed"))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+)

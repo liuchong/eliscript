@@ -44,6 +44,14 @@
             (lambda (candidate) (js-call (expect (get candidate :warmEndToEndSpeedup)) :toBeGreaterThanOrEqual 2)))))
         (js-call (expect (get (get report :selection) :thresholdCharacters)) :toBeGreaterThan (get (get qualifyingCrossover :corpus) :totalCharacters))
         (js-call (expect (get (get report :selection) :thresholdCharacters)) :toBeLessThan (get (get aboveThreshold :corpus) :totalCharacters)))
+      ;; Casing is on the measured token-normalization path. Bind its actual
+      ;; runtime bytes, maintained source and generated-table inputs as well.
+      (let ((files (js-call (get (get report :source) :files) :map
+                     (lambda (entry) (get entry :file)))))
+        (each (js-array "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
+                       "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"
+                       "bootstrap/runtime/memory.eli" "tools/runtime/unicode-case-runtime.el")
+          (lambda (file) (js-call (expect files) :toContain file))))
       (await (verifySourceContract (get report :source))))))
   (test "committed Emacs analysis soak proves buffer lifecycle safety" (async ()
     (let ((report (await (readJson "benchmarks/emacs-analysis-soak-macos-arm64.json"))))

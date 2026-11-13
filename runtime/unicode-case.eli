@@ -8,6 +8,15 @@
   (defconst intrinsic-string globalThis.String)
   (defconst intrinsic-code-point (get (get intrinsic-string :prototype) :codePointAt))
   (defconst intrinsic-from-code-point (get intrinsic-string :fromCodePoint))
+  (defconst intrinsic-regexp-exec (get (get globalThis.RegExp :prototype) :exec))
+  (defconst non-ascii (new globalThis.RegExp "[^\\x00-\\x7f]"))
+  (defconst ascii-upper (new globalThis.RegExp "[A-Z]"))
+  (defconst ascii-lower (new globalThis.RegExp "[a-z]"))
+
+  (defun case-pattern? (pattern text)
+    ;; RegExp.prototype.test would consult a replaceable .exec on every call.
+    ;; String casing must not acquire that unrelated observable dependency.
+    (not (eq (Reflect/apply intrinsic-regexp-exec pattern (js-array text)) nil)))
 
   (defun point (text index)
     (Reflect/apply intrinsic-code-point text (js-array index)))
@@ -32,7 +41,7 @@
             (when (= (funcall (get rules :cased) code) 1) (setq result 0)))
           (setq index (+ index (if (> code 65535) 2 1))))) result))
 
-  (defun convert (text upper rules)
+  (defun convert-profile (text upper rules)
     (let* ((mapping (get rules (if upper "upper" "lower")))
            (first-map (aref mapping 0)) (second-map (aref mapping 1)) (third-map (aref mapping 2))
            (pieces (js-array)) (chunk "") (index 0) (before 0))
@@ -50,6 +59,16 @@
           (setq index (+ index step))))
       (when (> (js-length chunk) 0) (js-call pieces :push chunk))
       (js-call pieces :join "")))
+
+  (defun convert (text upper rules)
+    ;; Already-cased ASCII is an identity under every supported profile. Avoid
+    ;; three table lookups per character for this common path. Do not delegate
+    ;; casing to replaceable host String methods: changed ASCII and every
+    ;; non-ASCII code unit still use our exact tables and final-sigma rules.
+    (if (or (case-pattern? non-ascii text)
+            (case-pattern? (if upper ascii-lower ascii-upper) text))
+      (convert-profile text upper rules)
+      text))
 
   (defun profile-method (name upper rules string-constructor function-prototype type-error)
     ;; An arrow target is intrinsically nonconstructible. Proxy [[Call]] gives

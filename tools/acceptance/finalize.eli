@@ -19,6 +19,8 @@
   (defconst contract-file "contracts/final-acceptance.json")
   (defconst fuzz-file "tests/reader-program-fuzz.test.mjs")
   (defconst scale-file "tests/project-scale.test.mjs")
+  (defconst benchmark-report-file "benchmarks/emacs-analysis-macos-arm64.json")
+  (defconst soak-report-file "benchmarks/worker-value-stream-macos-arm64.json")
   (defconst expected-source (js-object :run "acceptance/runs/m13-01.json" :report "acceptance/runs/m13-01.md"))
   (defconst expected-outputs (js-object :manifest "acceptance/manifest.json" :report "acceptance/report.md"))
   (defconst expected-groups (js-array "benchmark" "fuzz" "scale" "soak" "test"))
@@ -87,6 +89,14 @@
     (unless (= filename scale-file)
       (fail "only the retained project scale artifact has historical source authentication"))
     (await (verify-historical-artifact root filename run "scale")))
+  (defasync verifyHistoricalBenchmarkReport (root filename run)
+    (unless (= filename benchmark-report-file)
+      (fail "only the retained Emacs analysis benchmark report has historical source authentication"))
+    (await (verify-historical-artifact root filename run "benchmark")))
+  (defasync verifyHistoricalSoakReport (root filename run)
+    (unless (= filename soak-report-file)
+      (fail "only the retained worker value-stream soak report has historical source authentication"))
+    (await (verify-historical-artifact root filename run "soak")))
 
   (defun record-refresh (options result)
     (let ((items (get options :deferredPerformanceAcceptance)))
@@ -156,6 +166,12 @@
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
                                   ((and (= file scale-file) (eq (get options :deferPerformanceAcceptance) t))
                                     (try (record-history options (await (verifyHistoricalScaleArtifact root file run)))
+                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
+                                  ((and (= file benchmark-report-file) (eq (get options :deferPerformanceAcceptance) t))
+                                    (try (record-history options (await (verifyHistoricalBenchmarkReport root file run)))
+                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
+                                  ((and (= file soak-report-file) (eq (get options :deferPerformanceAcceptance) t))
+                                    (try (record-history options (await (verifyHistoricalSoakReport root file run)))
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
                                   (t (js-call errors :push (str label " artifact changed after the source run: " file))))))))))
                     (setq file-index (1+ file-index)))))))
@@ -274,13 +290,20 @@
             (js-call (get process :stdout) :write (str "  " (get item :report) ": measured Git snapshot "
               (get (get item :measuredSource) :commit) " verified; current source comparison not performed\n"))))
           (js-call (get options :historicalSourceEvidence) :forEach (lambda (item)
-            (let ((scale (= (get item :artifact) scale-file)))
+            (let ((artifact (get item :artifact)))
               (js-call (get process :stdout) :write (str
-                (if scale "Historical scale source: " "Historical fuzz source: ")
-                (get item :artifact) " at " (get item :sourceCommit) " verified; "
-                (if scale
-                  "current scale acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted\n"
-                  "current fuzz acceptance requires an independent complete functional run (not asserted here)\n")))))))
+                (cond ((= artifact scale-file) "Historical scale source: ")
+                      ((= artifact benchmark-report-file) "Historical benchmark source: ")
+                      ((= artifact soak-report-file) "Historical soak source: ")
+                      (t "Historical fuzz source: "))
+                artifact " at " (get item :sourceCommit) " verified; "
+                (cond ((= artifact scale-file)
+                        "current scale acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted\n")
+                      ((= artifact benchmark-report-file)
+                        "current benchmark acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted\n")
+                      ((= artifact soak-report-file)
+                        "current soak acceptance: DEFERRED / NOT ACCEPTED; current-source acceptance not asserted\n")
+                      (t "current fuzz acceptance requires an independent complete functional run (not asserted here)\n"))))))))
         (when (and (get options :requirePass) (not (get (get manifest :summary) :acceptancePass)))
           (fail "the canonical artifacts are valid, but final acceptance has not been reached")))))
   (let ((entry (aref (get process :argv) 1)))
@@ -294,5 +317,6 @@
                    (nullish stack error)) "\n")))
         (put process :exitCode 1)))))
   (export DEFAULT_ROOT FinalAcceptanceError validateFinalAcceptanceContract verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact
+    verifyHistoricalBenchmarkReport verifyHistoricalSoakReport
     validateDefectRegister buildFinalAcceptance humanFinalAcceptanceReport validateFinalManifest
     generateFinalAcceptance verifyFinalAcceptance humanFinalAcceptanceSummary))

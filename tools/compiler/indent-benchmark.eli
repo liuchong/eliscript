@@ -234,7 +234,9 @@
                 (< (get decision :minimumSpeedup) 10)
                 (not (= (get decision :passed) t))
                 (< (get measurements :speedup) (get decision :minimumSpeedup)))
-        (throw (new globalThis.TypeError "compiler indent speedup decision did not pass"))))
+        (let ((error (new globalThis.TypeError "compiler indent speedup decision did not pass")))
+          (put error :report report)
+          (throw error))))
     report)
 
   (defun coalesce (a b c)
@@ -378,13 +380,22 @@
   (defasync run-main ()
     (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
            (output (get parsed :output))
-           (report (await (runCompilerIndentBenchmark)))
-           (serialized (str (JSON/stringify report nil 2) "\n")))
-      (if (= output undefined)
+           (report undefined))
+      (try
+        (setq report (await (runCompilerIndentBenchmark)))
+        (catch error
+          (when (get error :report)
+            (let ((failed (str (JSON/stringify (get error :report) nil 2) "\n")))
+              (if (= output undefined)
+                (js-call (get process :stdout) :write failed)
+                (await (writeFile (js-call path :resolve output) failed)))))
+          (throw error)))
+      (let ((serialized (str (JSON/stringify report nil 2) "\n")))
+        (if (= output undefined)
           (js-call (get process :stdout) :write serialized)
-        (progn
-          (await (writeFile (js-call path :resolve output) serialized))
-          (js-call (get process :stdout) :write (str (js-call path :resolve output) "\n"))))))
+          (progn
+            (await (writeFile (js-call path :resolve output) serialized))
+            (js-call (get process :stdout) :write (str (js-call path :resolve output) "\n")))))))
 
   (when (js* "import.meta.main")
     (run-main))

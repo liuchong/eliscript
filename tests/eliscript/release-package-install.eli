@@ -121,6 +121,11 @@
       (js-call assert :strictEqual
         (js-call paths :some (lambda (path) (js-call path :startsWith "dist/runtime/node_modules/"))) false
         "temporary project dependencies must not be packaged")
+      (js-call assert :strictEqual
+        (js-call paths :some (lambda (path) (js-call path :startsWith "dist/bootstrap/runtime/"))) false
+        "the seed bootstrap runtime must not duplicate the final package runtime")
+      (js-call assert :strictEqual (js-call paths :includes "dist/bootstrap/package.json") false
+        "the seed private package scope must not shadow the installed package")
       (js-call assert :strictEqual (js-call paths :includes "dist/runtime/eliscript-project.json") false
         "the temporary runtime project manifest must not be packaged")
       (js-call assert :ok (js-call paths :includes "dist/runtime.eli")

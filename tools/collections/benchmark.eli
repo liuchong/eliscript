@@ -19,7 +19,16 @@
   (defconst project-directory (js-call path :resolve directory "../.."))
   (defconst host-runner (js-call path :join directory "layout-host.mjs"))
 
-  (defconst browser-module-files (Object/freeze (js-array
+  (defconst BROWSER_MODULE_FILES (Object/freeze (js-array
+    "runtime/errors.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/array-text.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/math.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs"
+    "stdlib/bit.mjs"
     "runtime/core/map-internals.mjs"
     "runtime/core/protocol-error.mjs"
     "runtime/core/protocol-impl.mjs"
@@ -30,17 +39,12 @@
     "tools/collections/browser/main.mjs"
     "tools/collections/layout-benchmark.mjs")))
 
-  (defconst digest-files (Object/freeze (js-array
-    "runtime/core/map-internals.mjs"
-    "runtime/core/protocol-error.mjs"
-    "runtime/core/protocol-impl.mjs"
-    "runtime/core/protocol.mjs"
-    "runtime/core/value.mjs"
-    "runtime/core/value-internals.mjs"
-    "tools/collections/benchmark.mjs"
-    "tools/collections/browser/index.html"
-    "tools/collections/browser/main.mjs"
-    "tools/collections/layout-benchmark.mjs")))
+  (defconst digest-files
+    (Object/freeze (js-call BROWSER_MODULE_FILES :concat (js-array
+      "bootstrap/runtime/memory.eli"
+      "tools/runtime/unicode-case-runtime.el"
+      "tools/collections/benchmark.eli"
+      "tools/collections/benchmark.mjs"))))
 
   (defun parse-arguments (args)
     (let ((output undefined) (index 0))
@@ -149,11 +153,52 @@
         ((= ext ".json") "application/json; charset=utf-8")
         (t "application/octet-stream"))))
 
+  ;; Validate the declared native ESM closure before launching a browser. A
+  ;; missing import must fail here rather than leave a pending page for minutes.
+  (defasync validateBrowserModuleFiles (&rest arguments)
+    (let* ((supplied-files (aref arguments 0))
+           (files (if (undefined? supplied-files) BROWSER_MODULE_FILES supplied-files))
+           (known (new globalThis.Set files))
+           (scanner (unless (undefined? globalThis.Bun)
+                      (new globalThis.Bun.Transpiler (js-object :loader "js"))))
+           (index 0))
+      (unless (and (js-call known :has "tools/collections/browser/index.html")
+                   (js-call known :has "tools/collections/browser/main.mjs"))
+        (throw (new globalThis.TypeError "HAMT browser closure requires its HTML and ESM entries")))
+      ;; The suite also runs under Node and already requires Bun for its Bun
+      ;; host. Use that same executable for the parser-only preflight there.
+      (if (nullish? scanner)
+          (await (run-command (or (get (get process :env) :BUN) "bun")
+            (js-array (fileURLToPath (js* "import.meta.url"))
+                      "--validate-browser-files" (JSON/stringify files))
+            (js-object :env (get process :env) :timeoutMs 10000)))
+        (while (< index (js-length files))
+        (let ((relative (aref files index)))
+          (when (js-call relative :endsWith ".mjs")
+            (let* ((source (await (readFile (js-call path :join project-directory relative) "utf8")))
+                   (imports (js-call scanner :scanImports source)) (item 0))
+              (while (< item (js-length imports))
+                (let* ((specifier (get (aref imports item) :path))
+                       (target
+                         (cond
+                           ((js-call specifier :startsWith "eliscript/")
+                            (js-call specifier :slice (js-length "eliscript/")))
+                           ((or (js-call specifier :startsWith "./") (js-call specifier :startsWith "../"))
+                            (js-call (get path :posix) :normalize
+                              (js-call (get path :posix) :join (js-call (get path :posix) :dirname relative) specifier)))
+                           (t undefined))))
+                  (unless (js-call known :has target)
+                    (throw (new globalThis.TypeError
+                      (str "undeclared HAMT browser import: " relative " -> " specifier)))))
+                (setq item (1+ item))))))
+        (setq index (1+ index))))
+      t))
+
   (defasync prepare-browser-root (temporary-directory)
     (let ((root (js-call path :join temporary-directory "browser-root"))
           (index 0))
-      (while (< index (js-length browser-module-files))
-        (let* ((relative (aref browser-module-files index))
+      (while (< index (js-length BROWSER_MODULE_FILES))
+        (let* ((relative (aref BROWSER_MODULE_FILES index))
                (destination (js-call path :join root relative)))
           (await (mkdir (js-call path :dirname destination) (js-object :recursive t)))
           (await (copyFile (js-call path :join project-directory relative) destination)))
@@ -454,6 +499,7 @@
     (let ((environment (benchmark-environment))
           (temporary-directory (await (mkdtemp (js-call path :join (tmpdir) "eliscript-layout-benchmark-")))))
       (try
+        (await (validateBrowserModuleFiles))
         (let* ((env (get process :env))
                (bun (or (get env :BUN) (if (= (value-type globalThis.Bun) "object") (get process :execPath) "bun")))
                (node (or (get env :NODE) "node"))
@@ -475,7 +521,9 @@
           (await (rm temporary-directory (js-object :recursive t :force t)))))))
 
   (defasync main ()
-    (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
+    (if (= (aref (get process :argv) 2) "--validate-browser-files")
+        (await (validateBrowserModuleFiles (JSON/parse (aref (get process :argv) 3))))
+      (let* ((parsed (parse-arguments (js-call (get process :argv) :slice 2)))
            (output (get parsed :output))
            (report (await (runLayoutSuiteBenchmark)))
            (json (str (JSON/stringify report nil 2) "\n")))
@@ -483,7 +531,7 @@
         (js-call (get process :stdout) :write json)
         (let ((resolved (js-call path :resolve project-directory output)))
           (await (writeFile resolved json "utf8"))
-          (js-call (get process :stdout) :write (str (get (pathToFileURL resolved) :href) "\n"))))))
+          (js-call (get process :stdout) :write (str (get (pathToFileURL resolved) :href) "\n")))))))
 
   (when (= (js-call path :resolve (or (aref (get process :argv) 1) ""))
            (fileURLToPath (get (js* "import.meta") :url)))
@@ -492,4 +540,5 @@
       (put process :exitCode 1))))
 
   (export LAYOUT_SUITE_FORMAT LAYOUT_SUITE_VERSION BROWSER_PORT BROWSER_DEBUG_PORT
+          BROWSER_MODULE_FILES validateBrowserModuleFiles
           benchmarkSourceDigest analyzeLayoutSuite validateLayoutSuiteReport runLayoutSuiteBenchmark))
