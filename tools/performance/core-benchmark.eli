@@ -68,8 +68,12 @@
                     (copyHostRecord (js-object :cwd projectDirectory :stdout "pipe" :stderr "pipe") options)))
            (result (await (Promise/all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) "text") (js-call (new globalThis.Response (get child :stderr)) "text"))))))
       (unless (= (aref result 0) 0)
-        (throw (new globalThis.Error (or (js-call (aref result 2) "trim") (js-call (aref result 1) "trim")
-                            (+ (aref command 0) " exited with " (aref result 0))))))
+        (let ((stderr (js-call (aref result 2) "trim"))
+              (stdout (js-call (aref result 1) "trim")))
+          (throw (new globalThis.Error
+            (cond ((> (js-length stderr) 0) stderr)
+                  ((> (js-length stdout) 0) stdout)
+                  (t (+ (aref command 0) " exited with " (aref result 0))))))))
       (js-object :stdout (aref result 1) :stderr (aref result 2))))
   (defasync filesIn (directory extension)
     (js-call (js-call (js-call (await (readdir (js-call path "join" projectDirectory directory) (js-object :withFileTypes t)))
@@ -77,9 +81,19 @@
                 "map" (lambda (entry) (+ directory "/" (get entry :name)))) "sort"))
   (defasync coreBenchmarkSourceDigest ()
     (let ((files (js-array)) (digest (createHash "sha256")) (identities (js-array)) (nul (String/fromCharCode 0)))
-      (let ((__eli_iterator_5 (openHostIterator (js-array (js-array "compiler" ".el") (js-array "bootstrap/compiler" ".eli") (js-array "runtime/core" ".mjs"))))) (try (while (advanceHostIterator __eli_iterator_5) (let ((pair (get __eli_iterator_5 :value))) (let ((__eli_iterator_3 (openHostIterator (await (filesIn (aref pair 0) (aref pair 1)))))) (try (while (advanceHostIterator __eli_iterator_3) (let ((file (get __eli_iterator_3 :value))) (js-call files "push" file))) (catch __eli_iteration_error_4 (closeHostIterator __eli_iterator_3 t) (throw __eli_iteration_error_4)) (finally (closeHostIterator __eli_iterator_3 false)))))) (catch __eli_iteration_error_6 (closeHostIterator __eli_iterator_5 t) (throw __eli_iteration_error_6)) (finally (closeHostIterator __eli_iterator_5 false))))
+      (let ((__eli_iterator_5 (openHostIterator (js-array
+        (js-array "compiler" ".el") (js-array "bootstrap/compiler" ".eli")
+        (js-array "bootstrap/host" ".eli")
+        (js-array "runtime" ".eli") (js-array "runtime" ".mjs")
+        (js-array "runtime/core" ".eli") (js-array "runtime/core" ".mjs")
+        (js-array "platform" ".eli") (js-array "platform" ".mjs"))))) (try (while (advanceHostIterator __eli_iterator_5) (let ((pair (get __eli_iterator_5 :value))) (let ((__eli_iterator_3 (openHostIterator (await (filesIn (aref pair 0) (aref pair 1)))))) (try (while (advanceHostIterator __eli_iterator_3) (let ((file (get __eli_iterator_3 :value))) (js-call files "push" file))) (catch __eli_iteration_error_4 (closeHostIterator __eli_iterator_3 t) (throw __eli_iteration_error_4)) (finally (closeHostIterator __eli_iterator_3 false)))))) (catch __eli_iteration_error_6 (closeHostIterator __eli_iterator_5 t) (throw __eli_iteration_error_6)) (finally (closeHostIterator __eli_iterator_5 false))))
       (let ((__eli_iterator_7 (openHostIterator buildBenchmarkSources))) (try (while (advanceHostIterator __eli_iterator_7) (let ((file (get __eli_iterator_7 :value))) (js-call files "push" file))) (catch __eli_iteration_error_8 (closeHostIterator __eli_iterator_7 t) (throw __eli_iteration_error_8)) (finally (closeHostIterator __eli_iterator_7 false))))
-      (let ((__eli_iterator_9 (openHostIterator (js-array "bootstrap/host/build.mjs" "bootstrap/host/bun.mjs" "bootstrap/host/project.mjs" "platform/worker.mjs" "runtime/worker-value-codec.mjs" "runtime/worker-value-stream.mjs" "runtime/worker.mjs" "tests/fixtures/worker.eli" "tools/performance/core-benchmark.mjs" "tools/backends/compiler-host-record.mjs" "tools/backends/compiler-host-iteration.mjs" "tools/worker/benchmark.el" "tools/worker/eliscript-value-codec.el" "tools/worker/eliscript-value-stream.el" "tools/worker/eliscript-worker.el")))) (try (while (advanceHostIterator __eli_iterator_9) (let ((file (get __eli_iterator_9 :value))) (js-call files "push" file))) (catch __eli_iteration_error_10 (closeHostIterator __eli_iterator_9 t) (throw __eli_iteration_error_10)) (finally (closeHostIterator __eli_iterator_9 false))))
+      (let ((__eli_iterator_9 (openHostIterator (js-array "package.json" "bin/eliscript" "bin/eliscript-build" "bin/eliscript-bootstrap" "tools/backends/bootstrap.el" "tools/bootstrap-runtime.el"
+        "bootstrap/runtime/memory.eli" "tools/runtime/unicode-case-runtime.el"
+        "stdlib/bit.eli" "stdlib/bit.mjs" "stdlib/core/object.eli" "stdlib/core/protocol.eli" "stdlib/core/text.eli"
+        "tools/project/project.eli" "tools/performance/core-benchmark.eli"
+        "tools/backends/compiler-host-record.eli" "tools/backends/compiler-host-iteration.eli"
+        "bootstrap/host/build.mjs" "bootstrap/host/bun.mjs" "bootstrap/host/project.mjs" "bootstrap/host/project-ground.mjs" "platform/worker.mjs" "runtime/worker-value-codec.mjs" "runtime/worker-value-stream.mjs" "runtime/worker.mjs" "tests/fixtures/worker.eli" "tools/performance/core-benchmark.mjs" "tools/backends/compiler-host-record.mjs" "tools/backends/compiler-host-iteration.mjs" "tools/worker/benchmark.el" "tools/worker/eliscript-value-codec.el" "tools/worker/eliscript-value-stream.el" "tools/worker/eliscript-worker.el")))) (try (while (advanceHostIterator __eli_iterator_9) (let ((file (get __eli_iterator_9 :value))) (js-call files "push" file))) (catch __eli_iteration_error_10 (closeHostIterator __eli_iterator_9 t) (throw __eli_iteration_error_10)) (finally (closeHostIterator __eli_iterator_9 false))))
       (let ((__eli_iterator_11 (openHostIterator (js-call (Array/from (new globalThis.Set files)) "sort")))) (try (while (advanceHostIterator __eli_iterator_11) (let ((file (get __eli_iterator_11 :value))) (let ((bytes (await (readFile (js-call path "join" projectDirectory file)))))
           (js-call digest "update" file) (js-call digest "update" nul)
           (js-call digest "update" bytes) (js-call digest "update" nul)
@@ -173,8 +187,23 @@
           (js-call warmSamplesMs "push" (get sample :milliseconds))) (setq index (1+ index))))
       (js-object :name "persistent-frequencies" :inputCount (get parameters :workloadSize) :keyCount (get parameters :workloadKeyCount) :countPerKey expectedCount :resultHash (get cold :value) :coldMs (get cold :milliseconds) :warmSamplesMs warmSamplesMs :warmMedianMs (median warmSamplesMs) :deterministic t)))
   (defasync runCoreBenchmarkSample (parameters)
-    (let ((normalized (parametersFrom parameters)))
-      (js-object :compiler (await (compilerSample normalized)) :build (await (buildSample normalized)) :worker (await (workerSample normalized)) :workload (workloadSample normalized))))
+    (let* ((normalized (parametersFrom parameters)) (result (js-object))
+           (failures (js-array))
+           (measure (async (name operation)
+             (try (put result name (await (funcall operation)))
+               (catch error
+                 (js-call failures :push
+                   (new globalThis.Error (str "core benchmark " name " failed")
+                     (js-object :cause error))))))))
+      (await (funcall measure "compiler" (lambda () (compilerSample normalized))))
+      (await (funcall measure "build" (lambda () (buildSample normalized))))
+      (await (funcall measure "worker" (lambda () (workerSample normalized))))
+      (await (funcall measure "workload" (lambda () (workloadSample normalized))))
+      (when (> (js-length failures) 0)
+        (let ((error (new globalThis.AggregateError failures "core benchmark sample failed")))
+          (put error :completedPhases (Object/keys result))
+          (throw error)))
+      result))
   (defun summarize (runs)
     (let ((summary (js-object)))
       (let ((__eli_iterator_25 (openHostIterator (Object/entries metricReaders)))) (try (while (advanceHostIterator __eli_iterator_25) (let ((entry (get __eli_iterator_25 :value))) (let* ((name (aref entry 0)) (samplesMs (js-call runs "map" (aref entry 1)))

@@ -259,6 +259,20 @@
             (lambda (pair)
               (when (js-call known :has (aref pair 0))
                 (js-call known :add (aref pair 1)))))
+          ;; Stage0 derives both Unicode table modules from this owned input
+          ;; and generator. Reports must bind those inputs as well as outputs.
+          (let* ((source (get report :source))
+                 (files (if (nullish? source) undefined (get source :files)))
+                 (declared (new globalThis.Set)))
+            (when (Array/isArray files)
+              (js-call files :forEach (lambda (entry)
+                (unless (nullish? entry) (js-call declared :add (get entry :file))))))
+            (when (and (js-call known :has "bootstrap/runtime/memory.eli")
+                       (js-call known :has "tools/runtime/unicode-case-runtime.el")
+                       (js-call declared :has "bootstrap/runtime/memory.eli")
+                       (js-call declared :has "tools/runtime/unicode-case-runtime.el"))
+              (js-call known :add "runtime/unicode-case-data.eli")
+              (js-call known :add "runtime/unicode-case-data.mjs")))
           (setq augmented (js-call (Array/from known) :sort))))
       (await (groundValidateBenchmarkSource directory augmented filename report))))
 

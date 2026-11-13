@@ -129,6 +129,7 @@ test-core: check-contracts
 		-l tests/eliscript-worker-tests.el \
 		-l tests/eliscript-service-tests.el \
 		-l tests/eliscript-analysis-tests.el \
+		-l tests/eliscript-version-comparison-tests.el \
 		-l tests/bootstrap-tests.el \
 		-l tests/eliscript-syntax-tests.el \
 		-f ert-run-tests-batch-and-exit

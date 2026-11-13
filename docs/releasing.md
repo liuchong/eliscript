@@ -81,18 +81,24 @@ publication, a GitHub Release or a signed release tag.
   reference-identity inputs in GNU Emacs and Eliscript, and enforce PERF-02 on
   unrounded measurements before producing release assets.
 - [ ] Complete the current candidate's four-dimension benchmark and resolve
-  substantive performance failures. The 14 deferred strict capacity/performance
-  items remain unaccepted until independently measured; they are not passed by
-  producing a benchmark report.
-  The latest local diagnostic sample has all nine medians below native
-  Emacs. With calibrated batches, five of nine also pass against 0.1.2:
-  first, last, sorting, grouping and frequencies.
-  The sample still rejects take-last (0.176300 vs 0.147946 microseconds/op),
-  reference-identity equality (0.390 vs 0.323 nanoseconds/op), deep zipper
-  (1.154253 vs 1.059290 ms/op) and numeric scoring
-  (1.530808 vs 1.530372 ms/op). These are diagnostic samples, not final
-  candidate acceptance. Sample variation and clock calibration do not waive
-  a slower unrounded median or close the performance gate.
+  substantive performance failures. Of the 14 retained performance/capacity
+  reports, the refreshed core baseline passes all 11 original budgets across
+  three independent processes and seven warm samples per path. Its source
+  binding includes maintained Eli, generated runtime modules and build inputs.
+  The other 13 reports remain unaccepted until independently measured;
+  producing a report alone does not pass its gate.
+  The latest local comparison isolates every workload in its own process in
+  both languages, retaining the original timed expressions, calibration and
+  sample counts. Each worker has a ten-second deadline; independent failures
+  are collected before the run fails without printing a partial report.
+  All nine medians are below native Emacs, and six also pass against 0.1.2:
+  first, last, sorting, grouping, frequencies and numeric scoring.
+  The run still rejects take-last (0.189360 vs 0.161391 microseconds/op),
+  reference-identity equality (2.642 vs 1.901 nanoseconds/op) and deep zipper
+  (1.239051 vs 1.152820 ms/op). The prior major dimension is absent in 0.x.
+  This completed comparison is not final candidate acceptance. Sample
+  variation, clock calibration and process isolation do not waive a slower
+  unrounded median or close the performance gate.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain

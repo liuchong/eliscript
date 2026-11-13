@@ -95,8 +95,8 @@
           (setq rebuilt copy)))
       rebuilt)))
 
-(defun eliscript-version-comparison-main ()
-  "Verify the normalized workload results, then print actual measurements."
+(defun eliscript-version-comparison-setup ()
+  "Return the verified shared workload inputs as a plist."
   (let* ((size 10000)
          (values (vconcat (number-sequence 0 (1- size))))
          (shuffled (make-vector size 0))
@@ -125,20 +125,158 @@
       (dotimes (_ 12000) (setq rebuilt (aref rebuilt 0)))
       (cl-assert (= rebuilt 42)))
     (cl-assert (= (eliscript-benchmark-score scores) 455649481))
-    (let ((measurements
-      `((sequence.first10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.first10k") (lambda () (aref values 0))))
-        (sequence.last10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.last10k") (lambda () (aref values (1- (length values))))))
-        (sequence.takeLast10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.takeLast10k") (lambda () (cl-subseq values (- (length values) 64)))))
-        (value.equalSameRef10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "value.equalSameRef10k") (lambda () (equal values values))))
-        (order.sort10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "order.sort10k") (lambda () (sort (copy-sequence shuffled) #'<))))
-        (data.groupBy10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "data.groupBy10k") (lambda () (eliscript-benchmark-group values))))
-        (data.frequencies100k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "data.frequencies100k") (lambda () (eliscript-benchmark-frequencies mod-values))))
-        (tree.zipper12k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "tree.zipper12k") (lambda () (eliscript-benchmark-replace-leaf nested))))
-        (worker.scoreValues . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "worker.scoreValues") (lambda () (eliscript-benchmark-score scores)))))))
-      (princ (json-encode
-              `((metricsMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :median))) measurements))
-                (samplesMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :samples))) measurements))
-                (calibration . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :calibration))) measurements))))))))
+    (list :values values :shuffled shuffled :mod-values mod-values
+          :scores scores :nested nested)))
+
+(defconst eliscript-version-comparison-workload-ids
+  '("sequence.first10k" "sequence.last10k" "sequence.takeLast10k"
+    "value.equalSameRef10k" "order.sort10k" "data.groupBy10k"
+    "data.frequencies100k" "tree.zipper12k" "worker.scoreValues"))
+
+(defun eliscript-version-comparison-workload (id inputs)
+  "Bind INPUTS once, then return the original zero-argument workload for ID."
+  (let ((values (plist-get inputs :values))
+        (shuffled (plist-get inputs :shuffled))
+        (mod-values (plist-get inputs :mod-values))
+        (scores (plist-get inputs :scores))
+        (nested (plist-get inputs :nested)))
+    (pcase id
+      ("sequence.first10k" (lambda () (aref values 0)))
+      ("sequence.last10k" (lambda () (aref values (1- (length values)))))
+      ("sequence.takeLast10k" (lambda () (cl-subseq values (- (length values) 64))))
+      ("value.equalSameRef10k" (lambda () (equal values values)))
+      ("order.sort10k" (lambda () (sort (copy-sequence shuffled) #'<)))
+      ("data.groupBy10k" (lambda () (eliscript-benchmark-group values)))
+      ("data.frequencies100k" (lambda () (eliscript-benchmark-frequencies mod-values)))
+      ("tree.zipper12k" (lambda () (eliscript-benchmark-replace-leaf nested)))
+      ("worker.scoreValues" (lambda () (eliscript-benchmark-score scores)))
+      (_ (error "Unknown benchmark workload id: %s" id)))))
+
+(defun eliscript-version-comparison-measure (id)
+  "Measure exactly one workload in this process and return its record."
+  (let* ((inputs (eliscript-version-comparison-setup))
+         (workload (eliscript-version-comparison-workload id inputs))
+         (minimum (eliscript-benchmark-minimum id))
+         (measurement (eliscript-benchmark-average
+                       minimum workload)))
+    (list :id id
+          :medianMs (plist-get measurement :median)
+          :samplesMs (plist-get measurement :samples)
+          :calibration (plist-get measurement :calibration))))
+
+(defun eliscript-version-comparison-report (records)
+  "Print the shared report shape for RECORDS."
+  (princ (json-encode
+          `((metricsMs . ,(mapcar (lambda (record)
+                                    (cons (alist-get 'id record)
+                                          (alist-get 'medianMs record)))
+                                  records))
+            (samplesMs . ,(mapcar (lambda (record)
+                                    (cons (alist-get 'id record)
+                                          (alist-get 'samplesMs record)))
+                                  records))
+            (calibration . ,(mapcar (lambda (record)
+                                      (cons (alist-get 'id record)
+                                            (alist-get 'calibration record)))
+                                    records))))))
+
+(defconst eliscript-version-comparison-script
+  (or load-file-name buffer-file-name)
+  "Absolute source path captured while this driver loads.")
+
+(defconst eliscript-version-comparison-workload-variable
+  "ELISCRIPT_BENCHMARK_WORKLOAD"
+  "Environment variable naming the single workload a child process measures.")
+
+(defun eliscript-version-comparison-child-command ()
+  "Return the argv that loads this driver in a fresh Emacs process."
+  (unless eliscript-version-comparison-script
+    (error "Benchmark driver must be loaded from its source file"))
+  (let ((executable (expand-file-name invocation-name invocation-directory)))
+    (unless (file-executable-p executable)
+      (error "Current Emacs executable is unavailable: %s" executable))
+    (list executable "--batch" "-Q" "--load" eliscript-version-comparison-script)))
+
+(defconst eliscript-version-comparison-worker-timeout 10.0
+  "Maximum wall-clock seconds for one isolated workload, including startup.")
+
+(defun eliscript-version-comparison-stop-child (child)
+  "Reap the owned CHILD, escalating only if it ignores termination."
+  (when (processp child)
+    (when (process-live-p child)
+      (ignore-errors (signal-process child 'SIGTERM))
+      (accept-process-output child 0.1)
+      (when (process-live-p child) (delete-process child)))
+    (delete-process child)))
+
+(defun eliscript-version-comparison-child (id)
+  "Run one isolated child with a hard deadline and parse its single record."
+  (let* ((command (eliscript-version-comparison-child-command))
+         (buffer (generate-new-buffer " *eliscript-benchmark-child*"))
+         (errors (generate-new-buffer " *eliscript-benchmark-errors*"))
+         (process-environment
+          (cons (format "%s=%s" eliscript-version-comparison-workload-variable id)
+                process-environment))
+         (deadline (+ (float-time) eliscript-version-comparison-worker-timeout))
+         (child nil))
+    (unwind-protect
+        (progn
+          (setq child (make-process :name (concat "eliscript-benchmark-" id)
+                                    :buffer buffer :stderr errors :command command
+                                    :connection-type 'pipe :noquery t :sentinel #'ignore))
+          (while (and (process-live-p child) (< (float-time) deadline))
+            (accept-process-output child 0.05))
+          (when (process-live-p child)
+            (eliscript-version-comparison-stop-child child)
+            (error "Benchmark worker timed out after %ss for %s"
+                   eliscript-version-comparison-worker-timeout id))
+          (let ((status (process-exit-status child))
+                (text (with-current-buffer buffer (buffer-string)))
+                (stderr (with-current-buffer errors (buffer-string))))
+            (unless (and (eq (process-status child) 'exit) (= status 0))
+              (error "Benchmark worker exited %S for %s: %s"
+                     status id (string-trim (concat stderr "\n" text))))
+            (let* ((json-object-type 'alist)
+                   (json-key-type 'symbol)
+                   (json-array-type 'list)
+                   (record (json-read-from-string (string-trim text))))
+              (unless (equal (alist-get 'id record) id)
+                (error "Benchmark worker returned a different workload: %s" id))
+              record)))
+      (eliscript-version-comparison-stop-child child)
+      (eliscript-version-comparison-stop-child (get-buffer-process errors))
+      (kill-buffer buffer)
+      (kill-buffer errors))))
+
+(defun eliscript-version-comparison-isolated ()
+  "Measure every workload in its own process with exactly one callee."
+  (let ((records nil)
+        (failures nil))
+    (dolist (id eliscript-version-comparison-workload-ids)
+      (condition-case failure
+          (push (eliscript-version-comparison-child id) records)
+        (error (push (cons id failure) failures))))
+    (when failures
+      (error "Benchmark workers failed: %s"
+             (mapconcat (lambda (item) (format "%s (%s)" (car item) (cdr item)))
+                        (nreverse failures) ", ")))
+    (nreverse records)))
+
+(defun eliscript-version-comparison-requested-workload ()
+  "Return the single workload requested by the environment, or nil."
+  (let ((id (getenv eliscript-version-comparison-workload-variable)))
+    (when id
+      (unless (member id eliscript-version-comparison-workload-ids)
+        (error "Unknown benchmark workload id: %s" id))
+      id)))
+
+(defun eliscript-version-comparison-main ()
+  "Verify the workload inputs, then print isolated per-workload measurements."
+  (let ((id (eliscript-version-comparison-requested-workload)))
+    (if id
+        (princ (json-encode (eliscript-version-comparison-measure id)))
+      (eliscript-version-comparison-report
+       (eliscript-version-comparison-isolated)))))
 
 (when noninteractive (eliscript-version-comparison-main))
 
