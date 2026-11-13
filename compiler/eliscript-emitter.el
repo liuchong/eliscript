@@ -563,10 +563,30 @@ must retain their ordinary property identity and receiver."
                     (cl-every #'eliscript-emitter--boolean-p (cdr form)))))))
 
 (defun eliscript-emitter--emit-test (form)
-  "Emit FORM as a condition preserving Lisp truth semantics."
-  (let ((output (eliscript-emitter-emit-expression form)))
-    (if (eliscript-emitter--boolean-p form) output
-      (format "__eliscript_truthy(%s)" output))))
+  "Emit conditions directly, without changing value-context short circuits."
+  (let ((pending (list (cons :form form))) parts)
+    (while pending
+      (let* ((task (pop pending)) (value (cdr task)))
+        (if (eq (car task) :text) (push value parts)
+          (cond
+           ((and (consp value) (proper-list-p value) (memq (car value) '(and or)))
+            (let ((arguments (cdr value)) (operator (if (eq (car value) 'and) " && " " || ")))
+              (if (null arguments) (push (if (eq (car value) 'and) "true" "false") parts)
+                (push (cons :text ")") pending)
+                (let ((rest (reverse arguments)))
+                  (while rest
+                    (push (cons :form (pop rest)) pending)
+                    (when rest (push (cons :text operator) pending))))
+                (push (cons :text "(") pending))))
+           ((and (consp value) (proper-list-p value) (eq (car value) 'not) (= (length value) 2))
+            (push (cons :text ")") pending)
+            (push (cons :form (cadr value)) pending)
+            (push (cons :text "!(") pending))
+           (t
+            (let ((output (eliscript-emitter-emit-expression value)))
+              (push (if (eliscript-emitter--boolean-p value) output
+                      (concat "__eliscript_truthy(" output ")")) parts)))))))
+    (apply #'concat (nreverse parts))))
 
 (defun eliscript-emitter--context-sequential-safe-p (bindings &optional parallel)
   "Whether parsed BINDINGS can share a scope without observing a TDZ.
@@ -766,16 +786,29 @@ when temporary allocation or binding setup must occur between child groups."
   "Describe an ordinary form emission step without recursing into its tree."
   (pcase mode
     (:value (list :value value))
+    (:test
+     (cond
+      ((and (consp value) (proper-list-p value) (memq (car value) '(and or)))
+       (let ((and-p (eq (car value) 'and)))
+         (if (null (cdr value)) (list :value (if and-p "true" "false"))
+           (list :children (mapcar (lambda (form) (list :test form nil)) (cdr value))
+                 (lambda (results) (list :value (concat "(" (string-join results (if and-p " && " " || ")) ")")))))))
+      ((and (consp value) (proper-list-p value) (eq (car value) 'not) (= (length value) 2))
+       (list :children (list (list :test (cadr value) nil))
+             (lambda (results) (list :value (concat "!(" (car results) ")")))))
+      (t (list :children (list (list :expression value nil))
+               (lambda (results) (list :value (if (eliscript-emitter--boolean-p value) (car results)
+                                                (concat "__eliscript_truthy(" (car results) ")"))))))))
     (:expression
      (if (and (consp value) (eq (car value) 'if))
          (let ((arguments (cdr value)))
            (eliscript-emitter--require-arity "if" arguments 2 3)
-           (list :children (mapcar (lambda (form) (list :expression form nil))
-                                   (list (nth 0 arguments) (nth 1 arguments) (nth 2 arguments)))
+           (list :children (list (list :test (nth 0 arguments) nil)
+                                 (list :expression (nth 1 arguments) nil)
+                                 (list :expression (nth 2 arguments) nil))
                  (lambda (results)
                    (list :value (format "(%s ? %s : %s)"
-                                         (if (eliscript-emitter--boolean-p (car arguments)) (nth 0 results)
-                                           (format "__eliscript_truthy(%s)" (nth 0 results)))
+                                         (nth 0 results)
                                          (nth 1 results) (nth 2 results))))))
        (list :value (eliscript-emitter--emit-expression-recursive value))))
     (:body
@@ -826,14 +859,13 @@ when temporary allocation or binding setup must occur between child groups."
                (lambda (results) (list :value (car results)))))
         ((eq operator 'if)
          (list :children
-               (list (list :expression (nth 0 arguments) nil)
+               (list (list :test (nth 0 arguments) nil)
                      (list :context (nth 1 arguments) options)
                      (if (nthcdr 2 arguments) (list :context (nth 2 arguments) options)
                        (list :value (if options "return null;" "") nil)))
                (lambda (results)
                  (list :value
-                       (concat "if (" (if (eliscript-emitter--boolean-p (car arguments)) (nth 0 results)
-                                          (format "__eliscript_truthy(%s)" (nth 0 results))) ") {\n"
+                       (concat "if (" (nth 0 results) ") {\n"
                                (eliscript-emitter--indent (nth 1 results)) "\n}"
                                (if (or options (nthcdr 2 arguments))
                                    (concat " else {\n" (eliscript-emitter--indent (nth 2 results)) "\n}") ""))))))
@@ -1832,6 +1864,108 @@ results are never boolean. Use an explicit stack for deep conditional trees."
          ((not (eliscript-emitter--boolean-p item)) (setq safe nil)))))
     (and safe seen)))
 
+(defun eliscript-emitter--method-formal-name-p (name)
+  "Require an unchanged strict identifier, excluding the captured callback."
+  (and (not (member name '("fn" "undefined" "nil" "t" "false")))
+       (not (string-prefix-p eliscript-symbol-internal-prefix name))
+       (equal name (eliscript-symbol-binding-name (intern name)))))
+
+(defun eliscript-emitter--raw-method-wrapper (source)
+  "Recognize closed native methods forwarding each argument once to fn."
+  (when (and (stringp source) (not (string-match-p "[\r\n]" source)))
+    (cond
+     ((string-match
+       "\\`(fn) => ({ \\([A-Za-z_$][A-Za-z0-9_$]*\\)(\\([^()]*\\)) { return fn(\\([^()]*\\)); } })\\.\\([A-Za-z_$][A-Za-z0-9_$]*\\)\\'" source)
+      (let* ((name (match-string 1 source)) (formal-text (match-string 2 source))
+             (call (match-string 3 source)) (result (match-string 4 source))
+             (formals (unless (string-empty-p formal-text) (split-string formal-text ", ")))
+             names defaults (safe (equal name result)))
+        (dolist (formal formals)
+          (if (string-match "\\`\\([A-Za-z_$][A-Za-z0-9_$]*\\)\\( = undefined\\)?\\'" formal)
+              (progn (push (match-string 1 formal) names)
+                     (push (not (null (match-string 2 formal))) defaults))
+            (setq safe nil)))
+        (setq names (nreverse names) defaults (nreverse defaults))
+        (when (and safe (cl-every #'eliscript-emitter--method-formal-name-p names)
+                   (= (length names) (length (delete-dups (copy-sequence names)))))
+          (cond ((equal call (string-join (cons "this" names) ", "))
+                 (list :name name :receiver t :defaults defaults))
+                ((equal call (string-join names ", "))
+                 (list :name name :receiver nil :defaults defaults))))))
+     ((string-match
+       "\\`(fn) => Object\\.getOwnPropertyDescriptor({ get \\([A-Za-z_$][A-Za-z0-9_$]*\\)() { return fn(this); } }, '\\([A-Za-z_$][A-Za-z0-9_$]*\\)')\\.get\\'" source)
+      (when (equal (match-string 1 source) (match-string 2 source))
+        (list :name (match-string 1 source) :getter t :receiver t :defaults nil))))))
+
+(defun eliscript-emitter--method-callback-safe-p (body)
+  "Refuse implicit host context, preserving literal object keys and quotes."
+  (let ((pending (copy-sequence body)) (safe t))
+    (while (and pending safe)
+      (let ((form (pop pending)))
+        (cond
+         ((symbolp form)
+          (when (and form (not (keywordp form))
+                     (string-match-p "[./]" (symbol-name form))
+                     (equal (car (split-string (symbol-name form) "[./]" t)) "arguments"))
+            (setq safe nil)))
+         ((vectorp form) (setq pending (append (append form nil) pending)))
+         ((consp form)
+          (cond
+           ((eq (car form) 'quote) nil)
+           ((memq (car form) '(defun defvar defconst import export)) (setq safe nil))
+           ((eq (car form) 'js*)
+            (unless (and (= (length form) 2) (eliscript-emitter--raw-binary-operator (cadr form)))
+              (setq safe nil)))
+           ((eq (car form) 'js-object)
+            (let ((pairs (cdr form)))
+              (while pairs
+                (let ((key (pop pairs)) (value (pop pairs)))
+                  (unless (or (symbolp key) (stringp key)) (push key pending))
+                  (push value pending)))))
+           ((memq (car form) (list eliscript-emitter--tdz-read-tag eliscript-emitter--tdz-write-tag))
+            (setq pending (append (nthcdr 2 form) pending)))
+           (t (setq pending (append form pending))))))))
+    safe))
+
+(defun eliscript-emitter--method-wrapper-shell (spec names body &optional locate)
+  "Wrap an Eli callback BODY in its proven native method signature."
+  (let* ((receiver (plist-get spec :receiver))
+         (formals (if receiver (cdr names) names))
+         (defaults (plist-get spec :defaults))
+         (signature (cl-mapcar (lambda (name optional)
+                                (concat name (if optional " = undefined" ""))) formals defaults))
+         (method (format "%s%s(%s) {\n%s\n}"
+                   (if (plist-get spec :getter) "get " "") (plist-get spec :name)
+                   (string-join signature ", ")
+                   (eliscript-emitter--indent
+                    (concat (if receiver (format "let %s = this;\n" (car names)) "") body)))))
+    (when locate (setq method (funcall locate method)))
+    (if (plist-get spec :getter)
+        (format "(0, Object.getOwnPropertyDescriptor({%s}, '%s').get)" method (plist-get spec :name))
+      (format "(0, ({%s}).%s)" method (plist-get spec :name)))))
+
+(defun eliscript-emitter--emit-method-wrapper (arguments)
+  "Inline only a direct synchronous, required-parameter callback literal."
+  (when (= (length arguments) 2)
+    (let* ((callee (car arguments)) (callback (cadr arguments))
+           (spec (and (consp callee) (eq (car callee) 'js*) (= (length callee) 2)
+                      (eliscript-emitter--raw-method-wrapper (cadr callee)))))
+      (when (and spec (consp callback) (proper-list-p callback)
+                 (consp (cdr callback)) (memq (car callback) '(lambda fn)))
+        (let* ((parameters (eliscript-parameters-parse (cadr callback)
+                             (lambda (_form message) (eliscript-emitter--fail "%s" message))))
+               (body (cddr callback)))
+          (when (and (= (length parameters) (+ (length (plist-get spec :defaults))
+                                                (if (plist-get spec :receiver) 1 0)))
+                     (cl-every (lambda (parameter)
+                                 (and (eq (eliscript-parameter-kind parameter) 'required)
+                                      (symbolp (eliscript-parameter-form parameter)))) parameters)
+                     (eliscript-emitter--method-callback-safe-p body))
+            (let ((names (mapcar (lambda (p) (eliscript-emitter--binding-name (eliscript-parameter-form p))) parameters)))
+              (when (= (length names) (length (delete-dups (copy-sequence names))))
+                (eliscript-emitter--method-wrapper-shell spec names
+                  (eliscript-emitter--emit-function-body parameters body))))))))))
+
 (defun eliscript-emitter--emit-primitive-invocation (arguments)
   "Reduce a proven primitive without changing operand evaluation."
   (let ((operator (eliscript-emitter--primitive-invocation-operator arguments)))
@@ -2137,7 +2271,8 @@ results are never boolean. Use an explicit stack for deep conditional trees."
                   arguments " + "))))
       ('funcall
        (eliscript-emitter--require-arity "funcall" arguments 1)
-       (or (eliscript-emitter--emit-primitive-invocation arguments)
+       (or (eliscript-emitter--emit-method-wrapper arguments)
+           (eliscript-emitter--emit-primitive-invocation arguments)
            (format "%s(%s)"
                    (eliscript-emitter--emit-callee (car arguments))
                    (eliscript-emitter--emit-arguments (cdr arguments)))))

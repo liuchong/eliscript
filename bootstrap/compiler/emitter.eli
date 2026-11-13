@@ -672,9 +672,32 @@
         (t false))))
 
   (defun emit-test (node)
-    (let ((output (emit-expression node)))
-      (if (boolean-p node) output
-        (combine (js-array "__eliscript_truthy(" output ")")))))
+    (let ((pending (js-array (js-object :node node))) (parts (js-array)))
+      (while (> (js-length pending) 0)
+        (let ((task (js-call pending :pop)))
+          (if (Object/hasOwn task "text") (js-call parts :push (get task :text))
+            (let* ((value (get task :node)) (kind (ir-kind value)) (nodes (children value)))
+              (cond
+                ((= kind "short-circuit")
+                 (let ((and-p (= (ir-value value) "and")))
+                   (if (= (js-length nodes) 0)
+                     (js-call parts :push (native-locate (ir-span value) (if and-p "true" "false")))
+                     (progn
+                       (js-call pending :push (js-object :text ")"))
+                       (let ((index (1- (js-length nodes))))
+                         (while (>= index 0)
+                           (js-call pending :push (js-object :node (aref nodes index)))
+                           (when (> index 0) (js-call pending :push (js-object :text (if and-p " && " " || "))))
+                           (setq index (1- index))))
+                       (js-call pending :push (js-object :text (native-locate (ir-span value) "(")))))))
+                ((and (= kind "intrinsic") (= (ir-value value) "not") (= (js-length nodes) 1))
+                 (js-call pending :push (js-object :text ")") (js-object :node (aref nodes 0))
+                   (js-object :text (native-locate (ir-span value) "!("))))
+                (t
+                 (let ((output (emit-expression value)))
+                   (js-call parts :push (if (boolean-p value) output
+                     (combine (js-array "__eliscript_truthy(" output ")")))))))))))
+      (combine parts)))
 
   ;; Direct declarations are safe only when initializers cannot observe a new
   ;; TDZ or capture a new binding. Parallel groups exclude every new name.
@@ -1840,6 +1863,87 @@
                (js-call nodes :forEach (lambda (child) (js-call pending :push child))) (setq safe false)))
             ((not (boolean-p item)) (setq safe false)))))
       (and safe seen)))
+  (defconst method-wrapper-pattern
+    (new globalThis.RegExp "^\\(fn\\) => \\(\\{ ([A-Za-z_$][A-Za-z0-9_$]*)\\(([^()]*)\\) \\{ return fn\\(([^()]*)\\); \\} \\}\\)\\.([A-Za-z_$][A-Za-z0-9_$]*)$"))
+  (defconst getter-wrapper-pattern
+    (new globalThis.RegExp "^\\(fn\\) => Object\\.getOwnPropertyDescriptor\\(\\{ get ([A-Za-z_$][A-Za-z0-9_$]*)\\(\\) \\{ return fn\\(this\\); \\} \\}, '([A-Za-z_$][A-Za-z0-9_$]*)'\\)\\.get$"))
+  (defconst method-formal-pattern
+    (new globalThis.RegExp "^([A-Za-z_$][A-Za-z0-9_$]*)( = undefined)?$"))
+  (defun method-formal-name-p (name)
+    (and (not (js-call (js-array "fn" "undefined" "nil" "t" "false") :includes name))
+         (not (js-call name :startsWith "__eliscript_")) (= name (binding-name name))))
+  (defun raw-method-wrapper (source)
+    (when (and (= (value-type source) "string")
+               (not (js-call source :includes "\n")) (not (js-call source :includes "\r")))
+      (let ((matched (js-call method-wrapper-pattern :exec source)))
+        (if matched
+          (let* ((name (aref matched 1)) (formal-text (aref matched 2))
+                 (call (aref matched 3)) (result (aref matched 4))
+                 (formals (if (= formal-text "") (js-array) (js-call formal-text :split ", ")))
+                 (names (js-array)) (defaults (js-array)) (safe (= name result)) (index 0))
+            (while (< index (js-length formals))
+              (let ((formal (js-call method-formal-pattern :exec (aref formals index))))
+                (if formal
+                  (progn (js-call names :push (aref formal 1))
+                    (js-call defaults :push (not (undefined? (aref formal 2)))))
+                  (setq safe false)))
+              (setq index (1+ index)))
+            (when (and safe (js-call names :every method-formal-name-p)
+                       (= (js-length names) (get (new globalThis.Set names) :size)))
+              (cond
+                ((= call (js-call (js-call (js-array "this") :concat names) :join ", "))
+                 (js-object :name name :receiver t :defaults defaults))
+                ((= call (js-call names :join ", "))
+                 (js-object :name name :receiver false :defaults defaults)))))
+          (let ((getter (js-call getter-wrapper-pattern :exec source)))
+            (when (and getter (= (aref getter 1) (aref getter 2)))
+              (js-object :name (aref getter 1) :getter t :receiver t :defaults (js-array))))))))
+  (defun method-callback-safe-p (body)
+    (let ((pending (js-call body :slice)) (safe t))
+      (while (and safe (> (js-length pending) 0))
+        (let* ((node (js-call pending :pop)) (kind (ir-kind node)) (nodes (children node)))
+          (cond
+            ((and (js-call (js-array "reference" "assignment-pair") :includes kind)
+                  (= (aref (js-call (reference-name (ir-value node)) :split ".") 0) "arguments"))
+             (setq safe false))
+            ((js-call (js-array "function-declaration" "variable-declaration" "import-declaration" "export-declaration") :includes kind)
+             (setq safe false))
+            ((= kind "raw-javascript")
+             (unless (and (= (js-length nodes) 1) (= (ir-kind (aref nodes 0)) "literal")
+                          (raw-binary-operator (ir-value (aref nodes 0))))
+               (setq safe false))))
+          (js-call nodes :forEach (lambda (child) (js-call pending :push child))))) safe))
+  (defun emit-method-wrapper (nodes)
+    (when (= (js-length nodes) 2)
+      (let* ((callee (aref nodes 0)) (callback (aref nodes 1)) (members (children callee))
+             (spec (when (and (= (ir-kind callee) "raw-javascript") (= (js-length members) 1)
+                              (= (ir-kind (aref members 0)) "literal"))
+                     (raw-method-wrapper (ir-value (aref members 0))))))
+        (when (and spec (= (ir-kind callback) "function-expression") (not (ir-property callback "async")))
+          (let* ((parts (split-counted-children callback "parameterCount"))
+                 (parameters (aref parts 0)) (body (aref parts 1))
+                 (receiver (get spec :receiver)) (defaults (get spec :defaults)))
+            (when (and (= (js-length parameters) (+ (js-length defaults) (if receiver 1 0)))
+                       (js-call parameters :every (lambda (parameter)
+                         (and (= (ir-property parameter "parameterKind") "required")
+                              (not (ir-property parameter "pattern")))))
+                       (method-callback-safe-p body))
+              (let ((names (js-call parameters :map (lambda (parameter) (binding-name (ir-value parameter))))))
+                (when (= (js-length names) (get (new globalThis.Set names) :size))
+                  (let* ((formals (if receiver (js-call names :slice 1) names))
+                         (signature (js-call formals :map (lambda (name index)
+                                      (str name (if (aref defaults index) " = undefined" "")))))
+                         (method (native-locate (ir-span callback)
+                           (combine (js-array (if (get spec :getter) "get " "") (get spec :name) "("
+                             (js-call signature :join ", ") ") {\n"
+                             (indent (combine (js-array
+                               (if receiver (str "let " (aref names 0) " = this;\n") "")
+                               (emit-function-body parameters body)))) "\n}"))))
+                         (profiled (function-source-fragment callback method 0 (js-length (get method :text)))))
+                    (if (get spec :getter)
+                      (combine (js-array "(0, Object.getOwnPropertyDescriptor({" profiled "}, '" (get spec :name) "').get)"))
+                      (combine (js-array "(0, ({" profiled "})." (get spec :name) ")"))))))))))))
+
   (defun emit-primitive-invocation (nodes)
     (let ((operator (primitive-invocation-operator nodes)))
       (when operator
@@ -1933,7 +2037,8 @@
                      (combine (js-array "String(" (emit-expression child) ")")))))
                (combine (js-array "(" (join-fragments parts " + ") ")")))))
           ((= kind "invoke")
-           (or (emit-primitive-invocation nodes)
+           (or (emit-method-wrapper nodes)
+             (emit-primitive-invocation nodes)
              (combine
                (js-array (emit-callee (js-nth 0 nodes)) "("
                 (emit-arguments (js-call nodes :slice 1)) ")"))))

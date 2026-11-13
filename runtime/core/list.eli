@@ -21,7 +21,8 @@
     VALUE_HASH
     orderedCollectionHash)
 
-  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
+  (defmacro instance-of? (value Constructor)
+    `(funcall (js* "(a, b) => a instanceof b") ,value ,Constructor))
   (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
   (defconst MAX_COUNT 2147483647)
   (defconst MISSING (funcall globalThis/Symbol "eliscript.list.missing"))
@@ -108,7 +109,7 @@
       (lambda (_self) EMPTY_LIST))
     (define-method PersistentList "from" "from" 1
       (lambda (_self iterable)
-        (if (funcall instance-of? iterable PersistentList)
+        (if (instance-of? iterable PersistentList)
             iterable
             (let ((values (Array/from iterable)))
               (when (> (js-length values) MAX_COUNT)
@@ -200,7 +201,7 @@
       (lambda (self other equal)
         (cond
           ((eq self other) t)
-          ((or (not (funcall instance-of? other PersistentList))
+          ((or (not (instance-of? other PersistentList))
                (not (= (get other :count) (get self :count))))
            false)
           (t
@@ -240,10 +241,10 @@
     (js-call PersistentList :from values))
 
   (defun isPersistentList (value)
-    (funcall instance-of? value PersistentList))
+    (instance-of? value PersistentList))
 
   (defun require-list (value operation)
-    (unless (funcall instance-of? value PersistentList)
+    (unless (instance-of? value PersistentList)
       (throw (new globalThis/TypeError (str operation " expects a persistent List or nil"))))
     value)
 

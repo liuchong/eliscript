@@ -3003,6 +3003,116 @@ already nested suffix, or use either production emitter to build the oracle."
       (eliscript-tests--guarded-module-read output "later")
       (should-not (string-match-p (regexp-quote "(a, b) => a + b") output)))))
 
+(ert-deftest eliscript-native-method-wrappers-match-both-emission-paths ()
+  (dolist (entry '(("(fn) => ({ get(x, y = undefined) { return fn(this, x, y); } }).get"
+                    "(lambda (owner left right) (get owner left right))" "get(left, right = undefined)")
+                   ("(fn) => ({ value(x) { return fn(x); } }).value"
+                    "(lambda (argument) argument)" "value(argument)")
+                   ("(fn) => Object.getOwnPropertyDescriptor({ get count() { return fn(this); } }, 'count').get"
+                    "(lambda (owner) (get owner :count))" "get count()")
+                   ("(fn) => ({ run() { return fn(this); } }).run"
+                    "(lambda (owner) (setq owner 4) owner)" "let owner = this;")
+                   ("(fn) => ({ run() { return fn(this); } }).run"
+                    "(lambda (owner) '(defun marker))" "let owner = this;")
+                   ("(fn) => ({ run() { return fn(this); } }).run"
+                    "(lambda (owner) (js-object arguments.foo 1))" "let owner = this;")
+                   ("(fn) => ({ run() { return fn(this); } }).run"
+                    "(lambda (owner) '(arguments.foo))" "let owner = this;")))
+    (let* ((source (format "(defun build () (funcall (js* %S) %s))" (car entry) (cadr entry)))
+           (output (eliscript-compile-string source "native-method.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "native-method.eli")))
+      (should-not (string-match-p (regexp-quote (car entry)) output))
+      (should (string-match-p (regexp-quote (nth 2 entry)) output)))))
+
+(ert-deftest eliscript-native-method-wrappers-refuse-ambiguous-forwarding ()
+  (dolist (source '("(fn) => ({ run(x) { return fn(x, x); } }).run"
+                    "(fn) => ({ run(x) { return fn(this, x); } }).other"
+                    "(fn) => ({ run(x = 1) { return fn(x); } }).run"
+                    "(fn) => ({ run(...args) { return fn(...args); } }).run"
+                    "(fn) => ({ run(fn) { return fn(fn); } }).run"
+                    "(fn) => ({ run(undefined = undefined) { return fn(undefined); } }).run"
+                    "(fn) => ({ run(eval) { return fn(eval); } }).run"
+                    "(fn) => ({ run(arguments) { return fn(arguments); } }).run"
+                    "(fn) => ({ run(x, x) { return fn(x, x); } }).run"
+                    "(fn) => Object.getOwnPropertyDescriptor({ get size() { return fn(this); } }, 'count').get"))
+    (should-not (eliscript-emitter--raw-method-wrapper source))))
+
+(ert-deftest eliscript-native-method-wrappers-retain-implicit-context-and-parameter-setups ()
+  (let ((wrapper "(fn) => ({ run(x) { return fn(this, x); } }).run"))
+    (dolist (callback '("(lambda (owner argument) (js* \"this\"))"
+                        "(lambda (owner argument) (lambda () (js* \"this\")))"
+                        "(lambda (owner argument) arguments.length)"
+                        "(lambda (owner argument) arguments/length)"
+                        "(lambda (owner argument) (lambda () arguments.length))"
+                        "(lambda (owner argument) (js-object :value arguments.length))"
+                        "(lambda (owner argument) (js-object (get arguments.foo :key) 1))"
+                        "(lambda (owner &optional argument) argument)"
+                        "(lambda (owner &rest arguments) arguments)"
+                        "(lambda ([owner] argument) (vector owner argument))"
+                        "(async (owner argument) argument)"))
+      (let* ((source (format "(defun build () (funcall (js* %S) %s))" wrapper callback))
+             (output (eliscript-compile-string source "method-refusal.eli")))
+        (should (equal output (eliscript-tests--ground-compile-string source "method-refusal.eli")))
+        (should (string-match-p (regexp-quote wrapper) output))))))
+
+(ert-deftest eliscript-native-method-wrappers-keep-module-initialization-guards ()
+  (let* ((source "(defconst method (funcall (js* \"(fn) => ({ read() { return fn(this); } }).read\") (lambda (owner) later))) (defconst before (funcall method)) (defconst later 42)")
+         (output (eliscript-compile-string source "method-tdz.eli")))
+    (should (equal output (eliscript-tests--ground-compile-string source "method-tdz.eli")))
+    (should-not (string-match-p (regexp-quote "(fn) =>") output))
+    (eliscript-tests--guarded-module-read output "later")))
+
+(ert-deftest eliscript-native-method-wrappers-retain-qualified-assignment-refusals ()
+  ;; The analyzer already rejects assigning an unbound qualified name. Check
+  ;; the emitter guard directly as well, without weakening that early error.
+  (should-not (eliscript-emitter--method-callback-safe-p '((setq arguments.foo 1))))
+  (should-not (eliscript-ir-emitter--method-callback-safe-p
+               (list (eliscript-ir-make-node 'assignment-pair nil 'arguments.foo
+                       (list (eliscript-ir-make-node 'literal nil 1)))))))
+
+(ert-deftest eliscript-native-method-wrappers-retain-bare-lambda-errors ()
+  (let ((callee '(js* "(fn) => ({ zero() { return fn(); } }).zero")))
+    (should-not (eliscript-emitter--emit-method-wrapper (list callee '(lambda))))
+    (should-not (eliscript-emitter--emit-method-wrapper (list callee (cons 'lambda 'invalid))))
+    (should-error (eliscript-emitter-emit-expression (list 'funcall callee '(lambda))))))
+
+(ert-deftest eliscript-test-context-short-circuits-match-gnu-unmodified-forms ()
+  (let* ((file (expand-file-name "../tools/testing/bootstrap-emitter.eli"
+                                 (file-name-directory (locate-library "eliscript"))))
+         (module (with-temp-buffer (insert-file-contents file) (read (current-buffer))))
+         (declaration (seq-find (lambda (form) (and (consp form) (eq (car form) 'defconst)
+                                                   (eq (cadr form) 'primitive-invocation-case))) (cddr module)))
+         (source (plist-get (cdr (nth 2 declaration)) :source))
+         (program (read source))
+         (function (seq-find (lambda (form) (and (consp form) (eq (car form) 'defun)
+                                                (eq (cadr form) 'ordinary-conditional-report))) (cddr program)))
+         (forms (cdr (nth 3 function))))
+    ;; Each input form is read and evaluated unchanged by GNU Emacs; the same
+    ;; forms execute in the self-hosted Node integration fixture.
+    (should (equal (mapcar (lambda (form) (eval form t)) forms) '(1 1 2 1 1 2 2012 1012 1 1 1 1 2 2 1)))
+    (dolist (form forms)
+      (let ((input (format "(defun run () %S)" form)))
+        (should (equal (eliscript-compile-string input "conditional.eli")
+                       (eliscript-tests--ground-compile-string input "conditional.eli")))))))
+
+(ert-deftest eliscript-test-context-retains-improper-list-errors ()
+  (dolist (form '((and a . b) (or a . b) (not a . b)))
+    (should-error (eliscript-emitter--emit-test form) :type 'eliscript-compile-error)
+    (should-error (eliscript-emitter--run-depth-plan #'eliscript-emitter--depth-plan :test form nil)
+                  :type 'eliscript-compile-error)))
+
+(ert-deftest eliscript-test-context-short-circuit-emission-is-stack-safe ()
+  (let ((form 'value) (node (eliscript-ir-make-node 'reference nil 'value)))
+    (dotimes (_ 10000)
+      (setq form (list 'and 'ready form)
+            node (eliscript-ir-make-node 'short-circuit nil 'and
+                   (list (eliscript-ir-make-node 'reference nil 'ready) node))))
+    (let ((source (eliscript-emitter--emit-test form))
+          (ir (eliscript-ir-emitter--emit-test node)))
+      (should (equal source ir))
+      (should (> (length source) 100000))
+      (should-not (string-match-p "=>" source)))))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

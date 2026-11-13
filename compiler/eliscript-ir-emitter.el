@@ -397,10 +397,32 @@
        (and nodes (cl-every #'eliscript-ir-emitter--boolean-p nodes))))))
 
 (defun eliscript-ir-emitter--emit-test (node)
-  "Emit NODE as a condition without redundant boolean conversion."
-  (let ((output (eliscript-ir-emitter-emit-expression node)))
-    (if (eliscript-ir-emitter--boolean-p node) output
-      (format "__eliscript_truthy(%s)" output))))
+  "Emit logical tests iteratively, preserving Lisp truth at every leaf."
+  (let ((pending (list (cons :node node))) parts)
+    (while pending
+      (let* ((task (pop pending)) (value (cdr task)))
+        (if (eq (car task) :text) (push value parts)
+          (let ((kind (eliscript-ir-node-kind value)) (children (eliscript-ir-emitter--children value)))
+            (cond
+             ((eq kind 'short-circuit)
+              (let ((and-p (eq (eliscript-ir-node-value value) 'and)))
+                (if (null children)
+                    (push (eliscript-ir-emitter--locate value (if and-p "true" "false")) parts)
+                  (push (cons :text ")") pending)
+                  (let ((rest (reverse children)))
+                    (while rest
+                      (push (cons :node (pop rest)) pending)
+                      (when rest (push (cons :text (if and-p " && " " || ")) pending))))
+                  (push (cons :text (eliscript-ir-emitter--locate value "(")) pending))))
+             ((and (eq kind 'intrinsic) (eq (eliscript-ir-node-value value) 'not) (= (length children) 1))
+              (push (cons :text ")") pending)
+              (push (cons :node (car children)) pending)
+              (push (cons :text (eliscript-ir-emitter--locate value "!(")) pending))
+             (t
+              (let ((output (eliscript-ir-emitter-emit-expression value)))
+                (push (if (eliscript-ir-emitter--boolean-p value) output
+                        (concat "__eliscript_truthy(" output ")")) parts))))))))
+    (apply #'concat (nreverse parts))))
 
 (defun eliscript-ir-emitter--context-sequential-safe-p (bindings &optional parallel)
   "Whether BINDINGS can share one scope without TDZ or capture changes.
@@ -521,11 +543,26 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
   "Describe the next ordinary IR emission step, preserving all child order."
   (pcase mode
     (:value (list :value value))
+    (:test
+     (let ((kind (eliscript-ir-node-kind value)) (children (eliscript-ir-emitter--children value)))
+       (cond
+        ((eq kind 'short-circuit)
+         (let ((and-p (eq (eliscript-ir-node-value value) 'and)))
+           (if (null children) (list :value (eliscript-ir-emitter--locate value (if and-p "true" "false")))
+             (list :children (mapcar (lambda (node) (list :test node nil)) children)
+                   (lambda (results) (list :value (concat (eliscript-ir-emitter--locate value "(")
+                                                           (string-join results (if and-p " && " " || ")) ")")))))))
+        ((and (eq kind 'intrinsic) (eq (eliscript-ir-node-value value) 'not) (= (length children) 1))
+         (list :children (list (list :test (car children) nil))
+               (lambda (results) (list :value (concat (eliscript-ir-emitter--locate value "!(") (car results) ")")))))
+        (t (list :children (list (list :expression value nil))
+                 (lambda (results) (list :value (if (eliscript-ir-emitter--boolean-p value) (car results)
+                                                  (concat "__eliscript_truthy(" (car results) ")")))))))))
     (:expression
      (if (and (eliscript-ir-node-p value) (eq (eliscript-ir-node-kind value) 'conditional))
          (let ((children (eliscript-ir-emitter--children value)))
            (list :children
-                 (list (list :expression (nth 0 children) nil)
+                 (list (list :test (nth 0 children) nil)
                        (list :expression (nth 1 children) nil)
                        (if (nth 2 children) (list :expression (nth 2 children) nil)
                          (list :value "null" nil)))
@@ -533,8 +570,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
                    (list :value
                          (eliscript-ir-emitter--locate
                           value (format "(%s ? %s : %s)"
-                                        (if (eliscript-ir-emitter--boolean-p (car children)) (nth 0 results)
-                                          (format "__eliscript_truthy(%s)" (nth 0 results)))
+                                        (nth 0 results)
                                         (nth 1 results) (nth 2 results)))))))
        (list :value (eliscript-ir-emitter--emit-expression-recursive value))))
     (:body
@@ -591,7 +627,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
                (lambda (results) (list :value (eliscript-ir-emitter--locate value (car results))))))
         ((eq kind 'conditional)
          (list :children
-               (list (list :expression (nth 0 children) nil)
+               (list (list :test (nth 0 children) nil)
                      (list :context (nth 1 children) options)
                      (if (nth 2 children) (list :context (nth 2 children) options)
                        (list :value (if options "return null;" "") nil)))
@@ -599,8 +635,7 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
                  (list :value
                        (eliscript-ir-emitter--locate
                         value
-                        (concat "if (" (if (eliscript-ir-emitter--boolean-p (car children)) (nth 0 results)
-                                          (format "__eliscript_truthy(%s)" (nth 0 results))) ") {\n"
+                        (concat "if (" (nth 0 results) ") {\n"
                                 (eliscript-emitter--indent (nth 1 results)) "\n}"
                                 (if (or options (nth 2 children))
                                     (concat " else {\n" (eliscript-emitter--indent (nth 2 results)) "\n}") "")))))))
@@ -1639,6 +1674,43 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
          ((not (eliscript-ir-emitter--boolean-p item)) (setq safe nil)))))
     (and safe seen)))
 
+(defun eliscript-ir-emitter--method-callback-safe-p (body)
+  "Match the source-form refusal of implicit host context."
+  (not (eliscript-ir-emitter--some-node body
+    (lambda (node)
+      (or (and (memq (eliscript-ir-node-kind node) '(reference assignment-pair))
+               (equal (car (split-string (eliscript-emitter--reference-name (eliscript-ir-node-value node)) "\\.")) "arguments"))
+          (memq (eliscript-ir-node-kind node)
+                '(function-declaration variable-declaration import-declaration export-declaration))
+          (and (eq (eliscript-ir-node-kind node) 'raw-javascript)
+               (let ((children (eliscript-ir-emitter--children node)))
+                 (not (and (= (length children) 1)
+                           (eq (eliscript-ir-node-kind (car children)) 'literal)
+                           (eliscript-emitter--raw-binary-operator (eliscript-ir-node-value (car children))))))))) nil)))
+
+(defun eliscript-ir-emitter--emit-method-wrapper (nodes)
+  "Reduce a closed method wrapper while preserving its Eli body and bindings."
+  (when (= (length nodes) 2)
+    (let* ((callee (car nodes)) (callback (cadr nodes))
+           (children (eliscript-ir-emitter--children callee))
+           (spec (and (eq (eliscript-ir-node-kind callee) 'raw-javascript)
+                      (= (length children) 1) (eq (eliscript-ir-node-kind (car children)) 'literal)
+                      (eliscript-emitter--raw-method-wrapper (eliscript-ir-node-value (car children))))))
+      (when (and spec (eq (eliscript-ir-node-kind callback) 'function-expression)
+                 (not (eliscript-ir-property callback :async)))
+        (pcase-let ((`(,parameters ,body) (eliscript-ir-emitter--split-counted-children callback :parameter-count)))
+          (when (and (= (length parameters) (+ (length (plist-get spec :defaults))
+                                                (if (plist-get spec :receiver) 1 0)))
+                     (cl-every (lambda (parameter)
+                                 (and (eq (eliscript-ir-property parameter :parameter-kind) 'required)
+                                      (not (eliscript-ir-property parameter :pattern)))) parameters)
+                     (eliscript-ir-emitter--method-callback-safe-p body))
+            (let ((names (mapcar (lambda (p) (eliscript-emitter--binding-name (eliscript-ir-node-value p))) parameters)))
+              (when (= (length names) (length (delete-dups (copy-sequence names))))
+                (eliscript-emitter--method-wrapper-shell spec names
+                  (eliscript-ir-emitter--emit-function-body parameters body)
+                  (lambda (method) (eliscript-ir-emitter--locate callback method)))))))))))
+
 (defun eliscript-ir-emitter--emit-primitive-invocation (nodes)
   "Emit a proven primitive without allocating an intermediate function."
   (let ((operator (eliscript-ir-emitter--primitive-invocation-operator nodes)))
@@ -1758,7 +1830,8 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                             (eliscript-ir-emitter-emit-expression child)))
                   children " + "))))
       ('invoke
-       (or (eliscript-ir-emitter--emit-primitive-invocation children)
+       (or (eliscript-ir-emitter--emit-method-wrapper children)
+           (eliscript-ir-emitter--emit-primitive-invocation children)
            (format "%s(%s)"
                    (eliscript-ir-emitter--emit-callee (car children))
                    (eliscript-ir-emitter--emit-arguments (cdr children)))))

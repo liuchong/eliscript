@@ -16,7 +16,7 @@
   (defconst root (get build :root))
   (defconst plans (js-array
     (js-object :suite "tests/wasm-managed-number-text.test.mjs" :kind "number-text" :sha256 "243924b3b0cf2eb522ce98188b371a2b53d20fede1b1bc1aead85d239806d1e9")
-    (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :kind "primitive" :sha256 "f07fc7e0094f35aa1b9024ab2c659677e4ed49fa297e6fa9cc8f5826111d356f")))
+    (js-object :suite "tests/wasm-managed-primitive-operators.test.mjs" :kind "primitive" :sha256 "d9a72ac7944d003fbcbe39086ff2b5e2cf132e23d531a25b5ed572c5194ba660")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))
   (js-call assert :strictEqual (js-length selected) 1)

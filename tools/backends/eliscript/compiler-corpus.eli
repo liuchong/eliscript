@@ -1371,7 +1371,7 @@
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
               (when (and (= filename "bootstrap/host/project-cli-ground.mjs")
-                         (/= (get asset :sha256) "7809183984d44336a7ddd9c5427eb77c0e0dc7b0b15221b6e25be3dab67da2fd"))
+                         (/= (get asset :sha256) "da552a3e41426e6310aa09fef78c02b7efc61012debc33d350a773fcd68b9930"))
                 (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
                 (unless (and (= (get existing :bytes) (get asset :bytes))
@@ -1532,6 +1532,7 @@
     (js-array "tests/fixtures/corpus-arguments-ieee-host.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
     (js-array "tests/fixtures/corpus-arguments-program-host.eli" "host-fixture" (js-array "tests/compiler-corpus-arguments.test.eli" "corpus-arguments-"))
     (js-array "tests/fixtures/corpus-clone-host.eli" "host-fixture" (js-array "tests/compiler-corpus-source-sharing.test.eli" "corpus-clone-host"))
+    (js-array "tests/fixtures/dense-order.eli" "host-fixture" (js-array "tests/core-order-targets.test.eli" "tests/fixtures/dense-order.eli"))
     (js-array "tests/fixtures/direct-backend-browser-cases.eli" "host-fixture" (js-array "tests/direct-wasm-backend-test-ground.eli" "direct-backend-browser-cases"))
     (js-array "tests/fixtures/direct-backend-node-host.eli" "host-fixture" (js-array "tests/direct-wasm-backend-test-ground.eli" "direct-backend-node-host"))
     (js-array "tests/fixtures/loop-recur-host.eli" "host-fixture" (js-array "tests/loop-recur.test.eli" "loop-recur-host"))

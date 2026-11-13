@@ -8,7 +8,7 @@
   (import "../backends/build.mjs" root)
   (import "./maintained-suite-source.mjs" maintainedSuiteSource sourceCall)
   (defconst capsule-pattern (new globalThis.RegExp "^data:text/javascript;base64,[A-Za-z0-9+/]+={0,2}$"))
-  (defconst original-suite-sha256 "7644f14a5c2e8752c7e8cf06c197a889c0c8e1455e9e7409c708e6df3b12b216")
+  (defconst original-suite-sha256 "6dacc11dc2480d37dba443bb61c8a182b420811747b1abe185d2cb789bcd948a")
   (defun source-boundary (source marker start)
     (let ((at (js-call source :indexOf marker start)))
       (unless (and (>= at 0) (= (js-call source :indexOf marker (1+ at)) -1))

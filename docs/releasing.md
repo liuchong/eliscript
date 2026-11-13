@@ -80,14 +80,13 @@ publication, a GitHub Release or a signed release tag.
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
   The latest normalized local sample has all nine medians below native
-  Emacs. The 64-element tail slice measures 0.401 vs 0.738 microseconds/op;
-  first and last measure 14.05 and 1.59 nanoseconds/op. Comparisons against
-  0.1.2 still reject first, last, the tail slice and reference-identity equality
-  (14.05 vs 8.53 ns, 1.59 vs 0.858 ns, 0.401 vs 0.161 microseconds, and
-  0.374 vs 0.365 ns respectively). Sorting measures 0.387663 vs 0.531131
-  ms/op; grouping, frequencies, deep zipper and numeric scoring pass in this
-  sample. Raw sample variation needs diagnosis and does not automatically
-  waive a slower median.
+  Emacs. First and last measure 7.46 and 0.639 nanoseconds/op, against 8.54
+  and 0.837 in 0.1.2. Comparisons still reject the 64-element tail slice
+  (0.396 vs 0.163 microseconds/op), deep zipper (1.1584 vs 1.1314 ms/op),
+  and reference-identity equality (0.3613 vs 0.3566 nanoseconds/op). Sorting
+  measures 0.382110 vs 0.564476 ms/op; grouping, frequencies and numeric
+  scoring also pass in this sample. Raw sample variation needs diagnosis
+  and does not automatically waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -102,8 +101,17 @@ with two proven operands and a fixed eager-operator whitelist. Private vector
 index and instance checks use that path; arbitrary `js*`, spread, extra
 arguments and scoped operands keep ordinary calls. Boolean inference retains
 Lisp truth for numeric zero, and module initialization guards remain intact.
-This improves the retained vector path without closing the four remaining
-previous-version performance failures.
+Closed method/getter wrappers around direct synchronous Eli lambdas can
+also fuse into native concise methods, preserving their name, length,
+undefined defaults, non-constructibility and dynamic receiver. Qualified
+`arguments.*`/`arguments/*`, opaque JS, declarations, async callbacks and
+non-simple parameters keep the ordinary wrapper. Literal object keys and
+quoted symbols do not count as implicit `arguments` reads; malformed lambda
+forms retain their original errors. Conditional `and`/`or`/`not` emit direct
+logical tests with Lisp truth conversion at every leaf, including through the
+seed emitters' deep-tree continuation path. Value-context short circuits keep
+their original returned values. These changes improve hot sequence dispatch
+without closing the three measured previous-version failures.
 
 Dense safe-integer collections now use a stable counting sort in both the
 JavaScript runtime and the managed WASM/native provider. The path requires at
@@ -119,14 +127,16 @@ still reports capacity exhaustion on both targets. These failures remain
 unaccepted; neither the new test's budget nor the explicit functional profile
 certifies that original capacity gate.
 
-The primitive-emission batch passes the 338-file stage2/stage3 byte fixed
-point, 36 Emacs emitter/bootstrap protections and 29 vector/core/emitter
-integration tests. The first platform sweep collected a fixture-registration
-failure and the old compressed-size failure without stopping the independent
-checks. Isolating the new protection from the original corpus restores all 21
-stage3 checks; the unchanged 11 release-integration and 8 package-surface
-checks retain their passes. The corrected exact package passes all 7 install
-checks under the documented allowance. These local results do not substitute
+The current emitter batch passes 55 Emacs protections and 35 runtime/emitter
+integration tests. The related Node checks pass 69 cases, and the source
+archive checks pass all 32 cases through the retained unaffected results plus
+the corrected recipe's focused replay. The dense ordering fixture is registered
+in the official build and bound to its actual Bun/Node/WASM/native consumer;
+source authentication alone never asserts that consumer passed. All four
+consumer cases also pass. The complete 861-record corpus authenticates without
+missing adapters. A build from absent generated outputs passes the 338-file
+stage2/stage3 fixed point and all six platform steps in 372.6 seconds, with a
+4.51 GB accounted process-tree peak. These local results do not substitute
 for the final commit's four required remote workflows.
 
 ## What Ships
@@ -136,18 +146,16 @@ can be accepted after checking duplication, growth proportion and installation
 cost, with actual bytes and the reason documented before adjusting the automated
 budget. Required source and debug assets take priority over shaving a few bytes.
 
-The current clean-build package measures 5,053,538 bytes (833 entries,
-35,029,810 bytes unpacked), after excluding the temporary runtime project's
-nested dependency copy and project manifest. Clean installation and installed
-JS/WASM/native execution pass. No identical payloads of at least 1 MB occur.
-The full Lisp frontend, maintained compiler sources and source maps remain:
-removing those formal capabilities to meet the old count would be incorrect.
-Compared with the last installed candidate (`6992faaf`: 4,851,866 bytes), the
-compressed increase is 4.16%; it is 1.07% above the original 5 MB baseline.
-For this candidate, the automatic compressed limit is 5.1 MB, a bounded 2%
-allowance above that baseline. Further growth requires a new payload audit;
-this allowance does not waive any version-comparison or deferred strict
-performance/capacity gate.
+The current clean-build package measures 4,758,372 bytes (706 entries,
+32,041,705 bytes unpacked). Clean installation and installed JS/WASM/native
+execution pass all seven checks. No identical payloads of at least 1 MB occur.
+The full Lisp frontend, maintained compiler sources and source maps remain.
+Building from absent generated outputs excludes incremental bootstrap and
+diagnostic leftovers, reducing the package below the original 5 MB baseline;
+the automatic limit is therefore restored to 5 MB. Compared with the last
+installed candidate (`6992faaf`: 4,851,866 bytes), the package is 1.93% smaller.
+Any future increase still requires a payload audit and does not waive version
+comparison or deferred strict performance/capacity gates.
 
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the

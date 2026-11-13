@@ -73,8 +73,8 @@
     "  (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-object :targets results :rootsReleased t :node (get globalThis.process :version) :sourceIdentity (get certificate :sourceIdentity) :producerIdentity (get certificate :productIdentity))) \"\\n\")))"
     " (main))") :join "\n"))
 
-  ;; The measured 0.1.3 payload allowance is justified in docs/releasing.md.
-  (defconst MAX_PACKED_BYTES 5100000)
+  ;; Clean formal products fit the original baseline documented in docs/releasing.md.
+  (defconst MAX_PACKED_BYTES 5000000)
 
   (defun clean-environment ()
     (let ((env (Object/assign (js-object) (get globalThis.process :env))))
@@ -213,10 +213,10 @@
                   (put receipt :tarballSha256 (await (file-sha tarball)))
                   ;; A size failure remains a failed acceptance gate, but must not prevent
                   ;; independent installed JS/WASM/Native semantics from being collected.
-                  (await (js-call context :test "release tarball remains compact (< 5.1 MB)"
+                  (await (js-call context :test "release tarball remains compact (< 5 MB)"
                     (async ()
                       (js-call assert :ok (< (get pack-result :size) MAX_PACKED_BYTES)
-                        (str "release tarball must remain compact (< 5.1 MB); actual " (get pack-result :size))))))
+                        (str "release tarball must remain compact (< 5 MB); actual " (get pack-result :size))))))
                   (await (check-package-payloads (get pack-result :files)))
                   (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
                 (let* ((installed (resolve consumer "node_modules/eliscript"))

@@ -9,10 +9,10 @@
   (import "./compiler-original-gates-cases.mjs" originalGateCases toolsGateCases)
   (import "./compiler-build-private.mjs" closeCompilerBuildPrivateUnit)
   (defconst plans (js-array
-    (js-object :suite "tests/compiler-artifact-archive-selfhosted.test.mjs" :archive "tests/compiler-artifact-archive-test-ground.mjs" :sha256 "749dbaaab341a68c050fb4ad14b451da51075541cfae63b5f3e57697efefca35" :cases artifactPrivateCases)
-    (js-object :suite "tests/compiler-metadata-codec-selfhosted.test.mjs" :archive "tests/compiler-metadata-codec-test-ground.mjs" :sha256 "3b7b4ac6ba60477ed01e44e846e433b8ed3db48e01f6c543f82f5e92988c2ffb" :cases metadataPrivateCases)
+    (js-object :suite "tests/compiler-artifact-archive-selfhosted.test.mjs" :archive "tests/compiler-artifact-archive-test-ground.mjs" :sha256 "4a197dfe2c58665f59e6e922fb49ad78a0d198be46fe1d39a984f416b7bccebe" :cases artifactPrivateCases)
+    (js-object :suite "tests/compiler-metadata-codec-selfhosted.test.mjs" :archive "tests/compiler-metadata-codec-test-ground.mjs" :sha256 "f5ad264c605f8acbc09f5b2f4468283ac077e369a6a0039acb827cdc240acc85" :cases metadataPrivateCases)
     (js-object :suite "tests/compiler-matrix-original-gates-selfhosted.test.mjs" :archive "tests/compiler-matrix-original-gates-test-ground.mjs" :sha256 "09414b40cc4445b6f40e2ede533062ce8f5c6caa0576fa583a2ff1f1d5270d66" :cases originalGateCases)
-    (js-object :suite "tests/compiler-corpus-tools-artifact-adapters.test.mjs" :archive "tests/compiler-corpus-tools-artifact-adapters.test.mjs" :sha256 "a04332ae6471777012ba16ac53903470ab30646497316905df6fc00dcd569667" :cases toolsGateCases)
+    (js-object :suite "tests/compiler-corpus-tools-artifact-adapters.test.mjs" :archive "tests/compiler-corpus-tools-artifact-adapters.test.mjs" :sha256 "550bb399c95e72382723f333e0e7108c9decc27db785374737e90c0c53348d4f" :cases toolsGateCases)
   ))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument)

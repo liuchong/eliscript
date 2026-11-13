@@ -32,7 +32,7 @@
                :execution (js-object :kind "original-program" :timeoutMs 320000 :requiresBun t :hostSource "historical original host")))
              (gate (js-object :verification "not-executed"))
              (document (js-object :records (js-array other record) :evidence (js-array) :originalGateEvidence gate)))
-        (js-call assert :strictEqual sha "41a8262b18e72ab8d646ab6f8e4e692607d27fa24509d5ef9537f2f071b689b2")
+        (js-call assert :strictEqual sha "067e55128209aee4d9c8a208e65ee470f380e345ae3822f7cc4b2b6f62727d78")
         (js-call assert :strictEqual (await (transportOriginalFuzzCorpus document (js-object :sourceRoot root))) document)
         (js-call assert :strictEqual (aref (get document :records) 0) other)
         (js-call assert :strictEqual (get document :originalGateEvidence) gate)
