@@ -115,6 +115,14 @@
         "the authenticated final runtime source must be packaged")
       (js-call assert :strictEqual (js-call paths :includes "bootstrap/runtime/memory.eli") false
         "the identical Emacs bootstrap runtime source must not be packaged twice")
+      (js-call assert :ok (js-call paths :includes "dist/browser/loader.js")
+        "the final browser loader bundle must be packaged")
+      (js-call assert :strictEqual (js-call paths :includes "dist/browser/loader.mjs") false
+        "the unbundled browser loader is a disposable intermediate")
+      (js-call (js-array "benchmark" "native-benchmark" "numeric-benchmark-kernel" "numeric-benchmark-runner")
+        :forEach (lambda (name)
+          (js-call assert :strictEqual (js-call paths :includes (str "tools/backends/" name ".mjs")) false
+            "development benchmarks belong in the source checkout")))
       (while (< index (js-length files))
         (let* ((file (aref files index)) (path (get file :path)))
           (when (>= (get file :size) 1000000)

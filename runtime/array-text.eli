@@ -26,9 +26,7 @@
   (defconst weakDelete (get (get globalThis.WeakSet :prototype) :delete))
   (defconst active (new globalThis.WeakSet))
   (defconst active-state (js-object :root nil))
-  (defconst normalized-methods
-    (new globalThis.Set (js-array numberStringBuiltin intrinsicJoin
-      intrinsicArrayString functionCall functionApply functionBind)))
+  (defconst no-arguments (Object/freeze (js-array)))
 
   (defun typeof-value (value)
     (js* "typeof value"))
@@ -173,7 +171,22 @@
       (funcall apply-fn collectArguments undefined value)))
 
   (defun normalized-method-p (method)
-    (js-call normalized-methods :has method))
+    (or (eq method numberStringBuiltin) (eq method intrinsicJoin)
+        (eq method intrinsicArrayString) (eq method functionCall)
+        (eq method functionApply) (eq method functionBind)))
+
+  (defun ordinary-call-p (method receiver)
+    (if (eq method functionCall)
+      (if (normalized-method-p receiver) false (callable-p receiver))
+      false))
+
+  (defun invoke-ordinary-call (receiver args)
+    (cond
+      ((<= (get args :length) 1)
+       (funcall apply-fn receiver (argument args 0) no-arguments))
+      ((= (get args :length) 2)
+       (funcall apply-fn receiver (argument args 0) (js-array (argument args 1))))
+      (t (funcall apply-fn functionCall receiver args))))
 
   (defun dispatch (initial-method initial-receiver initial-args)
     (let ((method initial-method)
@@ -197,7 +210,15 @@
           ;; order; nested calls of normalized intrinsics retain the slow path.
           ((and (or (eq method functionCall) (eq method functionApply))
                 (not (normalized-method-p receiver)))
-           (setq output (funcall apply-fn method receiver args)
+           (setq output
+             (if (and (eq method functionCall) (callable-p receiver))
+               (cond
+                 ((<= (get args :length) 1)
+                  (funcall apply-fn receiver (argument args 0) no-arguments))
+                 ((= (get args :length) 2)
+                  (funcall apply-fn receiver (argument args 0) (js-array (argument args 1))))
+                 (t (funcall apply-fn method receiver args)))
+               (funcall apply-fn method receiver args))
                  done t))
           ((eq method functionCall)
            (if (not (callable-p receiver))
@@ -262,14 +283,20 @@
 
   (defun c (value key)
     (let ((method (aref value key)))
-      (lambda (&rest args)
-        (dispatch method value args))))
+      ;; Capture before arguments. Keep selection after argument evaluation,
+      ;; including accesses to module bindings during cyclic initialization.
+      (lambda (&rest args) (invokeCapturedArrayText method value args))))
 
   (defun d (value key &rest args)
     (let ((method (aref value key)))
+      (invokeCapturedArrayText method value args)))
+
+  (defun invokeCapturedArrayText (method value args)
+    (if (ordinary-call-p method value)
+      (invoke-ordinary-call value args)
       (dispatch method value args)))
 
   (defconst captureArrayText c)
   (defconst invokeArrayText d)
 
-  (export c d captureArrayText invokeArrayText))
+  (export c d captureArrayText invokeArrayText invokeCapturedArrayText))

@@ -203,7 +203,8 @@
            (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs"))
            (targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs")))
       ;; A version is measured with its own build, never a convenient compiler
-      ;; from another checkout. compilerRoot supplies only the common workload.
+      ;; from another checkout. compilerRoot supplies the common workload source
+      ;; and one shared timing driver, never the compiler measured below.
       (unless (and (await (pathExists literalsMjs)) (await (pathExists targetCompilerPath)))
         (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot :timeout 360000))))
       (let* ((targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
@@ -235,12 +236,13 @@
                    (nodeModulesEliscript (js-call path :join tempDir "node_modules/eliscript"))
                    (zipperMjsPath (js-call path :join stdlibCoreDir "zipper.mjs"))
                    (seqMjsPath (js-call path :join stdlibCoreDir "seq.mjs"))
-                   (runnerPath (js-call path :join tempDir "run-bench.mjs"))
-                   (runnerSource (await (readFile (js-call path :join compilerRoot "tools/performance/version-comparison-runner.eli") "utf8")))
+                   (runnerPath (js-call path :join tempDir "workloads.mjs"))
+                   (timingPath (js-call path :join compilerRoot "tools/performance/version-comparison-runner.mjs"))
+                   (runnerSource (await (readFile (js-call path :join compilerRoot "tools/performance/version-comparison-workloads.eli") "utf8")))
                    (relocatedRunner (js-call (js-call runnerSource :replaceAll
                      "(import \"../../runtime/" "(import \"./runtime/") :replaceAll
                      "(import \"../../stdlib/core/" "(import \"./stdlib/core/"))
-                   (runnerScript (js-call compiler :compile_string relocatedRunner "version-comparison-runner.eli")))
+                   (runnerScript (js-call compiler :compile_string relocatedRunner "version-comparison-workloads.eli")))
               (await (mkdir stdlibCoreDir (js-object :recursive t)))
               (await (symlink (js-call path :join targetRoot "runtime") (js-call path :join tempDir "runtime") "dir"))
               (await (mkdir (js-call path :dirname nodeModulesEliscript) (js-object :recursive t)))
@@ -248,7 +250,7 @@
               (await (writeFile zipperMjsPath compiledZipper))
               (await (writeFile seqMjsPath compiledSeq))
               (await (writeFile runnerPath runnerScript))
-              (let ((result (await (capture (js-array (get process :execPath) runnerPath) (js-object :cwd tempDir)))))
+              (let ((result (await (capture (js-array (get process :execPath) timingPath runnerPath) (js-object :cwd tempDir)))))
                 (JSON/parse (js-call (get result :stdout) :trim))))
             (finally
               (await (rm tempDir (js-object :recursive t :force t)))))))))
@@ -335,7 +337,17 @@
                                (not (Number/isFinite val))
                                (<= val 0))
                        (throw (new globalThis.TypeError
-                                (str "invalid metric " wId " for active dimension " dimensionId)))))
+                                (str "invalid metric " wId " for active dimension " dimensionId))))
+                     (when (Object/hasOwn res "samplesMs")
+                       (let* ((samples (get (get res :samplesMs) wId))
+                              (valid (and (Array/isArray samples) (= (js-length samples) 3))))
+                         (unless (and valid (js-call (Array/from samples) :every
+                           (lambda (value) (and (= (value-type value) "number")
+                             (Number/isFinite value) (> value 0)))))
+                           (throw (new globalThis.TypeError (str "invalid samples " wId " for " dimensionId))))
+                         (let ((ordered (js-call (js-call samples :slice) :sort (lambda (a b) (- a b)))))
+                           (unless (= val (aref ordered 1))
+                             (throw (new globalThis.TypeError (str "metric differs from sample median " wId " for " dimensionId))))))))
                    (setq wIdx (1+ wIdx)))))
               ((= status "absent")
                (when (not (eq (get res :metricsMs) nil))
@@ -347,8 +359,13 @@
 
   (defasync measure-comparison-dimension (dimension measure failures)
     (try
-      (Object/assign (js-object) dimension
-        (js-object :deduplicatedFrom nil :metricsMs (await (funcall measure dimension))))
+      (let* ((measurement (await (funcall measure dimension)))
+             (sampled (Object/hasOwn measurement "metricsMs"))
+             (result (Object/assign (js-object) dimension
+               (js-object :deduplicatedFrom nil
+                 :metricsMs (if sampled (get measurement :metricsMs) measurement)))))
+        (when sampled (put result :samplesMs (get measurement :samplesMs)))
+        result)
       (catch error
         (js-call failures :push (js-object :dimension (get dimension :id) :error error))
         (Object/assign (js-object) dimension (js-object :status "failed" :metricsMs nil)))))
@@ -425,6 +442,9 @@
             (js-object :deduplicatedFrom nil :metricsMs nil))))
       (put results :latest
         (await (measure-comparison-dimension (get matrix :latest) measureTarget failures)))
+      (when (and (get (get matrix :previousMajor) :sameAsPreviousMinor)
+                 (Object/hasOwn (get results :previousMinor) "samplesMs"))
+        (put (get results :previousMajor) :samplesMs (get (get results :previousMinor) :samplesMs)))
       (when (> (js-length failures) 0)
         (let ((error (new globalThis.AggregateError
                 (js-call failures :map (lambda (failure) (get failure :error)))
@@ -544,6 +564,19 @@
                  (formatRatio (get cmp :latestVsPreviousMajor)) " | **"
                  (formatRatio (get cmp :latestVsPreviousMinor)) "** |")))
         (setq wIdx (1+ wIdx)))
+      (js-call lines :push "")
+      (js-call lines :push "All raw samples are retained in acquisition order to diagnose timing variation. Overlapping ranges do not waive a slower median: every latest median must improve over Emacs and must not regress against an active prior version.")
+      (js-call lines :push "")
+      (js-call lines :push "| Dimension | Workload | Samples (ms per operation, acquisition order) |")
+      (js-call lines :push "| --- | --- | --- |")
+      (js-call VERSION_COMPARISON_DIMENSIONS :forEach
+        (lambda (dimension)
+          (let ((result (get results dimension)))
+            (when (and (= (get result :status) "active") (Object/hasOwn result "samplesMs"))
+              (js-call VERSION_COMPARISON_WORKLOADS :forEach
+                (lambda (workload)
+                  (let* ((id (get workload :id)) (samples (get (get result :samplesMs) id)))
+                    (js-call lines :push (str "| " dimension " | " id " | " (js-call samples :join ", ") " |")))))))))
       (js-call lines :push "")
       (js-call lines :join "\n")))
 

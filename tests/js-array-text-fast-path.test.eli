@@ -2,7 +2,7 @@
   (import "bun:test" test)
   (import "node:assert/strict" :default assert)
   (import "node:process" :default process)
-  (import "node:fs/promises" readFile writeFile mkdtemp rm mkdir readdir)
+  (import "node:fs/promises" readFile writeFile mkdtemp rm mkdir readdir symlink)
   (import "node:path" resolve)
   (import "node:os" tmpdir)
   (import "node:url" pathToFileURL)
@@ -26,6 +26,11 @@
                  (source "(defun join (values separator) (js-call values :join separator)) (defun text (values) (js-call values :toString)) (export join text)")
                  (input (resolve directory "join.eli")) (output (resolve directory "join.mjs")))
             (await (writeFile input source))
+            ;; Every compiler generation imports the formal runtime package.
+            ;; Declare it in this isolated fixture rather than inheriting the
+            ;; checkout's resolution by accident.
+            (await (mkdir (resolve directory "node_modules")))
+            (await (symlink (js-call process :cwd) (resolve directory "node_modules/eliscript") "dir"))
             (let ((seeded (spawnSync (resolve "bin/eliscript-seed") (js-array "--output" output input) (js-object :encoding "utf8" :timeout 30000))))
               (js-call assert :equal (get seeded :status) 0 (get seeded :stderr)))
             (let* ((canonical (js-call compiler :compile_string source input))
@@ -41,6 +46,8 @@
                     (js-call assert :throws (lambda () (js-call m :join cycle ",")) (lambda (error) (let ((diagnostic (get error :eliscriptDiagnostic))) (= (if (nullish? diagnostic) undefined (get diagnostic :code)) "ELI-RT0009"))))))
                 (let ((out (resolve directory (str "g" generation))) (artifacts (js-array)) (index 0))
                   (await (mkdir out))
+                  (await (mkdir (resolve out "node_modules")))
+                  (await (symlink (js-call process :cwd) (resolve out "node_modules/eliscript") "dir"))
                   (while (< index (get files :length))
                     (let* ((file (aref files index)) (filename (resolve "bootstrap/compiler" file)) (source (await (readFile filename "utf8")))
                            (target (js-call file :replace (new globalThis.RegExp "\\.eli$") ".mjs"))

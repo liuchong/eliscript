@@ -52,35 +52,76 @@
 
   (defun typeof-value (value) (js* "typeof value"))
   (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
-  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+  (defconst host-generator (js* "(create) => function* () { yield* create(this); }"))
   (defun bit-ushr (a b) (js* "a >>> b"))
   (defun bit-shl (a b) (js* "a << b"))
   (defun bit-and (a b) (js* "a & b"))
   (defun bit-or-zero (a) (js* "a | 0"))
+  ;; Internal trie indices and levels have already passed integer validation.
+  ;; Keep their host-number arithmetic separate from polymorphic Lisp numbers.
+  (defun index-less? (a b) (js* "a < b"))
+  (defun index-greater? (a b) (js* "a > b"))
+  (defun index-at-least? (a b) (js* "a >= b"))
+  (defun index-subtract (a b) (js* "a - b"))
   (defconst MAX_COUNT 2147483647)
   (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
   (defconst VECTOR_HASH_TAG 1327180861)
   (defconst SUBVECTOR_STATE (new globalThis/WeakMap))
+  (defconst native-call (get (get globalThis.Function :prototype) :call))
+  (defvar vector-metadata-reader undefined)
 
   (defun callable? (value)
     (= (funcall typeof-value value) "function"))
 
-  (defun method (implementation name arity)
-    (let ((function (funcall
-                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
-                      implementation
-                      name)))
-      (Object/defineProperty function "length" (js-object :value arity :configurable t))
-      function))
-
-  (defun define-method (target key name arity implementation)
+  (defun define-method-value (target key value)
     (Object/defineProperty
       target
       key
       (js-object
-        :value (method implementation name arity)
+        :value value
         :writable t
         :configurable t)))
+
+  ;; Exact host signatures avoid collecting and expanding the same arguments
+  ;; twice. Bodies below remain Eli; these stubs only supply dynamic `this`
+  ;; and retain native concise-method identity and non-constructibility.
+  (defun zero-method (implementation name)
+    (funcall (js* "(fn, name) => ({ [name]() { return fn(this); } })[name]") implementation name))
+
+  (defun define-zero-method (target key name implementation)
+    (define-method-value target key (zero-method implementation name)))
+
+  (defun define-unary-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](value) { return fn(this, value); } })[name]") implementation name)))
+
+  (defun define-binary-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](first, second) { return fn(this, first, second); } })[name]") implementation name)))
+
+  (defun define-unary-rest-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](first, ...args) { return fn(this, first, args); } })[name]") implementation name)))
+
+  (defun define-optional-unary-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](value = undefined) { return fn(this, value); } })[name]") implementation name)))
+
+  (defun define-optional-binary-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](first, second = undefined) { return fn(this, first, second); } })[name]") implementation name)))
+
+  (defun define-unary-static-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](value) { return fn(value); } })[name]") implementation name)))
+
+  (defun define-binary-static-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](first, second) { return fn(first, second); } })[name]") implementation name)))
+
+  (defun define-pair-static-method (target key name implementation)
+    (define-method-value target key
+      (funcall (js* "(fn, name) => ({ [name](first, second, metadata = null) { return fn(first, second, metadata); } })[name]") implementation name)))
 
   (defun define-getter (target key name implementation)
     (Object/defineProperty
@@ -100,29 +141,52 @@
                (str operation " index " (funcall globalThis/String index) " is outside [0, " upper-bound ")")))))
 
   (defun tail-offset (count)
-    (if (< count BRANCH_WIDTH)
+    (if (index-less? count BRANCH_WIDTH)
         0
-        (funcall bit-shl (funcall bit-ushr (- count 1) BRANCH_BITS) BRANCH_BITS)))
+        (funcall bit-shl (funcall bit-ushr (index-subtract count 1) BRANCH_BITS) BRANCH_BITS)))
 
   (defun array-for (state index)
-    (if (>= index (tail-offset (get state :count)))
+    (if (index-at-least? index (tail-offset (get state :count)))
         (get state :tail)
         (let ((node (get state :root))
               (level (get state :shift)))
-          (while (> level 0)
+          (while (index-greater? level 0)
             (visitNode node)
             (setq node (get (get node :slots)
                             (funcall bit-and (funcall bit-ushr index level) BRANCH_MASK))
-                  level (- level BRANCH_BITS)))
+                  level (index-subtract level BRANCH_BITS)))
           (visitNode node)
           (get node :slots))))
+
+  (defun publish-path-value (state value)
+    ;; Zipper parent links are frozen only when first exposed to user code.
+    ;; Keep this cold publication path out of ordinary indexed access.
+    (when (and (= (get state :count) 2)
+               (not (eq (get state :metadata) nil))
+               (Array/isArray value)
+               (= (js-length value) 6)
+               (eq (get value 5) t)
+               (not (Object/isFrozen value)))
+      (Object/freeze value))
+    value)
+
+  (defun vector-index-value (state index)
+    (if (index-greater? (get state :count) BRANCH_WIDTH)
+      (aref (array-for state index) (funcall bit-and index BRANCH_MASK))
+      (let ((value (aref (get state :tail) index)))
+        (if (= index 1) (publish-path-value state value) value))))
+
+  (defun missing-vector-index (state index fallback)
+    (if (or (undefined? fallback) (eq fallback MISSING))
+      (assert-index index (get state :count) "nth")
+      fallback))
 
   (defun reverse-vector-iterator (state)
     (let ((index (- (get state :count) 1))
           (chunk EMPTY_TAIL)
           (chunk-start (get state :count)))
       (js-object
-        :next (method
+        :next (zero-method
                 (lambda (_self)
                   (if (< index 0)
                       (js-object :value undefined :done t)
@@ -140,7 +204,7 @@
     (let* ((rev (funcall globalThis/Boolean reverse))
            (index (if rev (- end 1) start)))
       (js-object
-        :next (method
+        :next (zero-method
                 (lambda (_self)
                   (if (if rev (< index start) (>= index end))
                       (js-object :value undefined :done t)
@@ -295,7 +359,7 @@
     (get state :tail))
 
   (let ((tproto (get TransientVector :prototype)))
-    (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
+    (define-unary-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]"
       (lambda (self value)
         (let ((state (active-transient-vector-state self)))
           (when (= (get state :count) MAX_COUNT)
@@ -334,7 +398,7 @@
           (put state "count" (+ (get state :count) 1))
           (put state "changed" t)
           self)))
-    (define-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]" 2
+    (define-binary-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]"
       (lambda (self index value)
         (let ((state (active-transient-vector-state self)))
           (if (= index (get state :count))
@@ -354,7 +418,7 @@
                             (get state :owner))))
                 (put state "changed" t)
                 self)))))
-    (define-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]" 0
+    (define-zero-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]"
       (lambda (self)
         (let* ((state (active-transient-vector-state self))
                (result (if (get state :changed)
@@ -369,7 +433,7 @@
           (put state "owner" nil)
           (recordTransientVectorPersistent)
           result)))
-    (define-method tproto "toJSON" "toJSON" 0
+    (define-zero-method tproto "toJSON" "toJSON"
       (lambda (_self)
         (throw (new globalThis/TypeError "transient vectors cannot be serialized"))))
     (define-getter tproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
@@ -401,7 +465,7 @@
           (chunk-length 0))
       (let ((iterator
               (js-object
-                :next (method
+                :next (zero-method
                         (lambda (_self)
                           (if (>= index (get state :count))
                               (js-object :value undefined :done t)
@@ -415,36 +479,13 @@
                                   (setq offset (+ offset 1)
                                         index (+ index 1))
                                   (js-object :value value :done false)))))
-                        "next"
-                        0))))
+                        "next"))))
         (put iterator (get globalThis/Symbol :iterator)
-              (method (lambda (self) self) "[Symbol.iterator]" 0))
+              (zero-method (lambda (self) self) "[Symbol.iterator]"))
         iterator)))
 
-  (let ((proto (get PersistentVector :prototype)))
-    (define-method PersistentVector "empty" "empty" 0
-      (lambda (_self) EMPTY_VECTOR))
-    (define-method PersistentVector "single" "single" 1
-      (lambda (_self value)
-        (make-vector 1 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array value)) nil)))
-    (define-method PersistentVector "pairWithMeta" "pairWithMeta" 2
-      (lambda (_self first second &rest args)
-        (let ((metadata (if (= (js-length args) 0) nil (get args 0))))
-          (make-vector 2 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array first second)) metadata))))
-    (define-method PersistentVector "rawSlot" "rawSlot" 2
-      (lambda (_self vector index)
-        (get (get (aref vector VECTOR_STATE) :tail) index)))
-    (define-method PersistentVector "from" "from" 1
-      (lambda (_self iterable)
-        (cond
-          ((funcall instance-of? iterable PersistentVector)
-           iterable)
-          ((and (Array/isArray iterable)
-                (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
-                (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
-                (eq (aref iterable (get globalThis/Symbol :iterator))
-                    (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
-           (let ((length (js-length iterable)))
+  (defun vector-from-array (iterable)
+    (let ((length (js-length iterable)))
              (cond
                ((= length 0) EMPTY_VECTOR)
                ((<= length BRANCH_WIDTH)
@@ -466,38 +507,51 @@
                       (setq tail (allocateTail (js-call iterable :slice count next-end))
                             count next-end)))
                   (make-vector length shift root tail))))))
-          (t
-           (let ((result EMPTY_VECTOR))
+
+  (defun vector-from-iterable (iterable)
+    (let ((result EMPTY_VECTOR))
              (for-each-iterable iterable (lambda (value) (setq result (js-call result :conj value))))
-             result)))))
+             result))
+
+  (let ((proto (get PersistentVector :prototype)))
+    (define-zero-method PersistentVector "empty" "empty"
+      (lambda (_self) EMPTY_VECTOR))
+    (define-unary-static-method PersistentVector "single" "single"
+      (lambda (value)
+        (make-vector 1 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array value)) nil)))
+    (define-pair-static-method PersistentVector "pairWithMeta" "pairWithMeta"
+      (lambda (first second metadata)
+        (make-vector 2 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array first second)) metadata)))
+    (define-binary-static-method PersistentVector "rawSlot" "rawSlot"
+      (lambda (vector index)
+        (get (get (aref vector VECTOR_STATE) :tail) index)))
+    (define-unary-static-method PersistentVector "from" "from"
+      (lambda (iterable)
+        (cond
+          ((funcall instance-of? iterable PersistentVector)
+           iterable)
+          ((and (Array/isArray iterable)
+                (eq (Object/getPrototypeOf iterable) (get globalThis/Array :prototype))
+                (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
+                (eq (aref iterable (get globalThis/Symbol :iterator))
+                    (aref (get globalThis/Array :prototype) (get globalThis/Symbol :iterator))))
+           (vector-from-array iterable))
+          (t
+           (vector-from-iterable iterable)))))
     (define-getter proto "count" "count"
       (lambda (self) (get (aref self VECTOR_STATE) :count)))
     (define-getter proto "size" "size"
       (lambda (self) (get (aref self VECTOR_STATE) :count)))
-    (define-method proto "nth" "nth" 1
-      (lambda (self index &rest args)
-        (let ((not-found (if (= (js-length args) 0) MISSING (get args 0)))
-              (state (aref self VECTOR_STATE)))
-          (if (and (or (eq (funcall bit-or-zero index) index)
-                       (Number/isInteger index))
-                   (>= index 0)
-                   (< index (get state :count)))
-              (if (<= (get state :count) BRANCH_WIDTH)
-                  (let ((value (get (get state :tail) index)))
-                    (when (and (= index 1)
-                               (= (get state :count) 2)
-                               (not (eq (get state :metadata) nil))
-                               (Array/isArray value)
-                               (= (js-length value) 6)
-                               (eq (get value 5) t)
-                               (not (Object/isFrozen value)))
-                      (Object/freeze value))
-                    value)
-                  (get (array-for state index) (funcall bit-and index BRANCH_MASK)))
-              (if (not (eq not-found MISSING))
-                  not-found
-                  (assert-index index (get state :count) "nth"))))))
-    (define-method proto "assoc" "assoc" 2
+    (define-method-value proto "nth"
+      (funcall (js* "(fn) => ({ nth(index, notFound = undefined) { return fn(this, index, notFound); } }).nth")
+        (lambda (self index fallback)
+        (let ((state (aref self VECTOR_STATE)))
+          (if (if (if (eq (funcall bit-or-zero index) index) t (Number/isInteger index))
+                  (if (index-at-least? index 0) (index-less? index (get state :count)) false)
+                  false)
+            (vector-index-value state index)
+            (missing-vector-index state index fallback))))))
+    (define-binary-method proto "assoc" "assoc"
       (lambda (self index value)
         (let ((state (aref self VECTOR_STATE)))
           (if (= index (get state :count))
@@ -519,7 +573,7 @@
                       (assoc-node (get state :shift) (get state :root) index value)
                       (get state :tail)
                       (get state :metadata))))))))
-    (define-method proto "conj" "conj" 1
+    (define-unary-method proto "conj" "conj"
       (lambda (self value)
         (let ((state (aref self VECTOR_STATE)))
           (when (= (get state :count) MAX_COUNT)
@@ -550,15 +604,16 @@
                   root
                   (allocateTail (js-array value))
                   (get state :metadata)))))))
-    (define-method proto "peek" "peek" 0
-      (lambda (self &rest args)
-        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+    (define-method-value proto "peek"
+      (funcall (js* "(fn) => ({ peek(notFound = undefined) { return fn(this, notFound); } }).peek")
+        (lambda (self fallback)
+        (let ((not-found (if (undefined? fallback) nil fallback))
               (state (aref self VECTOR_STATE)))
           (if (= (get state :count) 0)
               not-found
               (let ((tail (get state :tail)))
-                (get tail (- (js-length tail) 1)))))))
-    (define-method proto "pop" "pop" 0
+                (get tail (index-subtract (js-length tail) 1))))))))
+    (define-zero-method proto "pop" "pop"
       (lambda (self)
         (let ((state (aref self VECTOR_STATE)))
           (when (= (get state :count) 0)
@@ -588,8 +643,8 @@
                  root
                  tail
                  (get state :metadata))))))))
-    (define-method proto "reduce" "reduce" 1
-      (lambda (self reducer &rest initial)
+    (define-unary-rest-method proto "reduce" "reduce"
+      (lambda (self reducer initial)
         (unless (callable? reducer)
           (throw (new globalThis/TypeError "persistent vector reducer must be a function")))
         (let ((state (aref self VECTOR_STATE))
@@ -612,47 +667,47 @@
                       index (+ index 1)
                       offset (+ offset 1)))))
           accumulator)))
-    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+    (define-zero-method proto COLLECTION_COUNT "[eliscript.collection.count]"
       (lambda (self) (get self :count)))
-    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+    (define-zero-method proto COLLECTION_EMPTY "[eliscript.collection.empty]"
       (lambda (self) (empty-vector-with-metadata (get (aref self VECTOR_STATE) :metadata))))
-    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+    (define-unary-method proto COLLECTION_CONJ "[eliscript.collection.conj]"
       (lambda (self value) (js-call self :conj value)))
-    (define-method proto COLLECTION_PEEK "[eliscript.collection.peek]" 0
+    (define-zero-method proto COLLECTION_PEEK "[eliscript.collection.peek]"
       (lambda (self) (js-call self :peek)))
-    (define-method proto COLLECTION_POP "[eliscript.collection.pop]" 0
+    (define-zero-method proto COLLECTION_POP "[eliscript.collection.pop]"
       (lambda (self) (js-call self :pop)))
-    (define-method proto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+    (define-zero-method proto COLLECTION_RSEQ "[eliscript.collection.rseq]"
       (lambda (self)
         (let ((state (aref self VECTOR_STATE)))
           (if (= (get state :count) 0)
               nil
               (sequenceView (lambda () (reverse-vector-iterator state)) (get state :count))))))
-    (define-method proto COLLECTION_GET "[eliscript.collection.get]" 1
-      (lambda (self index &rest args)
-        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+    (define-optional-binary-method proto COLLECTION_GET "[eliscript.collection.get]"
+      (lambda (self index fallback)
+        (let ((not-found (if (undefined? fallback) nil fallback)))
           (js-call self :nth index not-found))))
-    (define-method proto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+    (define-binary-method proto COLLECTION_ASSOC "[eliscript.collection.assoc]"
       (lambda (self index value) (js-call self :assoc index value)))
-    (define-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+    (define-unary-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]"
       (lambda (self index)
         (and (Number/isInteger index) (>= index 0) (< index (get self :count)))))
-    (define-method proto COLLECTION_NTH "[eliscript.collection.nth]" 1
-      (lambda (self index &rest not-found)
+    (define-unary-rest-method proto COLLECTION_NTH "[eliscript.collection.nth]"
+      (lambda (self index not-found)
         (if (= (js-length not-found) 0)
             (js-call self :nth index)
             (js-call self :nth index (get not-found 0)))))
-    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+    (define-zero-method proto COLLECTION_SEQ "[eliscript.collection.seq]"
       (lambda (self)
         (if (= (get self :count) 0)
             nil
             (sequenceView
               (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
               (get self :count)))))
-    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
-      (lambda (self reducer &rest initial)
+    (define-unary-rest-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]"
+      (lambda (self reducer initial)
         (apply reduceIterable self reducer initial)))
-    (define-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+    (define-binary-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]"
       (lambda (self reducer initial)
         (let ((state (aref self VECTOR_STATE))
               (result initial)
@@ -671,40 +726,37 @@
                   (setq result (unreducedValue result)
                         halted t)))))
           result)))
-    (define-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+    (define-zero-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]"
       (lambda (self) (make-transient-vector self)))
-    (define-method proto "toArray" "toArray" 0
+    (define-zero-method proto "toArray" "toArray"
       (lambda (self)
         (js-call self :reduce
           (lambda (values value)
             (js-call values :push value)
             values)
           (js-array))))
-    (define-method proto "sliceVector" "sliceVector" 2
+    (define-binary-method proto "sliceVector" "sliceVector"
       (lambda (self start end)
         (let* ((state (aref self VECTOR_STATE))
-               (length (- end start)))
+               (length (index-subtract end start)))
           (cond
             ((<= length 0) EMPTY_VECTOR)
             ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
              self)
             (t
-             (let ((values (new globalThis/Array length))
-                   (out-index 0)
-                   (index start))
-               (while (< index end)
+             (let ((values (new globalThis.Array length)) (out-index 0) (index start))
+               (while (index-less? index end)
                  (let* ((chunk (array-for state index))
                         (chunk-offset (funcall bit-and index BRANCH_MASK))
-                        (chunk-base (- index chunk-offset))
-                        (chunk-end (Math/min (- end chunk-base) (js-length chunk)))
-                        (i chunk-offset))
-                   (while (< i chunk-end)
-                     (put values out-index (get chunk i))
-                     (setq out-index (+ out-index 1)
-                           i (+ i 1)))
+                        (chunk-base (index-subtract index chunk-offset))
+                        (chunk-end (Math/min (index-subtract end chunk-base) (js-length chunk)))
+                        (offset chunk-offset))
+                   (while (index-less? offset chunk-end)
+                     (put values out-index (aref chunk offset))
+                     (setq out-index (1+ out-index) offset (1+ offset)))
                    (setq index (+ chunk-base chunk-end))))
                (js-call PersistentVector :from values)))))))
-    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+    (define-binary-method proto VALUE_EQUAL "[eliscript.value.equal]"
       (lambda (self other equal)
         (cond
           ((eq self other) t)
@@ -724,12 +776,12 @@
                        (unless (funcall globalThis/Boolean (funcall equal (get left-step :value) (get right-step :value)))
                          (setq matched false))))))
              matched)))))
-    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+    (define-unary-method proto VALUE_HASH "[eliscript.value.hash]"
       (lambda (self hash)
         (orderedCollectionHash self hash VECTOR_HASH_TAG)))
-    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
-      (lambda (self) (get (aref self VECTOR_STATE) :metadata)))
-    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+    (define-zero-method proto METADATA_READ "[eliscript.metadata.read]" read-vector-metadata)
+    (setq vector-metadata-reader (aref proto METADATA_READ))
+    (define-unary-method proto METADATA_WITH "[eliscript.metadata.with]"
       (lambda (self metadata)
         (let ((state (aref self VECTOR_STATE)))
           (if (eq metadata (get state :metadata))
@@ -763,13 +815,13 @@
           (- (get state :end) (get state :start)))))
     (define-getter subproto "size" "size"
       (lambda (self) (get self :count)))
-    (define-method subproto "sliceVector" "sliceVector" 2
+    (define-binary-method subproto "sliceVector" "sliceVector"
       (lambda (self start end)
         (let ((state (js-call SUBVECTOR_STATE :get self)))
           (js-call (get state :vector) :sliceVector (+ (get state :start) start) (+ (get state :start) end)))))
-    (define-method subproto "nth" "nth" 1
-      (lambda (self index &rest args)
-        (let* ((not-found (if (= (js-length args) 0) MISSING (get args 0)))
+    (define-optional-binary-method subproto "nth" "nth"
+      (lambda (self index fallback)
+        (let* ((not-found (if (undefined? fallback) MISSING fallback))
                (state (js-call SUBVECTOR_STATE :get self))
                (count (- (get state :end) (get state :start))))
           (if (or (not (Number/isInteger index)) (< index 0) (>= index count))
@@ -777,7 +829,7 @@
                   not-found
                   (assert-index index count "subvec nth"))
               (js-call (get state :vector) :nth (+ (get state :start) index))))))
-    (define-method subproto "assoc" "assoc" 2
+    (define-binary-method subproto "assoc" "assoc"
       (lambda (self index value)
         (let* ((state (js-call SUBVECTOR_STATE :get self))
                (count (- (get state :end) (get state :start))))
@@ -793,17 +845,17 @@
               (get state :start)
               (Math/max (get state :end) (+ absolute-index 1))
               (get state :metadata))))))
-    (define-method subproto "conj" "conj" 1
+    (define-unary-method subproto "conj" "conj"
       (lambda (self value)
         (js-call self :assoc (get self :count) value)))
-    (define-method subproto "peek" "peek" 0
-      (lambda (self &rest args)
-        (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
+    (define-optional-unary-method subproto "peek" "peek"
+      (lambda (self fallback)
+        (let ((not-found (if (undefined? fallback) nil fallback))
               (state (js-call SUBVECTOR_STATE :get self)))
           (if (= (get state :start) (get state :end))
               not-found
               (js-call (get state :vector) :nth (- (get state :end) 1))))))
-    (define-method subproto "pop" "pop" 0
+    (define-zero-method subproto "pop" "pop"
       (lambda (self)
         (let ((state (js-call SUBVECTOR_STATE :get self)))
           (when (= (get state :start) (get state :end))
@@ -815,8 +867,8 @@
                 (get state :start)
                 (- (get state :end) 1)
                 (get state :metadata))))))
-    (define-method subproto "reduce" "reduce" 1
-      (lambda (self reducer &rest initial)
+    (define-unary-rest-method subproto "reduce" "reduce"
+      (lambda (self reducer initial)
         (unless (callable? reducer)
           (throw (new globalThis/TypeError "persistent subvector reducer must be a function")))
         (let ((state (js-call SUBVECTOR_STATE :get self))
@@ -834,17 +886,17 @@
             (setq result (funcall reducer result (js-call (get state :vector) :nth (+ (get state :start) index)) index)
                   index (+ index 1)))
           result)))
-    (define-method subproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+    (define-zero-method subproto COLLECTION_COUNT "[eliscript.collection.count]"
       (lambda (self) (get self :count)))
-    (define-method subproto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+    (define-zero-method subproto COLLECTION_EMPTY "[eliscript.collection.empty]"
       (lambda (self) (empty-vector-with-metadata (get (js-call SUBVECTOR_STATE :get self) :metadata))))
-    (define-method subproto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+    (define-unary-method subproto COLLECTION_CONJ "[eliscript.collection.conj]"
       (lambda (self value) (js-call self :conj value)))
-    (define-method subproto COLLECTION_PEEK "[eliscript.collection.peek]" 0
+    (define-zero-method subproto COLLECTION_PEEK "[eliscript.collection.peek]"
       (lambda (self) (js-call self :peek)))
-    (define-method subproto COLLECTION_POP "[eliscript.collection.pop]" 0
+    (define-zero-method subproto COLLECTION_POP "[eliscript.collection.pop]"
       (lambda (self) (js-call self :pop)))
-    (define-method subproto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0
+    (define-zero-method subproto COLLECTION_RSEQ "[eliscript.collection.rseq]"
       (lambda (self)
         (let ((state (js-call SUBVECTOR_STATE :get self)))
           (if (= (get state :start) (get state :end))
@@ -853,31 +905,31 @@
                 (lambda ()
                   (vector-range-iterator (get state :vector) (get state :start) (get state :end) t))
                 (- (get state :end) (get state :start)))))))
-    (define-method subproto COLLECTION_GET "[eliscript.collection.get]" 1
-      (lambda (self index &rest args)
-        (let ((not-found (if (= (js-length args) 0) nil (get args 0))))
+    (define-optional-binary-method subproto COLLECTION_GET "[eliscript.collection.get]"
+      (lambda (self index fallback)
+        (let ((not-found (if (undefined? fallback) nil fallback)))
           (js-call self :nth index not-found))))
-    (define-method subproto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+    (define-binary-method subproto COLLECTION_ASSOC "[eliscript.collection.assoc]"
       (lambda (self index value) (js-call self :assoc index value)))
-    (define-method subproto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+    (define-unary-method subproto COLLECTION_CONTAINS "[eliscript.collection.contains]"
       (lambda (self index)
         (and (Number/isInteger index) (>= index 0) (< index (get self :count)))))
-    (define-method subproto COLLECTION_NTH "[eliscript.collection.nth]" 1
-      (lambda (self index &rest not-found)
+    (define-unary-rest-method subproto COLLECTION_NTH "[eliscript.collection.nth]"
+      (lambda (self index not-found)
         (if (= (js-length not-found) 0)
             (js-call self :nth index)
             (js-call self :nth index (get not-found 0)))))
-    (define-method subproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+    (define-zero-method subproto COLLECTION_SEQ "[eliscript.collection.seq]"
       (lambda (self)
         (if (= (get self :count) 0)
             nil
             (sequenceView
               (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
               (get self :count)))))
-    (define-method subproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
-      (lambda (self reducer &rest initial)
+    (define-unary-rest-method subproto COLLECTION_REDUCE "[eliscript.collection.reduce]"
+      (lambda (self reducer initial)
         (apply reduceIterable self reducer initial)))
-    (define-method subproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+    (define-binary-method subproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]"
       (lambda (self reducer initial)
         (let ((state (js-call SUBVECTOR_STATE :get self))
               (result initial)
@@ -890,15 +942,15 @@
               (setq result (unreducedValue result)
                     halted t)))
           result)))
-    (define-method subproto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+    (define-zero-method subproto EDITABLE_TRANSIENT "[eliscript.transient.editable]"
       (lambda (self)
         (let* ((state (js-call SUBVECTOR_STATE :get self))
                (builder (make-transient-vector (empty-vector-with-metadata (get state :metadata)))))
           (for-each-iterable self (lambda (value) (js-call (aref builder TRANSIENT_CONJ) :call builder value)))
           builder)))
-    (define-method subproto METADATA_READ "[eliscript.metadata.read]" 0
+    (define-zero-method subproto METADATA_READ "[eliscript.metadata.read]"
       (lambda (self) (get (js-call SUBVECTOR_STATE :get self) :metadata)))
-    (define-method subproto METADATA_WITH "[eliscript.metadata.with]" 1
+    (define-unary-method subproto METADATA_WITH "[eliscript.metadata.with]"
       (lambda (self metadata)
         (let ((state (js-call SUBVECTOR_STATE :get self)))
           (if (eq metadata (get state :metadata))
@@ -908,7 +960,7 @@
                 (get state :start)
                 (get state :end)
                 metadata)))))
-    (define-method subproto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+    (define-zero-method subproto (get globalThis/Symbol :iterator) "[Symbol.iterator]"
       (lambda (self)
         (let ((state (js-call SUBVECTOR_STATE :get self)))
           (vector-range-iterator (get state :vector) (get state :start) (get state :end)))))
@@ -945,6 +997,17 @@
   (defun readPersistentVectorView (value)
     (js-call SUBVECTOR_STATE :get value))
 
+  (defun read-vector-metadata (self)
+    (get (aref self VECTOR_STATE) :metadata))
+
+  (defun readPersistentVectorMetadataReader (method call)
+    ;; Select the actual Eli body only for this exact method and native call.
+    ;; Its original state-slot read is retained, including proxy/accessor effects.
+    ;; Alternate methods and changed `.call` hooks take normal dispatch.
+    (if (and (eq method vector-metadata-reader) (eq call native-call))
+      read-vector-metadata
+      undefined))
+
   (Object/defineProperty subvec "length" (js-object :value 2 :configurable t))
 
   (export
@@ -953,4 +1016,5 @@
     persistentVector
     subvec
     isPersistentVector
-    readPersistentVectorView))
+    readPersistentVectorView
+    readPersistentVectorMetadataReader))

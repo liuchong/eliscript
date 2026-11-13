@@ -12,6 +12,8 @@
   (defasync compileFamily (command outputRoot environment)
     (await (mkdir outputRoot (js-object :recursive t)))
     (await (symlink (resolve root "runtime") (resolve outputRoot "runtime") "dir"))
+    (await (mkdir (resolve outputRoot "node_modules") (js-object :recursive t)))
+    (await (symlink root (resolve outputRoot "node_modules/eliscript") "dir"))
     (let ((index 0))
       (while (< index (js-length units))
         (let* ((unit (aref units index)) (target (resolve outputRoot (aref unit 1))))

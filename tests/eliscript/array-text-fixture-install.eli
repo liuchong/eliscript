@@ -13,7 +13,7 @@
     (lambda (argument) (= (resolve root argument) (resolve root suite)))))
   (js-call assert :strictEqual
     (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-    "f155d3fd35c94a1407f610bb1632b23f12c2ea7aa55e2dd5dd3b67af4de45230")
+    "d19ea168377140f45f2427a44fa5fc42b4e9155412d450f9df55e60a2702c752")
   (defconst original (Object/assign (js-object) files))
   (defconst runtime-url (get (pathToFileURL (resolve root "runtime/array-text.mjs")) :href))
   (defasync readFile (path &rest options)

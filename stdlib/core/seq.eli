@@ -274,6 +274,14 @@
                   (setq index (1+ index))
                   (sequence-iterator-result value false)))))))
       limit))
+  (defun first-reduced (collection not-found-value)
+    (let ((found false) (found-value nil))
+      (reduce collection
+        (lambda (missing value)
+          (setq found t found-value value)
+          (reduced missing))
+        nil)
+      (if found found-value not-found-value)))
   (defun first
     (collection &optional not-found-value)
     (cond
@@ -281,15 +289,7 @@
         (if (get collection :isEmpty) not-found-value (js-call collection :first not-found-value)))
       ((isPersistentVector collection)
         (if (= (get collection :count) 0) not-found-value (js-call collection :nth 0)))
-      (t
-        (let ((found false) (found-value nil))
-          (reduce
-            collection
-            (lambda (missing value)
-              (setq found t found-value value)
-              (reduced missing))
-            nil)
-          (if found found-value not-found-value)))))
+      (t (first-reduced collection not-found-value))))
   (defun nth-rest
     (limit collection)
     (require-non-negative-safe-integer limit "nth-rest limit")
@@ -328,6 +328,12 @@
             (progn (setq position (1+ position)) missing)))
         nil)
       (if found found-value not-found-value)))
+  (defun last-reduced (collection not-found-value)
+    (let ((found false) (last-value nil))
+      (reduce collection
+        (lambda (missing value) (setq found t last-value value) missing)
+        nil)
+      (if found last-value not-found-value)))
   (defun last
     (collection &optional not-found-value)
     (cond
@@ -335,13 +341,24 @@
         (js-call collection :peek not-found-value))
       ((implementsProtocolOperation IReversible "rseq" collection)
         (first (rseq collection) not-found-value))
-      (t
-        (let ((found false) (last-value nil))
+      (t (last-reduced collection not-found-value))))
+  (defun take-last-reduced (limit collection)
+    (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
           (reduce
             collection
-            (lambda (missing value) (setq found t last-value value) missing)
+            (lambda
+              (state value)
+              (if (< count limit)
+                (progn (put ring count value) (setq count (1+ count)))
+                (progn (put ring start value) (setq start (% (1+ start) limit))))
+              state)
             nil)
-          (if found last-value not-found-value)))))
+          (let ((builder (transient EMPTY_VECTOR)) (index 0))
+            (while (< index count)
+              (conjBang builder (js-nth (% (+ start index) limit) ring))
+              (setq index (1+ index)))
+            (persistentBang builder))))
+
   (defun take-last
     (limit collection)
     (require-non-negative-safe-integer limit "take-last limit")
@@ -360,21 +377,7 @@
                     (conjBang builder (js-call collection :nth index))
                     (setq index (1+ index)))
                   (persistentBang builder))))))
-        (let ((ring (funcall sequence-ring limit)) (count 0) (start 0))
-          (reduce
-            collection
-            (lambda
-              (state value)
-              (if (< count limit)
-                (progn (put ring count value) (setq count (1+ count)))
-                (progn (put ring start value) (setq start (% (1+ start) limit))))
-              state)
-            nil)
-          (let ((builder (transient EMPTY_VECTOR)) (index 0))
-            (while (< index count)
-              (conjBang builder (js-nth (% (+ start index) limit) ring))
-              (setq index (1+ index)))
-            (persistentBang builder))))))
+        (take-last-reduced limit collection))))
   (defun drop-last
     (limit collection)
     (require-non-negative-safe-integer limit "drop-last limit")

@@ -10,7 +10,7 @@
   (defconst transientMetrics (js-object :nodeClones 0 :nodeMutations 0 :tailCopies 0 :tailMutations 0 :persistentCalls 0 :invalidCalls 0))
   ;; Native class construction is host glue; ownership and node copying are Eli.
   (defconst VectorNode (funcall
-    (js* "(implementation) => class VectorNode { constructor(...args) { return implementation(this, ...args); } }")
+    (js* "(implementation) => class VectorNode { constructor(slots = [], owner = null) { implementation(this, slots, owner); } }")
     (lambda (self slots owner)
       (when (undefined? slots) (setq slots (js-array)))
       (when (undefined? owner) (setq owner nil))

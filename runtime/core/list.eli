@@ -21,7 +21,7 @@
     VALUE_HASH
     orderedCollectionHash)
 
-  (defconst instance-of? (js* "(value, Constructor) => value instanceof Constructor"))
+  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
   (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
   (defconst MAX_COUNT 2147483647)
   (defconst MISSING (funcall globalThis/Symbol "eliscript.list.missing"))

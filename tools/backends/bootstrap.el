@@ -115,6 +115,21 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
                 (with-temp-file map-path (insert (json-serialize map))))))))
       (set-file-modes full #o755))))
 
+(defun eliscript-backend-reset-runtime-support ()
+  "Discard the bootstrap-owned copied runtime before regenerating it.
+Public project builds still reject conflicting user output.  This exact path
+belongs to the compiler build; its former bytes are not an incremental input."
+  (dolist (relative '("dist" "dist/runtime" "dist/runtime/node_modules"
+                      "dist/runtime/node_modules/eliscript"))
+    (when (file-symlink-p (expand-file-name relative eliscript-backend-bootstrap-root))
+      (error "Bootstrap runtime support output is a symlink: %s" relative)))
+  (let ((directory (expand-file-name "dist/runtime/node_modules/eliscript"
+                                     eliscript-backend-bootstrap-root)))
+    (when (file-exists-p directory)
+      (unless (file-directory-p directory)
+        (error "Bootstrap runtime support output is not a directory"))
+      (delete-directory directory t))))
+
 (defun eliscript-backend-bootstrap-runtimes ()
   "Prepare maintained runtime modules before loading generated compiler tools."
   (let ((default-directory eliscript-backend-bootstrap-root))
@@ -569,6 +584,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                   ("tools/surface/generate-api.eli" . "tools/surface/generate-api.mjs")
                   ("tools/performance/version-comparison.eli" . "tools/performance/version-comparison.mjs")
                   ("tools/performance/version-comparison-runner.eli" . "tools/performance/version-comparison-runner.mjs")
+                  ("tools/performance/version-comparison-workloads.eli" . "tools/performance/version-comparison-workloads.mjs")
                   ("tools/backends/eliscript/compiler-unicode-profile-host.eli" . "tools/backends/compiler-unicode-profile-host.mjs")
                   ("tools/backends/eliscript/managed-source-view.eli" . "tools/backends/managed-source-view.mjs")
                   ("tools/backends/eliscript/compiler-corpus-matchers.eli" . "tools/backends/compiler-corpus-matchers.mjs")
@@ -1472,6 +1488,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
       (eliscript-compile-file-with-source-map
        source (expand-file-name (concat (file-name-base source) ".mjs") output)))
     (setenv "ELISCRIPT_BOOTSTRAP_MODULE_DIR" output)
+    (eliscript-backend-reset-runtime-support)
     (let ((failures nil))
       (with-temp-buffer
         (let ((status (call-process

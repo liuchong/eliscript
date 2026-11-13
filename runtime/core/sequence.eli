@@ -186,24 +186,22 @@
     (require-function producer "generate producer")
     (sequenceView (indexed-factory producer length) length))
 
-  (defun first (collection &rest optional)
-    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
-                         nil
-                         (get optional 0))))
-      (cond
-        ((isPersistentList collection)
-         (if (get collection :isEmpty) not-found (js-call collection :first not-found)))
-        ((isPersistentVector collection)
-         (if (= (get collection :count) 0) not-found (js-call collection :nth 0)))
-        (t
-         (let ((found false)
-               (found-value nil))
-           (reduce collection
-             (lambda (missing value)
-               (setq found t found-value value)
-               (reduced missing))
-             nil)
-           (if found found-value not-found))))))
+  (defun first-reduced (collection not-found)
+    (let ((found false) (found-value nil))
+      (reduce collection
+        (lambda (missing value)
+          (setq found t found-value value)
+          (reduced missing))
+        nil)
+      (if found found-value not-found)))
+
+  (defun first (collection &optional not-found)
+    (cond
+      ((isPersistentList collection)
+       (if (get collection :isEmpty) not-found (js-call collection :first not-found)))
+      ((isPersistentVector collection)
+       (if (= (get collection :count) 0) not-found (js-call collection :nth 0)))
+      (t (first-reduced collection not-found))))
 
   (defun nthRest (limit collection)
     (require-nonnegative limit "nthRest limit")
@@ -264,24 +262,43 @@
         nil)
       (if found found-value not-found)))
 
-  (defun last (collection &rest optional)
-    (let ((not-found (if (or (= (js-length optional) 0) (undefined? (get optional 0)))
-                         nil
-                         (get optional 0))))
-      (cond
-        ((isPersistentVector collection)
-         (js-call collection :peek not-found))
-        ((implementsProtocolOperation IReversible "rseq" collection)
-         (first (rseq collection) not-found))
-        (t
-         (let ((found false)
-               (last-value nil))
-           (reduce collection
-             (lambda (missing value)
-               (setq found t last-value value)
-               missing)
-             nil)
-           (if found last-value not-found))))))
+  (defun last-reduced (collection not-found)
+    (let ((found false) (last-value nil))
+      (reduce collection
+        (lambda (missing value)
+          (setq found t last-value value)
+          missing)
+        nil)
+      (if found last-value not-found)))
+
+  (defun last (collection &optional not-found)
+    (cond
+      ((isPersistentVector collection) (js-call collection :peek not-found))
+      ((implementsProtocolOperation IReversible "rseq" collection)
+       (first (rseq collection) not-found))
+      (t (last-reduced collection not-found))))
+
+  (defun take-last-reduced (limit collection)
+    (let ((ring (new globalThis/Array limit))
+             (length 0)
+             (start 0))
+         (reduce collection
+           (lambda (state value)
+             (if (< length limit)
+                 (progn
+                   (put ring length value)
+                   (setq length (1+ length)))
+                 (progn
+                   (put ring start value)
+                   (setq start (% (1+ start) limit))))
+             state)
+           nil)
+         (let ((builder (transient EMPTY_VECTOR))
+               (index 0))
+           (while (< index length)
+             (conjBang builder (get ring (% (+ start index) limit)))
+             (setq index (1+ index)))
+           (persistentBang builder))))
 
   (defun takeLast (limit collection)
     (require-nonnegative limit "takeLast limit")
@@ -302,26 +319,7 @@
                 (setq index (1+ index)))
               (persistentBang builder))))))
       (t
-       (let ((ring (new globalThis/Array limit))
-             (length 0)
-             (start 0))
-         (reduce collection
-           (lambda (state value)
-             (if (< length limit)
-                 (progn
-                   (put ring length value)
-                   (setq length (1+ length)))
-                 (progn
-                   (put ring start value)
-                   (setq start (% (1+ start) limit))))
-             state)
-           nil)
-         (let ((builder (transient EMPTY_VECTOR))
-               (index 0))
-           (while (< index length)
-             (conjBang builder (get ring (% (+ start index) limit)))
-             (setq index (1+ index)))
-           (persistentBang builder))))))
+       (take-last-reduced limit collection))))
 
   (defun dropLast (limit collection)
     (require-nonnegative limit "dropLast limit")

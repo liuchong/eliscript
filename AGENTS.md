@@ -225,9 +225,13 @@ precedence over parent rules when they address the same decision.
   `bootstrap/runtime/memory.eli` is an Emacs bootstrap input, not a second
   published runtime. Exclude that duplicate from npm without removing the
   maintained source or changing compiler-product identities.
-- **RELEASE-02** - Preserve the existing 5 MB compressed-package limit. Check
-  the actual npm file list for identical payloads of at least 1 MB; fix the
-  packaging rather than raising the limit or removing required debug assets.
+- **RELEASE-02** - Use 5 MB compressed as the package size baseline. Check the
+  actual npm file list for identical payloads of at least 1 MB and remove
+  unnecessary intermediates and development harnesses. Evaluate a small,
+  justified increase by required functionality, growth proportion, duplication
+  and installation cost; document the measured bytes and reason before changing
+  the automated budget. Do not raise it arbitrarily or remove required source
+  or debug assets merely to meet a byte count.
 - **RELEASE-03** - Before npm publication, validate the exact tarball by clean
   installation, installed CLI execution and shared-source JavaScript/WASM/native
   output tests. Publish those same tested bytes; a checkout build or a later

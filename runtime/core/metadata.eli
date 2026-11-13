@@ -8,8 +8,10 @@
     dispatchMetadataRead
     dispatchMetadataWith)
   (import "./protocol.mjs" implementsProtocolOperation)
+  (import "./vector.mjs" readPersistentVectorMetadataReader)
+  (import "../array-text.mjs" invokeCapturedArrayText)
 
-  (defconst typeof-value (js* "(value) => typeof value"))
+  (defun typeof-value (value) (js* "typeof value"))
   (defconst IMeta I_META)
   (defconst IWithMeta I_WITH_META)
 
@@ -26,7 +28,11 @@
     (if (not (nullish? value))
         (let ((direct (aref value METADATA_READ)))
           (if (= (funcall typeof-value direct) "function")
-              (js-call direct :call value)
+              (let* ((call (get direct :call))
+                     (reader (readPersistentVectorMetadataReader direct call)))
+                (if (undefined? reader)
+                  (invokeCapturedArrayText call direct (js-array value))
+                  (funcall reader value)))
               (if (implementsProtocolOperation IMeta "meta" value)
                   (dispatchMetadataRead value)
                   nil)))

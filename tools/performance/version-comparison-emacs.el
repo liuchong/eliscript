@@ -10,7 +10,7 @@
     (* 1000.0 (- (float-time) started))))
 
 (defun eliscript-benchmark-average (iterations function)
-  "Return the median of three warmed, at least 100ms samples of FUNCTION."
+  "Return the median and all three warmed, at least 100ms samples."
   (let ((warmup 0.0) (samples nil))
     (while (< warmup 20.0)
       (setq warmup (+ warmup (eliscript-benchmark-batch iterations function))))
@@ -21,7 +21,8 @@
           (setq elapsed (+ elapsed (eliscript-benchmark-batch iterations function))
                 calls (+ calls iterations)))
         (push (/ elapsed calls) samples)))
-    (nth 1 (sort samples #'<))))
+    (list :median (nth 1 (sort (copy-sequence samples) #'<))
+          :samples (vconcat (nreverse samples)))))
 
 (defun eliscript-benchmark-score (values)
   "Evaluate the shared numeric workload on VALUES."
@@ -88,8 +89,7 @@
       (dotimes (_ 12000) (setq rebuilt (aref rebuilt 0)))
       (cl-assert (= rebuilt 42)))
     (cl-assert (= (eliscript-benchmark-score scores) 455649481))
-    (princ
-     (json-encode
+    (let ((measurements
       `((sequence.first10k . ,(eliscript-benchmark-average 20000 (lambda () (aref values 0))))
         (sequence.last10k . ,(eliscript-benchmark-average 200 (lambda () (aref values (1- (length values))))))
         (sequence.takeLast10k . ,(eliscript-benchmark-average 200 (lambda () (cl-subseq values (- (length values) 64)))))
@@ -98,7 +98,10 @@
         (data.groupBy10k . ,(eliscript-benchmark-average 30 (lambda () (eliscript-benchmark-group values))))
         (data.frequencies100k . ,(eliscript-benchmark-average 7 (lambda () (eliscript-benchmark-frequencies mod-values))))
         (tree.zipper12k . ,(eliscript-benchmark-average 3 (lambda () (eliscript-benchmark-replace-leaf nested))))
-        (worker.scoreValues . ,(eliscript-benchmark-average 7 (lambda () (eliscript-benchmark-score scores)))))))))
+        (worker.scoreValues . ,(eliscript-benchmark-average 7 (lambda () (eliscript-benchmark-score scores)))))))
+      (princ (json-encode
+              `((metricsMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :median))) measurements))
+                (samplesMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :samples))) measurements))))))))
 
 (when noninteractive (eliscript-version-comparison-main))
 

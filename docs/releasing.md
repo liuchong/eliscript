@@ -79,12 +79,29 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
+  The latest local run has nine medians below native Emacs, but comparisons
+  against 0.1.2 still reject first, last, the 64-element tail slice,
+  same-reference equality, sorting and the deep zipper workload. Raw sample
+  variation needs diagnosis and does not automatically waive a slower median.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
   the final independent acceptance, and clean used generated outputs.
 
 ## What Ships
+
+The compressed size baseline is 5 MB. A small increase for necessary payload
+can be accepted after checking duplication, growth proportion and installation
+cost, with actual bytes and the reason documented before adjusting the automated
+budget. Required source and debug assets take priority over shaving a few bytes.
+
+The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
+intermediate. `build:browser` removes it after producing `loader.js`, and the
+npm file list excludes it even if a prior interrupted build left it behind.
+Published entry points and source maps required by the certified compiler
+remain in the package. Development-only backend benchmarks and their numeric
+runner/kernel stay in Git alongside the corpus/matrix harnesses; the npm
+transport excludes them and keeps all formal compiler/native execution modules.
 
 | Entry | Why it is in the tarball |
 | --- | --- |
@@ -130,14 +147,24 @@ npm pack --dry-run --json       # prepack rebuilds the compiler first
 
 The comparison uses each target's own compiler and runtime. Its shared workload
 source is compiled with that compiler; it never borrows a compiler from another
-version. Each workload verifies its actual result before timing. Vector tail
+version. All versions use one identical timing-driver artifact so compiler
+overhead in the measurement loop is not mistaken for workload performance.
+Equality measures the public `equalValues` operation; protocol-hook and ordering
+checks run outside its timed region. Tail timing measures `take-last` itself;
+the returned slice is checked outside timing without adding a collection-count
+dispatch to only one language's sample. Each workload verifies its actual result before timing. Vector tail
 access and same-reference equality have the same inputs on GNU Emacs and
 Eliscript. Both drivers warm each workload for at least 20ms and report the
-median of three samples lasting at least 100ms each; original iteration counts
-remain the minimum batch sizes. Every dimension is attempted even if an earlier measurement fails;
-failed dimensions do not acquire successful timings. The release command rejects
-non-improvements against Emacs or regressions against an active prior version
-using unrounded values, before writing release assets.
+median and all three samples lasting at least 100ms each; original iteration
+counts remain the minimum batch sizes. Every dimension is attempted even if an
+earlier measurement fails; failed dimensions do not acquire successful timings.
+The release command rejects non-improvements against Emacs and any slower
+median against an active prior version using unrounded values. All samples
+remain visible for investigating noise; overlapping ranges do not automatically
+waive a regression. Sample counts, finite positive values and exact agreement
+between the reported median and samples are validated before release assets
+are written. These normalized comparisons do not accept the separately
+deferred strict performance/capacity gates.
 
 `bun run benchmark:version-comparison -- --release-dir dist/release-report`
 executes the four-dimension performance and verification comparison (`Emacs
