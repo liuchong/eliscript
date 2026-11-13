@@ -1,4 +1,5 @@
 (module tools.performance.version-comparison
+  (import "node:fs" readFileSync)
   (import "node:fs/promises" mkdir mkdtemp readFile rm stat symlink writeFile)
   (import "node:module" createRequire)
   (import "node:child_process" spawnSync)
@@ -14,18 +15,37 @@
   (defconst VERSION_COMPARISON_DIMENSIONS
     (Object/freeze (js-array "emacsLisp" "previousMajor" "previousMinor" "latest")))
 
+  ;; One Git-declared input binds the minimum batch size of every workload for
+  ;; the JavaScript runner, the native Emacs driver and report validation.
+  (defconst VERSION_COMPARISON_MINIMA
+    (JSON/parse
+      (readFileSync
+        (new globalThis.URL "./version-comparison-minima.json" (js* "import.meta.url"))
+        "utf8")))
+
   (defconst VERSION_COMPARISON_WORKLOADS
     (Object/freeze
       (js-array
-        (Object/freeze (js-object :id "sequence.first10k" :label "first(Vector, N=10,000)" :category "sequence" :unit "ms"))
-        (Object/freeze (js-object :id "sequence.last10k" :label "last(Vector, N=10,000)" :category "sequence" :unit "ms"))
-        (Object/freeze (js-object :id "sequence.takeLast10k" :label "take-last(64, N=10,000)" :category "sequence" :unit "ms"))
-        (Object/freeze (js-object :id "value.equalSameRef10k" :label "equality(same Vector reference, N=10,000)" :category "equality" :unit "ms"))
-        (Object/freeze (js-object :id "order.sort10k" :label "sort(Vector, N=10,000)" :category "ordering" :unit "ms"))
-        (Object/freeze (js-object :id "data.groupBy10k" :label "group-by(x % 100, N=10,000)" :category "aggregation" :unit "ms"))
-        (Object/freeze (js-object :id "data.frequencies100k" :label "frequencies(1,000 keys, N=100,000)" :category "aggregation" :unit "ms"))
-        (Object/freeze (js-object :id "tree.zipper12k" :label "12,000-depth Zipper (down*12k + path + replace + root)" :category "tree" :unit "ms"))
-        (Object/freeze (js-object :id "worker.scoreValues" :label "score-values(N=10,000 x 10 rounds)" :category "numeric" :unit "ms")))))
+        (Object/freeze (js-object :id "sequence.first10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "sequence.first10k") :label "first(Vector, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "sequence.last10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "sequence.last10k") :label "last(Vector, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "sequence.takeLast10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "sequence.takeLast10k") :label "take-last(64, N=10,000)" :category "sequence" :unit "ms"))
+        (Object/freeze (js-object :id "value.equalSameRef10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "value.equalSameRef10k") :label "equality(same Vector reference, N=10,000)" :category "equality" :unit "ms"))
+        (Object/freeze (js-object :id "order.sort10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "order.sort10k") :label "sort(Vector, N=10,000)" :category "ordering" :unit "ms"))
+        (Object/freeze (js-object :id "data.groupBy10k" :minimumIterations (get VERSION_COMPARISON_MINIMA "data.groupBy10k") :label "group-by(x % 100, N=10,000)" :category "aggregation" :unit "ms"))
+        (Object/freeze (js-object :id "data.frequencies100k" :minimumIterations (get VERSION_COMPARISON_MINIMA "data.frequencies100k") :label "frequencies(1,000 keys, N=100,000)" :category "aggregation" :unit "ms"))
+        (Object/freeze (js-object :id "tree.zipper12k" :minimumIterations (get VERSION_COMPARISON_MINIMA "tree.zipper12k") :label "12,000-depth Zipper (down*12k + path + replace + root)" :category "tree" :unit "ms"))
+        (Object/freeze (js-object :id "worker.scoreValues" :minimumIterations (get VERSION_COMPARISON_MINIMA "worker.scoreValues") :label "score-values(N=10,000 x 10 rounds)" :category "numeric" :unit "ms")))))
+
+  (let ((ids (Object/keys VERSION_COMPARISON_MINIMA)) (index 0))
+    (unless (= (js-length ids) (js-length VERSION_COMPARISON_WORKLOADS))
+      (throw (new globalThis.TypeError "benchmark minima must cover every workload exactly once")))
+    (while (< index (js-length ids))
+      (let* ((id (aref ids index))
+             (value (get VERSION_COMPARISON_MINIMA id)))
+        (unless (and (= id (get (aref VERSION_COMPARISON_WORKLOADS index) :id))
+                     (Number/isSafeInteger value) (> value 0))
+          (throw (new globalThis.TypeError (str "invalid benchmark minimum for " id)))))
+      (setq index (1+ index))))
 
   (defun nullish (value fallback)
     (if (or (eq value undefined) (eq value nil)) fallback value))
@@ -311,6 +331,24 @@
             (setq idx (1+ idx)))
           comparisons))))
 
+  (defun validate-measurement-calibration (result workload dimension)
+    (let* ((id (get workload :id))
+           (minimum (get workload :minimumIterations))
+           (all (get result :calibration))
+           (calibration (if (and (not (nullish? all)) (= (value-type all) "object")) (get all id) nil)))
+      (unless (and (not (nullish? calibration)) (= (value-type calibration) "object")
+                   (Number/isSafeInteger (get calibration :minimumIterations))
+                   (= (get calibration :minimumIterations) minimum)
+                   (Number/isSafeInteger (get calibration :iterationsPerBatch))
+                   (>= (get calibration :iterationsPerBatch) minimum)
+                   (<= (get calibration :iterationsPerBatch) 16777216)
+                   (Array/isArray (get calibration :batchMs))
+                   (= (js-length (get calibration :batchMs)) 3)
+                   (js-call (Array/from (get calibration :batchMs)) :every
+                     (lambda (value) (and (= (value-type value) "number")
+                       (Number/isFinite value) (>= value 1)))))
+        (throw (new globalThis.TypeError (str "invalid calibration " id " for " dimension))))))
+
   (defun validateVersionComparisonReport (report)
     (when (or (not report)
               (/= (get report :format) VERSION_COMPARISON_FORMAT)
@@ -341,16 +379,22 @@
                                (<= val 0))
                        (throw (new globalThis.TypeError
                                 (str "invalid metric " wId " for active dimension " dimensionId))))
-                     (when (Object/hasOwn res "samplesMs")
-                       (let* ((samples (get (get res :samplesMs) wId))
-                              (valid (and (Array/isArray samples) (= (js-length samples) 3))))
-                         (unless (and valid (js-call (Array/from samples) :every
-                           (lambda (value) (and (= (value-type value) "number")
-                             (Number/isFinite value) (> value 0)))))
-                           (throw (new globalThis.TypeError (str "invalid samples " wId " for " dimensionId))))
-                         (let ((ordered (js-call (js-call samples :slice) :sort (lambda (a b) (- a b)))))
-                           (unless (= val (aref ordered 1))
-                             (throw (new globalThis.TypeError (str "metric differs from sample median " wId " for " dimensionId))))))))
+                     (validate-measurement-calibration res workload dimensionId)
+                     ;; Every active dimension owns complete evidence. A
+                     ;; deduplicated prior version receives it through the
+                     ;; existing previousMinor copy; only absent dimensions
+                     ;; have no measurements.
+                     (let* ((table (get res :samplesMs))
+                            (samples (if (and (not (nullish? table)) (= (value-type table) "object"))
+                                       (get table wId) nil))
+                            (valid (and (Array/isArray samples) (= (js-length samples) 3))))
+                       (unless (and valid (js-call (Array/from samples) :every
+                         (lambda (value) (and (= (value-type value) "number")
+                           (Number/isFinite value) (> value 0)))))
+                         (throw (new globalThis.TypeError (str "invalid samples " wId " for " dimensionId))))
+                       (let ((ordered (js-call (js-call samples :slice) :sort (lambda (a b) (- a b)))))
+                         (unless (= val (aref ordered 1))
+                           (throw (new globalThis.TypeError (str "metric differs from sample median " wId " for " dimensionId)))))))
                    (setq wIdx (1+ wIdx)))))
               ((= status "absent")
                (when (not (eq (get res :metricsMs) nil))
@@ -362,13 +406,20 @@
 
   (defasync measure-comparison-dimension (dimension measure failures)
     (try
-      (let* ((measurement (await (funcall measure dimension)))
-             (sampled (Object/hasOwn measurement "metricsMs"))
-             (result (Object/assign (js-object) dimension
-               (js-object :deduplicatedFrom nil
-                 :metricsMs (if sampled (get measurement :metricsMs) measurement)))))
-        (when sampled (put result :samplesMs (get measurement :samplesMs)))
-        result)
+      (let ((measurement (await (funcall measure dimension))))
+        ;; A measured dimension must hand back complete evidence. Bare
+        ;; metric maps are rejected instead of passing the report validator.
+        (unless (and (not (nullish? measurement)) (= (value-type measurement) "object")
+                     (Object/hasOwn measurement "metricsMs")
+                     (Object/hasOwn measurement "samplesMs")
+                     (Object/hasOwn measurement "calibration"))
+          (throw (new globalThis.TypeError
+                   (str "dimension measurement requires samples and calibration: " (get dimension :id)))))
+        (Object/assign (js-object) dimension
+          (js-object :deduplicatedFrom nil
+            :metricsMs (get measurement :metricsMs)
+            :samplesMs (get measurement :samplesMs)
+            :calibration (get measurement :calibration))))
       (catch error
         (js-call failures :push (js-object :dimension (get dimension :id) :error error))
         (Object/assign (js-object) dimension (js-object :status "failed" :metricsMs nil)))))
@@ -448,6 +499,9 @@
       (when (and (get (get matrix :previousMajor) :sameAsPreviousMinor)
                  (Object/hasOwn (get results :previousMinor) "samplesMs"))
         (put (get results :previousMajor) :samplesMs (get (get results :previousMinor) :samplesMs)))
+      (when (and (get (get matrix :previousMajor) :sameAsPreviousMinor)
+                 (Object/hasOwn (get results :previousMinor) "calibration"))
+        (put (get results :previousMajor) :calibration (get (get results :previousMinor) :calibration)))
       (when (> (js-length failures) 0)
         (let ((error (new globalThis.AggregateError
                 (js-call failures :map (lambda (failure) (get failure :error)))
@@ -568,7 +622,7 @@
                  (formatRatio (get cmp :latestVsPreviousMinor)) "** |")))
         (setq wIdx (1+ wIdx)))
       (js-call lines :push "")
-      (js-call lines :push "All raw samples are retained in acquisition order to diagnose timing variation. Overlapping ranges do not waive a slower median: every latest median must improve over Emacs and must not regress against an active prior version.")
+      (js-call lines :push "All raw samples are retained in acquisition order to diagnose timing variation. Both drivers calibrate batches to at least 1ms before collecting samples. Overlapping ranges do not waive a slower median: every latest median must improve over Emacs and must not regress against an active prior version.")
       (js-call lines :push "")
       (js-call lines :push "| Dimension | Workload | Samples (ms per operation, acquisition order) |")
       (js-call lines :push "| --- | --- | --- |")
@@ -581,6 +635,21 @@
                   (let* ((id (get workload :id)) (samples (get (get result :samplesMs) id)))
                     (js-call lines :push (str "| " dimension " | " id " | " (js-call samples :join ", ") " |")))))))))
       (js-call lines :push "")
+      (when (js-call VERSION_COMPARISON_DIMENSIONS :some
+        (lambda (dimension) (Object/hasOwn (get results dimension) "calibration")))
+        (js-call lines :push "| Dimension | Workload | Minimum calls | Calls per batch | Calibration batches (ms) |")
+        (js-call lines :push "| --- | --- | --- | --- | --- |")
+        (js-call VERSION_COMPARISON_DIMENSIONS :forEach
+          (lambda (dimension)
+            (let ((result (get results dimension)))
+              (when (and (= (get result :status) "active") (Object/hasOwn result "calibration"))
+                (js-call VERSION_COMPARISON_WORKLOADS :forEach
+                  (lambda (workload)
+                    (let* ((id (get workload :id)) (calibration (get (get result :calibration) id)))
+                      (js-call lines :push (str "| " dimension " | " id " | "
+                        (get calibration :minimumIterations) " | " (get calibration :iterationsPerBatch)
+                        " | " (js-call (get calibration :batchMs) :join ", ") " |")))))))))
+        (js-call lines :push ""))
       (js-call lines :join "\n")))
 
   (defun renderReleaseNotesSummary (report)

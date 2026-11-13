@@ -3,17 +3,53 @@
 (require 'cl-lib)
 (require 'json)
 
+(defconst eliscript-version-comparison-directory
+  (file-name-directory (or load-file-name buffer-file-name)))
+
+;; The minimal batch sizes are shared with the JavaScript runner and report
+;; validation. Keep this driver directly loadable from its own source file.
+(defconst eliscript-version-comparison-minima
+  (if eliscript-version-comparison-directory
+      (let ((json-object-type 'hash-table)
+            (json-key-type 'string))
+        (json-read-file (expand-file-name "version-comparison-minima.json"
+                                          eliscript-version-comparison-directory)))
+    (error "Benchmark driver must be loaded from its source file")))
+
+(defun eliscript-benchmark-minimum (id)
+  (let ((value (gethash id eliscript-version-comparison-minima 'missing)))
+    (if (and (integerp value) (> value 0))
+        value
+      (error "Invalid benchmark minimum for %s: %S" id value))))
+
 (defun eliscript-benchmark-batch (iterations function)
   "Measure a batch of ITERATIONS calls to FUNCTION in milliseconds."
   (let ((started (float-time)))
     (dotimes (_ iterations) (funcall function))
     (* 1000.0 (- (float-time) started))))
 
+(defun eliscript-benchmark-calibrate (minimum function)
+  "Increase MINIMUM calls until three consecutive batches span at least 1ms."
+  (let ((iterations minimum) (batches nil))
+    (while (< (length batches) 3)
+      (let ((elapsed (eliscript-benchmark-batch iterations function)))
+        (if (>= elapsed 1.0)
+            (push elapsed batches)
+          (when (>= iterations 16777216)
+            (error "Benchmark batch calibration did not reach 1ms"))
+          (setq iterations (min (* iterations 2) 16777216)
+                batches nil))))
+    `((minimumIterations . ,minimum)
+      (iterationsPerBatch . ,iterations)
+      (batchMs . ,(vconcat (nreverse batches))))))
+
 (defun eliscript-benchmark-average (iterations function)
   "Return the median and all three warmed, at least 100ms samples."
-  (let ((warmup 0.0) (samples nil))
+  (let ((warmup 0.0) (samples nil) (calibration nil))
     (while (< warmup 20.0)
       (setq warmup (+ warmup (eliscript-benchmark-batch iterations function))))
+    (setq calibration (eliscript-benchmark-calibrate iterations function)
+          iterations (alist-get 'iterationsPerBatch calibration))
     (dotimes (_ 3)
       (garbage-collect)
       (let ((elapsed 0.0) (calls 0))
@@ -22,7 +58,7 @@
                 calls (+ calls iterations)))
         (push (/ elapsed calls) samples)))
     (list :median (nth 1 (sort (copy-sequence samples) #'<))
-          :samples (vconcat (nreverse samples)))))
+          :samples (vconcat (nreverse samples)) :calibration calibration)))
 
 (defun eliscript-benchmark-score (values)
   "Evaluate the shared numeric workload on VALUES."
@@ -90,18 +126,19 @@
       (cl-assert (= rebuilt 42)))
     (cl-assert (= (eliscript-benchmark-score scores) 455649481))
     (let ((measurements
-      `((sequence.first10k . ,(eliscript-benchmark-average 20000 (lambda () (aref values 0))))
-        (sequence.last10k . ,(eliscript-benchmark-average 200 (lambda () (aref values (1- (length values))))))
-        (sequence.takeLast10k . ,(eliscript-benchmark-average 200 (lambda () (cl-subseq values (- (length values) 64)))))
-        (value.equalSameRef10k . ,(eliscript-benchmark-average 1000 (lambda () (equal values values))))
-        (order.sort10k . ,(eliscript-benchmark-average 30 (lambda () (sort (copy-sequence shuffled) #'<))))
-        (data.groupBy10k . ,(eliscript-benchmark-average 30 (lambda () (eliscript-benchmark-group values))))
-        (data.frequencies100k . ,(eliscript-benchmark-average 7 (lambda () (eliscript-benchmark-frequencies mod-values))))
-        (tree.zipper12k . ,(eliscript-benchmark-average 3 (lambda () (eliscript-benchmark-replace-leaf nested))))
-        (worker.scoreValues . ,(eliscript-benchmark-average 7 (lambda () (eliscript-benchmark-score scores)))))))
+      `((sequence.first10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.first10k") (lambda () (aref values 0))))
+        (sequence.last10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.last10k") (lambda () (aref values (1- (length values))))))
+        (sequence.takeLast10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "sequence.takeLast10k") (lambda () (cl-subseq values (- (length values) 64)))))
+        (value.equalSameRef10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "value.equalSameRef10k") (lambda () (equal values values))))
+        (order.sort10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "order.sort10k") (lambda () (sort (copy-sequence shuffled) #'<))))
+        (data.groupBy10k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "data.groupBy10k") (lambda () (eliscript-benchmark-group values))))
+        (data.frequencies100k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "data.frequencies100k") (lambda () (eliscript-benchmark-frequencies mod-values))))
+        (tree.zipper12k . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "tree.zipper12k") (lambda () (eliscript-benchmark-replace-leaf nested))))
+        (worker.scoreValues . ,(eliscript-benchmark-average (eliscript-benchmark-minimum "worker.scoreValues") (lambda () (eliscript-benchmark-score scores)))))))
       (princ (json-encode
               `((metricsMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :median))) measurements))
-                (samplesMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :samples))) measurements))))))))
+                (samplesMs . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :samples))) measurements))
+                (calibration . ,(mapcar (lambda (item) (cons (car item) (plist-get (cdr item) :calibration))) measurements))))))))
 
 (when noninteractive (eliscript-version-comparison-main))
 

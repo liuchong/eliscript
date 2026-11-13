@@ -1,4 +1,5 @@
 (module tools.performance.version-comparison-runner
+  (import "node:fs" readFileSync)
   (import "node:perf_hooks" performance)
   (import "node:process" :default process)
   (import "node:url" fileURLToPath pathToFileURL)
@@ -6,24 +7,47 @@
   (defconst load (js* "(specifier) => import(specifier)"))
   ;; One identical timing artifact invokes every version's separately compiled
   ;; workloads. Loop/compiler overhead must not masquerade as library cost.
-  (defconst iterations (js-object
-    "sequence.first10k" 20000 "sequence.last10k" 200
-    "sequence.takeLast10k" 200 "value.equalSameRef10k" 1000
-    "order.sort10k" 30 "data.groupBy10k" 30
-    "data.frequencies100k" 7 "tree.zipper12k" 3 "worker.scoreValues" 7))
+  ;; Minimal batch sizes live in one Git-declared input shared with the native
+  ;; driver and report validation.
+  (defconst minimumIterations
+    (JSON/parse
+      (readFileSync
+        (new globalThis.URL "./version-comparison-minima.json" (js* "import.meta.url"))
+        "utf8")))
+  (js-call (Object/keys minimumIterations) :forEach (lambda (id)
+    (let ((value (get minimumIterations id)))
+      (unless (and (Number/isSafeInteger value) (> value 0))
+        (throw (new globalThis.TypeError (str "invalid benchmark minimum for " id)))))))
 
   (defun timed-batch (iterations function)
     (let ((index 0) (start (js-call performance :now)))
       (while (< index iterations) (funcall function) (setq index (1+ index)))
       (- (js-call performance :now) start)))
 
+  (defun calibrate-batch (minimum function)
+    ;; Aggregate sample duration cannot repair sub-microsecond batch clocks.
+    ;; Increase calls until three consecutive batches each span at least 1ms.
+    (let ((iterations minimum) (batches (js-array)))
+      (while (< (js-length batches) 3)
+        (let ((elapsed (timed-batch iterations function)))
+          (if (>= elapsed 1)
+            (js-call batches :push elapsed)
+            (progn
+              (when (>= iterations 16777216)
+                (throw (new globalThis.Error "benchmark batch calibration did not reach 1ms")))
+              (setq iterations (Math/min (* iterations 2) 16777216)
+                    batches (js-array))))))
+      (js-object :minimumIterations minimum :iterationsPerBatch iterations :batchMs batches)))
+
   (defun bench (iterations function)
     ;; Fixed tiny samples mostly measured JIT tiering and timer resolution.
-    ;; Both language drivers warm for 20ms, then take three >=100ms samples.
+    ;; Both drivers warm for 20ms, calibrate, then take three >=100ms samples.
     ;; Original iteration counts are the minimum batch size, never reduced.
-    (let ((warmup 0) (samples (js-array)) (sample 0))
+    (let ((warmup 0) (samples (js-array)) (sample 0) (calibration nil))
       (while (< warmup 20)
         (setq warmup (+ warmup (timed-batch iterations function))))
+      (setq calibration (calibrate-batch iterations function))
+      (setq iterations (get calibration :iterationsPerBatch))
       (while (< sample 3)
         (js-call globalThis.Bun :gc t)
         (let ((elapsed 0) (calls 0))
@@ -33,7 +57,7 @@
           (js-call samples :push (/ elapsed calls)))
         (setq sample (1+ sample)))
       (let ((ordered (js-call (js-call samples :slice) :sort (lambda (a b) (- a b)))))
-        (js-object :medianMs (aref ordered 1) :samplesMs samples))))
+        (js-object :medianMs (aref ordered 1) :samplesMs samples :calibration calibration))))
 
 
   (defasync runVectorSliceDiagnostics (workloadPath)
@@ -60,16 +84,17 @@
                         (get (pathToFileURL workloadPath) :href)))
            (module (await (load specifier)))
            (workloads (js-call module :createVersionComparisonWorkloads))
-           (ids (Object/keys iterations))
-           (metrics (js-object)) (samples (js-object)) (index 0))
+           (ids (Object/keys minimumIterations))
+           (metrics (js-object)) (samples (js-object)) (calibrations (js-object)) (index 0))
       (js-call assert :deepStrictEqual (Object/keys workloads) ids)
       (while (< index (js-length ids))
         (let* ((id (aref ids index))
-               (measurement (bench (aref iterations id) (aref workloads id))))
+               (measurement (bench (aref minimumIterations id) (aref workloads id))))
           (put metrics id (get measurement :medianMs))
-          (put samples id (get measurement :samplesMs)))
+          (put samples id (get measurement :samplesMs))
+          (put calibrations id (get measurement :calibration)))
         (setq index (1+ index)))
-      (let ((result (js-object :metricsMs metrics :samplesMs samples)))
+      (let ((result (js-object :metricsMs metrics :samplesMs samples :calibration calibrations)))
         (js-call (get process :stdout) :write (str (JSON/stringify result) "\n"))
         result)))
   (when (= (aref (get process :argv) 1) (fileURLToPath (js* "import.meta.url")))

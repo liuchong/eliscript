@@ -80,14 +80,13 @@ publication, a GitHub Release or a signed release tag.
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
   The latest local diagnostic sample has all nine medians below native
-  Emacs. Sorting now measures 0.509645 vs 0.535316 ms/op in 0.1.2, after
-  removing generic numeric dispatch from its internal Number counters.
-  Isolating vector copy allocation reduces the earlier 0.412-microsecond
-  tail slice to 0.206 microseconds/op, but the current comparison still
-  rejects it against 0.154 in 0.1.2. Reference-identity equality, deep zipper
-  and numeric scoring also have slower unrounded medians in this sample;
-  first, last, grouping and frequencies pass. Sample variation does not
-  waive a slower median or close the performance gate.
+  Emacs. With calibrated batches, six of nine also pass against 0.1.2:
+  first, last, sorting, grouping, frequencies and numeric scoring.
+  The sample still rejects take-last (0.153734 vs 0.142717 microseconds/op),
+  reference-identity equality (0.375 vs 0.298 nanoseconds/op) and deep zipper
+  (1.100120 vs 1.059313 ms/op). These are diagnostic samples, not final
+  candidate acceptance. Sample variation and clock calibration do not waive
+  a slower unrounded median or close the performance gate.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -223,16 +222,26 @@ checks run outside its timed region. Tail timing measures `take-last` itself;
 the returned slice is checked outside timing without adding a collection-count
 dispatch to only one language's sample. Each workload verifies its actual result before timing. Vector tail
 access and same-reference equality have the same inputs on GNU Emacs and
-Eliscript. Both drivers warm each workload for at least 20ms and report the
-median and all three samples lasting at least 100ms each; original iteration
-counts remain the minimum batch sizes. Every dimension is attempted even if an
+Eliscript. Both drivers warm each workload for at least 20ms, then increase
+batch sizes until three consecutive calibration batches each span at least
+1ms. Both drivers and report validation use the original minimum call counts
+in `tools/performance/version-comparison-minima.json`; a report cannot replace
+these minima. The 16,777,216-call cap
+fails explicitly if a sufficiently long batch cannot be measured. The report
+records actual calls per batch and all three calibration times. This avoids
+summing hundreds of thousands of sub-microsecond stopwatches for tiny cases;
+it does not remove JIT or loop overhead or waive a slower median.
+Both drivers then report the median and all three samples lasting at least
+100ms each. Every dimension is attempted even if an
 earlier measurement fails; failed dimensions do not acquire successful timings.
 The release command rejects non-improvements against Emacs and any slower
 median against an active prior version using unrounded values. All samples
 remain visible for investigating noise; overlapping ranges do not automatically
 waive a regression. Sample counts, finite positive values and exact agreement
 between the reported median and samples are validated before release assets
-are written. These normalized comparisons do not accept the separately
+are written. Every active dimension requires raw samples and calibration;
+deduplicated versions copy both from their measured source dimension.
+These normalized comparisons do not accept the separately
 deferred strict performance/capacity gates.
 
 `bun run benchmark:version-comparison -- --release-dir dist/release-report`

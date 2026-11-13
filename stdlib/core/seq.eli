@@ -364,7 +364,7 @@
     (require-non-negative-safe-integer limit "take-last limit")
     (if (= limit 0)
       EMPTY_VECTOR
-      (if (isPersistentVector collection)
+      (if (eq (isPersistentVector collection) t)
         (let ((total (get collection :count)))
           (if (= total 0)
             EMPTY_VECTOR

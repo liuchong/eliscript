@@ -79,6 +79,7 @@
   (defmacro index-mask (a b)
     `(funcall (js* "(a, b) => a & b") ,a ,b))
   (defconst MAX_COUNT 2147483647)
+  (defconst TWO_CHUNK_WIDTH (index-shl BRANCH_WIDTH 1))
   (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
   (defconst VECTOR_HASH_TAG 1327180861)
   (defconst SUBVECTOR_STATE (new globalThis/WeakMap))
@@ -163,21 +164,26 @@
           (index-shl blocks BRANCH_BITS))))
 
   (defun array-for (state index)
-    (if (index-at-least? index (tail-offset (get state :count)))
-        (get state :tail)
-        (let ((node (get state :root))
-              (level (get state :shift)))
-          (while (index-greater? level 0)
+    ;; Hoist the single count read and its tail offset so the tail test reduces
+    ;; to one native comparison. Conversions still finish before the index is
+    ;; converted, and every visited node and tail read keeps its original order.
+    (let* ((count (get state :count))
+           (tail-start (tail-offset count)))
+      (if (index-at-least? index tail-start)
+          (get state :tail)
+          (let ((node (get state :root))
+                (level (get state :shift)))
+            (while (index-greater? level 0)
+              (visitNode node)
+              ;; Read slots before converting the index, as in the original
+              ;; indexed property expression; do not move effects past getters.
+              (let* ((slots (get node :slots))
+                     (shifted (index-ushr index level))
+                     (slot (index-mask shifted BRANCH_MASK)))
+                (setq node (get slots slot)
+                      level (index-subtract level BRANCH_BITS))))
             (visitNode node)
-            ;; Read slots before converting the index, as in the original
-            ;; indexed property expression; do not move effects past getters.
-            (let* ((slots (get node :slots))
-                   (shifted (index-ushr index level))
-                   (slot (index-mask shifted BRANCH_MASK)))
-              (setq node (get slots slot)
-                    level (index-subtract level BRANCH_BITS))))
-          (visitNode node)
-          (get node :slots))))
+            (get node :slots)))))
 
   (defun publish-path-value (state value)
     ;; Zipper parent links are frozen only when first exposed to user code.
@@ -506,31 +512,45 @@
               (zero-method (lambda (self) self) "[Symbol.iterator]"))
         iterator)))
 
+  (defun finish-vector-array (iterable length root shift count tail)
+    (while (< count length)
+      (let* ((next-end (Math/min (+ count BRANCH_WIDTH) length))
+             (tail-node (new VectorNode tail))
+             (blocks (index-ushr count BRANCH_BITS))
+             (capacity (index-shl 1 shift)))
+        (if (index-greater? blocks capacity)
+          (progn
+            (setq root (new VectorNode (js-array root (new-path shift tail-node)))
+                  shift (+ shift BRANCH_BITS))
+            (recordRootGrowth))
+          (setq root (push-tail shift root tail-node count)))
+        (setq tail (allocateTail (js-call iterable :slice count next-end))
+              count next-end)))
+    (make-vector length shift root tail))
+
   (defun vector-from-array (iterable)
     (let ((length (js-length iterable)))
-             (cond
-               ((= length 0) EMPTY_VECTOR)
-               ((<= length BRANCH_WIDTH)
-                (make-vector length BRANCH_BITS EMPTY_ROOT (allocateTail (js-call iterable :slice))))
-               (t
-                (let ((root EMPTY_ROOT)
-                      (shift BRANCH_BITS)
-                      (count BRANCH_WIDTH)
-                      (tail (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH))))
-                  (while (< count length)
-                    (let* ((next-end (Math/min (+ count BRANCH_WIDTH) length))
-                           (tail-node (new VectorNode tail))
-                           (blocks (index-ushr count BRANCH_BITS))
-                           (capacity (index-shl 1 shift)))
-                      (if (index-greater? blocks capacity)
-                          (progn
-                            (setq root (new VectorNode (js-array root (new-path shift tail-node)))
-                                  shift (+ shift BRANCH_BITS))
-                            (recordRootGrowth))
-                          (setq root (push-tail shift root tail-node count)))
-                      (setq tail (allocateTail (js-call iterable :slice count next-end))
-                            count next-end)))
-                  (make-vector length shift root tail))))))
+      (cond
+        ((= length 0) EMPTY_VECTOR)
+        ((if (= (js* "typeof length") "number")
+             (index-at-least? BRANCH_WIDTH length)
+             (<= length BRANCH_WIDTH))
+         (make-vector length BRANCH_BITS EMPTY_ROOT (allocateTail (js-call iterable :slice))))
+        ((and (= (js* "typeof length") "number")
+              (index-at-least? TWO_CHUNK_WIDTH length))
+         ;; Build the first root directly, retaining the live minimum call
+         ;; before node allocation. An overridden endpoint continues through
+         ;; the ordinary loop with precisely the already consumed first step.
+         (let* ((first (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH)))
+                (next-end (Math/min TWO_CHUNK_WIDTH length))
+                (root (new VectorNode (js-array (new VectorNode first))))
+                (tail (allocateTail (js-call iterable :slice BRANCH_WIDTH next-end))))
+           (if (= next-end length)
+             (make-vector length BRANCH_BITS root tail)
+             (finish-vector-array iterable length root BRANCH_BITS next-end tail))))
+        (t
+         (finish-vector-array iterable length EMPTY_ROOT BRANCH_BITS BRANCH_WIDTH
+           (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH)))))))
 
   (defun vector-from-iterable (iterable)
     (let ((result EMPTY_VECTOR))
@@ -771,7 +791,7 @@
           (let* ((state (aref self VECTOR_STATE))
                  (length (index-subtract end start)))
             (cond
-              ((<= length 0) EMPTY_VECTOR)
+              ((index-at-least? 0 length) EMPTY_VECTOR)
               ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
                self)
               (t
