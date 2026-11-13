@@ -198,7 +198,7 @@
       (progn (await (stat targetPath)) t)
       (catch error false)))
 
-  (defasync measureEliscriptDirectory (targetRoot &optional rawCompilerRoot)
+  (defasync measureEliscriptDirectory (targetRoot &optional rawCompilerRoot vectorDiagnostics)
     (let* ((compilerRoot (nullish rawCompilerRoot projectDirectory))
            (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs"))
            (targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs")))
@@ -250,15 +250,18 @@
               (await (writeFile zipperMjsPath compiledZipper))
               (await (writeFile seqMjsPath compiledSeq))
               (await (writeFile runnerPath runnerScript))
-              (let ((result (await (capture (js-array (get process :execPath) timingPath runnerPath) (js-object :cwd tempDir)))))
+              (let* ((command (if (eq vectorDiagnostics t)
+                               (js-array (get process :execPath) timingPath "--vector-diagnostics" runnerPath)
+                               (js-array (get process :execPath) timingPath runnerPath)))
+                     (result (await (capture command (js-object :cwd tempDir)))))
                 (JSON/parse (js-call (get result :stdout) :trim))))
             (finally
               (await (rm tempDir (js-object :recursive t :force t)))))))))
 
-  (defasync defaultMeasureEliscriptTarget (target &optional rawRoot)
+  (defasync defaultMeasureEliscriptTarget (target &optional rawRoot vectorDiagnostics)
     (let ((targetRoot (nullish rawRoot projectDirectory)))
       (if (or (= (get target :id) "latest") (not (get target :tag)))
-        (await (measureEliscriptDirectory targetRoot targetRoot))
+        (await (measureEliscriptDirectory targetRoot targetRoot vectorDiagnostics))
         (let* ((worktreeRoot (js-call path :join targetRoot "_worktree" "version-comparison"))
                (_ (await (mkdir worktreeRoot (js-object :recursive t))))
                (worktreeDir (await (mkdtemp (js-call path :join worktreeRoot (str "eliscript-wt-" (get target :version) "-"))))))
@@ -267,7 +270,7 @@
               (await (rm worktreeDir (js-object :recursive t :force t)))
               (await (capture (js-array "git" "worktree" "add" "--detach" worktreeDir (get target :tag))
                        (js-object :cwd targetRoot)))
-              (await (measureEliscriptDirectory worktreeDir targetRoot)))
+              (await (measureEliscriptDirectory worktreeDir targetRoot vectorDiagnostics)))
             (finally
               (try
                 (await (capture (js-array "git" "worktree" "remove" "--force" worktreeDir)

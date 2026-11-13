@@ -138,6 +138,26 @@
           (be (js-call values :sliceVector 31 96) marker)
           (same-values received (Array/from (js-object :length 65) (lambda (_ index) (+ 31 index))))
           (finally (put PersistentVector :from original))))
+      ;; Allocation remains a live host constructor call after specialization.
+      (let* ((host-global (js* "globalThis"))
+             (ArrayConstructor globalThis.Array) (factory (get PersistentVector :from))
+             (events (js-array)) (received nil) (marker (js-object))
+             (SelectedArray (new globalThis.Proxy ArrayConstructor
+               (js-object :construct (lambda (target arguments newTarget)
+                 (js-call events :push (js-object :target target :arguments arguments :newTarget newTarget))
+                 (Reflect/construct target arguments newTarget))))))
+        (try
+          (put host-global :Array SelectedArray)
+          (put PersistentVector :from (lambda (array)
+            (js-call events :push "factory") (setq received array) marker))
+          (be (js-call values :sliceVector 31 96) marker)
+          (finally (put host-global :Array ArrayConstructor) (put PersistentVector :from factory)))
+        (be (js-length events) 2)
+        (be (get (aref events 0) :target) ArrayConstructor)
+        (same-values (get (aref events 0) :arguments) (js-array 65))
+        (be (get (aref events 0) :newTarget) SelectedArray)
+        (be (aref events 1) "factory")
+        (same-values received (Array/from (js-object :length 65) (lambda (_ index) (+ 31 index)))))
       ;; A corrupt chunk must fail at its length read instead of stalling a loop.
       ;; The second read throws independently so the old defect stays bounded.
       (js-call (js-array

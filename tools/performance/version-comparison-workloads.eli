@@ -71,4 +71,22 @@
             (path location)
             (root (replace location 42))))
         "worker.scoreValues" (lambda () (score-values scores)))))
-  (export createVersionComparisonWorkloads))
+  (defun createVectorSliceDiagnostics ()
+    (let* ((items (Array/from (js-object :length 10000) (lambda (_ index) index)))
+           (values (Reflect/apply vector undefined items))
+           (Constructor (get values :constructor)) (factory (get Constructor :from))
+           (tail (js-call items :slice 9936)) (observation (js-object :last nil)))
+      ;; Every result escapes into a shared observation read after timing.
+      ;; These components locate costs; they never replace the release cases.
+      (let ((verify (lambda ()
+              (js-call assert :deepStrictEqual (Array/from (get observation :last)) tail))))
+        (js-array
+          (js-object :id "observe-existing" :run (lambda () (put observation :last tail)) :verify verify)
+          (js-object :id "take-last-64" :run (lambda () (put observation :last (take-last 64 values))) :verify verify)
+          (js-object :id "slice-vector-64" :run (lambda () (put observation :last (js-call values :sliceVector 9936 10000))) :verify verify)
+          (js-object :id "construct-vector-64" :run (lambda () (put observation :last (js-call Constructor :from tail))) :verify verify)
+          (js-object :id "copy-slice-64"
+            :before (lambda () (put Constructor :from (lambda (array) array)))
+            :run (lambda () (put observation :last (js-call values :sliceVector 9936 10000))) :verify verify
+            :after (lambda () (put Constructor :from factory)))))))
+  (export createVersionComparisonWorkloads createVectorSliceDiagnostics))

@@ -79,15 +79,15 @@ publication, a GitHub Release or a signed release tag.
   substantive performance failures. The 14 deferred strict capacity/performance
   items remain unaccepted until independently measured; they are not passed by
   producing a benchmark report.
-  A local diagnostic sample has all nine medians below native
-  Emacs. First and last measure 7.23 and 0.615 nanoseconds/op, against 8.47
-  and 0.848 in 0.1.2. Comparisons still reject the 64-element tail slice
-  (0.390 vs 0.173 microseconds/op) and sorting (0.632442 vs 0.547899 ms/op).
-  Deep zipper measures 1.1142 vs 1.1302 ms/op and reference-identity equality
-  0.3489 vs 0.4235 nanoseconds/op; grouping, frequencies and numeric scoring
-  also pass in this sample. Their previously slower medians and the changed
-  sorting result show sample variation that still needs diagnosis; a slower
-  median is never automatically waived.
+  The latest local diagnostic sample has all nine medians below native
+  Emacs. Sorting now measures 0.509645 vs 0.535316 ms/op in 0.1.2, after
+  removing generic numeric dispatch from its internal Number counters.
+  Isolating vector copy allocation reduces the earlier 0.412-microsecond
+  tail slice to 0.206 microseconds/op, but the current comparison still
+  rejects it against 0.154 in 0.1.2. Reference-identity equality, deep zipper
+  and numeric scoring also have slower unrounded medians in this sample;
+  first, last, grouping and frequencies pass. Sample variation does not
+  waive a slower median or close the performance gate.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -115,6 +115,10 @@ their original returned values. These changes improve hot sequence dispatch
 without closing the previous-version performance gate. Vector leaf iteration,
 reduction and copying read chunk lengths directly: a missing internal chunk
 raises `TypeError` rather than becoming zero-length work that cannot advance.
+Vector copy allocation has a separate Eli helper while continuing to read
+the live host Array constructor and call the public `PersistentVector.from`.
+Private numeric relation bridges use closed comparison primitives and direct
+Number type checks; mixed operands retain the original conversion path.
 
 Dense safe-integer collections now use a stable counting sort in both the
 JavaScript runtime and the managed WASM/native provider. The path requires at

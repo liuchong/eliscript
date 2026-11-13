@@ -8,8 +8,12 @@
 
   (defun typeof-value (value) (js* "typeof value"))
   (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
-  (defun host-less (left right) (js* "left < right"))
-  (defun host-number-difference (left right) (js* "left - right"))
+  (defmacro host-less (left right)
+    `(funcall (js* "(a, b) => a < b") ,left ,right))
+  (defmacro host-at-most (left right)
+    `(funcall (js* "(a, b) => a <= b") ,left ,right))
+  (defmacro host-number-difference (left right)
+    `(funcall (js* "(a, b) => a - b") ,left ,right))
   (defconst IComparable (defineProtocol "IComparable" (js-array "compare")))
   (defconst dispatch-compare (protocolMethod IComparable "compare"))
 
@@ -182,11 +186,13 @@
   (defun dense-integer-sort (values)
     ;; Bound both extra memory and the value-domain scan. Sparse, fractional
     ;; and non-finite inputs keep the general numeric comparison path.
+    ;; Internal array lengths and loop counters are Numbers; compare them
+    ;; directly while keeping bucket reads, writes and callback order intact.
     (let ((length (js-length values)) (index 0)
           (minimum globalThis.Infinity) (maximum (- globalThis.Infinity))
           (eligible t))
-      (when (>= length 256)
-        (while (and eligible (< index length))
+      (when (host-at-most 256 length)
+        (while (and eligible (host-less index length))
           (let ((value (aref values index)))
             (if (Number/isSafeInteger value)
               (progn
@@ -195,16 +201,16 @@
               (setq eligible false)))
           (setq index (1+ index)))
         (let ((width (1+ (host-number-difference maximum minimum))))
-          (when (and eligible (<= width 65536) (<= width (* length 4)))
+          (when (and eligible (host-at-most width 65536) (host-at-most width (* length 4)))
             (let ((offsets (js-call (new globalThis.Array width) :fill 0))
                   (result (new globalThis.Array length)) (total 0))
               (setq index 0)
-              (while (< index length)
+              (while (host-less index length)
                 (let ((bucket (host-number-difference (aref values index) minimum)))
                   (put offsets bucket (1+ (aref offsets bucket))))
                 (setq index (1+ index)))
               (setq index 0)
-              (while (< index width)
+              (while (host-less index width)
                 (let ((frequency (aref offsets index)))
                   (put offsets index total)
                   (setq total (+ total frequency)))
@@ -212,7 +218,7 @@
               ;; Scatter original values, rather than reconstructing numbers:
               ;; equal keys retain their order and the sign of each zero.
               (setq index 0)
-              (while (< index length)
+              (while (host-less index length)
                 (let* ((value (aref values index))
                        (bucket (host-number-difference value minimum))
                        (position (aref offsets bucket)))

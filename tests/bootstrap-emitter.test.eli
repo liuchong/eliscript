@@ -7,8 +7,10 @@
   (import "../tools/backends/compiler-host-record.mjs" copyHostRecord)
   (defconst fixturePath (resolve projectDirectory "tests/fixtures/bootstrap-ir.json"))
   (test "bootstrapped emitter matches seed ESM and Source Map output" (async ()
-    (let ((directory (await (mkdtemp (resolve projectDirectory ".eliscript-emitter-")))))
+    (let ((directory (await (mkdtemp (resolve projectDirectory ".eliscript-emitter-"))))
+          (programDirectory nil))
       (try
+        (setq programDirectory (await (mkdtemp (resolve projectDirectory ".eliscript-emitter-program-"))))
         (await (buildBootstrap directory))
         (let* ((modules (await (Promise/all (js-call (js-array "reader" "expander" "analyzer" "ir" "lower" "emitter" "source-map") :map (lambda (name) (loadModule directory name "test"))))))
                (reader (aref modules 0)) (expander (aref modules 1)) (analyzer (aref modules 2)) (ir (aref modules 3)) (lower (aref modules 4)) (emitter (aref modules 5)) (sourceMap (aref modules 6))
@@ -32,12 +34,16 @@
             (js-call (expect (lambda () (js-call emitter :emit_module (js-call ir :make_program "raw.js" (js-array (js-call ir :make_node "expression-statement" nil "statement" (js-array rawWithTwoArguments) nil)))))) :toThrow "js* expects 1 argument, got 2")
             (js-call (expect (lambda () (js-call emitter :emit_module (js-call ir :make_program "raw.js" (js-array (js-call ir :make_node "expression-statement" nil "statement" (js-array rawWithSymbol) nil)))))) :toThrow "js* expects a string literal"))
           (js-call (expect (js-array (js-call sourceMap :encode_vlq 0) (js-call sourceMap :encode_vlq 1) (js-call sourceMap :encode_vlq -1) (js-call sourceMap :encode_vlq 16) (js-call sourceMap :encode_vlq -16))) :toEqual (js-array "A" "C" "D" "gB" "hB"))
-          (let* ((basic (js-call generated :find (lambda (result) (= (get result :name) "executable-basic-module")))) (executablePath (resolve directory "executable-basic.mjs")))
+          ;; A user program consumes the complete public runtime rather than
+          ;; the independent compiler's minimal private frontend package.
+          (let* ((basic (js-call generated :find (lambda (result) (= (get result :name) "executable-basic-module")))) (executablePath (resolve programDirectory "executable-basic.mjs")))
             (await (writeFile executablePath (get basic :javascript)))
             (let* ((runtimeOutput (await (run (js-array (get globalThis.process :execPath) (resolve projectDirectory "tests/fixtures/bootstrap-emitter-host.mjs"))
                     (js-object :env (copyHostRecord (get globalThis.process :env) (js-object :ELISCRIPT_TEST_MODULE (get (pathToFileURL executablePath) :href)))))))
                    (runtime (JSON/parse (js-call (js-call (js-call runtimeOutput :trim) :split "\n") :at -1))))
               (js-call (expect runtime) :toEqual (js-object :factorial 120 :sum 15 :message "hello from Eliscript"))))
           (js-call (expect (await (readFile (resolve directory "emitter.mjs.map") "utf8"))) :toContain "bootstrap/compiler/emitter.eli"))
-        (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
+        (finally (await (Promise/all (js-array
+          (rm directory (js-object :recursive t :force t))
+          (if programDirectory (rm programDirectory (js-object :recursive t :force t)) (Promise/resolve))))))))) 30000)
 )

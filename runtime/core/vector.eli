@@ -51,6 +51,8 @@
     METADATA_WITH)
 
   (defun typeof-value (value) (js* "typeof value"))
+  ;; Keep copy-array allocation at a distinct host allocation site.
+  (defun allocate-copy-array (length) (new globalThis.Array length))
   (defmacro instance-of? (value Constructor)
     `(funcall (js* "(a, b) => a instanceof b") ,value ,Constructor))
   (defconst host-generator (js* "(create) => function* () { yield* create(this); }"))
@@ -516,9 +518,11 @@
                       (count BRANCH_WIDTH)
                       (tail (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH))))
                   (while (< count length)
-                    (let ((next-end (Math/min (+ count BRANCH_WIDTH) length))
-                          (tail-node (new VectorNode tail)))
-                      (if (> (funcall bit-ushr count BRANCH_BITS) (funcall bit-shl 1 shift))
+                    (let* ((next-end (Math/min (+ count BRANCH_WIDTH) length))
+                           (tail-node (new VectorNode tail))
+                           (blocks (index-ushr count BRANCH_BITS))
+                           (capacity (index-shl 1 shift)))
+                      (if (index-greater? blocks capacity)
                           (progn
                             (setq root (new VectorNode (js-array root (new-path shift tail-node)))
                                   shift (+ shift BRANCH_BITS))
@@ -771,7 +775,7 @@
               ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
                self)
               (t
-               (let ((values (new globalThis.Array length)) (out-index 0) (index start))
+               (let ((values (allocate-copy-array length)) (out-index 0) (index start))
                  (while (index-less? index end)
                    (let* ((chunk (array-for state index))
                           (chunk-offset (index-mask index BRANCH_MASK))
