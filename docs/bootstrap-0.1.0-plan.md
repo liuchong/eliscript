@@ -728,7 +728,7 @@ PERF13-07 与 PERF13-08 已用最终 Stage3 的实际测量与保护验证关闭
 | 三输出完整语料 | 当前官方维护源完整生成 797 条、1280 项 requiredCoverage；三输出完整执行均未验收 | 从干净 Git 维护源分别重建 745603c6 和迁移前 3381ff09，两者的 797 个记录 ID 均与当前完全相同。当前规范分母采用可重建的 797×3；旧运行确曾输出 861，但完整冻结输入及其来源不可复核，单列为未认证历史，不猜根因、不虚构补齐、不计当前通过。 |
 | 本地兼容环境 | 本次固定 macOS arm64 Emacs 32.0.50 + Bun 1.4.0、Node 24.20.0；政策接线测试 51/51 通过 | 用户明确后续只升不降，仅当官方稳定版高于 32.0.50，或用户明确要求时调整；29.4/30.2 不再作为当前支持与验收要求，历史报告不改写为当前通过。矩阵为三目标、一必需本地 cell；五份工作流均固定同一 Emacs 源码提交，远端构建及完整本地 cell 仍待验收。 |
 | 35 项 AC/PD 与 2 项 AV | 历史 core audit 为 35/35；当前候选未完成同来源复核 | Core 35 项沿 contracts/core-acceptance-corpus.json 与完整功能探针评估；AV-01/02 应用单独验收，不混入 core 百分比。旧 manifest 不改写成当前通过。 |
-| 最终签名 SHA 的 4 个远端门禁 | 政策提交 7139c613 的 Pages 通过，Compatibility 在测试启动前失败；Browser/Compiler 后续阶段仍在执行 | CI13-01 的修复候选尚未远端复验。Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；平台子集不冒充全量或性能验收。 |
+| 最终签名 SHA 的 4 个远端门禁 | 政策提交 7139c613 的 Pages、Browser、Compiler 均通过；修复提交 bd01517c 的 Pages 通过、Compatibility 已进入实际测试且仍在执行 | CI13-01 的 runner 启动修复已远端生效，完整测试尚未验收。Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；不同提交的通过结果不拼成最终全绿。 |
 | 三方独立终审与交付清理 | Codex、OpenCode、Antigravity 必须分别对同一最终冻结来源作全方位真实检查；当前阶段窄审不能代替终审 | Codex 主导分工与最终裁决；OpenCode、Antigravity 每次交回列清进行中、剩余与下一责任人。终审分别保留发现、执行覆盖、未验缺口及结论，三方核收后才可宣布达到发布质量；签名推送后清理用完输出，实际发布仍等待用户命令。 |
 
 十四份报告逐项对账：最终 Stage3 数值与来源通过的有
@@ -768,6 +768,15 @@ Core clean median/max/spread 为 18.572583 ms / 20.325416 ms / 1.105438。三份
 按历史版本自己的正式入口补建后才首次进入计时；启动失败不算性能失败或重测碰绿。
 保留实现的独立 ERT 为 3/3，控制流集成为 11/11（含真实 Node/Bun、13 模块三代字节与
 Source Map 一致性），严格 byte-compile 通过。
+
+后续 symbol/source-map 的数值域 guard-helper 候选完成可观察行为差分后，完整编译
+有界诊断未见收益：组合中位比 0.899840，分组件 source-map-only / symbol-only 分别
+0.807688 / 0.815520，各配置候选均为 0/25 个 ABBA 块更快。同 VM 加载额外模块副本时，
+未变父基线自身亦从 100.44ms 移至 109.65ms；这是测量布局风险，不据此断言 JIT 根因。
+两份生产补丁已精确撤回，不计正式 1.5/1.08 门禁次数，不重复原配置采样。保留的公开
+回归证明原型 getter 返回原方法仍逐次读取、import 前有状态覆盖与同参重复调用可观察；
+官方单文件生成及 SourceMap 整组为 6 pass / 1 explicit performance defer / 0 fail，
+76 个断言，新增用例 1.443s。前后真正 prepared gate 均为原 338 文件身份，未重建根产物。
 
 功能接线问题 FUNC13-01 已修复：portable-reader 的 beforeAll 改读显式维护夹具，
 夹具固定保留 2492d6db 的四个历史 generic kernel，不伪装为现行生产 Reader；全部

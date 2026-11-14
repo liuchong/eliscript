@@ -158,6 +158,161 @@
                 (same (js-call locations :get 4) (js-array 1 0)))
               (finally (put prototype :codePointAt original)))))
         (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
+  (test "symbol and Source Map preserve prototype getter identity and pre-import stateful overrides across repeated calls" (async ()
+    (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-source-map-cursor-proto-")))))
+      (try
+        (await (buildBootstrap directory))
+        (let* ((loaded (await (Promise/all (js-array (loadModule directory "symbol" "getter") (loadModule directory "source-map" "getter")))))
+               (symbol (aref loaded 0))
+               (sourceMap (aref loaded 1))
+               (strProto (js* "String.prototype"))
+               (arrProto (js* "Array.prototype"))
+               (savedCpa (Object/getOwnPropertyDescriptor strProto "codePointAt"))
+               (savedCca (Object/getOwnPropertyDescriptor strProto "charCodeAt"))
+               (savedCa (Object/getOwnPropertyDescriptor strProto "charAt"))
+               (savedJoin (Object/getOwnPropertyDescriptor arrProto "join"))
+               (savedInc (Object/getOwnPropertyDescriptor arrProto "includes"))
+               (origCpa (get savedCpa :value))
+               (origCca (get savedCca :value))
+               (origCa (get savedCa :value))
+               (origJoin (get savedJoin :value))
+               (origInc (get savedInc :value))
+               (events (js-array)))
+          (try
+            (Object/defineProperty strProto "codePointAt"
+              (js-object :configurable t :enumerable (get savedCpa :enumerable)
+                :get (lambda () (js-call events :push "cpa") origCpa)))
+            (Object/defineProperty strProto "charCodeAt"
+              (js-object :configurable t :enumerable (get savedCca :enumerable)
+                :get (lambda () (js-call events :push "cca") origCca)))
+            (Object/defineProperty strProto "charAt"
+              (js-object :configurable t :enumerable (get savedCa :enumerable)
+                :get (lambda () (js-call events :push "ca") origCa)))
+            (Object/defineProperty arrProto "join"
+              (js-object :configurable t :enumerable (get savedJoin :enumerable)
+                :get (lambda () (js-call events :push "join") origJoin)))
+            (Object/defineProperty arrProto "includes"
+              (js-object :configurable t :enumerable (get savedInc :enumerable)
+                :get (lambda () (js-call events :push "inc") origInc)))
+            (be (js-call symbol :munge_segment "9a") "_9a")
+            (same (Array/from events) (js-array "cpa" "cpa" "join" "cca" "cca" "inc"))
+            (be (js-call symbol :munge_segment "9a") "_9a")
+            (same (Array/from events) (js-array "cpa" "cpa" "join" "cca" "cca" "inc" "cpa" "cpa" "join" "cca" "cca" "inc"))
+            (put events :length 0)
+            (be (js-call symbol :binding_name "do") "do$")
+            (same (Array/from events) (js-array "inc" "cpa" "cpa" "join" "cca" "cca" "inc" "inc"))
+            (put events :length 0)
+            (let ((mapDoc (JSON/parse
+                            (js-call sourceMap :create_source_map
+                              "a\nb"
+                              (js-array
+                                (js-object :offset 0 :span (js-object :start 0 :line 1 :column 1))
+                                (js-object :offset 2 :span (js-object :start 1 :line 1 :column 3)))
+                              "😀x"
+                              "in.eli"
+                              "out.mjs"))))
+              (be (get mapDoc :mappings) "AAAA;AAAE")
+              (same (Array/from events)
+                (js-array
+                  "cca" "cca" "cpa"
+                  "ca" "join" "ca" "join" "ca" "join" "ca" "join" "join"
+                  "ca" "join" "ca" "join" "ca" "join" "ca" "join" "join" "join")))
+            (finally
+              (Object/defineProperty strProto "codePointAt" savedCpa)
+              (Object/defineProperty strProto "charCodeAt" savedCca)
+              (Object/defineProperty strProto "charAt" savedCa)
+              (Object/defineProperty arrProto "join" savedJoin)
+              (Object/defineProperty arrProto "includes" savedInc)))
+          (let ((dynamicImport (js* "(specifier) => import(specifier)"))
+                (makeMethod (js* "(fn) => function(...args) { return fn(this, args); }"))
+                (symbolUrl (str (get (pathToFileURL (resolve directory "symbol.mjs")) :href) "?preimport"))
+                (sourceMapUrl (str (get (pathToFileURL (resolve directory "source-map.mjs")) :href) "?preimport"))
+                (active false)
+                (cpaCalls 0)
+                (ccaCalls 0)
+                (incCalls 0)
+                (vlqCalls 0)
+                (mapCalls 0)
+                (preEvents (js-array)))
+            (try
+              (put strProto :codePointAt
+                (funcall makeMethod
+                  (lambda (self args)
+                    (let ((index (aref args 0)))
+                      (if (and active (= self "ab") (= index 0))
+                        (progn
+                          (setq cpaCalls (+ cpaCalls 1))
+                          (js-call preEvents :push (str "cpa:" cpaCalls))
+                          (if (= cpaCalls 5) 10 (+ 64 cpaCalls)))
+                        (Reflect/apply origCpa self args))))))
+              (put strProto :charCodeAt
+                (funcall makeMethod
+                  (lambda (self args)
+                    (let ((index (aref args 0)))
+                      (if (and active (= self "xy") (= index 0))
+                        (progn
+                          (setq ccaCalls (+ ccaCalls 1))
+                          (js-call preEvents :push (str "cca:" ccaCalls))
+                          (if (= ccaCalls 2) 10 (Reflect/apply origCca self args)))
+                        (Reflect/apply origCca self args))))))
+              (put arrProto :includes
+                (funcall makeMethod
+                  (lambda (self args)
+                    (let ((item (aref args 0)))
+                      (if (and active (= (get self :length) 46) (= item "kw"))
+                        (progn
+                          (setq incCalls (+ incCalls 1))
+                          (js-call preEvents :push (str "inc:" incCalls))
+                          (= (% incCalls 2) 1))
+                        (Reflect/apply origInc self args))))))
+              (put arrProto :join
+                (funcall makeMethod
+                  (lambda (self args)
+                    (let ((sep (aref args 0))
+                          (joined (Reflect/apply origJoin self args)))
+                      (if (not active)
+                        joined
+                        (if (= sep ";")
+                          (progn
+                            (setq mapCalls (+ mapCalls 1))
+                            (js-call preEvents :push (str "map:" mapCalls))
+                            (str joined "|m" mapCalls))
+                          (if (and (= sep "") (= joined "gB"))
+                            (progn
+                              (setq vlqCalls (+ vlqCalls 1))
+                              (js-call preEvents :push (str "vlq:" vlqCalls))
+                              (str "gB" vlqCalls))
+                            joined)))))))
+              (let* ((preLoaded (await (Promise/all (js-array (funcall dynamicImport symbolUrl) (funcall dynamicImport sourceMapUrl)))))
+                     (preSymbol (aref preLoaded 0))
+                     (preSourceMap (aref preLoaded 1)))
+                (setq active t)
+                (be (js-call preSymbol :munge_segment "ab") "Ab")
+                (be (js-call preSymbol :munge_segment "ab") "Bb")
+                (be (js-call preSymbol :reference_name "ns/ab") "ns.Cb")
+                (be (js-call preSymbol :binding_name "kw") "kw$")
+                (be (js-call preSymbol :binding_name "kw") "kw")
+                (let ((locMarks (js-array (js-array 0 0 (js-object :start 1)))))
+                  (same (js-call (js-call preSourceMap :source_locations "ab" locMarks) :get 1) (js-array 0 1))
+                  (same (js-call (js-call preSourceMap :source_locations "ab" locMarks) :get 1) (js-array 1 0)))
+                (let ((genMarks (js-array (js-object :offset 1 :span (js-object :start 0)))))
+                  (same (js-call preSourceMap :collect_generated_marks "xy" genMarks)
+                    (js-array (js-array 0 1 (js-object :start 0))))
+                  (same (js-call preSourceMap :collect_generated_marks "xy" genMarks)
+                    (js-array (js-array 1 0 (js-object :start 0)))))
+                (be (js-call preSourceMap :encode_vlq 16) "gB1")
+                (be (js-call preSourceMap :encode_vlq 16) "gB2")
+                (let ((oneMark (js-array (js-object :offset 0 :span (js-object :start 0 :line 1 :column 1)))))
+                  (be (get (JSON/parse (js-call preSourceMap :create_source_map "a" oneMark "a" "s.eli" "g.mjs")) :mappings) "AAAA|m1")
+                  (be (get (JSON/parse (js-call preSourceMap :create_source_map "a" oneMark "a" "s.eli" "g.mjs")) :mappings) "AAAA|m2"))
+                (same (Array/from preEvents)
+                  (js-array "cpa:1" "cpa:2" "cpa:3" "inc:1" "inc:2" "cpa:4" "cpa:5" "cca:1" "cca:2" "vlq:1" "vlq:2" "map:1" "map:2")))
+              (finally
+                (Object/defineProperty strProto "codePointAt" savedCpa)
+                (Object/defineProperty strProto "charCodeAt" savedCca)
+                (Object/defineProperty arrProto "includes" savedInc)
+                (Object/defineProperty arrProto "join" savedJoin)))))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
   (test "committed Source Map cursor report preserves historical measurements and decisions" (async ()
     (let ((report (validateCompilerSourceMapCursorReport (await (readReport)))))
       (js-call (expect (get (get report :corpus) :files)) :toHaveLength 13)
