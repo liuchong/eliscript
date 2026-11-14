@@ -18,6 +18,10 @@
         (js-call assert :deepStrictEqual (Array/from (new globalThis.Set dependencies))
           (js-array "test-core" "test-applications" "test-pre-bootstrap-originals"))
         (js-call assert :ok (js-call makefile :includes "test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals"))
+        ;; A clean checkout has no generated `tools/testing/*.mjs`; the originals
+        ;; recipe runs before `test-core` reaches `check-contracts`, so it must
+        ;; declare the Emacs bootstrap that creates its suite runner.
+        (js-call assert :ok (js-call makefile :includes "test-pre-bootstrap-originals: bootstrap-backends"))
         (js-call assert :ok (js-call makefile :includes "ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0"))
         (js-call assert :ok (js-call makefile :includes "BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)")))))
   (assertCIOriginalTitles (js-array

@@ -97,11 +97,14 @@ copies. Failed-job diagnostics expire after one day and are removed after
 their investigation is finished.
 
 The complete corpus for each of the three output targets is loaded by
-`make compiler-release-ci` or `make check-stage3-targets`. Historical execution
-recorded 861 records; the current loader produces 797 with all 1,280 required
-coverage IDs. The 64-record difference is unresolved, and neither count proves
-current complete acceptance. Freeze and authenticate the full input and resolve
-that scope difference before claiming the exhaustive gate passed. The workflow's
+`make compiler-release-ci` or `make check-stage3-targets`. The current loader
+produces 797 records with all 1,280 required coverage IDs. Fresh official builds
+of historical commits `745603c6` and `3381ff09` produce the same 797 record IDs;
+the comparison establishes the denominator, not record-content equivalence or
+program success. An older run reported 861, but its complete frozen input and
+source provenance cannot be verified. Keep that historical count unverified;
+do not fabricate records or use it as passing current evidence. Freeze and
+authenticate the complete current input before execution. The workflow's
 explicit `exhaustive` input selects the full gate with its six-hour ceiling.
 Use it only when current measurements fit the selected runner; cancelled and
 deferred records never count as passes. The default platform job does not run
@@ -246,8 +249,8 @@ archive checks pass all 32 cases through the retained unaffected results plus
 the corrected recipe's focused replay. The dense ordering fixture is registered
 in the official build and bound to its actual Bun/Node/WASM/native consumer;
 source authentication alone never asserts that consumer passed. All four
-consumer cases also pass. The historical 861-record corpus authenticated without
-missing adapters; the current corpus discrepancy above remains open. A build
+consumer cases also pass. A historical run reported 861 records without missing
+adapters; that count lacks the reproducible source binding described above. A build
 from absent generated outputs passes the 338-file
 stage2/stage3 fixed point and all six platform steps in 372.6 seconds, with a
 4.51 GB accounted process-tree peak. These local results do not substitute

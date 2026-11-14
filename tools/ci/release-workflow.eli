@@ -39,7 +39,7 @@
          "name: Compiler bootstrap and final outputs\n\n"
          "on:\n  workflow_dispatch:\n"
          "    inputs:\n      exhaustive:\n"
-         "        description: Run the complete current three-target corpus; the historical 861-record snapshot and current 797-record output still have an unexplained 64-record gap (not accepted as a final denominator)\n"
+         "        description: Run the complete current three-target corpus in addition to platform acceptance\n"
          "        type: boolean\n        default: false\n\n"
          "permissions:\n  contents: read\n\n"
          "concurrency:\n  group: compiler-release-${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true\n\n"

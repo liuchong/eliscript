@@ -100,7 +100,12 @@ test: test-pre-bootstrap-originals
 test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
 	@$(SUITE_FINALIZE) test "$(FULL_TEST_SUITE_STEPS)"
 
-test-pre-bootstrap-originals:
+# The suite runner is a generated artifact (see `tools/backends/bootstrap.el`);
+# a clean checkout has no `tools/testing/*.mjs` until the Emacs bootstrap runs.
+# Declare the dependency explicitly because `test` lists this target in the rule
+# that owns the recipe, so GNU Make builds it before `test-core` reaches
+# `check-contracts`.
+test-pre-bootstrap-originals: bootstrap-backends
 	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(SUITE_STEP) test test-pre-bootstrap-originals/node-originals "" -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 	$(if $(filter test test-pre-bootstrap,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(ORIGINALS_SUITE_STEPS)")
 
