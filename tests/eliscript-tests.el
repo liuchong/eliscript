@@ -3113,6 +3113,59 @@ already nested suffix, or use either production emitter to build the oracle."
       (should (> (length source) 100000))
       (should-not (string-match-p "=>" source)))))
 
+(ert-deftest eliscript-quoted-try-data-preserve-form-and-ir-parity ()
+  (dolist (source
+           '("(defun returning (log) (try (js-call log :push 1) 7 (finally (js-call log :push 2))))"
+             "(defun discarded (log) (try (js-call log :push 1) 7 (catch error 8) (finally (js-call log :push 2))) (js-call log :push 3) 9)"
+             "(defun empty-try () (try (finally)))"
+             "(defun quoted-try () (try (quote (js* \"data\")) (finally)))"
+             "(defun quoted-declaration () (try (quote (defun ignored () (js* \"data\"))) (finally)))"
+             "(defun quoted-recur () (try (quote (recur (js* \"data\"))) (finally)))"
+             "(defun quoted-await () (try (quote (await (js* \"data\"))) (finally)))"
+             "(defun quoted-vector () (try (quote [(js* \"data\")]) (finally)))"
+             "(defun string-try () (try \"js*\" (finally)))"
+             "(defun key-try () (try (js-object :js* 1) (finally)))"))
+    (let ((output (eliscript-compile-string source "try-context.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "try-context.eli")))))
+  (let* ((program (eliscript-compile-ir-string "(defun immutable () (try 9 (finally)))" "try-immutable.eli"))
+         (before (copy-tree program t)))
+    (eliscript-emit-ir-module program)
+    (should (equal program before)))
+  (let* ((source "(defun values (value) (try (throw [value]) (catch [item] item) (finally 99)))")
+         (direct (eliscript-tests--ground-compile-string source "try-map.eli"))
+         (emission (eliscript-compile-string-with-source-map source "try-map.eli" "try-map.mjs" "try-map.eli")))
+    (should (equal direct (eliscript-emission-javascript emission)))
+    (should (string-match-p (regexp-quote "catch (") direct))
+    (let ((document (json-parse-string (eliscript-emission-source-map emission))))
+      (should (equal (gethash "sourcesContent" document) (vector source)))
+      (should (> (length (gethash "mappings" document)) 0)))))
+
+(ert-deftest eliscript-try-expression-raw-and-await-boundaries-remain-iifes ()
+  (dolist (source
+           '("(defun operand () (js-array (try 7 (finally))))"
+             "(defun raw-body () (try (js* \"var privateTry = 1\") 7 (finally)))"
+             "(defun raw-catch () (try 7 (catch error (js* \"this\"))))"
+             "(defun raw-finally () (try 7 (finally (js* \"arguments\"))))"
+             "(defun raw-vector () (try [(js* \"arguments\")] (finally)))"
+             "(defun raw-closure () (try (lambda () (js* \"this\")) (finally)))"))
+    (let ((output (eliscript-compile-string source "try-fallback.eli")))
+      (should (equal output (eliscript-tests--ground-compile-string source "try-fallback.eli")))
+      (should (string-match-p (regexp-quote "(() => {") output))))
+  (let* ((source "(defasync asynchronous (value) (try (await value) (finally 1)))")
+         (output (eliscript-compile-string source "try-await.eli")))
+    (should (equal output (eliscript-tests--ground-compile-string source "try-await.eli")))
+    (should (string-match-p (regexp-quote "(await (async () => {") output)))
+  (dolist (source '("(defun invalid () (try 1))"
+                    "(defun invalid () (try 1 (catch error 2) (catch again 3)))"
+                    "(defun invalid () (try 1 (finally 2) (catch error 3)))"
+                    "(defun invalid () (try (defvar inner 1) (finally)))"
+                    "(defun invalid () (try (defun inner () 1) (finally)))"
+                    "(defun invalid () (try (import \"inside.mjs\" value) (finally)))"
+                    "(defun invalid () (try (export value) (finally)))"
+                    "(defun invalid () (loop ((value 0)) (try (recur 1) (finally))))"))
+    (should-error (eliscript-compile-string source "try-invalid.eli") :type 'eliscript-compile-error)
+    (should-error (eliscript-tests--ground-compile-string source "try-invalid.eli") :type 'eliscript-compile-error)))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

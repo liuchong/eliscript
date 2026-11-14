@@ -135,9 +135,14 @@ publication, a GitHub Release or a signed release tag.
   One full measurement per changed harness still fails: indentation 5.374567
   against 10 and location 1.039105 against 1.75. These are harness-cost
   reductions, with no production emitter speedup or passing decision claimed.
+  A later native-try emission candidate also failed its original SourceMap
+  gates (1.040186/0.957035 against 1.5/1.08), transient Vector gate
+  (0.830965 against 1.5), and full version comparison (13/18). It was
+  withdrawn. The independent fixes that prevent quoted `await`/`recur` data
+  from changing AST control flow and the public try regressions are retained.
   Core now passes all 11 original budgets across three independent processes
   and seven samples per path; clean-build median/maximum/spread are
-  19.187 ms/22.817 ms/1.223. The previous failures remain in the active plan.
+  18.573 ms/20.325 ms/1.105. The previous failures remain in the active plan.
   The five historical passing reports retain their accepted Git bytes and do
   not establish current acceptance. Their current-source checks still reject
   the stale evidence; failed fresh measurements are recorded in the checklist.

@@ -960,7 +960,7 @@ EXCLUDED operators prune their complete forms after the node predicate."
 (defun eliscript-emitter--contains-await-p (form)
   "Return non-nil when FORM contains await outside nested functions."
   (eliscript-emitter--some-form (list form)
-    (lambda (node) (and (consp node) (eq (car node) 'await))) '(lambda fn async)))
+    (lambda (node) (and (consp node) (eq (car node) 'await))) '(lambda fn async quote)))
 
 (defun eliscript-emitter--emit-iife
     (parameters body arguments asynchronous)
@@ -1042,7 +1042,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 (defun eliscript-emitter--contains-function-recur-p (form)
   "Return non-nil when FORM recurs outside nested functions or loops."
   (eliscript-emitter--some-form (list form)
-    (lambda (node) (and (consp node) (eq (car node) 'recur))) '(lambda fn async loop)))
+    (lambda (node) (and (consp node) (eq (car node) 'recur))) '(lambda fn async loop quote)))
 
 (defun eliscript-emitter--emit-rebinding-target (binding temporary)
   "Assign TEMPORARY to mutable BINDING, including a vector pattern."
