@@ -1,3 +1,53 @@
 (defun reader-failure (trace)
   (lambda (code) (put trace :called t) (throw false)))
 (export reader-failure)
+;; Historical portable-reader kernels, copied from
+;; bootstrap/compiler/reader.eli at revision
+;; 2492d6db6bdca05a925c8294d954d060c768be56 (the last revision before
+;; 80bd961d). The form text is unchanged; only the two-space module-body
+;; indentation was removed. This fixture is compilation and managed-lowering
+;; consistency input for the original generic-kernel suite. It is not the
+;; current Reader implementation and does not track it.
+(defconst native-whitespace-code-p
+  (lambda (code)
+    (or (eq code 32) (eq code 9) (eq code 10) (eq code 13) (eq code 12))))
+(defconst native-delimiter-code-p
+  (lambda (code)
+    (or (eq code undefined) (eq code 32) (eq code 9) (eq code 10) (eq code 13) (eq code 12)
+      (eq code 40) (eq code 41) (eq code 91) (eq code 93) (eq code 123) (eq code 125)
+        (eq code 34) (eq code 39) (eq code 44) (eq code 59) (eq code 96))))
+(defconst native-skip-space-and-comments
+  (lambda (state whitespace)
+  (let* ((source (aref state "source")) (index (aref state "index"))
+         (offset (aref state "offset")) (line (aref state "line"))
+         (column (aref state "column")) (done false))
+    (while (and (eq done false) (< index (aref source "length")))
+      (let* ((code (js-call source :codePointAt index))
+             (answer (funcall whitespace code)))
+        (if (js* "!!answer")
+          (progn
+            (setq index (+ index 1)) (setq offset (+ offset 1))
+            (if (eq code 10) (progn (setq line (+ line 1)) (setq column 1))
+              (setq column (+ column 1))))
+          (if (eq code 59)
+            (while (and (< index (aref source "length"))
+                        (not (eq (js-call source :charCodeAt index) 10)))
+              (setq index (+ index (if (> (js-call source :codePointAt index) 65535) 2 1)))
+              (setq offset (+ offset 1)) (setq column (+ column 1)))
+            (setq done t)))))
+    (put state :index index) (put state :offset offset)
+    (put state :line line) (put state :column column) nil)))
+(defconst native-read-token
+  (lambda (state start delimiter)
+  (let* ((source (aref state "source")) (index (aref state "index"))
+         (consumed 0) (done false))
+    (while (eq done false)
+      (let* ((code (js-call source :codePointAt index))
+             (answer (funcall delimiter code)))
+        (if (js* "!!answer") (setq done t)
+          (progn (setq index (+ index (if (> code 65535) 2 1)))
+                 (setq consumed (1+ consumed))))))
+    (put state :index index)
+    (put state :offset (+ (aref state "offset") consumed))
+    (put state :column (+ (aref state "column") consumed))
+    (js-call source :slice (aref start "index") index))))

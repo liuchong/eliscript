@@ -123,7 +123,7 @@
            (source (await (readFile "tests/bootstrap-emitter.test.mjs" "utf8")))
            (assertion (get original :assertionSource)))
       (ok record "source archive assertion at maintained line 108")
-      (eq-check (get original :sourceSha256) "a02c76af88e3cbec19496284040391c959517c8024a7327f4a3260c9a9ccffa5")
+      (eq-check (get original :sourceSha256) "8e6c6ec0667d26be9ea3af863529a2003f35e8f8d6a87a96634d0696fefe6a83")
       (eq-check (get assertion :sourceSha256) (hash source))
       (deep (get assertion :regions) (get original :regions))
       (eq-check (js-length (get assertion :regions)) 2)

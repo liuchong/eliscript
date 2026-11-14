@@ -725,10 +725,10 @@ PERF13-07 与 PERF13-08 已用最终 Stage3 的实际测量与保护验证关闭
 | 契约与重建 | 本批初次契约 16/17，唯一失败修复后独立复验通过；干净候选完整构建、22 项测试与 50 个选定 JS/map 同字节 | 干净候选的四条桥均拒绝 seed、零残留；只对所比对的 50 个输出声明字节一致，不冒充整仓或最终四阶段完整兼容矩阵。 |
 | 本地功能入口 | Makefile 显式去重 392 个 .test.mjs，另有 shell 与 ERT 门禁 | 旧 390 数量已失效。保留未受改源影响的有效证据，完成本批受影响入口及最终套件对账；静态列举不是 392 文件执行通过。 |
 | 全库 Eliscript 与嵌入 JS 清理 | 维护 .eli 1370 个；含 token 的 704 个候选已语法解析 704 个 | 深嵌套 multimethod 夹具补齐官方 reader 解析，审计快照真实 js* 节点 3484 个（生产 1071、测试 2413）；后续测试新增两条动态 import 薄桥另计。未发现大型生产算法 capsule；测试 PRNG 与阻塞 worker 均为独立宿主刺激。这是覆盖清点，不是纯净度或项目完成率。 |
-| 三输出完整语料 | 861 × 3 = 2583 个分类坐标；当前分类无拒绝 | JS 有效 853、迁移 2、延期 6；WASM/native 各有效 812、迁移/取消 35（含迁移 2）、延期 14。分类完成不是执行通过，新鲜同冻结输入全矩阵尚未验收。 |
-| 本地兼容环境 | 必需 macOS arm64 Emacs 29.4、30.2 + Bun 1.4.0、Node 24.20.0 | 留存两份矩阵来自较早 Git 来源，不是本候选通过；按规格补当前必要证据，不能用本机其它 Emacs 版本替代。 |
+| 三输出完整语料 | 旧分类记录为 861 × 3；当前正式 loader 返回 797 条，1280 项 requiredCoverage 齐全 | 已从原生运行记录确认旧 861/853/812 分类输出真实存在，但其完整冻结输入尚不可复核；64 条差额尚未解释，不能直接缩分母或虚构补齐。当前 797 条正式冻结输入已重载验真，完整规范覆盖与新鲜三输出执行仍未验收。 |
+| 本地兼容环境 | 本次固定 macOS arm64 Emacs 32.0.50 + Bun 1.4.0、Node 24.20.0 | 用户明确后续只升不降，仅当官方稳定版高于 32.0.50，或用户明确要求时调整；29.4/30.2 不再作为当前支持与验收要求，历史报告不改写为当前通过。矩阵、CI 与政策测试正在按此收敛。 |
 | 35 项 AC/PD 与 2 项 AV | 历史 core audit 为 35/35；当前候选未完成同来源复核 | Core 35 项沿 contracts/core-acceptance-corpus.json 与完整功能探针评估；AV-01/02 应用单独验收，不混入 core 百分比。旧 manifest 不改写成当前通过。 |
-| 最终签名 SHA 的 4 个远端门禁 | 已推送 d6910905 仅 Pages 通过；候选仍有未提交源码 | Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；平台子集不冒充全量或性能验收。 |
+| 最终签名 SHA 的 4 个远端门禁 | 最新已签名推送 0280e230 的 Pages 已通过，其余三项尚未在该 SHA 收齐；另有当前未提交修复 | Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；平台子集不冒充全量或性能验收。 |
 | 三方独立终审与交付清理 | Codex、OpenCode、Antigravity 必须分别对同一最终冻结来源作全方位真实检查；当前阶段窄审不能代替终审 | Codex 主导分工与最终裁决；OpenCode、Antigravity 每次交回列清进行中、剩余与下一责任人。终审分别保留发现、执行覆盖、未验缺口及结论，三方核收后才可宣布达到发布质量；签名推送后清理用完输出，实际发布仍等待用户命令。 |
 
 十四份报告逐项对账：最终 Stage3 数值与来源通过的有
@@ -769,12 +769,20 @@ Core clean median/max/spread 为 18.572583 ms / 20.325416 ms / 1.105438。三份
 保留实现的独立 ERT 为 3/3，控制流集成为 11/11（含真实 Node/Bun、13 模块三代字节与
 Source Map 一致性），严格 byte-compile 通过。
 
-另有独立功能接线缺口：compiler-portable-reader 的 beforeAll 仍从现行生产 Reader 查找
-已删除的四个历史 generic kernel。当前仅静态确认漂移，尚未执行故障套件，不冒称断言
-实测失败。OpenCode 负责完整夹具接线修复，保留全部 20 条契约并显式说明历史输入，
-生产 Reader 的当前行为覆盖独立保留；不简单改名绕过原 arity/callback/关闭协议断言。
-Antigravity 恢复原对话后负责 Reader/SourceMap 完整编译性能攻坚，Codex 继续当前批次
-集成、包安装和独立核收；当前冻结期间伙伴先在隔离缓存准备候选，不双写共享产物。
+功能接线问题 FUNC13-01 已修复：portable-reader 的 beforeAll 改读显式维护夹具，
+夹具固定保留 2492d6db 的四个历史 generic kernel，不伪装为现行生产 Reader；全部
+20 条原契约及 reader-failure 首函数/导出不变，两处摘要绑定真实生成产物。独立核验
+suite/helper maps 与维护源一致，官方 preload 下普通语义和恢复通过；无延期模式实际
+20 pass / 1 fail，失败在既有 16 KiB 压力用例初始化（需求 17176 B、live 98/256）前，
+尚未触发回调。该 C65 严格容量项仍明确 DEFERRED / NOT ACCEPTED，未提高预算，
+未删除任何原断言；功能模式真实为 20 pass / 1 explicit skip / 0 fail，不冒充容量通过。
+FUNC13-02 为 6206f8e5 漏同步的 emitter 归档摘要，精确绑定已核验维护源及 map 的
+8e6c6ec0… 后，原 32 条归档完整性与篡改拒绝全部通过；初次 31 pass / 1 fail 保留。
+本批受影响两文件独立执行 52 pass、1 explicit capacity skip、0 fail，不等于整仓验收。
+伙伴误执行两次全局 bootstrap-backends 造成 seed 产物覆盖；认证门正确拒绝变化的
+analyzer，正式 prepare 从未改动 Stage3 认证源恢复原 338 证书，未重新测量或改证书。
+Antigravity 负责 Reader/SourceMap 性能攻坚，OpenCode 当前编码收敛 Emacs 32.0.50
+矩阵/CI/政策测试；Codex 主导语料身份差异调查、独立核收及最终交付。
 
 本次只加载来源和分类，没有执行 2583 个程序；诊断最初漏传归档证据而触发严格拒绝，
 按正式入口传入 corpus.document.evidence 后全部分类成功，没有因此修改或放宽保护。

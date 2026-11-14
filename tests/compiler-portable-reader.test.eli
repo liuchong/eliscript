@@ -34,7 +34,12 @@
   (beforeAll (async ()
     (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-portable-reader-"))) b (await (buildBackends (js-object :outputRoot directory)))
       runtime (compilerIR (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
-    (let* ((source (compilerIR (await (readFile "bootstrap/compiler/reader.eli" "utf8")) "reader.eli")) (nodes (flatten (get source :body)))
+    ;; The four historical const-arrow kernels are fixture input copied from
+    ;; revision 2492d6db (the last revision before 80bd961d). This beforeAll
+    ;; pins their original JS and managed-lowering contract from that fixture;
+    ;; the kernel contract does not read live Reader code or claim current
+    ;; Reader coverage.
+    (let* ((source (compilerIR (await (readFile "tools/testing/fixtures/portable-reader-failure.eli" "utf8")) "reader-failure.eli")) (nodes (flatten (get source :body)))
            (adaptersSource (js-call (js-call names :map (lambda (name) (str "(defun " (adapterName name) " (&rest args) (apply " name " args))"))) :join " "))
            (adapters (js-call (flatten (get (compilerIR (str (placeholders) adaptersSource) "reader-adapters.eli") :body)) :filter
              (lambda (node) (and (= (get node :kind) "function-declaration") (not (js-call names :includes (get node :value))))))))
