@@ -1,5 +1,5 @@
 (module tools.backends.release-cli
-  (import "node:fs/promises" readFile writeFile mkdir cp realpath)
+  (import "node:fs/promises" readFile writeFile mkdir cp realpath rm)
   (import "node:fs" existsSync)
   (import "node:path" resolve dirname join relative isAbsolute sep)
   (import "node:url" fileURLToPath)
@@ -93,6 +93,18 @@
       "bootstrap/source-map.mjs" "bootstrap/emitter.mjs" "bootstrap/project.mjs"
       "bootstrap/compiler.mjs"))
 
+  (defconst prepared-shadow-package-files
+    (js-array "dist/bootstrap/package.json" "dist/runtime/package.json"))
+
+  (defun require-unshadowed-prepared-package (directory)
+    ;; The authenticated dist/package.json owns both the compiler and its
+    ;; runtime. A nearer package scope can redirect bare ESM imports while all
+    ;; declared compiler/runtime bytes still match the receipt.
+    (js-call prepared-shadow-package-files :forEach
+      (lambda (file)
+        (when (existsSync (resolve directory file))
+          (release-type-error (+ "prepared stage3 required: shadow package scope " file))))))
+
   (defasync require-prepared-runtime (certified &optional directory)
     (let* ((metadata-path (get certified :stage3MetadataPath))
            (metadata (await (readCompilerMetadata metadata-path)))
@@ -147,6 +159,7 @@
                              (resolve prepared-root "dist" (get record :id)))
                     (release-type-error "prepared stage3 module path differs from the measured package layout"))))
               (setq index (1+ index)))))
+        (require-unshadowed-prepared-package prepared-root)
         (await (require-prepared-runtime certified prepared-root))
         (js-object :scope (get certified :scope)
           :bootstrapManifestPath (get certified :bootstrapManifestPath)
@@ -157,7 +170,9 @@
           ;; Portable identity for retained reports; checkout paths never enter
           ;; the committed measurement, and current-source checks compare this
           ;; certificate with freshly authenticated final bytes.
-          :reportIdentity (js-object :format "eliscript-prepared-stage3" :version 1
+          ;; v1 authenticated declared bytes without excluding shadow package
+          ;; scopes. Only fresh measurements may claim the v2 loading contract.
+          :reportIdentity (js-object :format "eliscript-prepared-stage3" :version 2
             :fixedPointFileCount (get certified :fixedPointFileCount)
             :sourceSha256 (get (get certified :sourceIdentity) :sha256)
             :productSha256 (get (get certified :productIdentity) :sha256))))))
@@ -166,6 +181,7 @@
     (unless (and (not (nullish? source)) (not (nullish? certified))
                  (not (nullish? (get certified :reportIdentity)))
                  (= (get (get certified :reportIdentity) :format) "eliscript-prepared-stage3")
+                 (= (get (get certified :reportIdentity) :version) 2)
                  (isDeepStrictEqual (get source :preparedCompiler) (get certified :reportIdentity)))
       (release-type-error "benchmark source does not match the authenticated prepared stage3 compiler"))
     (unless (Array/isArray (get source :files))
@@ -220,6 +236,14 @@
            (directory (dirname metadata-path)) (modules (get metadata :modules)) (index 0))
       (unless (and (= (get metadata :host) "javascript") (Array/isArray modules) (> (js-length modules) 0))
         (release-type-error "stage3 package requires the complete JavaScript module graph"))
+      ;; Do not copy or clean through redirected output directories.
+      (let ((directories (js-array "dist" "dist/bootstrap" "dist/runtime")) (directory-index 0))
+        (while (< directory-index (js-length directories))
+          (let ((output (resolve root (aref directories directory-index))))
+            (when (existsSync output)
+              (unless (= (await (realpath output)) output)
+                (release-type-error "prepared stage3 output directory must not be redirected"))))
+          (setq directory-index (1+ directory-index))))
       ;; Copy the actual final frontend modules into the established public
       ;; compiler paths. The full authenticated stage3 remains alongside them.
       (while (< index (js-length modules))
@@ -283,6 +307,15 @@
             (Reflect/deleteProperty packaged-metadata "literalIR")
             (await (saveCompilerMetadata (resolve root "dist/compiler-artifact.json") packaged-metadata))
             (await (saveCompilerMetadata (resolve root "dist/stage3-release.json") release-receipt)))))
+      ;; The seed bootstrap creates its own private package and runtime beside
+      ;; its compiler. They are not final artifact records and must not shadow
+      ;; the authenticated dist/package.json after preparation.
+      (let ((shadow-index 0))
+        (while (< shadow-index (js-length prepared-shadow-package-files))
+          (await (rm (resolve root (aref prepared-shadow-package-files shadow-index))
+            (js-object :force t)))
+          (setq shadow-index (1+ shadow-index))))
+      (await (rm (resolve root "dist/bootstrap/runtime") (js-object :recursive t :force t)))
       certified))
 
   (defasync runReleaseCLI (arguments &optional io)
