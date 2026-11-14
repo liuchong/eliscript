@@ -152,28 +152,44 @@
       (aref sorted (Math/floor (/ (js-length sorted) 2)))))
 
   (defun fragment-checksum (fragment)
-    (let ((marks (get fragment :marks))
-          (checksum (+ (* (js-length (get fragment :text)) 31)
-                       (js-length (get fragment :marks))))
-          (index 0))
-      (while (< index (js-length marks))
+    (let* ((marks (get fragment :marks))
+           (checksum (+ (* (js-length (get fragment :text)) 31)
+                        (js-length (get fragment :marks))))
+           (mark-count (js-length marks))
+           (index 0))
+      ;; The timed checksum receives fresh plain emitter/boundary fragments with
+      ;; plain marks arrays. The index starts at zero and only advances while it
+      ;; is below this guarded bound, so both operands of the fused native
+      ;; comparison are safe Number integers for every iteration.
+      (unless (and (Number/isSafeInteger mark-count) (>= mark-count 0))
+        (throw (new globalThis.TypeError
+                 "indent benchmark checksum requires a safe nonnegative mark count")))
+      (while (funcall (js* "(a, b) => a < b") index mark-count)
         (setq checksum (+ checksum (get (aref marks index) :offset)))
         (setq index (+ index 1)))
       checksum))
 
   (defun measure (indent fragments iterations)
-    (let ((checksum 0)
-          (start (js-call globalThis.performance :now))
-          (iteration 0))
-      (while (< iteration iterations)
-        (let ((index 0))
-          (while (< index (js-length fragments))
-            (setq checksum (+ checksum (fragment-checksum (funcall indent (aref fragments index)))))
-            (setq index (+ index 1))))
-        (setq iteration (+ iteration 1)))
-      (js-object
-        :milliseconds (- (js-call globalThis.performance :now) start)
-        :checksum checksum)))
+    (let ((fragment-count (js-length fragments)))
+      ;; The fragment count comes from the benchmark-created plain array and the
+      ;; iteration count from parse-positive-integer. Both loop indices start at
+      ;; zero and only advance below these guarded bounds.
+      (unless (and (Number/isSafeInteger iterations) (>= iterations 0)
+                   (Number/isSafeInteger fragment-count) (>= fragment-count 0))
+        (throw (new globalThis.TypeError
+                 "indent benchmark requires safe nonnegative loop bounds")))
+      (let ((checksum 0)
+            (start (js-call globalThis.performance :now))
+            (iteration 0))
+        (while (funcall (js* "(a, b) => a < b") iteration iterations)
+          (let ((index 0))
+            (while (funcall (js* "(a, b) => a < b") index fragment-count)
+              (setq checksum (+ checksum (fragment-checksum (funcall indent (aref fragments index)))))
+              (setq index (+ index 1))))
+          (setq iteration (+ iteration 1)))
+        (js-object
+          :milliseconds (- (js-call globalThis.performance :now) start)
+          :checksum checksum))))
 
   (defasync load-generated-compiler ()
     (let ((module-directory (js-call path :join project-directory "dist/bootstrap")))

@@ -130,6 +130,11 @@ publication, a GitHub Release or a signed release tag.
   pipeline/compiler 1.028734/0.982600 against 1.5/1.08; indentation 4.446816
   against 10; transient Vector 0.772851 against 1.5; mark location 1.091314
   against 1.75. Transient allocation 0.269549 passes its separate 1/3 bound.
+  Removing redundant loop-control work from the shared indentation and
+  location checksums preserves their checksum values and original parameters.
+  One full measurement per changed harness still fails: indentation 5.374567
+  against 10 and location 1.039105 against 1.75. These are harness-cost
+  reductions, with no production emitter speedup or passing decision claimed.
   Core now passes all 11 original budgets across three independent processes
   and seven samples per path; clean-build median/maximum/spread are
   19.187 ms/22.817 ms/1.223. The previous failures remain in the active plan.
