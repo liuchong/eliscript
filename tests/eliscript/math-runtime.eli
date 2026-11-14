@@ -9,6 +9,9 @@
   (import "node:fs/promises" readFile realpath)
   (import "../dist/bootstrap/compiler.mjs" compile-ir-string emit-ir-string)
   (import "../runtime/math.mjs" f16round sumPrecise)
+  (import "../runtime/primitives.mjs"
+    numericSub numericMul numericDiv numericRem numericAnd numericOr numericXor numericShl numericShr numericUshr
+    numericRelation)
 
   (defconst math (Reflect/get globalThis.globalThis "Math"))
   (defconst bits (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
@@ -334,14 +337,176 @@
         (Reflect/deleteProperty math "pow")
         (exact (funcall held -2 3) -8)
         (finally (Object/defineProperty math "pow" saved)))))
+
+  (defconst native-arithmetic
+    (js* "({sub:(a,b)=>a-b,mul:(a,b)=>a*b,div:(a,b)=>a/b,rem:(a,b)=>a%b,and:(a,b)=>a&b,or:(a,b)=>a|b,xor:(a,b)=>a^b,shl:(a,b)=>a<<b,shr:(a,b)=>a>>b,ushr:(a,b)=>a>>>b})"))
+  (defconst native-relation
+    (js* "(op, a, b) => op === \"<\" ? a < b : op === \"<=\" ? a <= b : op === \">\" ? a > b : a >= b"))
+  (defun conversion-object (events label value failure marker)
+    (let ((object (js-object)))
+      (put object (get globalThis.Symbol :toPrimitive)
+        (lambda (hint)
+          (js-call events :push (js-array label hint))
+          (when failure (throw marker))
+          value))
+      object))
+  (defun check-operators ()
+    ;; The fixture itself must be negative zero, not positive zero.
+    (js-call assert :strictEqual (Object/is -0.0 0) false)
+    (let ((arithmetic
+            (js-array
+              (js-array numericSub "sub")
+              (js-array numericMul "mul")
+              (js-array numericDiv "div")
+              (js-array numericRem "rem")
+              (js-array numericAnd "and")
+              (js-array numericOr "or")
+              (js-array numericXor "xor")
+              (js-array numericShl "shl")
+              (js-array numericShr "shr")
+              (js-array numericUshr "ushr")))
+          (pairs
+            (js-array
+              (js-array -0.0 1)
+              (js-array 0 -1)
+              (js-array -0.0 -0.0)
+              (js-array globalThis.NaN 1)
+              (js-array 1 globalThis.NaN)
+              (js-array globalThis.Infinity 0)
+              (js-array (- globalThis.Infinity) 2)
+              (js-array globalThis.Infinity globalThis.Infinity)
+              (js-array 1.5 -2.25)
+              (js-array 5e-324 -0.0)
+              (js-array 1.7976931348623157e308 2)
+              (js-array -1 0))))
+      (js-call arithmetic :forEach
+        (lambda (entry)
+          (let ((helper (aref entry 0)) (key (aref entry 1)))
+            (js-call pairs :forEach
+              (lambda (pair)
+                (exact (funcall helper (aref pair 0) (aref pair 1))
+                       (funcall (get native-arithmetic key) (aref pair 0) (aref pair 1)))))))))
+    (let ((operators (js-array "<" "<=" ">" ">=" "!=" "===" "bogus" undefined))
+          (relation-pairs
+            (js-array
+              (js-array 1 2)
+              (js-array 2 1)
+              (js-array 1 1)
+              (js-array -0.0 0)
+              (js-array globalThis.NaN 1)
+              (js-array 1 globalThis.NaN)
+              (js-array globalThis.Infinity 1)
+              (js-array (- globalThis.Infinity) 1)
+              (js-array "10" "2")
+              (js-array "2" "10")
+              (js-array (big 1) (big 2))
+              (js-array (big 2) (big 1))
+              (js-array (big 1) 1.5)
+              (js-array 1.5 (big 1))
+              (js-array (big 1) globalThis.Infinity)
+              (js-array (- globalThis.Infinity) (big 1))
+              (js-array (big "9007199254740993") 9007199254740992)
+              (js-array (big "9007199254740993") 9007199254740994)
+              (js-array (big "-9007199254740993") -9007199254740992)
+              (js-array "2" (big 2)))))
+      (js-call operators :forEach
+        (lambda (operator)
+          (js-call relation-pairs :forEach
+            (lambda (pair)
+              (js-call assert :strictEqual
+                (numericRelation operator (aref pair 0) (aref pair 1))
+                (funcall native-relation operator (aref pair 0) (aref pair 1))))))))
+      (js-call assert :strictEqual (numericRelation ">" (big "9007199254740993") 9007199254740992) t)
+      (js-call assert :strictEqual (numericRelation "<=" (big "9007199254740993") 9007199254740992) false)
+      (js-call assert :strictEqual (numericRelation "<" (big "9007199254740993") 9007199254740994) t)
+      (js-call assert :strictEqual (numericRelation "<" (big "-9007199254740993") -9007199254740992) t)
+      (js-call assert :strictEqual (numericRelation "bogus" 2 1) t)
+      (js-call assert :strictEqual (numericRelation "bogus" 1 2) false)
+      (js-call assert :strictEqual (numericRelation undefined 2 1) t)
+    (let ((big-arithmetic
+            (js-array
+              (js-array numericSub "sub")
+              (js-array numericMul "mul")
+              (js-array numericDiv "div")
+              (js-array numericRem "rem")
+              (js-array numericAnd "and")
+              (js-array numericOr "or")
+              (js-array numericXor "xor")
+              (js-array numericShl "shl")
+              (js-array numericShr "shr")))
+          (mixed-arithmetic
+            (js-array
+              (js-array numericSub "sub")
+              (js-array numericMul "mul")
+              (js-array numericDiv "div")
+              (js-array numericRem "rem")
+              (js-array numericAnd "and")
+              (js-array numericOr "or")
+              (js-array numericXor "xor")
+              (js-array numericShl "shl")
+              (js-array numericShr "shr")
+              (js-array numericUshr "ushr"))))
+      (js-call big-arithmetic :forEach
+        (lambda (entry)
+          (js-call assert :strictEqual
+            (funcall (aref entry 0) (big 7) (big 3))
+            (funcall (get native-arithmetic (aref entry 1)) (big 7) (big 3)))))
+      (js-call mixed-arithmetic :forEach
+        (lambda (entry)
+          (let ((helper (aref entry 0)) (key (aref entry 1)))
+            (js-call assert :throws (lambda () (funcall helper (big 1) 1)) globalThis.TypeError)
+            (js-call assert :throws (lambda () (funcall helper 1 (big 1))) globalThis.TypeError)
+            (js-call assert :throws
+              (lambda () (funcall (get native-arithmetic key) (big 1) 1)) globalThis.TypeError)
+            (js-call assert :throws
+              (lambda () (funcall (get native-arithmetic key) 1 (big 1))) globalThis.TypeError)))))
+    (let ((events (js-array)) (marker (js-object)))
+      (exact (numericSub (conversion-object events "a" 3 false marker)
+                         (conversion-object events "b" 1 false marker)) 2)
+      (js-call assert :deepStrictEqual events
+        (js-array (js-array "a" "number") (js-array "b" "number"))))
+    (let ((events (js-array)) (marker (js-object)))
+      (js-call assert :throws
+        (lambda () (numericSub (conversion-object events "a" 3 t marker)
+                               (conversion-object events "b" 1 false marker)))
+        (lambda (error) (Object/is error marker)))
+      (js-call assert :deepStrictEqual events (js-array (js-array "a" "number"))))
+    (let ((events (js-array)) (marker (js-object)))
+      (js-call assert :throws
+        (lambda () (numericSub (conversion-object events "a" 3 false marker)
+                               (conversion-object events "b" 1 t marker)))
+        (lambda (error) (Object/is error marker)))
+      (js-call assert :deepStrictEqual events
+        (js-array (js-array "a" "number") (js-array "b" "number"))))
+    (let ((events (js-array)) (marker (js-object)) (object (js-object)))
+      (Object/defineProperty object (get globalThis.Symbol :toPrimitive)
+        (js-object :configurable t
+          :get (lambda ()
+                 (js-call events :push "get")
+                 (throw marker))))
+      (js-call assert :throws
+        (lambda () (numericSub object (conversion-object events "b" 1 false marker)))
+        (lambda (error) (Object/is error marker)))
+      (js-call assert :deepStrictEqual events (js-array "get")))
+    (let ((events (js-array)) (marker (js-object)))
+      (js-call assert :strictEqual
+        (numericRelation "<" (conversion-object events "a" 1 false marker)
+                             (conversion-object events "b" 2 false marker)) t)
+      (js-call assert :deepStrictEqual events
+        (js-array (js-array "a" "number") (js-array "b" "number"))))
+    (let ((calls 0))
+      (exact (numericSub (progn (setq calls (1+ calls)) 3)
+                         (progn (setq calls (1+ calls)) 1)) 2)
+      (js-call assert :strictEqual calls 2)))
   (defasync all-checks ()
-    (check-half) (check-sum) (check-iterator) (check-hypot) (check-pow) (await (check-metadata-and-mutation)))
+    (check-half) (check-sum) (check-iterator) (check-hypot) (check-pow) (check-operators) (await (check-metadata-and-mutation)))
   (if (= (get (get globalThis.process :env) :ELISCRIPT_MATH_RUNTIME_CHILD) "1")
     (js-call (all-checks) :then
       (lambda () (js-call (get globalThis.process :stdout) :write "math-runtime-complete\n"))
       (lambda (error) (js-call globalThis.console :error error) (put globalThis.process :exitCode 1)))
     (progn
       (test "production pow uses the binary backend kernel with exact bits conversion ordering and held calls" check-pow)
+      (test "exported numeric operators preserve native arithmetic relations BigInt boundaries and exact conversion order" check-operators)
       (test "production hypot retains subnormal results conversion order and user overrides on every JavaScript host" check-hypot)
       (test "production Math binary16 rounds directly from binary64 against the independent exact integer model" check-half)
       (test "production precise sum matches the original integer model across overflow cancellation ties and seeded binary64 values" check-sum)
