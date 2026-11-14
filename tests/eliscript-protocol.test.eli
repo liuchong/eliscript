@@ -39,6 +39,10 @@
            (seed (resolve seedRoot "stdlib/core/protocol-impl.mjs")) (selfHosted (resolve selfHostedRoot "stdlib/core/protocol-impl.mjs")))
       (try
         (await (Promise/all (js-array (mkdir seedRoot (js-object :recursive t)) (mkdir selfHostedRoot (js-object :recursive t)))))
+        ;; Generated core modules resolve the public runtime package from any
+        ;; scratch location, including the operating system's temporary root.
+        (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+        (await (symlink ROOT (resolve directory "node_modules/eliscript") "dir"))
         (await (Promise/all (js-array (symlink (resolve ROOT "runtime") (resolve seedRoot "runtime") "dir") (symlink (resolve ROOT "runtime") (resolve selfHostedRoot "runtime") "dir"))))
         (await (compileProtocol COMPILER seed (js-object))) (await (seedCompilerFixture bootstrapDirectory))
         (await (compileProtocol (resolve ROOT "bin/eliscript-portable") selfHosted (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrapDirectory)))
@@ -50,7 +54,7 @@
           (contains generated "function define_protocol(name, operations)")
           (contains generated "function define_protocol_from_definition(definition)")
           (contains generated "function protocol_definition(protocol)")
-          (contains generated "const protocol_states = new WeakMap()")
+          (contains generated "const protocol_states = new (globalThis.WeakMap)()")
           (js-call (js-array "Runtime.defineProtocol" "Runtime.extendProtocol" "vite" "react") :forEach (lambda (text) (js-call (get (expect generated) :not) :toContain text))))
         (let ((facade (await (readFile (resolve ROOT "runtime/core/protocol.mjs") "utf8"))))
           (contains facade "from \"./protocol-impl.mjs\"") (contains facade "from \"./protocol-error.mjs\"")

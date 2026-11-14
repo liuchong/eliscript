@@ -89,10 +89,10 @@ publication, a GitHub Release or a signed release tag.
   HAMT retains the measured 32/24 thresholds across Bun, Node 24 and Chrome.
   The analysis report now binds Unicode casing and its table-generation inputs.
   Five report units remain unaccepted. Reader complete-compiler speedup is
-  1.003 against 1.08; SourceMap pipeline/compiler speedups are 0.789/0.990
+  1.003 against 1.08; SourceMap pipeline/compiler speedups are 1.094/0.987
   against 1.5/1.08; indentation is 4.946 against 10; transient Vector speedup
-  is 0.737 against 1.5 although its allocation bound passes. A fresh core run
-  passes 9/11 budgets: clean-build maximum/spread are 59.425 ms/2.877 against
+  is 0.737 against 1.5 although its allocation bound passes. The last measured
+  core run passed 9/11 budgets: clean-build maximum/spread are 59.425 ms/2.877 against
   40 ms/2, and no-op median is 4.238 ms against 4 ms. All three independent
   processes and seven samples per path were collected. Historical passing
   reports for these five units do not establish current acceptance.
@@ -102,11 +102,13 @@ publication, a GitHub Release or a signed release tag.
   both languages, retaining the original timed expressions, calibration and
   sample counts. Each worker has a ten-second deadline; independent failures
   are collected before the run fails without printing a partial report.
-  All nine medians are below native Emacs, and six also pass against 0.1.2:
-  first, last, sorting, grouping, frequencies and numeric scoring.
-  The run still rejects take-last (0.189360 vs 0.161391 microseconds/op),
-  reference-identity equality (2.642 vs 1.901 nanoseconds/op) and deep zipper
-  (1.239051 vs 1.152820 ms/op). The prior major dimension is absent in 0.x.
+  All nine medians are below native Emacs, and three also pass against 0.1.2:
+  first, sorting and frequencies. This run rejects last-element access
+  (0.249 vs 0.223 nanoseconds/op), take-last (0.175461 vs 0.142614
+  microseconds/op), reference-identity equality (2.474 vs 2.417 nanoseconds/op),
+  grouping (0.452363 vs 0.442580 ms/op), deep zipper
+  (1.154654 vs 1.090429 ms/op) and numeric scoring
+  (1.555661 vs 1.550882 ms/op). The prior major dimension is absent in 0.x.
   This completed comparison is not final candidate acceptance. Sample
   variation, clock calibration and process isolation do not waive a slower
   unrounded median or close the performance gate.
@@ -118,11 +120,17 @@ publication, a GitHub Release or a signed release tag.
 Already-cased ASCII now returns the identical primitive text; changed ASCII
 and every non-ASCII value still use the selected Unicode 15.1/16/17 tables
 and final-sigma rules. Full scalar and sigma checks plus receiver/prototype
-protections pass. Speculative SourceMap cursor and indentation micro-optimizations
-were withdrawn after no demonstrated gain; they are not part of this candidate.
+protections pass. The SourceMap iterator expansion now keeps mutable cursor
+state local to each loop and preserves cached-next, dynamic character-method
+reads and IteratorClose error priority. Its pipeline improves on the preceding
+candidate, but both original SourceMap gates remain unaccepted. Earlier newline
+and numeric-comparison variants, the Vector unary-factory experiment and the
+indentation micro-optimization were withdrawn without sufficient benefit.
+Protocol test fixtures now establish their runtime package scope explicitly,
+so Bun and Node execution also works from the system temporary directory.
 
 The current compact installation check passes all seven checks, including the
-installed public CLI and JS/WASM/native outputs, at 4,960,144 bytes. Seed-only
+installed public CLI and JS/WASM/native outputs, at 4,964,318 bytes. Seed-only
 `dist/bootstrap/runtime` and its private self-named package scope are excluded;
 they must not duplicate or shadow the final installed runtime. The original
 5 MB guard remains unchanged.

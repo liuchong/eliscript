@@ -10,52 +10,67 @@
   (defconst native-object globalThis.Object)
   (defun js-object-p (value)
     (eq (funcall native-object value) value))
-  (defconst visit-iterable
-    (lambda (iterable visit)
-      (let ((iterator (native-apply (aref iterable iterator-key) iterable (js-array))))
-        (unless (js-object-p iterator)
-          (throw (new globalThis.TypeError "iterator is not an object")))
-        (let ((next (aref iterator "next"))
-              (done false))
-          (while (not done)
-            (let ((step (native-apply next iterator (js-array))))
-              (unless (js-object-p step)
-                (throw (new globalThis.TypeError "iterator result is not an object")))
-              (if (funcall native-boolean (aref step "done"))
-                  (setq done t)
-                (let ((value (aref step "value")))
-                  (try
-                    (funcall visit value)
-                    (catch error
-                      (try
-                        (let ((close (aref iterator "return")))
-                          (unless (nullish? close)
-                            (native-apply close iterator (js-array))))
-                        (catch ignored nil))
-                      (throw error)))))))))))
+  ;; Expand the one fixed iterator protocol into each internal cursor loop.
+  ;; A helper function forced every mutable cursor binding into a per-mark
+  ;; callback closure. The expansion keeps the protocol and the loop in one
+  ;; function: the iterator is read once outside the guard, then the guarded
+  ;; region owns the step loop and the caller's declared cursor state, so the
+  ;; emitted handler is invoked once per cursor call instead of once per mark.
+  ;; Evaluation order matches the previous helper: iterable once, one
+  ;; Symbol.iterator access/apply with a fresh array, iterator object check,
+  ;; cached `next`; each step's apply, object check, done conversion and value
+  ;; read are converted before `guarded$` is set, so a failure there propagates
+  ;; without calling iterator.return. Only a body failure (including mark
+  ;; getters and character methods) closes the iterator; close failures are
+  ;; swallowed and the primary thrown value is rethrown unchanged.
+  (defmacro visit-iterable (iterable name state result &rest body)
+    `(let ((iterable$ ,iterable))
+       (let ((iterator$ (native-apply (aref iterable$ iterator-key) iterable$ (js-array))))
+         (unless (js-object-p iterator$)
+           (throw (new globalThis.TypeError "iterator is not an object")))
+         (let ((guarded$ false))
+           (try
+             (let ((next$ (aref iterator$ "next"))
+                   (finished$ false)
+                   ,@state)
+               (while (not finished$)
+                 (let ((step$ (native-apply next$ iterator$ (js-array))))
+                   (unless (js-object-p step$)
+                     (throw (new globalThis.TypeError "iterator result is not an object")))
+                   (if (funcall native-boolean (aref step$ "done"))
+                       (setq finished$ t)
+                     (let ((,name (aref step$ "value")))
+                       (setq guarded$ t)
+                       (progn ,@body)
+                       (setq guarded$ false)))))
+               ,result)
+             (catch failure$
+               (try
+                 (when guarded$
+                   (let ((close$ (aref iterator$ "return")))
+                     (unless (nullish? close$)
+                       (native-apply close$ iterator$ (js-array)))))
+                 (catch ignored$ nil))
+               (throw failure$)))))))
   (defconst spread-iterable
     (lambda (iterable)
-      (let ((items (js-array)))
-        (funcall visit-iterable iterable (lambda (item) (js-call items :push item)))
-        items)))
+      (visit-iterable iterable item ((items (js-array))) items
+        (js-call items :push item))))
   (defconst native-source-locations
     (lambda (source marks)
       (let ((wanted (new globalThis.Set)) (locations (new globalThis.Map)))
-        (funcall visit-iterable marks
-          (lambda (mark)
-            (let* ((entry (if (nullish? mark) (js-array) mark))
-                   (raw-span (aref entry 2))
-                   (span (if (nullish? raw-span) nil raw-span))
-                   (start (aref span "start")))
-              (unless (eq start undefined) (js-call wanted :add start)))))
-        (let* ((starts (js-call (funcall spread-iterable wanted) :filter
+        (visit-iterable marks mark () nil
+          (let* ((entry (if (nullish? mark) (js-array) mark))
+                 (raw-span (aref entry 2))
+                 (span (if (nullish? raw-span) nil raw-span))
+                 (start (aref span "start")))
+            (unless (eq start undefined) (js-call wanted :add start))))
+        (let ((starts (js-call (funcall spread-iterable wanted) :filter
                         (lambda (start)
                           (let ((answer (Number/isSafeInteger start)))
-                            (and (funcall native-boolean answer) (>= start 0))))))
-               (ordered (js-call starts :sort (lambda (left right) (- left right))))
-               (index 0) (offset 0) (line 0) (column 0))
-          (funcall visit-iterable ordered
-            (lambda (start)
+                            (and (funcall native-boolean answer) (>= start 0)))))))
+          (let ((ordered (js-call starts :sort (lambda (left right) (- left right)))))
+            (visit-iterable ordered start ((index 0) (offset 0) (line 0) (column 0)) locations
               (while (and (< offset start) (< index (aref source "length")))
                 (let* ((code (js-call source :codePointAt index))
                        (width (if (> code 65535) 2 1)))
@@ -64,22 +79,18 @@
                   (setq index (+ index width)) (setq offset (+ offset 1))))
               (when (and (eq offset start)
                          (or (< index (aref source "length")) (eq (aref source "length") 0)))
-                (js-call locations :set offset (js-array line column)))))
-          locations))))
+                (js-call locations :set offset (js-array line column)))))))))
   (defconst native-collect-generated-marks
     (lambda (generated marks)
-      (let ((result (js-array)) (index 0) (line 0) (column 0))
-        (funcall visit-iterable marks
-          (lambda (mark)
-            (let ((target (aref mark "offset")))
-              (while (and (< index target) (< index (aref generated "length")))
-                (if (eq (js-call generated :charCodeAt index) 10)
-                    (progn (setq line (+ line 1)) (setq column 0))
-                  (setq column (+ column 1)))
-                (setq index (+ index 1)))
-              (when (and (eq index target) (< index (aref generated "length")))
-                (js-call result :push (js-array line column (aref mark "span")))))))
-        result)))
+      (visit-iterable marks mark ((result (js-array)) (index 0) (line 0) (column 0)) result
+        (let ((target (aref mark "offset")))
+          (while (and (< index target) (< index (aref generated "length")))
+            (if (eq (js-call generated :charCodeAt index) 10)
+                (progn (setq line (+ line 1)) (setq column 0))
+              (setq column (+ column 1)))
+            (setq index (+ index 1)))
+          (when (and (eq index target) (< index (aref generated "length")))
+            (js-call result :push (js-array line column (aref mark "span"))))))))
 
   (defun signed-vlq (value)
     (if (< value 0)
