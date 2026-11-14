@@ -7,6 +7,13 @@ This page records the maintained release procedure for the `eliscript`
 package. It is a procedure, not a decision: the package is prepared and
 verifiable, and nothing is published until a release is explicitly authorized.
 
+The current Emacs baseline is **32.0.50**. CI builds the source revision pinned
+in `contracts/compatibility-matrix.json` and verifies the resulting version;
+it must not follow a moving snapshot. Future baseline changes only upgrade to
+an official stable release above 32.0.50, unless the user explicitly requests
+another choice. Retained reports from older Emacs versions remain historical
+evidence and do not satisfy current compatibility acceptance.
+
 ## Rebuild and workspace lifetime
 
 Git contains the maintained sources, formal inputs and generation rules.
@@ -89,12 +96,16 @@ Successful jobs discard their build workspace without uploading compiler
 copies. Failed-job diagnostics expire after one day and are removed after
 their investigation is finished.
 
-The complete 861-record corpus for each of the three output targets remains
-available locally through `make compiler-release-ci` or `make
-check-stage3-targets`. The workflow's explicit `exhaustive` input selects that
-full gate with its six-hour ceiling. Use it only when current measurements
-fit the selected runner; cancelled and deferred records never count as
-passes. The default platform job does not run or claim that exhaustive gate.
+The complete corpus for each of the three output targets is loaded by
+`make compiler-release-ci` or `make check-stage3-targets`. Historical execution
+recorded 861 records; the current loader produces 797 with all 1,280 required
+coverage IDs. The 64-record difference is unresolved, and neither count proves
+current complete acceptance. Freeze and authenticate the full input and resolve
+that scope difference before claiming the exhaustive gate passed. The workflow's
+explicit `exhaustive` input selects the full gate with its six-hour ceiling.
+Use it only when current measurements fit the selected runner; cancelled and
+deferred records never count as passes. The default platform job does not run
+or claim that exhaustive gate.
 
 ## Publication guard
 
@@ -235,8 +246,9 @@ archive checks pass all 32 cases through the retained unaffected results plus
 the corrected recipe's focused replay. The dense ordering fixture is registered
 in the official build and bound to its actual Bun/Node/WASM/native consumer;
 source authentication alone never asserts that consumer passed. All four
-consumer cases also pass. The complete 861-record corpus authenticates without
-missing adapters. A build from absent generated outputs passes the 338-file
+consumer cases also pass. The historical 861-record corpus authenticated without
+missing adapters; the current corpus discrepancy above remains open. A build
+from absent generated outputs passes the 338-file
 stage2/stage3 fixed point and all six platform steps in 372.6 seconds, with a
 4.51 GB accounted process-tree peak. These local results do not substitute
 for the final commit's four required remote workflows.

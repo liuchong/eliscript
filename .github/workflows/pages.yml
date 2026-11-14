@@ -58,10 +58,30 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: "1.4.0"
-      - name: Install Emacs
-        uses: purcell/setup-emacs@34c6ded44899fd1bf74d2889558befd1750e61a7 # master@2026-08-28
-        with:
-          version: "30.2"
+      - name: Install Emacs source build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake texinfo libncurses-dev pkg-config
+      - name: Build pinned Emacs 32.0.50 from source
+        env:
+          EMACS_SOURCE: https://github.com/emacs-mirror/emacs
+          EMACS_COMMIT: fd7afced4036fc1a221567d70705d20a2bd64713
+        run: |
+          git init "$RUNNER_TEMP/emacs-src"
+          git -C "$RUNNER_TEMP/emacs-src" remote add origin "$EMACS_SOURCE"
+          git -C "$RUNNER_TEMP/emacs-src" fetch --depth 1 origin "$EMACS_COMMIT"
+          git -C "$RUNNER_TEMP/emacs-src" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/emacs-src" rev-parse HEAD)" = "$EMACS_COMMIT"
+          cd "$RUNNER_TEMP/emacs-src"
+          ./autogen.sh
+          ./configure --prefix="$RUNNER_TEMP/emacs-install" --without-x --without-ns --without-native-compilation --without-gnutls
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make install
+          echo "$RUNNER_TEMP/emacs-install/bin" >> "$GITHUB_PATH"
+      - name: Record Emacs toolchain
+        run: |
+          emacs --version
+          test "$(emacs --version | head -n 1)" = "GNU Emacs 32.0.50"
       - name: Build the compiler, the browser bundle, and the playground
         run: |
           make bootstrap-backends

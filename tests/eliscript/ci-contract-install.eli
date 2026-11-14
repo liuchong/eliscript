@@ -11,7 +11,7 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/ci-contract-test-ground.mjs")))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-    "16c60f6db70968ed61a1d9be9f66c4b0a2d8cf37b5f6a1f7d0b67024f8192e9a")
+    "0df2080a7a0ee0b4b3cc3ba5afbf1e1547a9cc305f5b0acba92bbd8b78de1648")
   (defun assertCIOriginalTitles (titles)
     (js-call titles :forEach (lambda (title) (js-call assert :ok (js-call (js-call source :toString "utf8") :includes title)))))
   (defconst selected (Object/assign (js-object) original
@@ -21,7 +21,7 @@
     "checker rejects manual workflow drift" runWorkflowDriftCase
     "all three real engines run on every supported machine combination" runBrowserWorkflowCase
     "repository compatibility matrix renders the committed CI workflow" runCompatibilityWorkflowCase
-    "twelve matrix jobs cover every core and application inventory once per machine and Emacs pair without weakening other gates" runEightShardInventoryCase)))
+    "three matrix jobs cover every core and application inventory once per supported machine without weakening other gates" runEightShardInventoryCase)))
   (defvar restored false)
   (defun restore () (unless restored
     (js-call (get original :mock) :module "bun:test" (lambda () original)) (setq restored t)))

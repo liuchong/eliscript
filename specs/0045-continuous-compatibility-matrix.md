@@ -9,8 +9,8 @@
 
 ## Summary
 
-Eliscript verifies the complete repository against the supported Emacs 29 and
-Emacs 30 release lines on Linux and macOS. A versioned JSON contract is the
+Eliscript verifies the complete repository against the locked Emacs 32.0.50
+baseline on Linux and macOS. A versioned JSON contract is the
 source of truth for the matrix. Each authoritative result is produced by
 running the declared commands directly on a real target machine and is bound
 to its clean Git commit, tree, operating system, architecture, Emacs, Bun, and
@@ -29,29 +29,38 @@ reproducible without a container, virtual machine, sandbox, or hosted service.
 - the workflow path
 - supported operating-system runners and architectures
 - the operating systems required by the current local acceptance profile
-- supported Emacs release versions
+- the locked Emacs baseline and its explicit CI install path
 - the reference JavaScript host and exact CI version
 - the exact Node host used by generated ESM package-boundary tests
 - the retained local-evidence directory and bounded command timeouts
 - immutable revisions and inspected review labels for external Actions
 - the ordered command sequence required in every matrix job
 
-The initial M7 matrix is the Cartesian product of:
+The historical M7 matrix used Emacs 29.4 and 30.2. The table below is the
+current locked support matrix; historical reports authenticate only their own
+measured matrix and are not current 32.0.50 acceptance.
+
+The current support matrix is the Cartesian product of:
 
 | System | Runner | Architecture | Emacs |
 | --- | --- | --- | --- |
-| Linux | `ubuntu-24.04` | x64 | 29.4, 30.2 |
-| macOS | `macos-15` | arm64 | 29.4, 30.2 |
+| Linux | `ubuntu-24.04` | x64 | 32.0.50 |
+| Linux | `ubuntu-24.04-arm` | arm64 | 32.0.50 |
+| macOS | `macos-15` | arm64 | 32.0.50 |
 
 Bun 1.4.0 and Node 24.20.0 are used in every retained local cell. Bun runs the
 suite and compiler commands; maintained host-boundary tests execute generated
 ESM under both Bun and Node.
 
-The M7 support statement is release-line support for Emacs 29 and 30, tested
-at the latest selected patch release for each line. Adding an Emacs major,
-operating system, architecture, or JavaScript host is a contract change. A
-moving runner image or unpinned host version is not a substitute for declaring
-that change.
+The current matrix locks the user-selected Emacs 32.0.50 development baseline
+across Ubuntu 24.04 x64, Ubuntu 24.04 arm64, and macOS 15 arm64. The policy is
+only-up: a later upgrade is allowed only to an official stable Emacs release
+higher than 32.0.50, or when the user explicitly requests another baseline.
+There is no 29/30 support job and no automatic tracking of each development
+snapshot. The CI install path is an explicit pinned
+`emacs-mirror/emacs` commit `fd7afced4036fc1a221567d70705d20a2bd64713`
+built from source; it does not track a moving snapshot or accept a
+version-only check as proof of the source identity.
 
 Node support applies to generated ESM, package imports, and public host-neutral
 project output. Bun remains the compiler-tooling process host; this contract
@@ -69,11 +78,11 @@ retained acceptance aggregation is disabled so an older report for the cell
 being replaced cannot recursively reject the test run. Compiler, runtime,
 standard-library, conformance, and all non-retained validation still run.
 
-For example, a macOS Emacs 30 cell can be recorded with:
+For example, a macOS Emacs 32.0.50 cell can be recorded with:
 
 ```sh
 bun tools/compatibility/matrix.mjs --run \
-  --emacs /path/to/emacs-30.2 \
+  --emacs /path/to/emacs-32.0.50 \
   --node /path/to/node-24.20.0
 ```
 
@@ -159,7 +168,7 @@ The default tests reject:
 
 - omission of Linux or macOS
 - an empty, unknown, duplicate, or unsorted acceptance operating-system set
-- omission of Emacs 29 or Emacs 30
+- omission of the locked Emacs 32.0.50 baseline
 - malformed or mutable Action revisions
 - weakening or reordering the required command sequence
 - any difference between the matrix contract and committed workflow

@@ -12,8 +12,8 @@
 Eliscript separates the environments it intends to support from the environments
 required to accept the current core release candidate. Linux x64 remains in the
 maintained target matrix, but absence of a Linux host does not block this final
-acceptance. The required local acceptance profile is macOS arm64 with Emacs 29.4
-and 30.2, Bun 1.4.0, and Node 24.20.0.
+acceptance. The required local acceptance profile is macOS arm64 with Emacs
+32.0.50, Bun 1.4.0, and Node 24.20.0.
 
 This is a support-policy migration, not removal of Linux compatibility. Linux
 cells continue to be generated, validated when retained, and reported as
@@ -29,14 +29,14 @@ name an entry in `operatingSystems`.
 The two sets have distinct meanings:
 
 - `operatingSystems` declares maintained compatibility targets and continues to
-  contain Linux x64 and macOS arm64.
+  contain Linux x64, Linux arm64, and macOS arm64.
 - `acceptanceOperatingSystems` selects which target systems are mandatory for
   the current final acceptance profile.
 
-The Emacs versions, Bun and Node versions, command sequence, report format, and
-clean-source binding remain unchanged. The generated workflow therefore retains
-all four target jobs even though only the two macOS cells are required by the
-local final gate.
+The Bun and Node versions, command sequence, report format, and clean-source
+binding remain unchanged; the Emacs baseline is now the locked 32.0.50 source
+commit. The generated workflow therefore retains all three target jobs even
+though only the single macOS cell is required by the local final gate.
 
 ## Evidence Aggregation
 
@@ -67,9 +67,9 @@ toolchain command is weakened by this migration.
 
 - **ACP-01:** Target operating systems and acceptance-required operating systems
   are explicit, sorted, non-empty, and referentially valid contract data.
-- **ACP-02:** Linux x64 remains a target with Emacs 29.4 and 30.2 and continues
-  to appear in the generated compatibility workflow.
-- **ACP-03:** macOS arm64 with Emacs 29.4 and 30.2 is the complete required local
+- **ACP-02:** Linux x64 and Linux arm64 remain targets with Emacs 32.0.50 and
+  continue to appear in the generated compatibility workflow.
+- **ACP-03:** macOS arm64 with Emacs 32.0.50 is the complete required local
   acceptance profile.
 - **ACP-04:** Every retained required or optional report receives identical
   environment, command, cleanliness, and source-identity validation.

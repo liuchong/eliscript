@@ -30,6 +30,7 @@
                "            os: " (get system :runner) "\n"
                "            architecture: arm64\n"
                "            emacs: \"" (aref versions (1- (js-length versions))) "\"\n"
+               "            emacsCommit: \"" (get (get (get validated :emacsInstall) (aref versions (1- (js-length versions)))) :commit) "\"\n"
                "            native_target: " (if (= platform "linux") "arm64-linux" "arm64-macos"))))
         (setq index (1+ index)))
       (unless (and (js-call platforms :has "linux") (js-call platforms :has "macos"))
@@ -38,7 +39,7 @@
          "name: Compiler bootstrap and final outputs\n\n"
          "on:\n  workflow_dispatch:\n"
          "    inputs:\n      exhaustive:\n"
-         "        description: Run the full 861-record three-target corpus in addition to platform acceptance\n"
+         "        description: Run the complete current three-target corpus; the historical 861-record snapshot and current 797-record output still have an unexplained 64-record gap (not accepted as a final denominator)\n"
          "        type: boolean\n        default: false\n\n"
          "permissions:\n  contents: read\n\n"
          "concurrency:\n  group: compiler-release-${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true\n\n"

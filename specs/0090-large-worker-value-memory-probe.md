@@ -96,7 +96,7 @@ The source and result digest is
 `8531f9720e3f5ce15fde831a4c677c501b3ef320d4f156c1248299cd9955392d`.
 The run used macOS arm64, Emacs 31.1, and Bun 1.4.0. This host record is
 measurement context, not an expansion or replacement of the separately
-specified Emacs 29/30 compatibility matrix.
+specified locked Emacs 32.0.50 compatibility matrix.
 
 ## Reproduction
 

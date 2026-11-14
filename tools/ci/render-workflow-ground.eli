@@ -14,12 +14,16 @@
   (defconst acceptance-modes (js-array "strict" "deferred"))
   (defconst required-commands
     (js-array "bun install --frozen-lockfile" "bun run test" "make byte-compile"))
-  (defconst required-action-ids (js-array "checkout" "setup-bun" "setup-emacs"))
+  (defconst required-action-ids (js-array "checkout" "setup-bun"))
   (defconst repository-pattern "^[a-z0-9-]+/[a-z0-9-]+$")
   (defconst revision-pattern "^[0-9a-f]{40}$")
   (defconst identifier-pattern "^[a-z][a-z0-9-]*$")
-  (defconst release-pattern "^\\d+\\.\\d+$")
+  (defconst release-pattern "^\\d+\\.\\d+(?:\\.\\d+)?$")
   (defconst exact-version-pattern "^\\d+\\.\\d+\\.\\d+$")
+  ;; Current support policy: one locked Emacs baseline. Historical matrices
+  ;; remain structurally valid for their own retained reports but are not
+  ;; current acceptance.
+  (defconst current-emacs-version "32.0.50")
 
   (defun compatibility-matrix-error-message (errors)
     (str "compatibility matrix validation failed:\n- " (js-call errors :join "\n- ")))
@@ -136,8 +140,9 @@
         (setq index (1+ index)))
       selected))
 
-  (defun validateCompatibilityMatrix (matrix)
-    (let ((errors (js-array)))
+  (defun validateCompatibilityMatrix (matrix &rest configuration)
+    (let ((errors (js-array))
+          (historical (and (> (js-length configuration) 0) (get (aref configuration 0) :historical))))
       (unless (plain-object? matrix)
         (throw (new CompatibilityMatrixError (js-array "matrix must be an object"))))
       (when (or (not (= (get matrix :schemaVersion) 1))
@@ -200,14 +205,23 @@
                                   (get matrix :emacsVersions) (js-array)))
                 (local-evidence (get matrix :localEvidence)))
             (when (or (= (js-length emacs-versions) 0) (some-invalid-release emacs-versions))
-              (js-call errors :push "emacsVersions must contain major.minor release strings"))
+              (js-call errors :push "emacsVersions must contain valid major.minor or major.minor.patch release strings"))
             (sorted-unique emacs-versions "Emacs versions" errors)
-            (let ((majors (new globalThis.Set)) (major-index 0))
-              (while (< major-index (js-length emacs-versions))
-                (js-call majors :add (aref (js-call (aref emacs-versions major-index) :split ".") 0))
-                (setq major-index (1+ major-index)))
-              (unless (and (js-call majors :has "29") (js-call majors :has "30"))
-                (js-call errors :push "emacsVersions must cover Emacs 29 and Emacs 30")))
+            (unless historical
+              (unless (and (= (js-length emacs-versions) 1)
+                           (= (aref emacs-versions 0) current-emacs-version))
+                (js-call errors :push (str "emacsVersions must contain exactly " current-emacs-version)))
+              (let ((installs (get matrix :emacsInstall)))
+                (unless (and (plain-object? installs)
+                             (= (JSON/stringify (object-keys installs)) (JSON/stringify emacs-versions))
+                             (js-call emacs-versions :every (lambda (version)
+                               (let ((install (get installs version)))
+                                 (and (plain-object? install)
+                                      (= (get install :source) "https://github.com/emacs-mirror/emacs")
+                                      (regexp-test revision-pattern (get install :commit "") "")))))
+                             (plain-object? (get installs current-emacs-version)))
+                  (js-call errors :push (str "emacsInstall must pin " current-emacs-version
+                    " and every selected version to the exact emacs-mirror source commit")))))
             (let ((javascript-host (get matrix :javascriptHost)))
               (when (or (not (plain-object? javascript-host))
                         (not (= (get javascript-host :name) "bun"))
@@ -241,6 +255,8 @@
                 :systems systems
                 :acceptanceSystems acceptance-systems
                 :emacsVersions emacs-versions
+                :emacsInstall (if (plain-object? (get matrix :emacsInstall))
+                                (get matrix :emacsInstall) (js-object))
                 :javascriptHost (get matrix :javascriptHost)
                 :localEvidence local-evidence
                 :actions actions
@@ -268,6 +284,7 @@
                              (str "            os: " (get system :runner))
                              (str "            architecture: " (get system :architecture))
                              (str "            emacs: \"" emacs-version "\"")
+                             (str "            emacsCommit: \"" (get (get (get validated :emacsInstall) emacs-version) :commit) "\"")
                              (str "            shard: " (1+ shard-index)))
                     :join "\n"))
                 (setq shard-index (1+ shard-index))))
@@ -279,7 +296,9 @@
     (let* ((validated (validateCompatibilityMatrix matrix))
            (checkout (js-call (get validated :actions) :get "checkout"))
            (setup-bun (js-call (get validated :actions) :get "setup-bun"))
-           (setup-emacs (js-call (get validated :actions) :get "setup-emacs"))
+           (versions (get validated :emacsVersions))
+           (emacs-install (get validated :emacsInstall))
+           (emacs-source (get (get emacs-install (aref versions 0)) :source))
            (node-version (get (get (get validated :localEvidence) :nodeHost) :version)))
       (+ "      - name: Check out repository\n"
          "        uses: " (get checkout :repository) "@" (get checkout :revision) " # " (get checkout :label) "\n"
@@ -289,10 +308,35 @@
          ;; verification resolves those trees. A shallow clone cannot, so the job that
          ;; verifies evidence needs the history the evidence refers to.
          "          fetch-depth: 0\n"
-         "      - name: Install Emacs\n"
-         "        uses: " (get setup-emacs :repository) "@" (get setup-emacs :revision) " # " (get setup-emacs :label) "\n"
-         "        with:\n"
-         "          version: ${{ matrix.emacs }}\n"
+         "      - name: Install Emacs source build prerequisites\n"
+         "        run: |\n"
+         "          case \"$(uname -s)\" in\n"
+         "            Linux)\n"
+         "              sudo apt-get update\n"
+         "              sudo apt-get install -y build-essential autoconf automake texinfo libncurses-dev pkg-config\n"
+         "              ;;\n"
+         "            Darwin)\n"
+         "              brew install autoconf automake texinfo\n"
+         "              echo \"$(brew --prefix texinfo)/bin\" >> \"$GITHUB_PATH\"\n"
+         "              ;;\n"
+         "            *) exit 1 ;;\n"
+         "          esac\n"
+         "      - name: Build pinned Emacs from source\n"
+         "        env:\n"
+         "          EMACS_SOURCE: " emacs-source "\n"
+         "          EMACS_COMMIT: ${{ matrix.emacsCommit }}\n"
+         "        run: |\n"
+         "          git init \"$RUNNER_TEMP/emacs-src\"\n"
+         "          git -C \"$RUNNER_TEMP/emacs-src\" remote add origin \"$EMACS_SOURCE\"\n"
+         "          git -C \"$RUNNER_TEMP/emacs-src\" fetch --depth 1 origin \"$EMACS_COMMIT\"\n"
+         "          git -C \"$RUNNER_TEMP/emacs-src\" checkout --detach FETCH_HEAD\n"
+         "          test \"$(git -C \"$RUNNER_TEMP/emacs-src\" rev-parse HEAD)\" = \"$EMACS_COMMIT\"\n"
+         "          cd \"$RUNNER_TEMP/emacs-src\"\n"
+         "          ./autogen.sh\n"
+         "          ./configure --prefix=\"$RUNNER_TEMP/emacs-install\" --without-x --without-ns --without-native-compilation --without-gnutls\n"
+         "          make -j\"$(getconf _NPROCESSORS_ONLN)\"\n"
+         "          make install\n"
+         "          echo \"$RUNNER_TEMP/emacs-install/bin\" >> \"$GITHUB_PATH\"\n"
          "      - name: Install Bun\n"
          "        uses: " (get setup-bun :repository) "@" (get setup-bun :revision) " # " (get setup-bun :label) "\n"
          "        with:\n"
@@ -320,6 +364,7 @@
          "        run: |\n"
          "          uname -a\n"
          "          emacs --version\n"
+         "          test \"$(emacs --version | head -n 1)\" = \"GNU Emacs ${{ matrix.emacs }}\"\n"
          "          bun --version\n"
          "          node --version\n"
          "          test \"$(bun -p 'process.arch')\" = \"${{ matrix.architecture }}\"\n"

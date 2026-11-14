@@ -17,7 +17,7 @@ diagnostics.
 The foundation covers syntax-aware editing, deterministic indentation,
 semantic font locking, definition navigation, Imenu, project discovery, and a
 buffer formatting command backed by the public self-hosted formatter. It is
-compatible with Emacs 29 and 30 and has no package dependency outside Emacs.
+compatible with the locked Emacs 32.0.50 baseline and has no package dependency outside Emacs.
 
 Application frameworks, UI libraries, bundlers, publishing systems, sites,
 hosting, and development servers are outside the implementation, dependencies,
@@ -139,7 +139,7 @@ behaviors but cannot redefine language syntax or formatter version 1.
   produces the same canonical bytes as direct command use.
 - **EMM-09:** Formatter failure and invalid formatter configuration leave the
   buffer unchanged and expose a deterministic editor error.
-- **EMM-10:** Focused ERT tests run under the maintained Emacs 29/30 matrix and
+- **EMM-10:** Focused ERT tests run under the locked Emacs 32.0.50 matrix and
   strict byte compilation treats warnings as errors.
 - **EMM-11:** The public-surface and conformance registries track the mode and
   public editor commands.

@@ -52,6 +52,7 @@
          "            os: " (get linux-system :runner) "\n"
          "            architecture: " (get linux-system :architecture) "\n"
          "            emacs: \"" latest-emacs "\"\n"
+         "            emacsCommit: \"" (get (get (get matrix :emacsInstall) latest-emacs) :commit) "\"\n"
          "    steps:\n"
          (renderToolchainSteps matrix)
          "      - name: Install locked dependencies\n        run: bun install --frozen-lockfile\n"
