@@ -22,6 +22,24 @@ It pins npm's installation mode and prefix to each child workspace.
 It checks npm's resolved paths before packing and installing, so checkout
 cleanup also removes those package blobs and logs without touching user caches.
 
+Tool bootstrapping retains the runtime prerequisites and the maintained batch
+launcher on the single-file CLI path, then reuses one JavaScript compiler
+process for the remaining inventory. Every source still uses `compileFile`
+with its source map; independent errors are collected in inventory order.
+The parent validates all result bindings and the exit status before restoring
+executable wrappers. Runtime warnings use a separate, disposable stderr file.
+Runtime deployment collects each input inode with one following `stat` call;
+output paths still use `lstat` to reject symlinks and source aliases. Source,
+module and map bytes are reauthenticated on every deployment without caching.
+
+To compare the process strategies from absent outputs, run `make clean-all`
+and then `emacs -Q --batch -L compiler -L tools -l
+tools/testing/bootstrap-parity.el`. This builds both strategies from the same
+current sources and compares generated modules, maps, macro-origin sidecars,
+symlink targets and file modes. The measured 2,259-file comparison was identical:
+84.991 seconds serial versus 25.034 seconds batched (3.395x). This measures
+bootstrap overhead; it does not satisfy a compiler or runtime performance gate.
+
 `targets` deletes each successful record's working directory after its real
 execution and independent comparison. The run manifest keeps a same-input
 checkpoint, bound to the exact compiler, corpus and input, for an interrupted
@@ -89,11 +107,12 @@ publication, a GitHub Release or a signed release tag.
   HAMT retains the measured 32/24 thresholds across Bun, Node 24 and Chrome.
   The analysis report now binds Unicode casing and its table-generation inputs.
   Five report units remain unaccepted. Reader complete-compiler speedup is
-  1.003 against 1.08; SourceMap pipeline/compiler speedups are 1.094/0.987
+  1.017 against 1.08; SourceMap pipeline/compiler speedups are 1.094/0.987
   against 1.5/1.08; indentation is 4.946 against 10; transient Vector speedup
   is 0.737 against 1.5 although its allocation bound passes. The last measured
-  core run passed 9/11 budgets: clean-build maximum/spread are 59.425 ms/2.877 against
-  40 ms/2, and no-op median is 4.238 ms against 4 ms. All three independent
+  core run passed 10/11 budgets: clean-build spread is 2.243 against 2
+  (38.832/17.312/17.417 ms); no-op median is 3.083 ms against 4 ms
+  and incremental median is 3.466 ms against 5 ms. All three independent
   processes and seven samples per path were collected. Historical passing
   reports for these five units do not establish current acceptance.
   Failed measurements retain their original thresholds; no unchanged failure
@@ -102,13 +121,11 @@ publication, a GitHub Release or a signed release tag.
   both languages, retaining the original timed expressions, calibration and
   sample counts. Each worker has a ten-second deadline; independent failures
   are collected before the run fails without printing a partial report.
-  All nine medians are below native Emacs, and three also pass against 0.1.2:
-  first, sorting and frequencies. This run rejects last-element access
-  (0.249 vs 0.223 nanoseconds/op), take-last (0.175461 vs 0.142614
-  microseconds/op), reference-identity equality (2.474 vs 2.417 nanoseconds/op),
-  grouping (0.452363 vs 0.442580 ms/op), deep zipper
-  (1.154654 vs 1.090429 ms/op) and numeric scoring
-  (1.555661 vs 1.550882 ms/op). The prior major dimension is absent in 0.x.
+  All nine medians are below native Emacs, and six also pass against 0.1.2:
+  first, reference-identity equality, sorting, grouping, frequencies and zipper.
+  This run rejects last-element access (0.241 vs 0.235 nanoseconds/op),
+  take-last (0.189816 vs 0.159829 microseconds/op) and numeric scoring
+  (1.561918 vs 1.544717 ms/op). The prior major dimension is absent in 0.x.
   This completed comparison is not final candidate acceptance. Sample
   variation, clock calibration and process isolation do not waive a slower
   unrounded median or close the performance gate.
@@ -130,7 +147,7 @@ Protocol test fixtures now establish their runtime package scope explicitly,
 so Bun and Node execution also works from the system temporary directory.
 
 The current compact installation check passes all seven checks, including the
-installed public CLI and JS/WASM/native outputs, at 4,964,318 bytes. Seed-only
+installed public CLI and JS/WASM/native outputs, at 4,964,109 bytes. Seed-only
 `dist/bootstrap/runtime` and its private self-named package scope are excluded;
 they must not duplicate or shadow the final installed runtime. The original
 5 MB guard remains unchanged.

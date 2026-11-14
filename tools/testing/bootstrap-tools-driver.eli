@@ -1,0 +1,49 @@
+(module tools.testing.bootstrap-tools-driver
+  (import "node:fs" readFileSync)
+  (import "node:fs/promises" mkdir)
+  (import "node:path" dirname)
+  (import "node:process" :default process)
+  (import "../../bootstrap/host/bun.mjs" compileFile diagnosticFromError)
+
+  (defun validate-requests (requests)
+    (unless (Array/isArray requests)
+      (throw (new globalThis.TypeError "bootstrap requests must be an array")))
+    (let ((index 0))
+      (while (< index (js-length requests))
+        (let ((request (aref requests index)))
+          (unless (and (Array/isArray request) (= (js-length request) 2)
+                       (= (value-type (aref request 0)) "string")
+                       (= (value-type (aref request 1)) "string"))
+            (throw (new globalThis.TypeError "bootstrap request requires source and output paths"))))
+        (setq index (1+ index))))
+    requests)
+
+  (defun failure-message (error)
+    (try (JSON/stringify (diagnosticFromError error))
+      (catch ignored "compiler request failed while formatting its diagnostic")))
+
+  (defasync main ()
+    (let ((requests (validate-requests (JSON/parse (readFileSync 0 "utf8"))))
+          (results (js-array)) (failed false) (index 0))
+      ;; Compile in inventory order with the official single-file entry. Keep
+      ;; only scalar results; no AST, IR, source map or product graph survives
+      ;; into the next request. A bad source does not cancel independent files.
+      (while (< index (js-length requests))
+        (let* ((request (aref requests index)) (input (aref request 0))
+               (output (aref request 1))
+               (result (js-object :input input :output output :status 0)))
+          (try
+            (await (mkdir (dirname output) (js-object :recursive t)))
+            (await (compileFile (js-object :input input :output output :sourceMap t)))
+            (catch error
+              (put result :status 1)
+              (put result :error (failure-message error))
+              (setq failed t)))
+          (js-call results :push result))
+        (setq index (1+ index)))
+      (js-call (get process :stdout) :write (str (JSON/stringify results) "\n"))
+      (when failed (put process :exitCode 1))))
+
+  (when (js* "import.meta.main")
+    (js-call (main) :catch
+      (lambda (error) (console/error error) (put process :exitCode 1)))))

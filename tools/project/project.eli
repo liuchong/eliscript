@@ -1,6 +1,6 @@
 (module tools.project.project
   (import "node:crypto" createHash)
-  (import "node:fs" lstatSync mkdirSync readFileSync realpathSync writeFileSync)
+  (import "node:fs" lstatSync mkdirSync readFileSync realpathSync statSync writeFileSync)
   (import "node:path" basename dirname resolve)
   (import "node:url" fileURLToPath)
   (import "node:buffer" Buffer)
@@ -55,7 +55,7 @@
                (mapping (readFileSync (resolve source-root map-path)))
                (map (JSON/parse (js-call mapping :toString "utf8"))))
           (js-call (js-array source-path module-path map-path) :forEach (lambda (path)
-            (js-call inputs :push (lstatSync (realpathSync (resolve source-root path))))))
+            (js-call inputs :push (statSync (resolve source-root path)))))
           ;; The source module and its map are one real generator pair. Keep
           ;; every original map coordinate and byte; dist/runtime is another
           ;; producer and is never a fallback for either half of this pair.

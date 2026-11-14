@@ -14,7 +14,60 @@
 (require 'eliscript-symbol)
 
 (declare-function eliscript-backend-reset-runtime-support "../tools/backends/bootstrap")
+(declare-function eliscript-backend-compile-tool-batch "../tools/backends/bootstrap" (runtime driver tools))
 (defvar eliscript-backend-bootstrap-root)
+
+(ert-deftest eliscript-bootstrap-batch-binds-complete-results-before-finalizing ()
+  (let ((noninteractive nil))
+    (load (expand-file-name "tools/backends/bootstrap.el") nil t))
+  (let* ((tools '(("first-λ.eli" . "first.mjs") ("bad.eli" . "bad.mjs")
+                  ("last.eli" . "last.mjs")))
+         (rows [((input . "first-λ.eli") (output . "first.mjs") (status . 0))
+                ((input . "bad.eli") (output . "bad.mjs") (status . 1) (error . "bad source"))
+                ((input . "last.eli") (output . "last.mjs") (status . 0))])
+         (payload (json-encode rows)))
+    (dolist (case (list (list 1 payload t)
+                       (list 0 payload nil)
+                       (list 1 "{" nil)
+                       (list 1 (json-encode (vector (aref rows 0) (aref rows 2))) nil)
+                       (list 1 (json-encode (vconcat rows (vector (aref rows 0)))) nil)
+                       (list 1 (json-encode (vector (aref rows 2) (aref rows 1) (aref rows 0))) nil)
+                       (list 1 (json-encode (vector (aref rows 0) (aref rows 0) (aref rows 2))) nil)
+                       (list 1 (json-encode (vector (aref rows 0)
+                                                  '((input . "bad.eli") (output . "bad.mjs") (status . 0))
+                                                  (aref rows 2))) nil)
+                       (list 1 (json-encode (vector (aref rows 0)
+                                                  '((input . "bad.eli") (output . "bad.mjs") (status . 1))
+                                                  (aref rows 2))) nil)
+                       (list "killed" payload nil)))
+      (let (finalized destination stderr-file)
+        (cl-letf (((symbol-function 'call-process-region)
+                   (lambda (start end _runtime _delete channels _display &rest _args)
+                     (should (equal (json-parse-string (buffer-substring-no-properties start end)
+                                                       :array-type 'list)
+                                    '(("first-λ.eli" "first.mjs") ("bad.eli" "bad.mjs")
+                                      ("last.eli" "last.mjs"))))
+                     (should (eq coding-system-for-write 'utf-8-unix))
+                     (setq destination (car channels) stderr-file (cadr channels))
+                     ;; Warnings belong to the human-readable channel, never
+                     ;; to the machine response. They cannot invalidate JSON.
+                     (with-temp-file (cadr channels) (insert "harmless runtime warning\n"))
+                     ;; Process output leaves point at the end, as a real
+                     ;; child does; the consumer must rewind before JSON read.
+                     (with-current-buffer destination (insert (nth 1 case)))
+                     (car case)))
+                  ((symbol-function 'eliscript-backend-finalize-tool)
+                   (lambda (output) (push output finalized))))
+          (let ((failures (eliscript-backend-compile-tool-batch "runtime" "driver" tools)))
+            (should (= (length failures) 1))
+            (if (nth 2 case)
+                (progn
+                  (should (string-match-p "bad.eli: bad source" (car failures)))
+                  (should (equal (nreverse finalized) '("first.mjs" "last.mjs"))))
+              (should-not finalized)
+              (should (string-match-p "outputs are unverified" (car failures))))))
+        (should-not (buffer-live-p destination))
+        (should-not (file-exists-p stderr-file))))))
 
 (ert-deftest eliscript-bootstrap-owned-runtime-reset-refuses-links-and-preserves-neighbors ()
   (let ((noninteractive nil))
@@ -214,10 +267,11 @@
     (condition-case error-data
         (progn
           (eliscript-analyze-module
-           (eliscript-read-located-string source filename)
+           (eliscript-expand-module
+            (eliscript-read-located-string source filename) filename)
            filename)
           `((name . ,name) (status . "ok")))
-      ((eliscript-read-error eliscript-analyze-error)
+      ((eliscript-read-error eliscript-expand-error eliscript-analyze-error)
        `((name . ,name) (status . "error")
          (message . ,(cadr error-data))
          (diagnostic . ,(eliscript-diagnostic-to-alist

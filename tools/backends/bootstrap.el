@@ -387,6 +387,96 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
               (error . ((message . ,(error-message-string failure))))))))
        (signal (car failure) (cdr failure))))))
 
+(defun eliscript-backend-finalize-tool (output)
+  "Restore the executable wrapper for a successfully compiled OUTPUT."
+  (when (member output '("bootstrap/host/bun.mjs"
+                         "bootstrap/host/project-cli-ground.mjs"
+                         "runtime/worker.mjs"))
+    (eliscript-backend-install-bun-shebang output))
+  (when (equal output "bootstrap/host/eliscript-cli.mjs")
+    (let ((entry (expand-file-name output default-directory))
+          (coding-system-for-write 'utf-8-unix))
+      (with-temp-buffer
+        (insert-file-contents entry)
+        (goto-char (point-min))
+        (insert (format "#!%s node\n" (or (executable-find "env")
+                                         (error "Cannot locate env for the CLI executable"))))
+        (write-region (point-min) (point-max) entry nil 'silent))
+      (when (file-exists-p (concat entry ".map"))
+        (let* ((map-path (concat entry ".map"))
+               (map (json-parse-string (eliscript-backend-stage0-read map-path))))
+          (puthash "mappings" (concat ";" (gethash "mappings" map)) map)
+          (with-temp-file map-path (insert (json-serialize map)))))
+      (set-file-modes entry #o755))))
+
+(defun eliscript-backend-compile-tool (runtime tool)
+  "Compile one bootstrap prerequisite TOOL, returning its failure or nil."
+  (make-directory (file-name-directory (expand-file-name (cdr tool) default-directory)) t)
+  (with-temp-buffer
+    (let ((status (call-process runtime nil t nil "bootstrap/host/bun.mjs"
+                                (car tool) "--output" (cdr tool) "--source-map")))
+      (if (and (integerp status) (zerop status))
+          (progn (eliscript-backend-finalize-tool (cdr tool)) nil)
+        (format "Self-hosted tool bootstrap failed for %s (%s): %s"
+                (car tool) status (buffer-string))))))
+
+(defun eliscript-backend-compile-tool-batch (runtime driver tools)
+  "Compile ordered TOOLS in one RUNTIME; return failures in reverse order."
+  (let ((destination (generate-new-buffer " *eliscript-bootstrap-results*"))
+        status stderr-file diagnostics)
+    (unwind-protect
+        (condition-case failure
+            (let ((requests (vconcat (mapcar (lambda (tool) (vector (car tool) (cdr tool))) tools)))
+                  results failures)
+              (let ((directory (expand-file-name ".eliscript-cache/bootstrap" default-directory)))
+                (make-directory directory t)
+                (setq stderr-file (make-temp-file (expand-file-name "stderr-" directory))))
+              (with-temp-buffer
+                (let ((encoded (json-serialize requests)))
+                  (insert (if (multibyte-string-p encoded) encoded
+                            (decode-coding-string encoded 'utf-8))))
+                (let ((coding-system-for-write 'utf-8-unix)
+                      (coding-system-for-read 'utf-8-unix))
+                  (setq status (call-process-region (point-min) (point-max)
+                                                    runtime nil (list destination stderr-file) nil driver))))
+              (setq diagnostics (eliscript-backend-stage0-read stderr-file))
+              (unless (zerop (length diagnostics)) (message "%s" diagnostics))
+              (with-current-buffer destination
+                (goto-char (point-min))
+                (setq results (json-parse-buffer :object-type 'alist :array-type 'list)))
+              (unless (and (memq status '(0 1)) (= (length results) (length tools)))
+                (error "batch status/count differs from the requested inventory"))
+              ;; Validate the complete response before treating any output as
+              ;; successful. Missing, reordered or misbound results never pass.
+              (let ((rows results))
+                (dolist (tool tools)
+                  (let ((row (pop rows)))
+                    (unless (and (equal (alist-get 'input row) (car tool))
+                                 (equal (alist-get 'output row) (cdr tool))
+                                 (memq (alist-get 'status row) '(0 1))
+                                 (or (= (alist-get 'status row) 0)
+                                     (stringp (alist-get 'error row))))
+                      (error "batch result differs for %s" (car tool))))))
+              (dolist (row results)
+                (unless (zerop (alist-get 'status row))
+                  (push (format "Self-hosted tool bootstrap failed for %s: %s"
+                                (alist-get 'input row) (alist-get 'error row)) failures)))
+              (unless (eq (zerop status) (null failures))
+                (error "batch exit status disagrees with its per-file results"))
+              (dolist (row results)
+                (when (zerop (alist-get 'status row))
+                  (eliscript-backend-finalize-tool (alist-get 'output row))))
+              failures)
+          (error
+           (list (format "Self-hosted batch bootstrap failed (status %S); remaining outputs are unverified: %s\n%s"
+                         status
+                         (error-message-string failure)
+                         (let ((text (if (and diagnostics (> (length diagnostics) 0)) diagnostics
+                                       (with-current-buffer destination (buffer-string)))))
+                           (substring text 0 (min (length text) 4096)))))))
+      (when (and stderr-file (file-exists-p stderr-file)) (delete-file stderr-file))
+      (kill-buffer destination))))
+
 (defun eliscript-backend-bootstrap (&optional include-tests)
   "Build the Emacs seed, then compile backend tools with that generated seed."
   (let* ((default-directory eliscript-backend-bootstrap-root)
@@ -402,6 +492,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                   ("runtime/math.eli" . "runtime/math.mjs")
                   ("runtime/unicode-case-data.eli" . "runtime/unicode-case-data.mjs")
                   ("runtime/unicode-case.eli" . "runtime/unicode-case.mjs")
+                  ("tools/testing/bootstrap-tools-driver.eli" . "tools/testing/bootstrap-tools-driver.mjs")
                   ("tools/project/project.eli" . "bootstrap/host/project.mjs")
                   ("tools/project/project-cli.eli" . "bootstrap/host/project-cli.mjs")
                   ("tools/project/check-cli.eli" . "bootstrap/host/check-cli.mjs")
@@ -1052,6 +1143,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                             ("tests/bootstrap-formatter.test.eli" . "tests/bootstrap-formatter.test.mjs")
                             ("tests/bootstrap-ir-serialization.test.eli" . "tests/bootstrap-ir-serialization.test.mjs")
                             ("tests/bootstrap-reader.test.eli" . "tests/bootstrap-reader.test.mjs")
+                            ("tests/bootstrap-tools-driver.test.eli" . "tests/bootstrap-tools-driver.test.mjs")
                             ("tests/bootstrap-symbol.test.eli" . "tests/bootstrap-symbol.test.mjs")
                             ("tests/compiler-binary-comparison.test.eli" . "tests/compiler-binary-comparison.test.mjs")
                             ("tests/compiler-corpus-json-patch.test.eli" . "tests/compiler-corpus-json-patch.test.mjs")
@@ -1502,40 +1594,28 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
             (push (format "Self-hosted lisp runtime build failed (%s): %s"
                           status (buffer-string))
                   failures))))
-      (dolist (tool tools)
-        (make-directory (file-name-directory (expand-file-name (cdr tool) default-directory)) t)
-        (with-temp-buffer
-          (let ((status (apply #'call-process
-                               runtime nil t nil "bootstrap/host/bun.mjs"
-                               ;; Every registered module may be declared as
-                               ;; a maintained corpus source. Emit its companion
-                               ;; map through the same self-hosted compiler.
-                               (list (car tool) "--output" (cdr tool) "--source-map"))))
-            (unless (and (integerp status) (zerop status))
-              (push (format "Self-hosted tool bootstrap failed for %s (%s): %s"
-                            (car tool) status (buffer-string))
-                    failures))
-            (when (and (integerp status) (zerop status)
-                       (member (cdr tool) '("bootstrap/host/bun.mjs"
-                                            "bootstrap/host/project-cli-ground.mjs"
-                                            "runtime/worker.mjs")))
-              (eliscript-backend-install-bun-shebang (cdr tool)))
-            (when (and (integerp status) (zerop status)
-                       (equal (cdr tool) "bootstrap/host/eliscript-cli.mjs"))
-              (let ((entry (expand-file-name (cdr tool) default-directory))
-                    (coding-system-for-write 'utf-8-unix))
-                (with-temp-buffer
-                  (insert-file-contents entry)
-                  (goto-char (point-min))
-                  (insert (format "#!%s node\n" (or (executable-find "env")
-                                                     (error "Cannot locate env for the CLI executable"))))
-                  (write-region (point-min) (point-max) entry nil 'silent))
-                (when (file-exists-p (concat entry ".map"))
-                  (let* ((map-path (concat entry ".map"))
-                         (map (json-parse-string (eliscript-backend-stage0-read map-path))))
-                    (puthash "mappings" (concat ";" (gethash "mappings" map)) map)
-                    (with-temp-file map-path (insert (json-serialize map)))))
-                (set-file-modes entry #o755))))))
+      ;; Keep the runtime prerequisites and the batch driver on the original
+      ;; single-file path. Everything after that uses the same compileFile
+      ;; entry, without restarting Node and reloading the compiler per module.
+      (let ((pending tools)
+            (driver "tools/testing/bootstrap-tools-driver.mjs")
+            ready)
+        (unless (assoc "tools/testing/bootstrap-tools-driver.eli" tools)
+          (error "formal bootstrap is missing its maintained batch driver"))
+        (while (and pending (not ready))
+          (let* ((tool (pop pending))
+                 (failure (eliscript-backend-compile-tool runtime tool)))
+            (when failure (push failure failures))
+            (when (equal (cdr tool) driver)
+              (if failure
+                  (progn
+                    (push (format "%s remaining tools unexecuted: batch driver prerequisite failed"
+                                  (length pending)) failures)
+                    (setq pending nil))
+                (setq ready t)))))
+        (when pending
+          (setq failures (append (eliscript-backend-compile-tool-batch runtime driver pending)
+                                 failures))))
       (when failures
         (error "%s" (mapconcat #'identity (nreverse failures) "\n"))))))
 

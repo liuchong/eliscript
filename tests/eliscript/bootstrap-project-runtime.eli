@@ -137,7 +137,7 @@
                    "bootstrap/host/project-cli-ground.mjs" "tools/project/project-cli.eli")))
             (js-call assert :ok (> (js-length records) 0))
             (js-call assert :strictEqual (digest (await (readFile (resolve root "bootstrap/host/project-cli-ground.mjs"))))
-              "cbaaf12e9aa56c696e555d2cd101c17ac8c3177046c513d0fbe8655a10f916d2")
+              "da552a3e41426e6310aa09fef78c02b7efc61012debc33d350a773fcd68b9930")
             (js-call capsules :forEach (lambda (name)
               (js-call files :push (str "runtime/" name ".eli") (str "runtime/" name ".mjs") (str "runtime/" name ".mjs.map"))))
             (let ((index 0))

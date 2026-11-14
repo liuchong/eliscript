@@ -176,6 +176,7 @@ test-core: check-contracts
 		./tests/collection-layout-benchmark.test.mjs \
 		./tests/transient-builder-benchmark.test.mjs \
 		./tests/bootstrap-symbol.test.mjs ./tests/bootstrap-reader.test.mjs \
+		./tests/bootstrap-tools-driver.test.mjs \
 		./tests/bootstrap-formatter.test.mjs \
 		./tests/bootstrap-expander.test.mjs ./tests/bootstrap-analyzer.test.mjs \
 		./tests/bootstrap-ir.test.mjs ./tests/bootstrap-ir-serialization.test.mjs \

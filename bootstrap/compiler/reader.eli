@@ -24,14 +24,19 @@
         (throw error))))
   (defconst number-pattern
     (new globalThis.RegExp "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$"))
-  (defconst native-whitespace-code-p
-    (lambda (code)
-      (or (eq code 32) (eq code 9) (eq code 10) (eq code 13) (eq code 12))))
-  (defconst native-delimiter-code-p
-    (lambda (code)
-      (or (eq code undefined) (eq code 32) (eq code 9) (eq code 10) (eq code 13) (eq code 12)
-        (eq code 40) (eq code 41) (eq code 91) (eq code 93) (eq code 123) (eq code 125)
-          (eq code 34) (eq code 39) (eq code 44) (eq code 59) (eq code 96))))
+  ;; One strict-identity rule per character class, shared by the two scanning
+  ;; loops and the public predicate entries. The operand is always an
+  ;; already-bound value (a parameter or a loop local), so it is read, never
+  ;; re-evaluated, and each rule expands to a plain boolean expression: a loop
+  ;; test stays one comparison chain with no call and no extra coercion.
+  (defmacro whitespace-code? (code)
+    `(or (eq ,code 32) (eq ,code 9) (eq ,code 10) (eq ,code 13) (eq ,code 12)))
+  (defmacro delimiter-code? (code)
+    `(or (eq ,code undefined)
+       (whitespace-code? ,code)
+       (eq ,code 40) (eq ,code 41) (eq ,code 91) (eq ,code 93)
+       (eq ,code 123) (eq ,code 125) (eq ,code 34) (eq ,code 39)
+       (eq ,code 44) (eq ,code 59) (eq ,code 96)))
   (defun make-state
     (source filename)
     (js-object :source source :filename filename :index 0 :offset 0 :line 1 :column 1
@@ -123,7 +128,7 @@
   (defun reference-whitespace-code-p
     (code)
     (or (= code 32) (= code 9) (= code 10) (= code 13) (= code 12)))
-  (defun whitespace-code-p (code) (funcall native-whitespace-code-p code))
+  (defun whitespace-code-p (code) (whitespace-code? code))
   (defun reference-delimiter-code-p
     (code)
     (or
@@ -140,7 +145,7 @@
       (= code 44)
       (= code 59)
       (= code 96)))
-  (defun delimiter-code-p (code) (funcall native-delimiter-code-p code))
+  (defun delimiter-code-p (code) (delimiter-code? code))
   (defun closing-code-p (code) (or (= code 41) (= code 93) (= code 125)))
   (defun code-character (code) (js-call globalThis.String :fromCodePoint code))
   (defun invalid-closing
@@ -165,15 +170,14 @@
                (advance state)))
             (t (setq done t)))))))
 
-  (defconst native-skip-space-and-comments
-    (lambda (state whitespace)
+  (defun skip-space-and-comments
+    (state)
     (let* ((source (aref state "source")) (index (aref state "index"))
            (offset (aref state "offset")) (line (aref state "line"))
            (column (aref state "column")) (done false))
       (while (and (eq done false) (< index (aref source "length")))
-        (let* ((code (js-call source :codePointAt index))
-               (answer (funcall whitespace code)))
-          (if (js* "!!answer")
+        (let ((code (js-call source :codePointAt index)))
+          (if (whitespace-code? code)
             (progn
               (setq index (+ index 1)) (setq offset (+ offset 1))
               (if (eq code 10) (progn (setq line (+ line 1)) (setq column 1))
@@ -185,10 +189,7 @@
                 (setq offset (+ offset 1)) (setq column (+ column 1)))
               (setq done t)))))
       (put state :index index) (put state :offset offset)
-      (put state :line line) (put state :column column) nil)))
-  (defun skip-space-and-comments
-    (state)
-    (funcall native-skip-space-and-comments state native-whitespace-code-p))
+      (put state :line line) (put state :column column) nil))
   (defun reference-read-token (state start)
     (while (not (delimiter-code-p (peek-code state)))
       (advance state))
@@ -198,23 +199,19 @@
       (get start :index)
       (get state :index)))
 
-  (defconst native-read-token
-    (lambda (state start delimiter)
+  (defun read-token
+    (state start)
     (let* ((source (aref state "source")) (index (aref state "index"))
            (consumed 0) (done false))
       (while (eq done false)
-        (let* ((code (js-call source :codePointAt index))
-               (answer (funcall delimiter code)))
-          (if (js* "!!answer") (setq done t)
+        (let ((code (js-call source :codePointAt index)))
+          (if (delimiter-code? code) (setq done t)
             (progn (setq index (+ index (if (> code 65535) 2 1)))
                    (setq consumed (1+ consumed))))))
       (put state :index index)
       (put state :offset (+ (aref state "offset") consumed))
       (put state :column (+ (aref state "column") consumed))
-      (js-call source :slice (aref start "index") index))))
-  (defun read-token
-    (state start)
-    (funcall native-read-token state start native-delimiter-code-p))
+      (js-call source :slice (aref start "index") index)))
   (defun queue-opening-index
     (state)
     (let*
