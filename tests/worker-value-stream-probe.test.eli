@@ -3,11 +3,21 @@
   (import "node:crypto" createHash)
   (import "node:fs/promises" readFile)
   (import "node:path" resolve dirname)
-  (import "node:url" fileURLToPath)
+  (import "node:url" fileURLToPath pathToFileURL)
 
   (defconst projectDirectory (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
   (defconst probePath (resolve projectDirectory "tools/worker/value-stream-probe.el"))
   (defconst emacs (or (get (get globalThis.process :env) :EMACS) "emacs"))
+  (defconst loadModule (js* "(specifier) => import(specifier)"))
+  (defconst preparedRuntimeCapsules
+    (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs"
+              "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
+              "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+  (defconst preparedRuntimeSources
+    (js-array "runtime/array-text.eli" "runtime/errors.eli" "runtime/math.eli"
+              "runtime/number-radix.eli" "runtime/prelude.eli" "runtime/primitives.eli"
+              "runtime/unicode-case.eli" "bootstrap/runtime/memory.eli"
+              "tools/runtime/unicode-case-runtime.el"))
 
   (defasync readJson (relativePath)
     (JSON/parse (await (readFile (resolve projectDirectory relativePath) "utf8"))))
@@ -16,6 +26,84 @@
     (js-call (js-call (createHash "sha256")
                :update (await (readFile (resolve projectDirectory relativePath))))
       :digest "hex"))
+
+  (defasync freshPreparedIdentity ()
+    (let* ((module (await (funcall loadModule
+                            (get (pathToFileURL (resolve projectDirectory "tools/backends/dist/release-cli.mjs")) :href))))
+           (prepared (await (js-call module :requirePreparedStage3))))
+      (get prepared :reportIdentity)))
+
+  (defun preparedIdentityP (identity)
+    (and identity
+         (= (get identity :format) "eliscript-prepared-stage3")
+         (= (js-length (Object/keys identity)) 5)
+         (Number/isInteger (get identity :version))
+         (Number/isInteger (get identity :fixedPointFileCount))
+         (= (value-type (get identity :sourceSha256)) "string")
+         (= (value-type (get identity :productSha256)) "string")))
+
+  (defun ensurePreparedIdentity (identity)
+    (unless (preparedIdentityP identity)
+      (throw (new globalThis.Error "prepared stage3 portable identity is missing or invalid")))
+    identity)
+
+  (defun ensureCurrentPreparedIdentity (identity fresh)
+    (ensurePreparedIdentity identity)
+    (unless (and (= (get identity :format) (get fresh :format))
+                 (= (get identity :version) (get fresh :version))
+                 (= (get identity :fixedPointFileCount) (get fresh :fixedPointFileCount))
+                 (= (get identity :sourceSha256) (get fresh :sourceSha256))
+                 (= (get identity :productSha256) (get fresh :productSha256)))
+      (throw (new globalThis.Error "prepared stage3 identity does not match current final products")))
+    identity)
+
+  (defun ensurePreparedRuntimeInventory (source)
+    (let ((files (js-array)) (entries (get source :files)) (index 0))
+      (while (< index (js-length entries))
+        (js-call files :push (get (aref entries index) :file))
+        (setq index (1+ index)))
+      (js-call preparedRuntimeCapsules :forEach
+        (lambda (file)
+          (unless (js-call files :includes file)
+            (throw (new globalThis.Error (str "missing prepared runtime capsule " file))))))
+      (js-call preparedRuntimeSources :forEach
+        (lambda (file)
+          (unless (js-call files :includes file)
+            (throw (new globalThis.Error (str "missing prepared runtime source " file))))))))
+
+  (defun verifyRetainedPreparedIdentity (identity)
+    ;; Retained measurements may predate the prepared-stage3 certificate.
+    ;; When present, only the portable shape is checked; no historical
+    ;; measurement is retroactively certified by the current gate.
+    (when identity
+      (js-call (expect (get identity :format)) :toBe "eliscript-prepared-stage3")
+      (js-call (expect (js-call (Object/keys identity) :sort))
+        :toEqual (js-array "fixedPointFileCount" "format" "productSha256" "sourceSha256" "version"))
+      (js-call (expect (Number/isInteger (get identity :version))) :toBe t)
+      (js-call (expect (Number/isInteger (get identity :fixedPointFileCount))) :toBe t)
+      (js-call (expect (get identity :sourceSha256)) :toHaveLength 64)
+      (js-call (expect (get identity :productSha256)) :toHaveLength 64)))
+
+  (defasync verifySourceFiles (source)
+    (let ((measuredFiles (js-array))
+          (files (get source :files))
+          (i 0))
+      (while (< i (js-length files))
+        (let* ((entry (aref files i))
+               (digest (await (sha256 (get entry :file)))))
+          (js-call (expect digest) :toBe (get entry :sha256))
+          (js-call measuredFiles :push (str (get entry :file) ":" digest "\n")))
+        (setq i (1+ i)))
+      (js-call (expect (js-call (js-call (createHash "sha256")
+                                  :update (js-call measuredFiles :join ""))
+                         :digest "hex"))
+        :toBe (get source :digest))))
+
+  (defasync verifyCurrentSourceContract (source)
+    (ensureCurrentPreparedIdentity (get source :preparedCompiler)
+      (await (freshPreparedIdentity)))
+    (ensurePreparedRuntimeInventory source)
+    (await (verifySourceFiles source)))
 
   (defasync runProbe (environment)
     (let* ((env (Object/assign (js-object) (get globalThis.process :env)
@@ -69,7 +157,8 @@
           (js-call (expect (>= (get (get (get report :memory) :worker) :peak)
                                (get (get (get report :memory) :worker) :baseline))) :toBe t)
           (js-call (expect (> (get (get report :memory) :combinedPeak) 0)) :toBe t)
-          (js-call (expect (get (get report :source) :digest)) :toHaveLength 64))))
+          (js-call (expect (get (get report :source) :digest)) :toHaveLength 64)
+          (await (verifyCurrentSourceContract (get report :source))))))
     40000)
 
   (test "value-stream probe cancels and fails when a memory budget is exceeded"
@@ -121,16 +210,5 @@
                              (* (get (get report :budgetsMiB) :workerPeak) 1024))) :toBe t)
         (js-call (expect (<= (get (get report :memory) :combinedPeak)
                              (* (get (get report :budgetsMiB) :combinedPeak) 1024))) :toBe t)
-        (let ((measuredFiles (js-array))
-              (files (get (get report :source) :files))
-              (i 0))
-          (while (< i (js-length files))
-            (let* ((entry (aref files i))
-                   (digest (await (sha256 (get entry :file)))))
-              (js-call (expect digest) :toBe (get entry :sha256))
-              (js-call measuredFiles :push (str (get entry :file) ":" digest "\n")))
-            (setq i (1+ i)))
-          (js-call (expect (js-call (js-call (createHash "sha256")
-                                      :update (js-call measuredFiles :join ""))
-                             :digest "hex"))
-            :toBe (get (get report :source) :digest)))))))
+        (verifyRetainedPreparedIdentity (get (get report :source) :preparedCompiler))
+        (await (verifySourceFiles (get report :source)))))))

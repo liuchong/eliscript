@@ -17,6 +17,27 @@
   (expand-file-name "../.." eliscript-analysis-benchmark--script-directory)
   "Repository root used by the analysis benchmark.")
 
+(defconst eliscript-analysis-benchmark--prepared-runtime-capsules
+  '("runtime/array-text.mjs"
+    "runtime/errors.mjs"
+    "runtime/math.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs")
+  "Actual runtime capsules installed by the prepared final stage3 package.")
+
+(defconst eliscript-analysis-benchmark--prepared-runtime-sources
+  '("runtime/array-text.eli"
+    "runtime/errors.eli"
+    "runtime/math.eli"
+    "runtime/number-radix.eli"
+    "runtime/prelude.eli"
+    "runtime/primitives.eli"
+    "runtime/unicode-case.eli")
+  "Maintained sources for the prepared runtime capsules.")
+
 (add-to-list
  'load-path
  (expand-file-name "compiler" eliscript-analysis-benchmark--project-directory))
@@ -46,24 +67,30 @@
     (insert-file-contents-literally filename)
     (secure-hash 'sha256 (current-buffer))))
 
-(defun eliscript-analysis-benchmark--source-contract ()
-  "Return source files and aggregate digest for this benchmark."
+(defun eliscript-analysis-benchmark--source-contract (prepared)
+  "Return source files and aggregate digest for this benchmark.
+PREPARED is the freshly authenticated portable prepared stage3 identity."
   (let* ((files
-          '("examples/emacs-analysis/analysis.eli"
-            "runtime/core/data.mjs"
-            "runtime/core/transducer.mjs"
-            "runtime/core/vector.mjs"
-            "runtime/worker.mjs"
-            "runtime/unicode-case.eli"
-            "runtime/unicode-case.mjs"
-            "runtime/unicode-case-data.eli"
-            "runtime/unicode-case-data.mjs"
-            "bootstrap/runtime/memory.eli"
-            "tools/runtime/unicode-case-runtime.el"
-            "tools/worker/eliscript-analysis.el"
-            "tools/worker/eliscript-service.el"
-            "tools/worker/eliscript-worker.el"
-            "tools/worker/analysis-benchmark.el"))
+          (delete-dups
+           (copy-sequence
+            (append
+             '("examples/emacs-analysis/analysis.eli"
+               "runtime/core/data.mjs"
+               "runtime/core/transducer.mjs"
+               "runtime/core/vector.mjs"
+               "runtime/worker.mjs"
+               "runtime/unicode-case.eli"
+               "runtime/unicode-case.mjs"
+               "runtime/unicode-case-data.eli"
+               "runtime/unicode-case-data.mjs"
+               "bootstrap/runtime/memory.eli"
+               "tools/runtime/unicode-case-runtime.el"
+               "tools/worker/eliscript-analysis.el"
+               "tools/worker/eliscript-service.el"
+               "tools/worker/eliscript-worker.el"
+               "tools/worker/analysis-benchmark.el")
+             eliscript-analysis-benchmark--prepared-runtime-capsules
+             eliscript-analysis-benchmark--prepared-runtime-sources))))
          (entries
           (mapcar
            (lambda (file)
@@ -81,7 +108,8 @@
                  (mapcar
                   (lambda (entry)
                     `((file . ,(car entry)) (sha256 . ,(cdr entry))))
-                  entries))))))
+                  entries)))
+      (preparedCompiler . ,prepared))))
 
 (defun eliscript-analysis-benchmark--program-version (program)
   "Return the first version line printed by PROGRAM."
@@ -318,9 +346,69 @@
                   :test #'equal)))
     (alist-get 'warmEndToEndSpeedup candidate)))
 
+(defun eliscript-analysis-benchmark--prepared-report-identity (identity)
+  "Return portable prepared stage3 report IDENTITY or signal an error."
+  (unless (and (listp identity)
+               (equal (alist-get 'format identity) "eliscript-prepared-stage3")
+               (integerp (alist-get 'version identity))
+               (integerp (alist-get 'fixedPointFileCount identity))
+               (stringp (alist-get 'sourceSha256 identity))
+               (stringp (alist-get 'productSha256 identity)))
+    (error "prepared stage3 gate returned an invalid portable identity"))
+  identity)
+
+(defun eliscript-analysis-benchmark--require-prepared-stage3 ()
+  "Authenticate the prepared final stage3 and return its portable identity.
+Standard output must contain exactly the machine-readable JSON identity;
+diagnostics stay on standard error so warnings cannot corrupt it."
+  (let* ((module (expand-file-name "tools/backends/dist/release-cli.mjs"
+                                   eliscript-analysis-benchmark--project-directory))
+         (program (or (getenv "BUN") "bun"))
+         (script (format
+                  (concat "import(%S).then((m) => m.requirePreparedStage3())"
+                          ".then((p) => { process.stdout.write(JSON.stringify(p.reportIdentity)); })"
+                          ".catch((e) => { console.error(e && e.message); process.exit(1); })")
+                  (concat "file://" module)))
+         (stdout (generate-new-buffer " *eliscript-prepared-stage3-stdout*"))
+         (stderr (generate-new-buffer " *eliscript-prepared-stage3-stderr*"))
+         process)
+    (unwind-protect
+        (progn
+          (setq process
+                (make-process
+                 :name "eliscript-analysis-benchmark-prepared-stage3"
+                 :command (list program "--eval" script)
+                 :buffer stdout
+                 :stderr stderr
+                 :sentinel #'ignore
+                 :noquery t))
+          (while (process-live-p process)
+            (accept-process-output process 0.05))
+          (let ((status (process-exit-status process)))
+            (unless (and (integerp status) (zerop status))
+              (error "prepared stage3 is required for formal measurements: %s"
+                     (let ((diagnostic
+                            (string-trim
+                             (with-current-buffer stderr (buffer-string)))))
+                       (if (= (length diagnostic) 0)
+                           (format "gate exited with status %s" status)
+                         diagnostic)))))
+          (eliscript-analysis-benchmark--prepared-report-identity
+           (with-current-buffer stdout
+             (json-parse-string (string-trim (buffer-string))
+                                :object-type 'alist
+                                :array-type 'list
+                                :null-object nil
+                                :false-object :false))))
+      (when (process-live-p process)
+        (delete-process process))
+      (kill-buffer stdout)
+      (kill-buffer stderr))))
+
 (defun eliscript-analysis-benchmark--run ()
   "Run primary and crossover analysis candidates."
-  (let* ((document-count
+  (let* ((prepared (eliscript-analysis-benchmark--require-prepared-stage3))
+         (document-count
           (eliscript-analysis-benchmark--positive-environment
            "ELISCRIPT_ANALYSIS_DOCUMENTS" 500))
          (terms-per-document
@@ -392,7 +480,8 @@
                   (bunVersion
                    . ,(eliscript-analysis-benchmark--program-version
                        eliscript-worker-program))))
-              (source . ,(eliscript-analysis-benchmark--source-contract)))))
+              (source
+               . ,(eliscript-analysis-benchmark--source-contract prepared)))))
       (when session (eliscript-analysis-stop session)))))
 
 (condition-case error-data

@@ -8,6 +8,7 @@
   (import "../tools/acceptance/finalize.mjs" FinalAcceptanceError
     verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact verifyHistoricalBenchmarkReport verifyHistoricalSoakReport
     validateFinalAcceptanceContract buildFinalAcceptance
+    validateExtendedWorkerSoakSource
     verifyFinalAcceptance generateFinalAcceptance validateFinalManifest humanFinalAcceptanceReport)
 
   (defconst fuzz-file "tests/reader-program-fuzz.test.mjs")
@@ -109,6 +110,40 @@
               (await (js-call assert :rejects (verifyHistoricalScaleArtifact directory scale-file run)
                 (rejection "historical scale Git source authentication failed"))))
             (finally (await (rm directory (js-object :recursive t :force t)))))))))
+
+  (test "fresh retained worker soak accepts only the exact prepared-runtime inventory extension"
+    (async ()
+      (let* ((run (await (retained-run)))
+             (revision (get (get run "source") "commit"))
+             (accepted-result (spawnSync "git"
+                                (js-array "show" (str revision ":benchmarks/worker-lifecycle-soak-macos-arm64.json"))
+                                (js-object :cwd root :encoding "utf8" :timeout 10000)))
+             (current (await (data "benchmarks/worker-lifecycle-soak-macos-arm64.json"))))
+        (js-call assert :strictEqual (get accepted-result "status") 0 (get accepted-result "stderr"))
+        (let ((accepted (JSON/parse (get accepted-result "stdout"))))
+          (await (validateExtendedWorkerSoakSource root current accepted))
+          (let ((mutations
+                 (js-array
+                   (lambda (value) (js-call (get (get value "source") "files") :pop))
+                   (lambda (value) (js-call (get (get value "source") "files") :push
+                                     (js-object "file" "README.md" "sha256" (js-call "0" :repeat 64))))
+                   (lambda (value) (put (aref (get (get value "source") "files") 26) "sha256"
+                                        (js-call "0" :repeat 64)))
+                   (lambda (value) (put (aref (get (get value "source") "files") 0) "file"
+                                        "bootstrap/compiler/not-the-accepted-source.eli"))
+                   (lambda (value) (put (get value "source") "digest" (js-call "0" :repeat 64)))
+                   (lambda (value) (js-call (get (get value "source") "files") :shift))))
+                (index 0))
+            (while (< index (js-length mutations))
+              (let ((changed (globalThis.structuredClone current)))
+                (funcall (aref mutations index) changed)
+                (await (js-call assert :rejects
+                  (validateExtendedWorkerSoakSource root changed accepted) typed-error)))
+              (setq index (1+ index))))
+          (let ((changed-accepted (globalThis.structuredClone accepted)))
+            (js-call (get (get changed-accepted "source") "files") :shift)
+            (await (js-call assert :rejects
+              (validateExtendedWorkerSoakSource root current changed-accepted) typed-error)))))))
 
   (defun rejects-current-source-drift (error)
     (and (typed-error error)

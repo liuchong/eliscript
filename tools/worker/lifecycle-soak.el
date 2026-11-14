@@ -13,6 +13,27 @@
 (defconst eliscript-worker-soak--project-directory
   (expand-file-name "../.." eliscript-worker-soak--script-directory))
 
+(defconst eliscript-worker-soak--prepared-runtime-capsules
+  '("runtime/array-text.mjs"
+    "runtime/errors.mjs"
+    "runtime/math.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs")
+  "Actual runtime capsules installed by the prepared final stage3 package.")
+
+(defconst eliscript-worker-soak--prepared-runtime-sources
+  '("runtime/array-text.eli"
+    "runtime/errors.eli"
+    "runtime/math.eli"
+    "runtime/number-radix.eli"
+    "runtime/prelude.eli"
+    "runtime/primitives.eli"
+    "runtime/unicode-case.eli")
+  "Maintained sources for the prepared runtime capsules.")
+
 (add-to-list
  'load-path
  (expand-file-name "compiler" eliscript-worker-soak--project-directory))
@@ -66,23 +87,30 @@
 
 (defun eliscript-worker-soak--source-files ()
   "Return the complete source contract for the worker soak."
-  (append
-   (mapcar
-    (lambda (file) (concat "compiler/" (file-name-nondirectory file)))
-    (sort
-     (directory-files
-      (expand-file-name "compiler" eliscript-worker-soak--project-directory)
-      t "\\.el\\'")
-     #'string<))
-   '("platform/worker.mjs"
-     "runtime/worker.mjs"
-     "tools/worker/eliscript-value-codec.el"
-     "tools/worker/eliscript-value-stream.el"
-     "tools/worker/eliscript-worker.el"
-     "tools/worker/lifecycle-soak.el")))
+  (delete-dups
+   (copy-sequence
+    (append
+     (mapcar
+      (lambda (file) (concat "compiler/" (file-name-nondirectory file)))
+      (sort
+       (directory-files
+        (expand-file-name "compiler" eliscript-worker-soak--project-directory)
+        t "\\.el\\'")
+       #'string<))
+     '("platform/worker.mjs"
+       "runtime/worker.mjs"
+       "tools/worker/eliscript-value-codec.el"
+       "tools/worker/eliscript-value-stream.el"
+       "tools/worker/eliscript-worker.el"
+       "tools/worker/lifecycle-soak.el"
+       "bootstrap/runtime/memory.eli"
+       "tools/runtime/unicode-case-runtime.el")
+     eliscript-worker-soak--prepared-runtime-capsules
+     eliscript-worker-soak--prepared-runtime-sources))))
 
-(defun eliscript-worker-soak--source-contract ()
-  "Return file-level and aggregate source identities for this soak."
+(defun eliscript-worker-soak--source-contract (prepared)
+  "Return file-level and aggregate source identities for this soak.
+PREPARED is the freshly authenticated portable prepared stage3 identity."
   (let* ((entries
           (mapcar
            (lambda (file)
@@ -97,7 +125,8 @@
                  (mapcar
                   (lambda (entry)
                     `((file . ,(car entry)) (sha256 . ,(cdr entry))))
-                  entries))))))
+                  entries)))
+      (preparedCompiler . ,prepared))))
 
 (defun eliscript-worker-soak--program-version (program)
   "Return the first version line printed by PROGRAM."
@@ -179,9 +208,69 @@
       (bounded . ,(and (<= emacs-delta allowance-kib)
                        (<= worker-delta allowance-kib))))))
 
+(defun eliscript-worker-soak--prepared-report-identity (identity)
+  "Return portable prepared stage3 report IDENTITY or signal an error."
+  (unless (and (listp identity)
+               (equal (alist-get 'format identity) "eliscript-prepared-stage3")
+               (integerp (alist-get 'version identity))
+               (integerp (alist-get 'fixedPointFileCount identity))
+               (stringp (alist-get 'sourceSha256 identity))
+               (stringp (alist-get 'productSha256 identity)))
+    (error "prepared stage3 gate returned an invalid portable identity"))
+  identity)
+
+(defun eliscript-worker-soak--require-prepared-stage3 ()
+  "Authenticate the prepared final stage3 and return its portable identity.
+Standard output must contain exactly the machine-readable JSON identity;
+diagnostics stay on standard error so warnings cannot corrupt it."
+  (let* ((module (expand-file-name "tools/backends/dist/release-cli.mjs"
+                                   eliscript-worker-soak--project-directory))
+         (program (or (getenv "BUN") eliscript-worker-program))
+         (script (format
+                  (concat "import(%S).then((m) => m.requirePreparedStage3())"
+                          ".then((p) => { process.stdout.write(JSON.stringify(p.reportIdentity)); })"
+                          ".catch((e) => { console.error(e && e.message); process.exit(1); })")
+                  (concat "file://" module)))
+         (stdout (generate-new-buffer " *eliscript-prepared-stage3-stdout*"))
+         (stderr (generate-new-buffer " *eliscript-prepared-stage3-stderr*"))
+         process)
+    (unwind-protect
+        (progn
+          (setq process
+                (make-process
+                 :name "eliscript-worker-soak-prepared-stage3"
+                 :command (list program "--eval" script)
+                 :buffer stdout
+                 :stderr stderr
+                 :sentinel #'ignore
+                 :noquery t))
+          (while (process-live-p process)
+            (accept-process-output process 0.05))
+          (let ((status (process-exit-status process)))
+            (unless (and (integerp status) (zerop status))
+              (error "prepared stage3 is required for formal measurements: %s"
+                     (let ((diagnostic
+                            (string-trim
+                             (with-current-buffer stderr (buffer-string)))))
+                       (if (= (length diagnostic) 0)
+                           (format "gate exited with status %s" status)
+                         diagnostic)))))
+          (eliscript-worker-soak--prepared-report-identity
+           (with-current-buffer stdout
+             (json-parse-string (string-trim (buffer-string))
+                                :object-type 'alist
+                                :array-type 'list
+                                :null-object nil
+                                :false-object :false))))
+      (when (process-live-p process)
+        (delete-process process))
+      (kill-buffer stdout)
+      (kill-buffer stderr))))
+
 (defun eliscript-worker-soak--run ()
   "Run the fixed worker lifecycle soak and return its report."
-  (let* ((requests
+  (let* ((prepared (eliscript-worker-soak--require-prepared-stage3))
+         (requests
           (eliscript-worker-soak--positive-environment
            "ELISCRIPT_WORKER_SOAK_REQUESTS" 100000))
          (batch-size
@@ -597,7 +686,8 @@
                             (javascriptVersion
                              . ,(eliscript-worker-soak--program-version
 				 eliscript-worker-program))))
-			(source . ,(eliscript-worker-soak--source-contract)))))))
+			(source
+			 . ,(eliscript-worker-soak--source-contract prepared)))))))
 	(when worker (ignore-errors (eliscript-worker-stop worker t)))
 	(dolist (process processes)
           (when (process-live-p process) (ignore-errors (delete-process process))))

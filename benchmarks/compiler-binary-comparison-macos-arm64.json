@@ -1,7 +1,7 @@
 {
   "format": "eliscript-compiler-binary-comparison-benchmark",
   "version": 1,
-  "generatedAt": "2026-11-14T01:35:39.017Z",
+  "generatedAt": "2026-11-14T04:58:06.131Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
@@ -20,9 +20,39 @@
       "bootstrap/compiler/compiler.eli",
       "compiler/eliscript-emitter.el",
       "compiler/eliscript-ir-emitter.el",
-      "tools/compiler/binary-comparison-benchmark.mjs"
+      "tools/compiler/binary-comparison-benchmark.eli",
+      "tools/compiler/binary-comparison-benchmark.mjs",
+      "runtime/array-text.eli",
+      "runtime/array-text.mjs",
+      "runtime/binding.eli",
+      "runtime/binding.mjs",
+      "runtime/errors.eli",
+      "runtime/errors.mjs",
+      "runtime/math.eli",
+      "runtime/math.mjs",
+      "runtime/number-radix.eli",
+      "runtime/number-radix.mjs",
+      "runtime/prelude.eli",
+      "runtime/prelude.mjs",
+      "runtime/primitives.eli",
+      "runtime/primitives.mjs",
+      "runtime/unicode-case.eli",
+      "runtime/unicode-case.mjs",
+      "runtime/unicode-case-data.eli",
+      "runtime/unicode-case-data.mjs",
+      "bootstrap/runtime/memory.eli",
+      "tools/runtime/unicode-case-runtime.el",
+      "tools/compiler/controlled-baseline.eli",
+      "tools/compiler/controlled-baseline.mjs"
     ],
-    "value": "1a347a192e51b2111e5ed70661aaf0e12da0d982826d47fcdeb33d983d60b461"
+    "value": "c18994565600d5dfbda86b3166029753feada3685c24ddb24dc01014b5df4af6",
+    "preparedCompiler": {
+      "format": "eliscript-prepared-stage3",
+      "version": 1,
+      "fixedPointFileCount": 338,
+      "sourceSha256": "894fe71a413733e20b7ed6f0cd9320e24e1feac40cfa29e4290642e15842e8d6",
+      "productSha256": "9fb89d3aa45a417dae78a4dea824b3a62a249078c339c2e385c5ac43f3f6e10f"
+    }
   },
   "host": {
     "runtime": "bun",
@@ -34,7 +64,7 @@
   },
   "baseline": {
     "revision": "a123937b275d89e833434e84064e4e120cf5495b",
-    "root": "binary-comparison"
+    "root": "binary"
   },
   "corpus": {
     "files": [
@@ -70,37 +100,37 @@
   "measurements": {
     "baseline": {
       "samplesMs": [
-        1168.988167,
-        1214.880459,
-        1257.1596250000002,
-        1149.7546670000002,
-        1155.8539999999994,
-        1190.180292000001,
-        1277.3702920000014,
-        1175.824708,
-        1284.279458000001,
-        1231.257791,
-        1251.4765420000003
+        1237.9072079999999,
+        1213.2734579999997,
+        1263.7077500000005,
+        1219.1761660000002,
+        1220.4526669999996,
+        1261.0049589999999,
+        1243.7735840000005,
+        1323.490249999999,
+        1305.6770830000005,
+        1213.6166660000017,
+        1258.940791000001
       ],
-      "medianMs": 1214.880459
+      "medianMs": 1243.7735840000005
     },
     "optimized": {
       "samplesMs": [
-        621.2117499999999,
-        601.1772500000002,
-        573.2741249999999,
-        574.4157080000004,
-        562.2602079999997,
-        553.7522910000007,
-        638.2065000000002,
-        605.3253339999992,
-        589.1309580000016,
-        576.7491250000021,
-        609.9044590000012
+        637.3867499999997,
+        632.7768329999999,
+        613.8587500000003,
+        609.2025409999997,
+        592.5682909999996,
+        587.5512500000004,
+        636.5938340000012,
+        639.3192920000001,
+        627.9952919999996,
+        597.0702079999974,
+        598.6772500000006
       ],
-      "medianMs": 589.1309580000016
+      "medianMs": 613.8587500000003
     },
-    "speedup": 2.062156881254909
+    "speedup": 2.0261559910973004
   },
   "decision": {
     "minimumSpeedup": 1.15,

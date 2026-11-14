@@ -21,6 +21,26 @@
   (defconst scale-file "tests/project-scale.test.mjs")
   (defconst benchmark-report-file "benchmarks/emacs-analysis-macos-arm64.json")
   (defconst soak-report-file "benchmarks/worker-value-stream-macos-arm64.json")
+  (defconst lifecycle-soak-file "benchmarks/worker-lifecycle-soak-macos-arm64.json")
+  (defconst worker-soak-inventory-extension
+    (js-array
+      "bootstrap/runtime/memory.eli"
+      "tools/runtime/unicode-case-runtime.el"
+      "runtime/array-text.mjs"
+      "runtime/errors.mjs"
+      "runtime/math.mjs"
+      "runtime/number-radix.mjs"
+      "runtime/prelude.mjs"
+      "runtime/primitives.mjs"
+      "runtime/unicode-case.mjs"
+      "runtime/unicode-case-data.mjs"
+      "runtime/array-text.eli"
+      "runtime/errors.eli"
+      "runtime/math.eli"
+      "runtime/number-radix.eli"
+      "runtime/prelude.eli"
+      "runtime/primitives.eli"
+      "runtime/unicode-case.eli"))
   (defconst expected-source (js-object :run "acceptance/runs/m13-01.json" :report "acceptance/runs/m13-01.md"))
   (defconst expected-outputs (js-object :manifest "acceptance/manifest.json" :report "acceptance/report.md"))
   (defconst expected-groups (js-array "benchmark" "fuzz" "scale" "soak" "test"))
@@ -55,6 +75,94 @@
       (catch error false)))
   (defun git-text (root arguments)
     (js-call (new globalThis.TextDecoder) :decode (retainedGitSnapshotBytes root arguments)))
+
+  (defun worker-soak-source-files (report label)
+    "Return REPORT's source files after validating its declared inventory."
+    (let* ((source (field report "source"))
+           (files (field source "files")))
+      (unless (and (plain-object source) (Array/isArray files) (> (js-length files) 0)
+                   (js-call files :every
+                     (lambda (entry)
+                       (and (plain-object entry)
+                            (safe-relative (field entry "file"))
+                            (= (value-type (field entry "sha256")) "string")
+                            (js-call digest-pattern :test (field entry "sha256")))))
+                   (= (get (new globalThis.Set
+                             (js-call files :map (lambda (entry) (field entry "file"))))
+                           "size")
+                      (js-length files)))
+        (fail (str label " worker soak source inventory is invalid")))
+      files))
+
+  (defun worker-soak-source-digest (files)
+    "Return the accepted filename/hash aggregate for FILES."
+    (let ((hash (createHash "sha256")) (index 0))
+      (while (< index (js-length files))
+        (let ((entry (aref files index)))
+          (js-call hash :update
+            (str (field entry "file") ":" (field entry "sha256") "\n")))
+        (setq index (1+ index)))
+      (js-call hash :digest "hex")))
+
+  (defasync accepted-worker-soak (root run)
+    "Return the accepted Git worker-soak report bound by RUN."
+    (let* ((commit (field (field run "source") "commit"))
+           (bytes (try (retainedGitSnapshotBytes
+                        root (js-array "show" (str commit ":" lifecycle-soak-file)))
+                    (catch error
+                      (fail (str "accepted worker soak Git source is unavailable: "
+                                 (get error :message))))))
+           (bound (js-call (get run "artifacts") :filter
+                    (lambda (entry) (= (field entry "file") lifecycle-soak-file)))))
+      (unless (and (js-call revision-pattern :test (or commit ""))
+                   (= (js-length bound) 1)
+                   (= (sha256 bytes) (field (aref bound 0) "sha256")))
+        (fail "accepted worker soak artifact is not uniquely authenticated"))
+      (JSON/parse (js-call (new globalThis.TextDecoder) :decode bytes))))
+
+  ;; The historical run bound the lifecycle soak report before the worker
+  ;; contract authenticated the prepared runtime capsules. A fresh complete
+  ;; report may extend that accepted prefix only by this exact inventory.
+  (defasync validateExtendedWorkerSoakSource (root current accepted)
+    "Validate the fresh worker soak's exact larger source inventory."
+    (let* ((current-files (worker-soak-source-files current "fresh"))
+           (accepted-files (worker-soak-source-files accepted "accepted"))
+           (old-count (js-length accepted-files))
+           (suffix (js-call current-files :slice old-count)))
+      (unless (same (js-call (js-call current-files :slice 0 old-count) :map
+                             (lambda (entry) (field entry "file")))
+                    (js-call accepted-files :map (lambda (entry) (field entry "file"))))
+        (fail "fresh worker soak source inventory does not preserve the accepted prefix"))
+      (unless (same (js-call suffix :map (lambda (entry) (field entry "file")))
+                    worker-soak-inventory-extension)
+        (fail "fresh worker soak source inventory is not the exact prepared-runtime extension"))
+      (let ((index 0))
+        (while (< index (js-length current-files))
+          (let* ((entry (aref current-files index))
+                 (file (field entry "file")))
+            (unless (= (sha256 (await (readFile (js-call path :join root file))))
+                       (field entry "sha256"))
+              (fail (str "fresh worker soak source entry is stale: " file))))
+          (setq index (1+ index))))
+      (unless (= (worker-soak-source-digest current-files)
+                 (field (field current "source") "digest"))
+        (fail "fresh worker soak source aggregate is stale"))
+      t))
+
+  (defun project-worker-soak (current accepted)
+    "Return CURRENT projected onto ACCEPTED's historical source inventory."
+    (let* ((projected (JSON/parse (JSON/stringify current)))
+           (source (field projected "source"))
+           (old-count (js-length (field (field accepted "source") "files")))
+           (files (js-call (field source "files") :slice 0 old-count)))
+      (put source "files" files)
+      (put source "digest" (worker-soak-source-digest files))
+      projected))
+
+  (defun worker-soak-inventory-change-error? (error)
+    (and error (= (value-type (get error :message)) "string")
+         (js-call (get error :message)
+           :includes "retained soak refresh: source inventory changed")))
 
   ;; Authenticate only the bytes and source identity of the accepted historical
   ;; run. Neither this proof nor deferral establishes current-source acceptance.
@@ -155,9 +263,27 @@
                             (unless (= (sha256 bytes) (js-call artifacts :get file))
                               (let ((refresh-options (js-object :deferPerformanceAcceptance (eq (get options :deferPerformanceAcceptance) t))))
                                 (cond
-                                  ((= file "benchmarks/worker-lifecycle-soak-macos-arm64.json")
-                                    (try (record-refresh options (await (validateRefreshedWorkerSoak root file bytes run refresh-options)))
-                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
+                                  ((= file lifecycle-soak-file)
+                                    (try
+                                        (record-refresh options
+                                          (await (validateRefreshedWorkerSoak root file bytes run refresh-options)))
+                                      (catch error
+                                        (if (not (worker-soak-inventory-change-error? error))
+                                            (js-call errors :push
+                                              (str label " artifact changed after the source run: " file ": " (get error :message)))
+                                          (try
+                                              (let* ((current (JSON/parse (js-call (new globalThis.TextDecoder) :decode bytes)))
+                                                     (accepted (await (accepted-worker-soak root run))))
+                                                (await (validateExtendedWorkerSoakSource root current accepted))
+                                                (record-refresh options
+                                                  (await (validateRefreshedWorkerSoak root file
+                                                           (Buffer/from (JSON/stringify
+                                                                          (project-worker-soak current accepted)))
+                                                           run refresh-options))))
+                                            (catch extension-error
+                                              (js-call errors :push
+                                                (str label " artifact changed after the source run: " file ": "
+                                                     (get extension-error :message)))))))))
                                   ((= file "benchmarks/transient-builder-macos-arm64.json")
                                     (try (record-refresh options (await (validateRefreshedTransientBuilder root file bytes run refresh-options)))
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
@@ -317,6 +443,6 @@
                    (nullish stack error)) "\n")))
         (put process :exitCode 1)))))
   (export DEFAULT_ROOT FinalAcceptanceError validateFinalAcceptanceContract verifyHistoricalFuzzArtifact verifyHistoricalScaleArtifact
-    verifyHistoricalBenchmarkReport verifyHistoricalSoakReport
+    verifyHistoricalBenchmarkReport verifyHistoricalSoakReport validateExtendedWorkerSoakSource
     validateDefectRegister buildFinalAcceptance humanFinalAcceptanceReport validateFinalManifest
     generateFinalAcceptance verifyFinalAcceptance humanFinalAcceptanceSummary))

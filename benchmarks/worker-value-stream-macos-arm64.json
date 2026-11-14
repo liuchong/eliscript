@@ -23,20 +23,20 @@
     "unit": "KiB",
     "sampleCount": 1063,
     "emacs": {
-      "baseline": 58048,
-      "peak": 953296,
-      "delta": 895248,
-      "peakMiB": 930.953125
+      "baseline": 69360,
+      "peak": 1229920,
+      "delta": 1160560,
+      "peakMiB": 1201.09375
     },
     "worker": {
-      "baseline": 39312,
-      "peak": 683664,
-      "delta": 644352,
-      "peakMiB": 667.640625
+      "baseline": 36400,
+      "peak": 702448,
+      "delta": 666048,
+      "peakMiB": 685.984375
     },
-    "combinedPeak": 1266976,
-    "combinedPeakMiB": 1237.28125,
-    "sumOfProcessPeaks": 1636960
+    "combinedPeak": 1932368,
+    "combinedPeakMiB": 1887.078125,
+    "sumOfProcessPeaks": 1932368
   },
   "budgetsMiB": {
     "emacsPeak": 2048,
@@ -44,19 +44,19 @@
     "combinedPeak": 2560
   },
   "timingsMs": {
-    "datasetConstruction": 59.121131896972656,
-    "sourceHash": 509.22203063964844,
-    "roundTrip": 206700.65689086914,
-    "resultHash": 585.5159759521484,
+    "datasetConstruction": 22.31001853942871,
+    "sourceHash": 494.4109916687012,
+    "roundTrip": 201158.02192687988,
+    "resultHash": 539.3810272216797,
     "worker": {
-      "moduleLoadMs": 7.965499999991152,
+      "moduleLoadMs": 4.043291000009049,
       "moduleCacheHit": false,
-      "moduleVersion": "(1794604407425081489 . 1000000000):917:456817450:16777234",
+      "moduleVersion": "(1794622436278934886 . 1000000000):917:458143030:16777234",
       "sourceMapLoaded": true,
       "sourceMapCount": 1,
-      "executionMs": 103.16066699998919,
-      "serializationMs": 38317.27262499998,
-      "workerMs": 206490.44975,
+      "executionMs": 103.03575000001001,
+      "serializationMs": 35667.51554200001,
+      "workerMs": 201095.925584,
       "valueStream": {
         "framing": "eliscript-value-chunks-v1",
         "argumentChunks": 1058,
@@ -66,7 +66,7 @@
         "maxTextPartUnits": 8192
       }
     },
-    "total": 207887.49599456787
+    "total": 202242.95496940613
   },
   "host": {
     "systemType": "darwin",
@@ -75,7 +75,7 @@
     "bunVersion": "1.4.0"
   },
   "source": {
-    "digest": "da2af62364e5cbb425e526f9295faf517ca39c235e534cfc22bc2ea369ce2e3b",
+    "digest": "4637171b76ac82d6ce3fd5dc6cb28fa1f1b34d9f142cbffc2297e001dbbca23c",
     "files": [
       {
         "file": "runtime/worker.mjs",
@@ -95,13 +95,88 @@
       },
       {
         "file": "tools/worker/value-stream-probe.el",
-        "sha256": "abc621860a426871e9dd02c8160790b84ad18fe4bfa7dc1586c33901e3640e4a"
+        "sha256": "994550b29357544315f425a45b953daf3c0932ec8634b41e7f4eea4299273e96"
       },
       {
         "file": "tests/fixtures/worker-value-stream-probe.mjs",
         "sha256": "2a931b5526d2d4940e664d4c8f9190965f4514f0d87943c99765a3d3d05dc73f"
+      },
+      {
+        "file": "bootstrap/runtime/memory.eli",
+        "sha256": "d29068a25965fdcdbeee0c9ea12ab382a115a5239189d720e920cb8d64389264"
+      },
+      {
+        "file": "tools/runtime/unicode-case-runtime.el",
+        "sha256": "fb74299e26ac8b0685a31ec471bad8907f54d98ae310060b923916f74554ce85"
+      },
+      {
+        "file": "runtime/array-text.mjs",
+        "sha256": "d4db3d4334aa1756694031dfdc100f4d7d6d6084513f10d58753683874aafda5"
+      },
+      {
+        "file": "runtime/errors.mjs",
+        "sha256": "0cc9cb65d37d89811f6b2bb246de3935e7dc45e8fd8733d7f6fc64e4c2b7dd63"
+      },
+      {
+        "file": "runtime/math.mjs",
+        "sha256": "e4e8aabec787a8f511d5b4990e9a293dbd58c00065d28c8271fc6a35f4f410e4"
+      },
+      {
+        "file": "runtime/number-radix.mjs",
+        "sha256": "2445937e8c21cd572618efd7fe6ea76a690cb6293c09b6078f56a5fa41744849"
+      },
+      {
+        "file": "runtime/prelude.mjs",
+        "sha256": "58863998664aa27738c91aae7dbfcfccaf38ff5ba535f7f0a671f258b1416729"
+      },
+      {
+        "file": "runtime/primitives.mjs",
+        "sha256": "8493f61419d79e1f38b05ce6d73366d17f7771bc223a54b1ac8d3ad7ff3c9daa"
+      },
+      {
+        "file": "runtime/unicode-case.mjs",
+        "sha256": "796e155bde6f8ba110370913825aa7abbfff28581b995d1758f4b5fda48f640b"
+      },
+      {
+        "file": "runtime/unicode-case-data.mjs",
+        "sha256": "c8751cd32a95594cd7e36331a2ba8bf8950ac73fbe2399da4917b3be9e20e7f9"
+      },
+      {
+        "file": "runtime/array-text.eli",
+        "sha256": "466882f2fe67d189d55fa270ebf165649c95383839cbed4149d1b12ee821298a"
+      },
+      {
+        "file": "runtime/errors.eli",
+        "sha256": "988904485895a0a22fbbe0fc48777fd50eb26d6459491da8ec0dd4b8e1c82b5f"
+      },
+      {
+        "file": "runtime/math.eli",
+        "sha256": "c7cf12d8494a35391744b6ea20b0feffb2225d230e614e9298365e73053c7e9b"
+      },
+      {
+        "file": "runtime/number-radix.eli",
+        "sha256": "e25433f601371ef7d3490130ef6201e9cbbb9369cbe2a0ace8e122d2f7c27422"
+      },
+      {
+        "file": "runtime/prelude.eli",
+        "sha256": "01561a3060bbb0e68febf6b6093f2dd2659fd6d7c75884095c725513630bfa41"
+      },
+      {
+        "file": "runtime/primitives.eli",
+        "sha256": "3874935fb9c60238222014e8261461d1a2cd486f9558eea480036c44602d0ad4"
+      },
+      {
+        "file": "runtime/unicode-case.eli",
+        "sha256": "24e040e67e80c5ca66be698a35efc1b42791a21daa592808c117c7c04b405c20"
       }
-    ]
+    ],
+    "preparedCompiler": {
+      "format": "eliscript-prepared-stage3",
+      "version": 1,
+      "fixedPointFileCount": 338,
+      "sourceSha256": "894fe71a413733e20b7ed6f0cd9320e24e1feac40cfa29e4290642e15842e8d6",
+      "productSha256": "9fb89d3aa45a417dae78a4dea824b3a62a249078c339c2e385c5ac43f3f6e10f"
+    }
   },
   "error": null
 }

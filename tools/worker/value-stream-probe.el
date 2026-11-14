@@ -32,6 +32,27 @@
    (file-name-directory (or load-file-name buffer-file-name)))
   "Project directory containing the probe sources.")
 
+(defconst eliscript-value-stream-probe--prepared-runtime-capsules
+  '("runtime/array-text.mjs"
+    "runtime/errors.mjs"
+    "runtime/math.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs")
+  "Actual runtime capsules installed by the prepared final stage3 package.")
+
+(defconst eliscript-value-stream-probe--prepared-runtime-sources
+  '("runtime/array-text.eli"
+    "runtime/errors.eli"
+    "runtime/math.eli"
+    "runtime/number-radix.eli"
+    "runtime/prelude.eli"
+    "runtime/primitives.eli"
+    "runtime/unicode-case.eli")
+  "Maintained sources for the prepared runtime capsules.")
+
 (defun eliscript-value-stream-probe--positive-environment (name default)
   "Return positive integer environment variable NAME or DEFAULT."
   (let ((text (getenv name)))
@@ -55,15 +76,23 @@
     (insert-file-contents-literally filename)
     (secure-hash 'sha256 (current-buffer))))
 
-(defun eliscript-value-stream-probe--source-contract ()
-  "Return source files and their aggregate digest for this probe."
+(defun eliscript-value-stream-probe--source-contract (prepared)
+  "Return source files and their aggregate digest for this probe.
+PREPARED is the freshly authenticated portable prepared stage3 identity."
   (let* ((files
-          '("runtime/worker.mjs"
-            "runtime/worker-value-stream.mjs"
-            "tools/worker/eliscript-worker.el"
-            "tools/worker/eliscript-value-stream.el"
-            "tools/worker/value-stream-probe.el"
-            "tests/fixtures/worker-value-stream-probe.mjs"))
+          (delete-dups
+           (copy-sequence
+            (append
+             '("runtime/worker.mjs"
+               "runtime/worker-value-stream.mjs"
+               "tools/worker/eliscript-worker.el"
+               "tools/worker/eliscript-value-stream.el"
+               "tools/worker/value-stream-probe.el"
+               "tests/fixtures/worker-value-stream-probe.mjs"
+               "bootstrap/runtime/memory.eli"
+               "tools/runtime/unicode-case-runtime.el")
+             eliscript-value-stream-probe--prepared-runtime-capsules
+             eliscript-value-stream-probe--prepared-runtime-sources))))
          (entries
           (mapcar
            (lambda (file)
@@ -81,7 +110,8 @@
                  (mapcar (lambda (entry)
                            `((file . ,(car entry))
                              (sha256 . ,(cdr entry))))
-                         entries))))))
+                         entries)))
+      (preparedCompiler . ,prepared))))
 
 (defun eliscript-value-stream-probe--program-version (program)
   "Return the first version line printed by PROGRAM."
@@ -99,9 +129,69 @@
   "Convert KIB to MiB."
   (/ kib 1024.0))
 
+(defun eliscript-value-stream-probe--prepared-report-identity (identity)
+  "Return portable prepared stage3 report IDENTITY or signal an error."
+  (unless (and (listp identity)
+               (equal (alist-get 'format identity) "eliscript-prepared-stage3")
+               (integerp (alist-get 'version identity))
+               (integerp (alist-get 'fixedPointFileCount identity))
+               (stringp (alist-get 'sourceSha256 identity))
+               (stringp (alist-get 'productSha256 identity)))
+    (error "prepared stage3 gate returned an invalid portable identity"))
+  identity)
+
+(defun eliscript-value-stream-probe--require-prepared-stage3 ()
+  "Authenticate the prepared final stage3 and return its portable identity.
+Standard output must contain exactly the machine-readable JSON identity;
+diagnostics stay on standard error so warnings cannot corrupt it."
+  (let* ((module (expand-file-name "tools/backends/dist/release-cli.mjs"
+                                   eliscript-value-stream-probe--project-directory))
+         (program (or (getenv "BUN") eliscript-worker-program))
+         (script (format
+                  (concat "import(%S).then((m) => m.requirePreparedStage3())"
+                          ".then((p) => { process.stdout.write(JSON.stringify(p.reportIdentity)); })"
+                          ".catch((e) => { console.error(e && e.message); process.exit(1); })")
+                  (concat "file://" module)))
+         (stdout (generate-new-buffer " *eliscript-prepared-stage3-stdout*"))
+         (stderr (generate-new-buffer " *eliscript-prepared-stage3-stderr*"))
+         process)
+    (unwind-protect
+        (progn
+          (setq process
+                (make-process
+                 :name "eliscript-value-stream-probe-prepared-stage3"
+                 :command (list program "--eval" script)
+                 :buffer stdout
+                 :stderr stderr
+                 :sentinel #'ignore
+                 :noquery t))
+          (while (process-live-p process)
+            (accept-process-output process 0.05))
+          (let ((status (process-exit-status process)))
+            (unless (and (integerp status) (zerop status))
+              (error "prepared stage3 is required for formal measurements: %s"
+                     (let ((diagnostic
+                            (string-trim
+                             (with-current-buffer stderr (buffer-string)))))
+                       (if (= (length diagnostic) 0)
+                           (format "gate exited with status %s" status)
+                         diagnostic)))))
+          (eliscript-value-stream-probe--prepared-report-identity
+           (with-current-buffer stdout
+             (json-parse-string (string-trim (buffer-string))
+                                :object-type 'alist
+                                :array-type 'list
+                                :null-object nil
+                                :false-object :false))))
+      (when (process-live-p process)
+        (delete-process process))
+      (kill-buffer stdout)
+      (kill-buffer stderr))))
+
 (defun eliscript-value-stream-probe-run ()
   "Run the chunked round-trip probe and return its report alist."
-  (let* ((logical-mib
+  (let* ((prepared (eliscript-value-stream-probe--require-prepared-stage3))
+         (logical-mib
           (eliscript-value-stream-probe--positive-environment
            "ELISCRIPT_VALUE_STREAM_PROBE_MIB" 2))
          (logical-bytes (* logical-mib 1024 1024))
@@ -127,7 +217,7 @@
          (eliscript-worker-program
           (or (getenv "BUN") eliscript-worker-program))
          (source-contract
-          (eliscript-value-stream-probe--source-contract))
+          (eliscript-value-stream-probe--source-contract prepared))
          (started (float-time))
          (emacs-pid (emacs-pid))
          worker

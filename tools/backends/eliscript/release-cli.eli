@@ -1,5 +1,5 @@
 (module tools.backends.release-cli
-  (import "node:fs/promises" readFile writeFile mkdir cp)
+  (import "node:fs/promises" readFile writeFile mkdir cp realpath)
   (import "node:fs" existsSync)
   (import "node:path" resolve dirname join relative isAbsolute sep)
   (import "node:url" fileURLToPath)
@@ -81,20 +81,103 @@
         :sourceIdentity (js-object :entry (get source :entry) :encoding (get source :encoding)
           :sha256 (get source :sha256)))))
 
-  (defasync require-prepared-runtime (certified)
+  (defconst prepared-runtime-support-files
+    (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs"
+      "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
+      "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+
+  (defconst prepared-compiler-modules
+    (js-array "bootstrap/symbol.mjs" "bootstrap/syntax.mjs" "bootstrap/reader.mjs"
+      "bootstrap/formatter.mjs" "bootstrap/expander.mjs" "bootstrap/transient-analysis.mjs"
+      "bootstrap/analyzer.mjs" "bootstrap/ir.mjs" "bootstrap/lower.mjs"
+      "bootstrap/source-map.mjs" "bootstrap/emitter.mjs" "bootstrap/project.mjs"
+      "bootstrap/compiler.mjs"))
+
+  (defasync require-prepared-runtime (certified &optional directory)
     (let* ((metadata-path (get certified :stage3MetadataPath))
            (metadata (await (readCompilerMetadata metadata-path)))
            (supports (js-call (get metadata :modules) :filter
-             (lambda (record) (js-call (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs"
-               "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
-               "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs") :includes (get record :id))))) (index 0))
+             (lambda (record) (js-call prepared-runtime-support-files :includes (get record :id))))) (index 0))
       (while (< index (js-length supports))
         (let* ((support (aref supports index))
                (actual (await (readFile (resolve (dirname metadata-path) (get support :path)))))
-               (prepared (await (readFile (resolve root (get support :id))))))
+               (prepared (await (readFile (resolve (if (nullish? directory) root directory) (get support :id))))))
           (unless (isDeepStrictEqual actual prepared)
             (release-type-error "prepare-release-package must install the final stage3 runtime before compiler execution")))
         (setq index (1+ index)))))
+
+  ;; The single gate every formal measurement calls before timing. It accepts
+  ;; only the prepared final stage3 package layout: the release receipt names
+  ;; dist/compiler-artifact.json, every declared product is authenticated there,
+  ;; the compiler module graph and runtime support set are complete, and the
+  ;; root runtime capsules equal their certified bytes. Nothing is rebuilt.
+  (defasync requirePreparedStage3 (&optional directory)
+    (let* ((prepared-root (await (realpath (resolve (if (nullish? directory) root directory)))))
+           (manifest (resolve prepared-root "dist/stage3-release.json")))
+      (unless (existsSync manifest)
+        (release-type-error
+         "prepared stage3 required: dist/stage3-release.json is missing; run make prepare-release-package"))
+      (let* ((certified (await (resolveReleaseCompiler (js-object :bootstrapManifestPath manifest))))
+             (metadata-path (await (realpath (get certified :stage3MetadataPath))))
+             (expected (resolve prepared-root "dist/compiler-artifact.json")))
+        (unless (= (get certified :scope) "stage3-identity")
+          (release-type-error "prepared stage3 required: the release receipt is not an accepted stage3 receipt"))
+        (unless (= metadata-path expected)
+          (release-type-error "prepared stage3 required: stage3 metadata must be dist/compiler-artifact.json"))
+        (let* ((metadata (await (readCompilerMetadata metadata-path)))
+               (declared
+                 (new globalThis.Set
+                   (js-call (get metadata :modules) :map (lambda (record) (get record :id))))))
+          (js-call prepared-compiler-modules :forEach
+            (lambda (id)
+              (unless (js-call declared :has id)
+                (release-type-error (+ "prepared stage3 is missing compiler module " id)))))
+          (js-call prepared-runtime-support-files :forEach
+            (lambda (id)
+              (unless (js-call declared :has id)
+                (release-type-error (+ "prepared stage3 is missing runtime support " id)))))
+          ;; Authenticate the paths the benchmark will actually load, not a
+          ;; second copy named by a module record elsewhere in the artifact.
+          (let ((modules (get metadata :modules)) (index 0))
+            (while (< index (js-length modules))
+              (let ((record (aref modules index)))
+                (when (or (js-call prepared-compiler-modules :includes (get record :id))
+                          (js-call prepared-runtime-support-files :includes (get record :id)))
+                  (unless (= (await (realpath (resolve (dirname metadata-path) (get record :path))))
+                             (resolve prepared-root "dist" (get record :id)))
+                    (release-type-error "prepared stage3 module path differs from the measured package layout"))))
+              (setq index (1+ index)))))
+        (await (require-prepared-runtime certified prepared-root))
+        (js-object :scope (get certified :scope)
+          :bootstrapManifestPath (get certified :bootstrapManifestPath)
+          :stage3MetadataPath metadata-path
+          :fixedPointFileCount (get certified :fixedPointFileCount)
+          :sourceIdentity (get certified :sourceIdentity)
+          :productIdentity (get certified :productIdentity)
+          ;; Portable identity for retained reports; checkout paths never enter
+          ;; the committed measurement, and current-source checks compare this
+          ;; certificate with freshly authenticated final bytes.
+          :reportIdentity (js-object :format "eliscript-prepared-stage3" :version 1
+            :fixedPointFileCount (get certified :fixedPointFileCount)
+            :sourceSha256 (get (get certified :sourceIdentity) :sha256)
+            :productSha256 (get (get certified :productIdentity) :sha256))))))
+
+  (defun assertPreparedBenchmarkSource (source certified)
+    (unless (and (not (nullish? source)) (not (nullish? certified))
+                 (not (nullish? (get certified :reportIdentity)))
+                 (= (get (get certified :reportIdentity) :format) "eliscript-prepared-stage3")
+                 (isDeepStrictEqual (get source :preparedCompiler) (get certified :reportIdentity)))
+      (release-type-error "benchmark source does not match the authenticated prepared stage3 compiler"))
+    (unless (Array/isArray (get source :files))
+      (release-type-error "benchmark source must declare prepared runtime files"))
+    (let ((declared (new globalThis.Set
+                      (js-call (get source :files) :map
+                        (lambda (entry) (if (= (value-type entry) "string") entry
+                          (if (nullish? entry) undefined (get entry :file))))))))
+      (js-call prepared-runtime-support-files :forEach (lambda (file)
+        (unless (js-call declared :has file)
+          (release-type-error (+ "benchmark source is missing prepared runtime " file))))))
+    source)
 
   (defun release-write (io text)
     (if (and io (= (value-type (get io :write)) "function"))
@@ -303,4 +386,5 @@
           (+ (renderReleaseCLIError error (js-object :json
             (js-call (get globalThis.process :argv) :includes "--json-errors"))) "\n"))
         (put globalThis.process :exitCode 1))))
-  (export runReleaseCLI resolveReleaseCompiler renderReleaseCLIError prepareReleasePackage))
+  (export runReleaseCLI resolveReleaseCompiler renderReleaseCLIError prepareReleasePackage
+    requirePreparedStage3 assertPreparedBenchmarkSource))

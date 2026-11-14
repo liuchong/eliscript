@@ -12,6 +12,7 @@
   (import "../../runtime/core/value.mjs" hashValue)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
   (import "../backends/compiler-host-record.mjs" copyHostRecord)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
 
   (defconst host-typeof (js* "(value) => typeof value"))
   (defconst import-module (js* "(specifier) => import(specifier)"))
@@ -19,7 +20,6 @@
   (defconst CORE_BENCHMARK_VERSION 1)
   (defconst toolPath (fileURLToPath (js* "import.meta.url")))
   (defconst projectDirectory (js-call path "resolve" (js-call path "dirname" toolPath) "../.."))
-  (defconst bootstrapCommand (js-call path "join" projectDirectory "bin/eliscript-bootstrap"))
   (defconst compilerDirectory (js-call path "join" projectDirectory "dist/bootstrap"))
   (defconst compilerModule (js-call path "join" compilerDirectory "compiler.mjs"))
   (defconst workerBenchmark (js-call path "join" projectDirectory "tools/worker/benchmark.el"))
@@ -80,7 +80,8 @@
                 "filter" (lambda (entry) (and (js-call entry "isFile") (js-call (get entry :name) "endsWith" extension))))
                 "map" (lambda (entry) (+ directory "/" (get entry :name)))) "sort"))
   (defasync coreBenchmarkSourceDigest ()
-    (let ((files (js-array)) (digest (createHash "sha256")) (identities (js-array)) (nul (String/fromCharCode 0)))
+    (let ((prepared (get (await (requirePreparedStage3)) :reportIdentity))
+          (files (js-array)) (digest (createHash "sha256")) (identities (js-array)) (nul (String/fromCharCode 0)))
       (let ((__eli_iterator_5 (openHostIterator (js-array
         (js-array "compiler" ".el") (js-array "bootstrap/compiler" ".eli")
         (js-array "bootstrap/host" ".eli")
@@ -93,12 +94,13 @@
         "stdlib/bit.eli" "stdlib/bit.mjs" "stdlib/core/object.eli" "stdlib/core/protocol.eli" "stdlib/core/text.eli"
         "tools/project/project.eli" "tools/performance/core-benchmark.eli"
         "tools/backends/compiler-host-record.eli" "tools/backends/compiler-host-iteration.eli"
-        "bootstrap/host/build.mjs" "bootstrap/host/bun.mjs" "bootstrap/host/project.mjs" "bootstrap/host/project-ground.mjs" "platform/worker.mjs" "runtime/worker-value-codec.mjs" "runtime/worker-value-stream.mjs" "runtime/worker.mjs" "tests/fixtures/worker.eli" "tools/performance/core-benchmark.mjs" "tools/backends/compiler-host-record.mjs" "tools/backends/compiler-host-iteration.mjs" "tools/worker/benchmark.el" "tools/worker/eliscript-value-codec.el" "tools/worker/eliscript-value-stream.el" "tools/worker/eliscript-worker.el")))) (try (while (advanceHostIterator __eli_iterator_9) (let ((file (get __eli_iterator_9 :value))) (js-call files "push" file))) (catch __eli_iteration_error_10 (closeHostIterator __eli_iterator_9 t) (throw __eli_iteration_error_10)) (finally (closeHostIterator __eli_iterator_9 false))))
+        "bootstrap/host/build.mjs" "bootstrap/host/bun.mjs" "bootstrap/host/project.mjs" "bootstrap/host/project-ground.mjs" "platform/worker.mjs" "runtime/worker-value-codec.mjs" "runtime/worker-value-stream.mjs" "runtime/worker.mjs" "tests/fixtures/worker.eli" "tools/performance/core-benchmark.eli" "tools/performance/core-benchmark.mjs" "tools/backends/compiler-host-record.mjs" "tools/backends/compiler-host-iteration.mjs" "tools/worker/benchmark.el" "tools/worker/eliscript-value-codec.el" "tools/worker/eliscript-value-stream.el" "tools/worker/eliscript-worker.el")))) (try (while (advanceHostIterator __eli_iterator_9) (let ((file (get __eli_iterator_9 :value))) (js-call files "push" file))) (catch __eli_iteration_error_10 (closeHostIterator __eli_iterator_9 t) (throw __eli_iteration_error_10)) (finally (closeHostIterator __eli_iterator_9 false))))
       (let ((__eli_iterator_11 (openHostIterator (js-call (Array/from (new globalThis.Set files)) "sort")))) (try (while (advanceHostIterator __eli_iterator_11) (let ((file (get __eli_iterator_11 :value))) (let ((bytes (await (readFile (js-call path "join" projectDirectory file)))))
           (js-call digest "update" file) (js-call digest "update" nul)
           (js-call digest "update" bytes) (js-call digest "update" nul)
           (js-call identities "push" (js-object :file file :sha256 (js-call (js-call (createHash "sha256") "update" bytes) "digest" "hex")))))) (catch __eli_iteration_error_12 (closeHostIterator __eli_iterator_11 t) (throw __eli_iteration_error_12)) (finally (closeHostIterator __eli_iterator_11 false))))
-      (js-object :algorithm "sha256" :digest (js-call digest "digest" "hex") :files identities)))
+      (js-object :algorithm "sha256" :digest (js-call digest "digest" "hex")
+        :files identities :preparedCompiler prepared)))
   (defasync compilerSample (parameters)
     (let ((sources (js-array)))
       (let ((__eli_iterator_13 (openHostIterator (await (filesIn "bootstrap/compiler" ".eli"))))) (try (while (advanceHostIterator __eli_iterator_13) (let ((file (get __eli_iterator_13 :value))) (js-call sources "push" (js-object :file file :source (await (readFile (js-call path "join" projectDirectory file) "utf8")))))) (catch __eli_iteration_error_14 (closeHostIterator __eli_iterator_13 t) (throw __eli_iteration_error_14)) (finally (closeHostIterator __eli_iterator_13 false))))
@@ -287,9 +289,11 @@
     (js-call (get (await (capture (js-array (coalesce (get (get process :env) :EMACS) "emacs") "--batch" "-Q" "--eval" "(princ emacs-version)") (js-object))) :stdout) "trim"))
   (defasync runCorePerformanceBenchmark (options)
     (let* ((parameters (parametersFrom options)) (source undefined) (runs (js-array)))
-      (await (capture (js-array bootstrapCommand) (js-object :env (copyHostRecord (get process :env)))))
-      ;; Preparing the compiler can regenerate runtime modules. Freeze their
-      ;; identities after that prerequisite and before all timed child runs.
+      ;; Formal measurements only accept the prepared final stage3 package:
+      ;; the gate authenticates the compiler modules in dist and the root
+      ;; runtime bytes, and refuses seed or tampered layouts instead of
+      ;; rebuilding anything before timing.
+      (await (requirePreparedStage3))
       (setq source (await (coreBenchmarkSourceDigest)))
       (let ((__eli_count_29 (get parameters :baselineRuns)) (index 0)) (while (< index __eli_count_29) (let ((result (await (capture (js-array (get process :execPath) toolPath "--single-run")
                         (js-object :env (copyHostRecord (get process :env) (js-object :ELISCRIPT_CORE_BENCHMARK_PARAMETERS (JSON/stringify parameters))))))))

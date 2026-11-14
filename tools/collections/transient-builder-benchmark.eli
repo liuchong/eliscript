@@ -1,5 +1,4 @@
 (module tools.collections.transient-builder-benchmark
-  (import "node:crypto" createHash)
   (import "node:fs/promises" readdir readFile writeFile)
   (import "node:os" :default os)
   (import "node:path" :default path)
@@ -9,6 +8,8 @@
   (import "../../runtime/core/set.mjs" EMPTY_SET)
   (import "../../runtime/core/transducer.mjs" into)
   (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
+  (import "../compiler/controlled-baseline.mjs" compilerBenchmarkSourceDigest)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
   (import "../../runtime/testing/map.mjs"
     persistentMapMetrics resetPersistentMapMetrics resetTransientMapMetrics transientMapMetrics)
@@ -56,20 +57,12 @@
                                            :filter (lambda (name) (js-call name :endsWith ".mjs")))
                                   :map (lambda (name) (str "runtime/core/" name)))
                          :sort)))
-      (js-call core-files :concat testing-files (js-array tool-file))))
+      (js-call core-files :concat testing-files
+        (js-array "tools/collections/transient-builder-benchmark.eli" tool-file))))
 
   (defasync transientBuilderSourceDigest ()
-    (let ((files (await (source-files)))
-          (hash (createHash "sha256"))
-          (index 0))
-      (while (< index (js-length files))
-        (let ((relative (aref files index)))
-          (js-call hash :update relative)
-          (js-call hash :update "\u0000")
-          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
-          (js-call hash :update "\u0000"))
-        (setq index (1+ index)))
-      (js-object :algorithm "sha256" :files files :value (js-call hash :digest "hex"))))
+    (await (compilerBenchmarkSourceDigest project-directory (await (source-files))
+             (await (requirePreparedStage3)))))
 
   (defun median (samples)
     (let ((values (js-call (Array/from samples) :sort (lambda (left right) (- left right)))))
@@ -261,6 +254,7 @@
       report))
 
   (defasync runTransientBuilderBenchmark (&optional supplied-options)
+    (await (requirePreparedStage3))
     (let* ((options (or supplied-options (js-object)))
            (env (get process :env))
            (parameters (js-object

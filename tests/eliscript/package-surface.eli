@@ -153,7 +153,7 @@
       (js-call (expect (js-call entry :startsWith "tools/backends/compiler-matrix")) :toBe false)))))
 
   (test "the package keeps development trees out of the tarball" (lambda ()
-    (each (js-array "!dist/bootstrap/runtime/" "!dist/bootstrap/package.json")
+    (each (js-array "!dist/bootstrap/runtime/" "!dist/bootstrap/package.json" "!**/*.elc")
       (lambda (excluded) (js-call (expect (get manifest :files)) :toContain excluded)))
     (each (js-array "acceptance/" "docs/" "examples/" "node_modules/" "specs/" "tests/" "tools/"
                    "dist/bootstrap-release/" "tools/backends/")

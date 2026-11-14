@@ -1,12 +1,14 @@
 (module tools.performance.version-comparison
   (import "node:fs" readFileSync)
-  (import "node:fs/promises" mkdir mkdtemp readFile rm stat symlink writeFile)
+  (import "node:fs/promises" mkdir mkdtemp readFile realpath rm stat symlink writeFile)
   (import "node:module" createRequire)
   (import "node:child_process" spawnSync)
   (import "node:os" :default os)
   (import "node:path" :default path)
   (import "node:process" :default process)
+  (import "node:util" isDeepStrictEqual)
   (import "../backends/build.mjs" root)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
 
   (defconst projectDirectory root)
   (defconst VERSION_COMPARISON_FORMAT "eliscript-version-comparison-benchmark")
@@ -221,12 +223,19 @@
   (defasync measureEliscriptDirectory (targetRoot &optional rawCompilerRoot vectorDiagnostics)
     (let* ((compilerRoot (nullish rawCompilerRoot projectDirectory))
            (literalsMjs (js-call path :join targetRoot "runtime/literals.mjs"))
-           (targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs")))
-      ;; A version is measured with its own build, never a convenient compiler
-      ;; from another checkout. compilerRoot supplies the common workload source
-      ;; and one shared timing driver, never the compiler measured below.
-      (unless (and (await (pathExists literalsMjs)) (await (pathExists targetCompilerPath)))
-        (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot :timeout 360000))))
+           (targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
+           (prepared undefined)
+           (current-source-root
+             (= (await (realpath targetRoot)) (await (realpath projectDirectory)))))
+      ;; The current source root is the prepared final stage3 package: require
+      ;; its authentication and never rebuild the seed for it. Historical
+      ;; version dimensions keep measuring their own checkout build below.
+      ;; compilerRoot supplies the common workload source and one shared timing
+      ;; driver, never the compiler measured here.
+      (if current-source-root
+          (setq prepared (await (requirePreparedStage3)))
+        (unless (and (await (pathExists literalsMjs)) (await (pathExists targetCompilerPath)))
+          (await (capture (js-array "make" "bootstrap-backends") (js-object :cwd targetRoot :timeout 360000)))))
       (let* ((targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
              (activeCompilerPath targetCompilerPath)
              (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath)))
@@ -274,7 +283,13 @@
                                (js-array (get process :execPath) timingPath "--vector-diagnostics" runnerPath)
                                (js-array (get process :execPath) timingPath runnerPath)))
                      (result (await (capture command (js-object :cwd tempDir)))))
-                (JSON/parse (js-call (get result :stdout) :trim))))
+                (let ((measurement (JSON/parse (js-call (get result :stdout) :trim))))
+                  (unless (undefined? prepared)
+                    (put measurement :preparedCompiler (get prepared :reportIdentity))
+                    (unless (isDeepStrictEqual (get measurement :preparedCompiler)
+                              (get (await (requirePreparedStage3)) :reportIdentity))
+                      (throw (new globalThis.Error "prepared latest compiler changed during measurement"))))
+                  measurement)))
             (finally
               (await (rm tempDir (js-object :recursive t :force t)))))))))
 
@@ -415,11 +430,14 @@
                      (Object/hasOwn measurement "calibration"))
           (throw (new globalThis.TypeError
                    (str "dimension measurement requires samples and calibration: " (get dimension :id)))))
-        (Object/assign (js-object) dimension
+        (let ((result (Object/assign (js-object) dimension
           (js-object :deduplicatedFrom nil
             :metricsMs (get measurement :metricsMs)
             :samplesMs (get measurement :samplesMs)
-            :calibration (get measurement :calibration))))
+            :calibration (get measurement :calibration)))))
+          (when (Object/hasOwn measurement "preparedCompiler")
+            (put result :preparedCompiler (get measurement :preparedCompiler)))
+          result))
       (catch error
         (js-call failures :push (js-object :dimension (get dimension :id) :error error))
         (Object/assign (js-object) dimension (js-object :status "failed" :metricsMs nil)))))

@@ -2,9 +2,51 @@
   (import "node:crypto" createHash)
   (import "node:fs/promises" copyFile mkdir readFile writeFile)
   (import "node:path" :default path)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
 
   (defun sha256 (bytes)
     (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
+
+  ;; Benchmark source identity binds the maintained runtime inputs the measured
+  ;; tools actually execute, so editing a runtime capsule cannot leave a report
+  ;; claiming the old measured sources.
+  (defconst compilerBenchmarkRuntimeInputs
+    (Object/freeze
+      (js-array
+        "runtime/array-text.eli" "runtime/array-text.mjs"
+        "runtime/binding.eli" "runtime/binding.mjs"
+        "runtime/errors.eli" "runtime/errors.mjs"
+        "runtime/math.eli" "runtime/math.mjs"
+        "runtime/number-radix.eli" "runtime/number-radix.mjs"
+        "runtime/prelude.eli" "runtime/prelude.mjs"
+        "runtime/primitives.eli" "runtime/primitives.mjs"
+        "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
+        "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"
+        "bootstrap/runtime/memory.eli"
+        "tools/runtime/unicode-case-runtime.el"
+        "tools/compiler/controlled-baseline.eli"
+        "tools/compiler/controlled-baseline.mjs")))
+
+  (defasync compilerBenchmarkSourceDigest (root sourceFiles &optional certified)
+    (let* ((files
+             (Object/freeze
+               (Array/from
+                 (new globalThis.Set
+                   (js-call sourceFiles :concat compilerBenchmarkRuntimeInputs)))))
+           (hash (createHash "sha256"))
+           (index 0))
+      (while (< index (js-length files))
+        (let ((relative (aref files index)))
+          (js-call hash :update relative)
+          (js-call hash :update "\u0000")
+          (js-call hash :update (await (readFile (js-call path :join root relative))))
+          (js-call hash :update "\u0000"))
+        (setq index (+ index 1)))
+      (let ((identity (js-object :algorithm "sha256" :files files
+                        :value (js-call hash :digest "hex"))))
+        (unless (nullish? certified)
+          (put identity :preparedCompiler (get certified :reportIdentity)))
+        identity)))
 
   ;; Read a complete definition, respecting strings and comments instead of
   ;; using a regular expression to guess where nested Lisp forms end.
@@ -50,7 +92,11 @@
   ;; emits today's JS. All modules share today's source/code generator except
   ;; the named functions restored verbatim from the pinned historical revision.
   (defasync buildControlledBaseline (options)
+    ;; Formal measurements accept only the prepared final stage3 compiler; the
+    ;; gate refuses missing, stale, tampered or seed-rebuilt products and never
+    ;; rebuilds anything itself.
     (let* ((root (get options :root))
+           (certified (await (requirePreparedStage3 root)))
            (baseline-root (get options :baselineRoot))
            (revision (get options :revision))
            (sources (get options :sources))
@@ -70,19 +116,7 @@
                        (js-call control-source :replace
                          (definition control-source name)
                          (lambda () original)))
-                     (js-object :name name :sha256 (sha256 original))))))
-             (bootstrap (js-call globalThis.Bun :spawn
-                          (js-array (js-call path :join root "bin/eliscript-bootstrap"))
-                          (js-object :cwd root :stdout "pipe" :stderr "pipe")))
-             (bootstrap-res
-               (await (Promise/all
-                        (js-array
-                          (get bootstrap :exited)
-                          (js-call (new globalThis.Response (get bootstrap :stderr)) :text)))))
-             (build-status (aref bootstrap-res 0))
-             (build-errors (aref bootstrap-res 1)))
-        (when (not (= build-status 0))
-          (throw (new globalThis.Error build-errors)))
+                     (js-object :name name :sha256 (sha256 original)))))))
         (let ((directory (js-call path :join root "dist/compiler-controls" (js-call path :basename target ".eli")))
               (inputs (js-array))
               (artifacts (js-array)))
@@ -103,9 +137,18 @@
           (let* ((source-file (js-call path :join directory (js-call path :basename target)))
                  (output (js-call path :join directory (str (js-call path :basename target ".eli") ".mjs"))))
             (await (writeFile source-file control-source))
+            ;; Both arms must be produced by the same authenticated stage3
+            ;; compiler; the control source is compiled through the release CLI
+            ;; with the explicit certified metadata path.
             (let* ((compiler (js-call globalThis.Bun :spawn
-                               (js-array (js-call path :join root "bin/eliscript-seed")
-                                         "--source-map" "--output" output source-file)
+                               (js-array (or (get (get globalThis.process :env) :NODE_BINARY) "node")
+                                 (js-call path :join root "tools/backends/dist/release-cli.mjs")
+                                 "compile"
+                                 "--bootstrap-manifest"
+                                 (js-call path :join root "dist/stage3-release.json")
+                                 "--compiler-artifact" (get certified :stage3MetadataPath)
+                                 "--source-map" "--output" output
+                                 "--input" source-file "--target" "javascript")
                                (js-object :cwd root :stdout "pipe" :stderr "pipe")))
                    (compiler-res
                      (await (Promise/all
@@ -167,4 +210,5 @@
                                   (= (get item :treatment) (get item :control)))))))))
         (throw (new globalThis.TypeError "invalid controlled compiler baseline evidence")))))
 
-  (export definition buildControlledBaseline validateControlledBaseline))
+  (export definition buildControlledBaseline validateControlledBaseline
+    compilerBenchmarkRuntimeInputs compilerBenchmarkSourceDigest))

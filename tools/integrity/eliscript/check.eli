@@ -8,6 +8,7 @@
   (import "../ci/render-workflow.mjs" checkCompatibilityWorkflow)
   (import "../ci/render-browser-workflow.mjs" checkBrowserCompatibilityWorkflow)
   (import "../surface/generate-api.mjs" generateApiArtifacts)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3 assertPreparedBenchmarkSource)
 
   (defconst DEFAULT_ROOT (get ground :DEFAULT_ROOT))
   (defconst RepositoryIntegrityError (get ground :RepositoryIntegrityError))
@@ -211,11 +212,19 @@
              (files (validateBenchmarkInventory tracked contract)) (sources 0)
              (deferred (eq (get options :deferPerformanceAcceptance) t)) (index 0))
         (unless deferred
-          (while (< index (js-length files))
-            (let* ((filename (aref files index))
-                   (report (JSON/parse (await (readFile (js-call path :join directory filename) "utf8")))))
-              (setq sources (+ sources (await (validateBenchmarkSource directory tracked filename report)))))
-            (setq index (1+ index))))
+          (let ((certified (await (requirePreparedStage3 directory))) (errors (js-array)))
+            (while (< index (js-length files))
+              (let ((filename (aref files index)))
+                (try
+                  (let ((report (JSON/parse (await (readFile (js-call path :join directory filename) "utf8")))))
+                    (assertPreparedBenchmarkSource (or (get report :sourceDigest) (get report :source)) certified)
+                    (setq sources (+ sources (await (validateBenchmarkSource directory tracked filename report)))))
+                  (catch error
+                    (js-call errors :push (str filename ": "
+                      (if (nullish? error) (globalThis.String error)
+                        (or (get error :message) (globalThis.String error))))))))
+              (setq index (1+ index)))
+            (when (> (js-length errors) 0) (throw (new RepositoryIntegrityError errors)))))
         (let ((result (js-object :deterministicArtifacts (js-length (get (get contract :artifacts) :deterministic))
           :deterministicOutputs (js-call (get (get contract :artifacts) :deterministic) :reduce
             (lambda (count artifact) (+ count 1 (if (get artifact :sourceMap) 1 0))) 0)
@@ -261,12 +270,13 @@
                 (js-call known :add (aref pair 1)))))
           ;; Stage0 derives both Unicode table modules from this owned input
           ;; and generator. Reports must bind those inputs as well as outputs.
-          (let* ((source (get report :source))
+          (let* ((source (or (get report :source) (get report :sourceDigest)))
                  (files (if (nullish? source) undefined (get source :files)))
                  (declared (new globalThis.Set)))
             (when (Array/isArray files)
               (js-call files :forEach (lambda (entry)
-                (unless (nullish? entry) (js-call declared :add (get entry :file))))))
+                (unless (nullish? entry)
+                  (js-call declared :add (if (= (value-type entry) "string") entry (get entry :file)))))))
             (when (and (js-call known :has "bootstrap/runtime/memory.eli")
                        (js-call known :has "tools/runtime/unicode-case-runtime.el")
                        (js-call declared :has "bootstrap/runtime/memory.eli")

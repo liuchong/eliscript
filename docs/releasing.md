@@ -40,6 +40,23 @@ symlink targets and file modes. The measured 2,259-file comparison was identical
 84.991 seconds serial versus 25.034 seconds batched (3.395x). This measures
 bootstrap overhead; it does not satisfy a compiler or runtime performance gate.
 
+Compiler microbenchmark fingerprints include both maintained and generated tool
+files, all nine runtime capsule sources and outputs, and the Unicode generator
+inputs. Changing or removing a required runtime input invalidates a current
+report even when the compiler source text itself is unchanged.
+Formal release measurements must use the authenticated, prepared Stage3
+compiler and runtime byte tree. `make bootstrap-backends` supplies the seed
+and development tools; its runtime bytes cannot stand in for the prepared
+release runtime. A measurement must reject a missing or different prepared
+product rather than rebuild seed in place. The controlled comparison must
+compile both arms with that same final compiler. This requirement and the
+remaining report acceptance are tracked as PERF13-08 in the
+[active release checklist](bootstrap-0.1.0-plan.md#013-当前性能收口固定分母-14-份报告).
+The four Emacs report bridges keep process status notifications out of their
+JSON stream. The artifact-stage package test exercises their real prepared
+gates and resource cleanup without running the report workloads; full reports
+are still measured separately with their original datasets and budgets.
+
 `targets` deletes each successful record's working directory after its real
 execution and independent comparison. The run manifest keeps a same-input
 checkpoint, bound to the exact compiler, corpus and input, for an interrupted
@@ -100,35 +117,40 @@ publication, a GitHub Release or a signed release tag.
   unrounded measurements before producing release assets.
 - [ ] Complete the current candidate's four-dimension benchmark and resolve
   substantive performance failures. Of the 14 retained performance/capacity
-  reports, nine now have current passing evidence: compiler runtime scanning,
-  IR-kind decisions, mark location, binary comparison emission, HAMT layout,
-  Emacs analysis, analysis soak, worker lifecycle soak and the full 256 MiB
-  value-stream probe. The probe retains its original 2048/1024/2560 MiB budgets;
-  HAMT retains the measured 32/24 thresholds across Bun, Node 24 and Chrome.
-  The analysis report now binds Unicode casing and its table-generation inputs.
-  Five report units remain unaccepted. Reader complete-compiler speedup is
-  1.017 against 1.08; SourceMap pipeline/compiler speedups are 1.094/0.987
-  against 1.5/1.08; indentation is 4.946 against 10; transient Vector speedup
-  is 0.737 against 1.5 although its allocation bound passes. The last measured
-  core run passed 10/11 budgets: clean-build spread is 2.243 against 2
-  (38.832/17.312/17.417 ms); no-op median is 3.083 ms against 4 ms
-  and incremental median is 3.466 ms against 5 ms. All three independent
-  processes and seven samples per path were collected. Historical passing
-  reports for these five units do not establish current acceptance.
+  reports, nine now have passing measurements authenticated against the final
+  Stage3: compiler runtime scanning, IR-kind decisions, binary comparison
+  emission, HAMT layout, core performance, Emacs analysis, analysis soak,
+  worker lifecycle soak and the full 256 MiB value-stream probe. The probe
+  retains its original 2048/1024/2560 MiB budgets; HAMT retains the measured
+  32/24 thresholds across Bun, Node 24 and Chrome. The four Emacs workloads
+  were measured again after the process-sentinel fix; their real gates and
+  cleanup also pass the artifact-stage regression.
+  Five report units failed numerically under that same final Stage3:
+  Reader complete-compiler speedup 1.030099 against 1.08; SourceMap
+  pipeline/compiler 1.028734/0.982600 against 1.5/1.08; indentation 4.446816
+  against 10; transient Vector 0.772851 against 1.5; mark location 1.091314
+  against 1.75. Transient allocation 0.269549 passes its separate 1/3 bound.
+  Core now passes all 11 original budgets across three independent processes
+  and seven samples per path; clean-build median/maximum/spread are
+  19.187 ms/22.817 ms/1.223. The previous failures remain in the active plan.
+  The five historical passing reports retain their accepted Git bytes and do
+  not establish current acceptance. Their current-source checks still reject
+  the stale evidence; failed fresh measurements are recorded in the checklist.
   Failed measurements retain their original thresholds; no unchanged failure
   is rerun to obtain a favorable sample.
   The latest local comparison isolates every workload in its own process in
   both languages, retaining the original timed expressions, calibration and
   sample counts. Each worker has a ten-second deadline; independent failures
   are collected before the run fails without printing a partial report.
-  All nine medians are below native Emacs, and six also pass against 0.1.2:
-  first, reference-identity equality, sorting, grouping, frequencies and zipper.
-  This run rejects last-element access (0.241 vs 0.235 nanoseconds/op),
-  take-last (0.189816 vs 0.159829 microseconds/op) and numeric scoring
-  (1.561918 vs 1.544717 ms/op). The prior major dimension is absent in 0.x.
-  This completed comparison is not final candidate acceptance. Sample
-  variation, clock calibration and process isolation do not waive a slower
-  unrounded median or close the performance gate.
+  The final-Stage3 comparison has all nine medians below native Emacs, and six
+  also pass against 0.1.2. It rejects take-last (0.179785 vs 0.148862
+  microseconds/op), zipper (1.095898 vs 1.057777 ms/op), and numeric scoring
+  (1.506457 vs 1.504721 ms/op), using the unrounded values. Last-element access
+  and reference equality pass this run; their earlier failures remain in the
+  checklist and are not claimed as permanently resolved JIT behavior.
+  The prior major dimension is absent in 0.x. This completed comparison is not
+  final candidate acceptance. Sample variation, clock calibration and process
+  isolation do not waive a slower unrounded median or close the performance gate.
 - [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
   installed JS/WASM/native package and necessary functional regression.
 - [ ] Complete all four required checks on the final candidate commit, obtain
@@ -146,11 +168,15 @@ indentation micro-optimization were withdrawn without sufficient benefit.
 Protocol test fixtures now establish their runtime package scope explicitly,
 so Bun and Node execution also works from the system temporary directory.
 
-The current compact installation check passes all seven checks, including the
-installed public CLI and JS/WASM/native outputs, at 4,964,109 bytes. Seed-only
+The current compact installation check passes all eight checks, including the
+prepared Emacs bridges, installed public CLI and JS/WASM/native outputs, at
+4,967,449 bytes. Seed-only
 `dist/bootstrap/runtime` and its private self-named package scope are excluded;
 they must not duplicate or shadow the final installed runtime. The original
 5 MB guard remains unchanged.
+Emacs byte-code files are excluded independently of local build leftovers.
+The installation gate places a disposable `.elc` probe inside the included
+compiler tree before packing and rejects any byte-code payload in the tarball.
 
 The vector `count`, `from` and `sliceVector` bridges have distinct host call
 sites while their Eli algorithms, method signatures, descriptors and public

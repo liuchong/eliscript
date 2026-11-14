@@ -1,10 +1,11 @@
 (module tools.compiler.runtime-scan-benchmark
-  (import "node:crypto" createHash)
   (import "node:fs/promises" readFile writeFile)
   (import "node:os" :default os)
   (import "node:path" :default path)
   (import "node:process" :default process)
   (import "node:url" fileURLToPath pathToFileURL)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
+  (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_RUNTIME_SCAN_FORMAT "eliscript-compiler-runtime-scan-benchmark")
   (defconst COMPILER_RUNTIME_SCAN_VERSION 1)
@@ -29,7 +30,7 @@
         "bootstrap/compiler/compiler.eli")))
   (defconst digest-files
     (Object/freeze
-      (js-call compiler-sources :concat (js-array "tools/compiler/runtime-scan-benchmark.mjs"))))
+      (js-call compiler-sources :concat (js-array "tools/compiler/runtime-scan-benchmark.eli" "tools/compiler/runtime-scan-benchmark.mjs"))))
 
   (defun parse-positive-integer (value name)
     (let ((parsed (globalThis.Number value)))
@@ -59,19 +60,8 @@
       (js-object :output output)))
 
   (defasync compilerRuntimeScanSourceDigest ()
-    (let ((hash (createHash "sha256"))
-          (index 0))
-      (while (< index (js-length digest-files))
-        (let ((relative (aref digest-files index)))
-          (js-call hash :update relative)
-          (js-call hash :update "\u0000")
-          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
-          (js-call hash :update "\u0000"))
-        (setq index (+ index 1)))
-      (js-object
-        :algorithm "sha256"
-        :files digest-files
-        :value (js-call hash :digest "hex"))))
+    (await (compilerBenchmarkSourceDigest project-directory digest-files
+             (await (requirePreparedStage3)))))
 
   (defun ir-node (kind &rest __opt)
     (let* ((value (aref __opt 0))
@@ -209,6 +199,7 @@
       (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
 
   (defasync runCompilerRuntimeScanBenchmark (&optional options)
+    (await (requirePreparedStage3))
     (let* ((opts (or options (js-object)))
            (env (get process :env))
            (warmup-iterations

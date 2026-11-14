@@ -1,6 +1,5 @@
 (module tools.collections.benchmark
   (import "node:child_process" spawn)
-  (import "node:crypto" createHash)
   (import "node:fs" createReadStream)
   (import "node:fs/promises" copyFile mkdir mkdtemp readFile rm stat writeFile)
   (import "node:http" createServer)
@@ -9,6 +8,8 @@
   (import "node:process" :default process)
   (import "node:url" fileURLToPath pathToFileURL)
   (import "./layout-benchmark.mjs" validateLayoutHostReport)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
+  (import "../compiler/controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst LAYOUT_SUITE_FORMAT "eliscript-hamt-layout-benchmark")
   (defconst LAYOUT_SUITE_VERSION 1)
@@ -75,15 +76,8 @@
         :ELISCRIPT_LAYOUT_MEMORY_SAMPLES (or (get env :ELISCRIPT_LAYOUT_MEMORY_SAMPLES) "3")))))
 
   (defasync benchmarkSourceDigest ()
-    (let ((hash (createHash "sha256")) (index 0))
-      (while (< index (js-length digest-files))
-        (let ((relative (aref digest-files index)))
-          (js-call hash :update relative)
-          (js-call hash :update "\u0000")
-          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
-          (js-call hash :update "\u0000"))
-        (setq index (1+ index)))
-      (js-object :algorithm "sha256" :files digest-files :value (js-call hash :digest "hex"))))
+    (await (compilerBenchmarkSourceDigest project-directory digest-files
+             (await (requirePreparedStage3)))))
 
   (defun run-command (command args &optional options)
     (let* ((opts (or options (js-object)))
@@ -496,6 +490,7 @@
         report)))
 
   (defasync runLayoutSuiteBenchmark ()
+    (await (requirePreparedStage3))
     (let ((environment (benchmark-environment))
           (temporary-directory (await (mkdtemp (js-call path :join (tmpdir) "eliscript-layout-benchmark-")))))
       (try

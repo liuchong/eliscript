@@ -13,6 +13,27 @@
 (defconst eliscript-analysis-soak--project-directory
   (expand-file-name "../.." eliscript-analysis-soak--script-directory))
 
+(defconst eliscript-analysis-soak--prepared-runtime-capsules
+  '("runtime/array-text.mjs"
+    "runtime/errors.mjs"
+    "runtime/math.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs")
+  "Actual runtime capsules installed by the prepared final stage3 package.")
+
+(defconst eliscript-analysis-soak--prepared-runtime-sources
+  '("runtime/array-text.eli"
+    "runtime/errors.eli"
+    "runtime/math.eli"
+    "runtime/number-radix.eli"
+    "runtime/prelude.eli"
+    "runtime/primitives.eli"
+    "runtime/unicode-case.eli")
+  "Maintained sources for the prepared runtime capsules.")
+
 (add-to-list
  'load-path
  (expand-file-name "compiler" eliscript-analysis-soak--project-directory))
@@ -63,13 +84,21 @@
      (expand-file-name file eliscript-analysis-soak--project-directory))
     (secure-hash 'sha256 (current-buffer))))
 
-(defun eliscript-analysis-soak--source-contract ()
-  "Return the source contract for this soak."
+(defun eliscript-analysis-soak--source-contract (prepared)
+  "Return the source contract for this soak.
+PREPARED is the freshly authenticated portable prepared stage3 identity."
   (let* ((files
-          '("examples/emacs-analysis/analysis.eli"
-            "tools/worker/eliscript-analysis.el"
-            "tools/worker/eliscript-service.el"
-            "tools/worker/analysis-soak.el"))
+          (delete-dups
+           (copy-sequence
+            (append
+             '("examples/emacs-analysis/analysis.eli"
+               "tools/worker/eliscript-analysis.el"
+               "tools/worker/eliscript-service.el"
+               "tools/worker/analysis-soak.el"
+               "bootstrap/runtime/memory.eli"
+               "tools/runtime/unicode-case-runtime.el")
+             eliscript-analysis-soak--prepared-runtime-capsules
+             eliscript-analysis-soak--prepared-runtime-sources))))
          (entries
           (mapcar
            (lambda (file)
@@ -84,7 +113,8 @@
                  (mapcar
                   (lambda (entry)
                     `((file . ,(car entry)) (sha256 . ,(cdr entry))))
-                  entries))))))
+                  entries)))
+      (preparedCompiler . ,prepared))))
 
 (defun eliscript-analysis-soak--median (values)
   "Return median of numeric VALUES."
@@ -94,9 +124,69 @@
         (nth middle sorted)
       (/ (+ (nth (1- middle) sorted) (nth middle sorted)) 2.0))))
 
+(defun eliscript-analysis-soak--prepared-report-identity (identity)
+  "Return portable prepared stage3 report IDENTITY or signal an error."
+  (unless (and (listp identity)
+               (equal (alist-get 'format identity) "eliscript-prepared-stage3")
+               (integerp (alist-get 'version identity))
+               (integerp (alist-get 'fixedPointFileCount identity))
+               (stringp (alist-get 'sourceSha256 identity))
+               (stringp (alist-get 'productSha256 identity)))
+    (error "prepared stage3 gate returned an invalid portable identity"))
+  identity)
+
+(defun eliscript-analysis-soak--require-prepared-stage3 ()
+  "Authenticate the prepared final stage3 and return its portable identity.
+Standard output must contain exactly the machine-readable JSON identity;
+diagnostics stay on standard error so warnings cannot corrupt it."
+  (let* ((module (expand-file-name "tools/backends/dist/release-cli.mjs"
+                                   eliscript-analysis-soak--project-directory))
+         (program (or (getenv "BUN") "bun"))
+         (script (format
+                  (concat "import(%S).then((m) => m.requirePreparedStage3())"
+                          ".then((p) => { process.stdout.write(JSON.stringify(p.reportIdentity)); })"
+                          ".catch((e) => { console.error(e && e.message); process.exit(1); })")
+                  (concat "file://" module)))
+         (stdout (generate-new-buffer " *eliscript-prepared-stage3-stdout*"))
+         (stderr (generate-new-buffer " *eliscript-prepared-stage3-stderr*"))
+         process)
+    (unwind-protect
+        (progn
+          (setq process
+                (make-process
+                 :name "eliscript-analysis-soak-prepared-stage3"
+                 :command (list program "--eval" script)
+                 :buffer stdout
+                 :stderr stderr
+                 :sentinel #'ignore
+                 :noquery t))
+          (while (process-live-p process)
+            (accept-process-output process 0.05))
+          (let ((status (process-exit-status process)))
+            (unless (and (integerp status) (zerop status))
+              (error "prepared stage3 is required for formal measurements: %s"
+                     (let ((diagnostic
+                            (string-trim
+                             (with-current-buffer stderr (buffer-string)))))
+                       (if (= (length diagnostic) 0)
+                           (format "gate exited with status %s" status)
+                         diagnostic)))))
+          (eliscript-analysis-soak--prepared-report-identity
+           (with-current-buffer stdout
+             (json-parse-string (string-trim (buffer-string))
+                                :object-type 'alist
+                                :array-type 'list
+                                :null-object nil
+                                :false-object :false))))
+      (when (process-live-p process)
+        (delete-process process))
+      (kill-buffer stdout)
+      (kill-buffer stderr))))
+
 (defun eliscript-analysis-soak--run ()
   "Run the buffer lifecycle soak and return its report."
-  (let* ((iterations
+  (let* ((prepared (eliscript-analysis-soak--require-prepared-stage3))
+         (iterations
           (eliscript-analysis-soak--positive-environment
            "ELISCRIPT_ANALYSIS_SOAK_ITERATIONS" 200))
          (sources (eliscript-analysis-soak--sources))
@@ -195,7 +285,7 @@
                . ((systemType . ,(symbol-name system-type))
                   (systemConfiguration . ,system-configuration)
                   (emacsVersion . ,emacs-version)))
-              (source . ,(eliscript-analysis-soak--source-contract)))))
+              (source . ,(eliscript-analysis-soak--source-contract prepared)))))
       (when session (eliscript-analysis-stop session)))))
 
 (condition-case error-data

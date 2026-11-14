@@ -1,10 +1,11 @@
 (module tools.compiler.binary-comparison-benchmark
-  (import "node:crypto" createHash)
   (import "node:fs/promises" readFile writeFile)
   (import "node:os" :default os)
   (import "node:path" :default path)
   (import "node:process" :default process)
   (import "node:url" fileURLToPath pathToFileURL)
+  (import "../backends/dist/release-cli.mjs" requirePreparedStage3)
+  (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_BINARY_COMPARISON_FORMAT "eliscript-compiler-binary-comparison-benchmark")
   (defconst COMPILER_BINARY_COMPARISON_VERSION 1)
@@ -34,7 +35,7 @@
         (js-array
           "compiler/eliscript-emitter.el"
           "compiler/eliscript-ir-emitter.el"
-          "tools/compiler/binary-comparison-benchmark.mjs"))))
+          "tools/compiler/binary-comparison-benchmark.eli" "tools/compiler/binary-comparison-benchmark.mjs"))))
 
   (defun positive-integer (value name)
     (let ((parsed (globalThis.Number value)))
@@ -70,19 +71,8 @@
         :output output)))
 
   (defasync compilerBinaryComparisonSourceDigest ()
-    (let ((hash (createHash "sha256"))
-          (index 0))
-      (while (< index (js-length digest-files))
-        (let ((relative (aref digest-files index)))
-          (js-call hash :update relative)
-          (js-call hash :update "\u0000")
-          (js-call hash :update (await (readFile (js-call path :join project-directory relative))))
-          (js-call hash :update "\u0000"))
-        (setq index (+ index 1)))
-      (js-object
-        :algorithm "sha256"
-        :files digest-files
-        :value (js-call hash :digest "hex"))))
+    (await (compilerBenchmarkSourceDigest project-directory digest-files
+             (await (requirePreparedStage3)))))
 
   (defun git-revision (root)
     (let ((result (js-call globalThis.Bun :spawnSync (js-array "git" "-C" root "rev-parse" "HEAD"))))
@@ -169,6 +159,7 @@
       (if (not (= b undefined)) (if (not (= b nil)) b c) c)))
 
   (defasync runCompilerBinaryComparisonBenchmark (options)
+    (await (requirePreparedStage3))
     (let* ((env (get process :env))
            (warmup-rounds
              (positive-integer

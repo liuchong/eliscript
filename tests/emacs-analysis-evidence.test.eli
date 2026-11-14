@@ -15,6 +15,18 @@
         (setq index (1+ index)))
       (js-call (expect (get source :digest)) :toBe (digest (js-call aggregate :join "")))))
   (defun each (items operation) (let ((index 0)) (while (< index (get items :length)) (funcall operation (aref items index)) (setq index (1+ index)))))
+  (defun verifyRetainedPreparedIdentity (identity)
+    ;; Retained measurements may predate the prepared-stage3 certificate.
+    ;; When one is present, only its portable shape is checked here; a fresh
+    ;; gate must not retroactively certify a historical measurement.
+    (when identity
+      (js-call (expect (get identity :format)) :toBe "eliscript-prepared-stage3")
+      (js-call (expect (js-call (Object/keys identity) :sort))
+        :toEqual (js-array "fixedPointFileCount" "format" "productSha256" "sourceSha256" "version"))
+      (js-call (expect (Number/isInteger (get identity :version))) :toBe t)
+      (js-call (expect (Number/isInteger (get identity :fixedPointFileCount))) :toBe t)
+      (js-call (expect (get identity :sourceSha256)) :toHaveLength 64)
+      (js-call (expect (get identity :productSha256)) :toHaveLength 64)))
   (test "committed Emacs analysis benchmark preserves qualified evidence" (async ()
     (let* ((report (await (readJson "benchmarks/emacs-analysis-macos-arm64.json")))
            (selected (new globalThis.Set (get (get report :selection) :selected))))
@@ -52,11 +64,13 @@
                        "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"
                        "bootstrap/runtime/memory.eli" "tools/runtime/unicode-case-runtime.el")
           (lambda (file) (js-call (expect files) :toContain file))))
+      (verifyRetainedPreparedIdentity (get (get report :source) :preparedCompiler))
       (await (verifySourceContract (get report :source))))))
   (test "committed Emacs analysis soak proves buffer lifecycle safety" (async ()
     (let ((report (await (readJson "benchmarks/emacs-analysis-soak-macos-arm64.json"))))
       (js-call (expect report) :toMatchObject (js-object "schemaVersion" 1 "format" "eliscript-emacs-analysis-soak" "version" 1 "verified" t "iterations" 200 "stableApplications" 100 "staleDiscards" 100 "applicationCount" 100 "workerGenerationStable" t))
       (js-call (expect (get (get report :workerMs) :samples)) :toHaveLength 200)
       (js-call (expect (get (get report :workerMs) :median)) :toBeGreaterThan 0)
+      (verifyRetainedPreparedIdentity (get (get report :source) :preparedCompiler))
       (await (verifySourceContract (get report :source))))))
 )

@@ -58,7 +58,10 @@
       (throw error)))
 
   (defun primitive (value)
-    (if (not (object-p value))
+    ;; A primitive string is already its ToPrimitive result. Avoid allocating
+    ;; a temporary String wrapper for every segment of compiler text joins;
+    ;; text still calls the captured String formatter, and objects keep hooks.
+    (if (or (eq (typeof-value value) "string") (not (object-p value)))
         value
       (let ((exotic (aref value primitiveKey)))
         (if (and (not (undefined? exotic)) (not (nil? exotic)))

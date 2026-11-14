@@ -4,13 +4,70 @@
   (import "node:crypto" createHash)
   (import "node:fs/promises" readFile)
   (import "node:path" resolve dirname)
-  (import "node:url" fileURLToPath)
+  (import "node:url" fileURLToPath pathToFileURL)
 
   (defconst root (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
   (defconst soakPath (resolve root "tools/worker/lifecycle-soak.el"))
   (defconst emacs (or (get (get globalThis.process :env) :EMACS) "emacs"))
+  (defconst loadModule (js* "(specifier) => import(specifier)"))
+  (defconst preparedRuntimeCapsules
+    (js-array "runtime/array-text.mjs" "runtime/errors.mjs" "runtime/math.mjs"
+              "runtime/number-radix.mjs" "runtime/prelude.mjs" "runtime/primitives.mjs"
+              "runtime/unicode-case.mjs" "runtime/unicode-case-data.mjs"))
+  (defconst preparedRuntimeSources
+    (js-array "runtime/array-text.eli" "runtime/errors.eli" "runtime/math.eli"
+              "runtime/number-radix.eli" "runtime/prelude.eli" "runtime/primitives.eli"
+              "runtime/unicode-case.eli" "bootstrap/runtime/memory.eli"
+              "tools/runtime/unicode-case-runtime.el"))
 
-  (defasync verifySourceContract (source)
+  (defasync freshPreparedIdentity ()
+    (let* ((module (await (funcall loadModule
+                            (get (pathToFileURL (resolve root "tools/backends/dist/release-cli.mjs")) :href))))
+           (prepared (await (js-call module :requirePreparedStage3))))
+      (get prepared :reportIdentity)))
+
+  (defun preparedIdentityP (identity)
+    (and identity
+         (= (get identity :format) "eliscript-prepared-stage3")
+         (= (js-length (Object/keys identity)) 5)
+         (Number/isInteger (get identity :version))
+         (Number/isInteger (get identity :fixedPointFileCount))
+         (= (value-type (get identity :sourceSha256)) "string")
+         (= (value-type (get identity :productSha256)) "string")))
+
+  (defun ensurePreparedIdentity (identity)
+    (unless (preparedIdentityP identity)
+      (throw (new globalThis.Error "prepared stage3 portable identity is missing or invalid")))
+    identity)
+
+  (defun ensureCurrentPreparedIdentity (identity fresh)
+    (ensurePreparedIdentity identity)
+    (unless (and (= (get identity :format) (get fresh :format))
+                 (= (get identity :version) (get fresh :version))
+                 (= (get identity :fixedPointFileCount) (get fresh :fixedPointFileCount))
+                 (= (get identity :sourceSha256) (get fresh :sourceSha256))
+                 (= (get identity :productSha256) (get fresh :productSha256)))
+      (throw (new globalThis.Error "prepared stage3 identity does not match current final products")))
+    identity)
+
+  (defun ensurePreparedRuntimeInventory (source)
+    (let ((files (js-array)) (entries (get source :files)) (index 0))
+      (while (< index (js-length entries))
+        (js-call files :push (get (aref entries index) :file))
+        (setq index (1+ index)))
+      (js-call preparedRuntimeCapsules :forEach
+        (lambda (file)
+          (unless (js-call files :includes file)
+            (throw (new globalThis.Error (str "missing prepared runtime capsule " file))))))
+      (js-call preparedRuntimeSources :forEach
+        (lambda (file)
+          (unless (js-call files :includes file)
+            (throw (new globalThis.Error (str "missing prepared runtime source " file))))))))
+
+  (defasync verifySourceContract (source current)
+    (when current
+      (ensureCurrentPreparedIdentity (get source :preparedCompiler) (await (freshPreparedIdentity)))
+      (ensurePreparedRuntimeInventory source))
     (let ((aggregate (js-array))
           (files (get source :files))
           (i 0))
@@ -192,8 +249,36 @@
     (async ()
       (let ((report (await (runSoak))))
         (verifyReport report)
-        (await (verifySourceContract (get report :source)))))
+        (await (verifySourceContract (get report :source) t))))
     220000)
+
+  (test "prepared source validation rejects absent or tampered identities and missing runtime capsules"
+    (async ()
+      (let ((identity (await (freshPreparedIdentity)))
+            (source (js-object :files (js-array)))
+            (index 0))
+        (ensurePreparedIdentity identity)
+        (while (< index (js-length preparedRuntimeCapsules))
+          (js-call (get source :files) :push
+            (js-object :file (aref preparedRuntimeCapsules index)))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length preparedRuntimeSources))
+          (js-call (get source :files) :push
+            (js-object :file (aref preparedRuntimeSources index)))
+          (setq index (1+ index)))
+        (ensurePreparedRuntimeInventory source)
+        (js-call (expect (lambda () (ensurePreparedIdentity undefined))) :toThrow)
+        (let ((tampered (JSON/parse (JSON/stringify identity))))
+          (put tampered :productSha256
+               "0000000000000000000000000000000000000000000000000000000000000000")
+          (js-call (expect (lambda ()
+                             (ensureCurrentPreparedIdentity tampered identity)))
+            :toThrow))
+        (let ((missing (JSON/parse (JSON/stringify source))))
+          (js-call (get missing :files) :pop)
+          (js-call (expect (lambda () (ensurePreparedRuntimeInventory missing)))
+            :toThrow)))))
 
   (test "smaller diagnostic worker runs cannot claim acceptance"
     (async ()
