@@ -122,7 +122,7 @@
                            :stage3 (get stage3 :metadataPath) :sourceIdentity identity))))
            (manifest-path (resolve directory "bootstrap.json"))
            (comparison-path (resolve directory "fixed-point.json"))
-           (manifest (js-object :format "eliscript-js-bootstrap" :version 1 :status "accepted"
+           (manifest (js-object :format "eliscript-js-bootstrap" :status "accepted"
              :seedSourceIdentity identity :formalSourceIdentity identity
              :stages (js-call (js-array 0 1 2 3) :map (lambda (stage)
                (let ((artifact (if (= stage 3) stage3 stage2)))
@@ -195,7 +195,7 @@
                          (js-object :write (lambda (text) (js-call lines :push text))))))
                (stage2 (get fixture :stage2)) (stage3 (get fixture :stage3))
                (identity (get fixture :sourceIdentity))
-               (expected (js-object :format "eliscript-bootstrap-verification" :version 1
+               (expected (js-object :format "eliscript-bootstrap-verification"
                  :scope "stage2-stage3-complete-products" :verification "identical"
                  :bootstrapManifestPath (await (realpath path))
                  :fileCount (js-length (get (get fixture :comparison) :files))
@@ -445,7 +445,10 @@
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :sourceMaps false))
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :manifestEnvironment "OTHER"))
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :manifestFormat "other"))
+                (lambda (item) (put (get (get item :execution) :compilerGenerations) :manifestVersion 1))
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :manifestVersion 2))
+                (lambda (item) (put (get (get item :execution) :compilerGenerations) :unrelated t))
+                (lambda (item) (Reflect/deleteProperty (get (get item :execution) :compilerGenerations) "fixedPoint"))
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :javascriptCompanions "seed"))
                 (lambda (item) (put (get (get item :execution) :compilerGenerations) :fixedPoint "user-observation")))))
           (js-call changes :forEach (lambda (change)
@@ -503,6 +506,7 @@
           (setq index (1+ index))))))
   (defun primitive-observation (runtime value)
     (cond ((or (nullish? value) (= (value-type value) "boolean")) value)
+      ((= (value-type value) "number") value)
       ((= (get value :kind) 4) (js-call runtime :readNumber value))
       ((= (get value :kind) 5) (js-call runtime :readString value))
       ((= (get value :kind) 14)

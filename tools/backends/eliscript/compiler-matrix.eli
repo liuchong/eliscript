@@ -245,7 +245,7 @@
         (let ((originals (await (loadOriginalCompilerManifests (js-object :sourceRoot source-root)))))
           (when (undefined? document) (setq document (await (loadOriginalCompilerCorpus (js-object :sourceRoot source-root :originals originals)))))
           (unless (and document (= (get document :format) "eliscript-compiler-matrix-corpus")
-                       (= (get document :version) 1) (Array/isArray (get document :records)))
+                       (Array/isArray (get document :records)))
             (matrix-type-error "original compiler matrix corpus records are required"))
           (js-call (get originals :manifests) :forEach (lambda (manifest)
             (let ((binding (field (get document :manifests) (get manifest :id))))
@@ -497,7 +497,7 @@
     (let* ((bytes (await (readFile (join (resolve (get grid :directory)) "grid.json"))))
            (actual (JSON/parse (js-call bytes :toString "utf8")))
            (pairs (new globalThis.Set)) (targets (new globalThis.Map)) (generations-verified false))
-      (unless (and (= (get actual :format) "eliscript-independent-compiler-grid") (= (get actual :version) 1)
+      (unless (and (= (get actual :format) "eliscript-independent-compiler-grid")
                    (= (field (get actual :sourceIdentity) "sha256") (get source-identity :sha256))
                    (Array/isArray (get actual :cells)) (Array/isArray (get actual :comparisons)))
         (matrix-error "compiler grid does not bind the current complete compiler source"))
@@ -513,7 +513,7 @@
         (when (field generation-evidence "directory")
           (let* ((generation-bytes (await (readFile (join (resolve (get generation-evidence :directory)) "bootstrap.json"))))
                  (generations (JSON/parse (js-call generation-bytes :toString "utf8")))
-                 (bound (and (= (get generations :format) "eliscript-independent-compiler-bootstrap") (= (get generations :version) 1)
+                 (bound (and (= (get generations :format) "eliscript-independent-compiler-bootstrap")
                    (= (field (get generations :sourceIdentity) "sha256") (get source-identity :sha256))
                    (= (get generations :status) "constructed") (= (field (get generations :fixedPoint) "status") "identical")
                    (Array/isArray (get generations :chains)) (= (js-length (get generations :chains)) 3)))
@@ -531,7 +531,7 @@
                       (let* ((chain-bytes (await (readFile (join (resolve (get chain :directory)) "bootstrap.json"))))
                              (original (JSON/parse (js-call chain-bytes :toString "utf8"))) (records (get original :generations))
                              (fixed-point (get original :fixedPoint)))
-                        (if (or (/= (get original :format) "eliscript-compiler-bootstrap") (/= (get original :version) 1)
+                        (if (or (/= (get original :format) "eliscript-compiler-bootstrap") nil
                                 (/= (field (get original :sourceIdentity) "sha256") (get source-identity :sha256))
                                 (/= (get original :status) "constructed") (get original :cleanupFailure)
                                 (not (Array/isArray records)) (/= (js-length records) (js-length sequence))
@@ -576,8 +576,8 @@
       (await (js-call options :onStage event))))
 
   (defun matrix-response-mode (modes)
-    (cond ((and (not (nullish? modes)) (js-call modes :includes "graph-events-v1")) "graph-events-v1")
-          ((and (not (nullish? modes)) (js-call modes :includes "events-v1")) "events-v1")
+    (cond ((and (not (nullish? modes)) (js-call modes :includes "graph-events")) "graph-events")
+          ((and (not (nullish? modes)) (js-call modes :includes "events")) "events")
           (t undefined)))
 
   (defun matrix-suite-request-options (mode options input)
@@ -841,7 +841,11 @@
            (= (field contract "sourceMaps") t)
            (= (field contract "manifestEnvironment") "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS")
            (= (field contract "manifestFormat") "eliscript-original-compiler-generations")
-           (= (field contract "manifestVersion") 1)
+           (= (value-type contract) "object") (not (nullish? contract)) (not (Array/isArray contract))
+           (= (js-length (Reflect/ownKeys contract)) 9)
+           (js-call (js-array "count" "producer" "target" "completeCompiler" "sourceMaps"
+                     "manifestEnvironment" "manifestFormat" "javascriptCompanions" "fixedPoint")
+             :every (lambda (key) (Object/hasOwn contract key)))
            (= (field contract "javascriptCompanions") "selected-generation-producer")
            (= (field contract "fixedPoint") "complete-target-artifacts-and-original-javascript-files"))))
 
@@ -1073,7 +1077,7 @@
         (let* ((directory (await (mkdtemp (join output (+ "compiler-matrix-cell-" host "-" target "-")))))
                (_scope (await (prepareCompilerCorpusExecutionScope directory source-root)))
                (manifest (join directory "matrix.json"))
-               (metadata (js-object :format "eliscript-independent-compiler-matrix-cell" :version 1
+               (metadata (js-object :format "eliscript-independent-compiler-matrix-cell"
                  :scope "single-cell" :host host :target target :nativeTarget native-target
                  :status "constructing" :verification "unverified"
                  :finalGridVerification "unverified" :crossCellVerification "unverified"
@@ -1233,7 +1237,7 @@
                    (get options :originalOracle))))))
           (await (archiveCompilerSources sources (join directory "compiler-sources")))
           (await (archive-original-corpus corpus (join directory "corpus") source-root))
-          (let* ((metadata (js-object :format "eliscript-independent-compiler-matrix" :version 1 :status "constructing"
+          (let* ((metadata (js-object :format "eliscript-independent-compiler-matrix" :status "constructing"
                     :verification "unverified" :sourceIdentity source-identity
                     :originalGateVerification (otherwise (field (get (get corpus :document) :originalGateEvidence) "verification") "not-supplied")
                     :corpusIdentity (matrix-spread (get corpus :identity) (js-object :recordsSha256 (get corpus :recordsSha256)))

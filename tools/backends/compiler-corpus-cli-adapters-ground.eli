@@ -207,7 +207,7 @@
                           (js-object :count 3 :producer "previous-generation" :target "selected-target"
                             :completeCompiler t :sourceMaps t
                             :manifestEnvironment "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS"
-                            :manifestFormat "eliscript-original-compiler-generations" :manifestVersion 1
+                            :manifestFormat "eliscript-original-compiler-generations"
                             :javascriptCompanions "selected-generation-producer"
                             :fixedPoint "complete-target-artifacts-and-original-javascript-files")))
                     (let* ((setup-replacement
@@ -349,7 +349,7 @@
            (source-root (get options :sourceRoot))
            (suite "tests/worker-runtime.test.mjs")
            (eli-file "tests/worker-runtime.test.eli")
-           (title "long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps")
+           (title "long-lived worker implements the NDJSON protocol and maps failures through project source maps")
            (candidates (js-call locators :filter (lambda (locator) (= (get locator :file) suite)))))
       (if (= (js-length candidates) 0)
         (js-array)

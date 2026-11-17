@@ -95,14 +95,21 @@
       (if (undefined? contract)
         undefined
         (progn
-          (when (or (/= (get contract :count) 3)
-                    (/= (get contract :producer) "previous-generation")
-                    (/= (get contract :target) "selected-target")
-                    (/= (get contract :completeCompiler) t)
-                    (/= (get contract :sourceMaps) t)
-                    (/= (get contract :manifestEnvironment) "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS")
-                    (/= (get contract :manifestFormat) "eliscript-original-compiler-generations")
-                    (/= (get contract :manifestVersion) 1))
+          (when (not (and (= (value-type contract) "object") (not (nullish? contract))
+                          (not (Array/isArray contract))
+                          (= (js-length (Reflect/ownKeys contract)) 9)
+                          (js-call (js-array "count" "producer" "target" "completeCompiler" "sourceMaps"
+                                    "manifestEnvironment" "manifestFormat" "javascriptCompanions" "fixedPoint")
+                            :every (lambda (key) (Object/hasOwn contract key)))
+                          (= (get contract :count) 3)
+                          (= (get contract :producer) "previous-generation")
+                          (= (get contract :target) "selected-target")
+                          (= (get contract :completeCompiler) t)
+                          (= (get contract :sourceMaps) t)
+                          (= (get contract :manifestEnvironment) "ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS")
+                          (= (get contract :manifestFormat) "eliscript-original-compiler-generations")
+                          (= (get contract :javascriptCompanions) "selected-generation-producer")
+                          (= (get contract :fixedPoint) "complete-target-artifacts-and-original-javascript-files")))
             (throw (new globalThis.TypeError "unsupported original compiler generation contract")))
           (let* ((options (let ((opt (get context :options))) (if (nullish? opt) (js-object) opt)))
                  (profile (get options :profile)))
@@ -126,7 +133,7 @@
                      (_0 (await (archiveCompilerSources sources (resolve directory "sources"))))
                      (metadata (js-object
                                  :format "eliscript-original-compiler-generations"
-                                 :version 1
+
                                  :target target
                                  :profile profile
                                  :status "constructing"
