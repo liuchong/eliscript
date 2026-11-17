@@ -249,6 +249,9 @@
                 (js-object :moduleGraph graph :initializeModule false :projectEntry (get input :entry)
                   :projectModuleBaseURL (get input :base) :moduleBaseURL (get (pathToFileURL (get input :path)) :href)
                   :nativeTarget (get input :nativeTarget)))))
+          ;; The original host lifetime is consumed by driver-close above.
+          ;; Public runtime constructors receive only runtime options.
+          (Reflect/deleteProperty options "originalHostLifetime")
           (if (= (get input :target) "wasm")
             (setq runtime (await (instantiateManagedRuntimeWithHostModules
               (new globalThis.Uint8Array (await (readFile (get input :path)))) options)))
