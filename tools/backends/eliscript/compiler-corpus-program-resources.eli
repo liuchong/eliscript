@@ -3,10 +3,11 @@
   ;; original record declares no execution resource at all, they receive one
   ;; independent, finite acceptance work set instead of a compiler profile.
   ;; The values stay inside the already supported managed construction range:
-  ;; the canonical 24-bit slot ceiling, the public 8 MiB initial heap, the
-  ;; existing 1 GiB managed byte ceiling and the 128 page / 65535 page image
-  ;; range used by the complete compiler profile. No public runtime default or
-  ;; compiler profile changes here.
+  ;; the canonical 24-bit slot ceiling, this ordinary-program acceptance
+  ;; initial amount of 8 MiB, the existing 1 GiB managed byte ceiling and the
+  ;; 128 page / 65535 page image range used by the complete compiler profile.
+  ;; The public runtime default keeps its own 65536 bytes; no public runtime
+  ;; default or compiler profile changes here.
   (defconst programCorpusResourceBudget
     (Object/freeze (js-object :maxSlots 16777215 :initialBytes 8388608 :maxBytes 1073741824)))
   (defconst programCorpusResourceMemory
