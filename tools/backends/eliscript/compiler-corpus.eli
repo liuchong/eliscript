@@ -16,6 +16,8 @@
   (import "./compiler-corpus-emitter.mjs" transportOriginalBootstrapEmitterCorpus prepareOriginalBootstrapEmitterOptions)
   (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalParts sortedFunctionalPartition)
   (import "./compiler-corpus-wire-host.mjs" wireFunctionalParts wireFunctionalPartition wireSuiteSha)
+  (import "./compiler-corpus-program-resources.mjs"
+    programCorpusResourceSelection programCorpusResources)
 
   ;; Preserve the unaffected public implementations and function identities.
   ;; The source-audit branch and binary replay request transport live here.
@@ -213,19 +215,42 @@
           ;; An explicitly declared local provider graph still authenticates
           ;; managed source names before the Seed compiler assigns paths.
           ;; This does not add providers to an undeclared or self-contained graph.
-          (when (and request options (Array/isArray (get options :sourceAssets))
-                     (js-call (get request :hostSources (js-array)) :some
-                       (lambda (provider)
-                         (and (js-call (get provider :id) :startsWith "runtime/")
-                              (js-call (get provider :id) :endsWith ".mjs")))))
-            (let ((assets (new globalThis.Map)))
-              (js-call (get options :sourceAssets) :forEach (lambda (asset)
-                (let* ((filename (get asset :file)) (previous (js-call assets :get filename)))
-                  (when (and previous (or (/= (get previous :sha256) (get asset :sha256))
-                                         (/= (get previous :content) (get asset :content))))
-                    (throw (new globalThis.TypeError (+ "original recipe has conflicting source assets: " filename))))
-                  (js-call assets :set filename asset))))
-              (request-canonical-library-filenames (get request :modules) options assets)))
+          (let ((has-host-runtime (js-call (get request :hostSources (js-array)) :some
+                  (lambda (provider)
+                    (and (js-call (get provider :id) :startsWith "runtime/")
+                         (js-call (get provider :id) :endsWith ".mjs")))))
+                (has-literal-runtime (and request options (Array/isArray (get options :literalSources))
+                  (js-call (get request :modules (js-array)) :some (lambda (module)
+                    (js-call (get options :literalSources) :some (lambda (library)
+                      (and (= (get library :filename) (get module :filename))
+                           (js-call (get library :id) :startsWith "runtime/")
+                           (js-call (get library :id) :endsWith ".mjs")))))))))
+            (when (and request options (Array/isArray (get options :sourceAssets))
+                       (or has-host-runtime has-literal-runtime))
+              (let ((assets (new globalThis.Map)) (modules (get request :modules)))
+                (js-call (get options :sourceAssets) :forEach (lambda (asset)
+                  (let* ((filename (get asset :file)) (previous (js-call assets :get filename)))
+                    (when (and previous (or (/= (get previous :sha256) (get asset :sha256))
+                                           (/= (get previous :content) (get asset :content))))
+                      (throw (new globalThis.TypeError (+ "original recipe has conflicting source assets: " filename))))
+                    (js-call assets :set filename asset))))
+                (request-canonical-library-filenames modules options assets)
+                (when (and has-literal-runtime (not has-host-runtime))
+                  (let ((aliases (new globalThis.Map)) (index 0))
+                    (js-call (js-call modules :concat (get request :hostSources (js-array))) :forEach (lambda (module)
+                      (js-call aliases :set (js-call posix :normalize (get module :id)) module)
+                      (js-call aliases :set (js-call posix :normalize (get module :filename)) module)))
+                    (while (< index (js-length modules))
+                      (js-call (request-imports (aref modules index)) :forEach (lambda (path)
+                        (when (and (js-call path :endsWith ".eli") (not (js-call aliases :has path)))
+                          (let* ((id (+ (js-call path :slice 0 -4) ".mjs"))
+                                 (module (js-object :id id :filename path :source (request-source assets path))))
+                            (when (or (js-call aliases :has id) (js-call aliases :has path))
+                              (throw (new globalThis.TypeError (+ "original recipe source alias conflicts: " path))))
+                            (js-call modules :push module)
+                            (js-call aliases :set id module)
+                            (js-call aliases :set path module)))))
+                      (setq index (1+ index))))))))
           request))))
 
   (defun originalSequenceNativeInteropP (record)
@@ -947,6 +972,15 @@
                  (compilerCorpusFunctionalResources record (if (> (js-length arguments) 0) (aref arguments 0) undefined)))
         (let ((acceptance (compilerCorpusFunctionalResources record (if (> (js-length arguments) 0) (aref arguments 0) undefined))))
           (put request :memory (get (independentCompilerResources (js-object :profile (get acceptance :effectiveRuntimeProfile))) :memory))))
+      ;; An ordinary program that declares no execution resource keeps one
+      ;; independent, finite acceptance work set for both its compiled image
+      ;; and its execution constructor. Explicit record, request, execution or
+      ;; real caller resources never reach this branch.
+      (when (and request (or (= target "wasm") (= target "native"))
+                 (nullish? (get request :memory))
+                 (programCorpusResourceSelection record (get record :request)
+                   (get record :execution) (if (> (js-length arguments) 0) (aref arguments 0) undefined) target))
+        (put request :memory (get (programCorpusResources) :memory)))
       (setq request (complete-request-sources record request (if (> (js-length arguments) 0) (aref arguments 0) undefined)))
       (when (and request (originalSequenceNativeInteropP record))
         (let* ((options (if (> (js-length arguments) 0) (aref arguments 0) undefined))
@@ -1256,7 +1290,7 @@
               (Object/assign (js-object) record (js-object
                 :execution (Object/assign (js-object) execution (js-object :hostSource output))
                 :original (Object/assign (js-object) original (js-object :nativeInstrumentationScope
-                  (js-object :kind "javascript-host-implementation-counters" :version 1
+                  (js-object :kind "javascript-host-implementation-counters"
                     :beforeSha256 (corpus-hash source) :afterSha256 (corpus-hash output)
                     :assertionSha256 (corpus-hash assertion) :executedTargets (js-array "javascript")
                     :notEvaluatedTargets (js-array "wasm" "native")
@@ -1343,7 +1377,7 @@
         (js-call records :forEach (lambda (record)
           (let ((original (get record :original)))
             (put original :toolsDataReferenceTransport
-              (js-object :kind "original-tools-data-reference" :version 1 :sourceAssets proofs
+              (js-object :kind "original-tools-data-reference" :sourceAssets proofs
                 :hostSha256 (corpus-hash (get (get record :execution) :hostSource))))))))
       document))
 
@@ -1371,7 +1405,7 @@
                    (existing (js-call (get document :evidence) :find
                      (lambda (entry) (= (get entry :file) filename)))))
               (when (and (= filename "bootstrap/host/project-cli-ground.mjs")
-                         (/= (get asset :sha256) "da552a3e41426e6310aa09fef78c02b7efc61012debc33d350a773fcd68b9930"))
+                         (/= (get asset :sha256) "de2bdb6815200e508993204877c2bf19115de84612b8a84d7519d917b914b78e"))
                 (throw (new globalThis.TypeError "original project CLI archive bytes changed")))
               (if existing
                 (unless (and (= (get existing :bytes) (get asset :bytes))

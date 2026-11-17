@@ -9,6 +9,7 @@
   (import "./compiler-bootstrap.mjs" archiveCompilerArtifact normalizeCompilerHost saveCompilerMetadata)
   (import "./compiler-corpus-generations.mjs" prepareOriginalCompilerGenerations)
   (import "./compiler-corpus-reference.mjs" prepareOriginalReferenceArtifact)
+  (import "./compiler-corpus-program-resources.mjs" programCorpusResourceSelection)
   (import "./native-managed-runtime.mjs" snapshotNativeManagedRuntimeABI)
   (import "./compiler-corpus-process.mjs" originalCorpusExecutionPolicy runOriginalCorpusProcess writeOriginalCorpusExecutionContext validateOriginalProcessHostDependency)
   (defun fallback (value other) (if (nullish? value) other value))
@@ -191,11 +192,21 @@
     (let* ((artifact (get input-context :artifact)) (record (get input-context :record))
            (target (get input-context :target)) (source-root (get input-context :sourceRoot))
            (contract (get record :execution)) (supplied (or (get input-context :options) (js-object)))
-           (resources (independentCompilerResources supplied))
-           (configured (if resources (Object/assign (js-object) supplied
-             (js-object :profile (get resources :profile) :budget (get resources :budget) :memory (get resources :memory)
-               :auto (get resources :auto) :runtimeOptions (Object/assign (js-object) (get resources :budget)
-                 (js-object :auto (get resources :auto)) (get supplied :runtimeOptions)))) supplied))
+           ;; Provenance comes from the retained record and the real caller
+           ;; input before any compiler profile default is materialized. Only a
+           ;; fully unconstrained ordinary program receives the independent
+           ;; acceptance work set; explicit values keep their original source.
+           (program (programCorpusResourceSelection record (get record :request) contract supplied target))
+           (resources (if program program (independentCompilerResources supplied)))
+           (configured (if program
+             (Object/assign (js-object) supplied
+               (js-object :budget (get program :budget) :memory (get program :memory) :auto (get program :auto)
+                 :runtimeOptions (Object/assign (js-object) (get program :budget)
+                   (js-object :auto (get program :auto)) (get supplied :runtimeOptions))))
+             (if resources (Object/assign (js-object) supplied
+               (js-object :profile (get resources :profile) :budget (get resources :budget) :memory (get resources :memory)
+                 :auto (get resources :auto) :runtimeOptions (Object/assign (js-object) (get resources :budget)
+                   (js-object :auto (get resources :auto)) (get supplied :runtimeOptions)))) supplied)))
            (options (Object/assign (js-object) configured
              (when (get record :memory) (js-object :memory (globalThis.structuredClone (get record :memory))))
              (js-object :runtimeOptions (Object/assign (js-object) (get configured :runtimeOptions) (get contract :runtimeOptions)))))
@@ -315,7 +326,7 @@
             (let* ((manifest (JSON/parse (await (readFile supporting-manifest "utf8"))))
                    (products (get manifest :products)) (roles (new globalThis.Set)) (index 0))
               (unless (and (= (get manifest :format) "eliscript-original-compiler-supporting-products")
-                   (= (get manifest :version) 1) (Array/isArray products) (> (js-length products) 0))
+                   (Array/isArray products) (> (js-length products) 0))
                 (invalid "original compiler tools did not retain their real supporting products"))
               (while (< index (js-length products))
                 (let* ((product (aref products index)) (role (get product :role)) (built (get product :artifact)))

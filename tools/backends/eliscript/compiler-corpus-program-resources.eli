@@ -1,0 +1,73 @@
+(module tools.backends.compiler-corpus-program-resources
+  ;; Ordinary source programs are not the compiler. When their retained
+  ;; original record declares no execution resource at all, they receive one
+  ;; independent, finite acceptance work set instead of a compiler profile.
+  ;; The values stay inside the already supported managed construction range:
+  ;; the canonical 24-bit slot ceiling, the public 8 MiB initial heap, the
+  ;; existing 1 GiB managed byte ceiling and the 128 page / 65535 page image
+  ;; range used by the complete compiler profile. No public runtime default or
+  ;; compiler profile changes here.
+  (defconst programCorpusResourceBudget
+    (Object/freeze (js-object :maxSlots 16777215 :initialBytes 8388608 :maxBytes 1073741824)))
+  (defconst programCorpusResourceMemory
+    (Object/freeze (js-object :initialPages 128 :maximumPages 65535)))
+  (defconst programCorpusResourceAuto 65536)
+  (defconst programCorpusResourceKeys
+    (Object/freeze (js-array "memory" "auto" "budget" "runtimeOptions"
+      "runtimeProfile" "functionalRuntimeProfile" "compilerProfile")))
+  (defconst programCorpusRuntimeBudgetKeys
+    (Object/freeze (js-array "maxSlots" "initialBytes" "maxBytes" "auto")))
+
+  (defun programCorpusField (value key)
+    (if (nullish? value) undefined (get value key)))
+
+  (defun programCorpusRuntimeBudgetDeclaredP (value)
+    ;; A runtimeOptions object may carry non-resource transport or lifetime
+    ;; keys. Only an actual heap/budget declaration makes it explicit.
+    (and (not (nullish? value))
+      (js-call programCorpusRuntimeBudgetKeys :some
+        (lambda (key) (and (Object/hasOwn value key) (not (undefined? (get value key))))))))
+
+  (defun programCorpusResourceDeclaredP (value)
+    (and (not (nullish? value))
+      (js-call programCorpusResourceKeys :some (lambda (key)
+        (and (Object/hasOwn value key)
+          (if (= key "runtimeOptions")
+            (programCorpusRuntimeBudgetDeclaredP (get value key))
+            (not (undefined? (get value key)))))))))
+
+  (defun programCorpusCallerResourceP (options)
+    ;; The real caller wins before any compiler profile default is filled.
+    ;; Only these execution keys are caller declarations; a compiler producer
+    ;; profile is not an execution budget and never becomes one here.
+    (and (not (nullish? options))
+      (or (js-call (js-array "runtimeOptions" "budget" "memory" "auto") :some
+            (lambda (key) (and (Object/hasOwn options key) (not (undefined? (get options key))))))
+        ;; An explicitly requested functional acceptance mode keeps its own
+        ;; resource path; it is never silently replaced by this budget.
+        (and (Object/hasOwn options "functionalRuntimeProfile")
+             (not (undefined? (get options "functionalRuntimeProfile")))))))
+
+  (defun programCorpusResourceEligible (record request execution options target)
+    (and (or (= target "wasm") (= target "native"))
+      (= (programCorpusField record "kind") "project")
+      (= (programCorpusField execution "kind") "original-program")
+      (= (programCorpusField (programCorpusField record "expected") "kind") "seed-program")
+      (= (programCorpusField (programCorpusField record "expected") "oracleRequired") t)
+      (not (programCorpusResourceDeclaredP record))
+      (not (programCorpusResourceDeclaredP request))
+      (not (programCorpusResourceDeclaredP execution))
+      (not (programCorpusCallerResourceP options))))
+
+  (defun programCorpusResources ()
+    (js-object :budget (Object/assign (js-object) programCorpusResourceBudget)
+      :memory (Object/assign (js-object) programCorpusResourceMemory)
+      :auto programCorpusResourceAuto :source "independent-program-acceptance"))
+
+  (defun programCorpusResourceSelection (record request execution options target)
+    (if (programCorpusResourceEligible record request execution options target)
+      (programCorpusResources) undefined))
+
+  (export programCorpusResourceBudget programCorpusResourceMemory programCorpusResourceAuto
+    programCorpusResourceDeclaredP programCorpusCallerResourceP programCorpusResourceEligible
+    programCorpusResources programCorpusResourceSelection))

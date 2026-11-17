@@ -19,6 +19,7 @@
   (import "../tools/backends/compiler-corpus-execution.mjs" prepareCompilerCorpusRuntimeContext prepareOriginalSeedCorpusRecord createOriginalSeedOracle executeCompilerCorpusRecord)
   (import "../tools/backends/compiler-corpus-host-context.mjs" installOriginalProgramBunChildContext)
   (import "../tools/backends/compiler-corpus-process.mjs" originalCorpusExecutionPolicy)
+  (import "../tools/backends/compiler-corpus-program-resources.mjs" programCorpusResourceSelection programCorpusResources)
   (defun digest (text) (js-call (js-call (createHash "sha256") :update text) :digest "hex"))
 
   (defun collect-host-garbage ()
@@ -303,7 +304,7 @@
         (try
           (let ((modules (js-array (js-object :id "original.mjs" :filename "original-中文😀.eli"
                            :source "(defun negative-zero () -0.0) (defun echo (value) (js-array value value)) (export negative-zero echo)")))
-                (graph-response-options (js-object :responseMode "graph-events-v1")))
+                (graph-response-options (js-object :responseMode "graph-events")))
             (let ((artifact (await (buildIndependentCompiler (js-object :host "javascript" :profile "small"
                               :outputRoot (resolve directory "compiler") :retainIR false :debug false
                               :onPhase build-gc-phase)))))
@@ -359,18 +360,19 @@
                           (if (js-call seen :has value) (setq shared (1+ shared))
                             (progn
                               (js-call seen :add value)
-                              ;; Managed numeric literals are a value-number
-                              ;; call with exact low/high u32 words, rather
-                              ;; than a host f64 number in the typed graph.
-                              (when (and (= (get value :kind) "call")
-                                         (= (get value :value) (get number-function :index))
-                                         (= (js-length (get value :children)) 3))
-                                (let* ((children (get value :children))
-                                       (low (aref children 1)) (high (aref children 2)))
-                                  (when (and (= (get low :kind) "literal") (= (get low :type) "u32")
-                                             (= (get low :value) 0)
-                                             (= (get high :kind) "literal") (= (get high :type) "u32")
-                                             (= (get high :value) 2147483648))
+                              ;; An ordinary managed numeric literal lowers to
+                              ;; one inline `v64` constant carrying exact
+                              ;; `{low, high}` words, not a `value-number` call.
+                              ;; Negative zero is `low 0` with the sign bit in
+                              ;; `high`, which the inline encoding offsets by
+                              ;; 0x0001_0000: 2147483648 + 65536 = 2147549184.
+                              (when (and (= (get value :kind) "literal")
+                                         (= (get value :type) "v64")
+                                         (= (js-length (get value :children)) 0))
+                                (let ((words (get value :value)))
+                                  (when (and (= (value-type words) "object")
+                                             (= (get words :low) 0)
+                                             (= (get words :high) 2147549184))
                                     (setq negative-zero-bits t))))
                               (js-call (Object/values value) :forEach (lambda (child) (js-call pending :push child))))))))
                     (js-call assert :ok (> shared 0) "real lowered typed/debug data retains its shared graph")
@@ -1130,4 +1132,64 @@
               (put selected index undefined))))
           (finally
             (setq selected undefined)
-            (collect-host-garbage)))))))
+            (collect-host-garbage))))))
+  (test "ordinary unconstrained programs receive one independent finite work set while every explicit budget stays exactly as declared"
+    (async ()
+      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+             (records (get corpus :records))
+             (defaults (programCorpusResources))
+             (find-record (lambda (id) (js-call records :find (lambda (item) (= (get item :id) id))))))
+        (let* ((record (find-record "stable-compatibility:program:stdlib/json.eli"))
+               (selected (programCorpusResourceSelection record (get record :request)
+                           (get record :execution) (js-object :profile "small") "wasm")))
+          (js-call assert :ok selected "an unconstrained ordinary program receives the independent work set")
+          (js-call assert :deepStrictEqual (get selected :budget)
+            (js-object :maxSlots 16777215 :initialBytes 8388608 :maxBytes 1073741824))
+          (js-call assert :deepStrictEqual (get selected :memory)
+            (js-object :initialPages 128 :maximumPages 65535))
+          (js-call assert :strictEqual (get selected :auto) 65536)
+          (js-call assert :strictEqual (get selected :source) (get defaults :source))
+          (js-call assert :deepStrictEqual (compilerCorpusRequest record "wasm" (js-object))
+            (Object/assign (js-object) (compilerCorpusRequest record "wasm" (js-object))
+              (js-object :memory (get selected :memory))))
+          (js-call assert :strictEqual (programCorpusResourceSelection record (get record :request)
+            (get record :execution) (js-object) "javascript") undefined))
+        ;; Explicit record budgets and declared 8192 safe-literal gates stay
+        ;; byte-for-byte as retained, and never receive the program default.
+        (js-call (js-array "original-managed:sorted-core:node:auto-1"
+                    "original-managed:wire:node:auto-1"
+                    "original-managed:core-modules:node:auto-1")
+          :forEach (lambda (id)
+            (let* ((record (find-record id)) (declared (get record :execution))
+                   (before-timeout (get declared :timeoutMs)))
+              (js-call assert :ok record id)
+              (js-call assert :strictEqual (programCorpusResourceSelection record (get record :request)
+                declared (js-object) "wasm") undefined id)
+              (js-call assert :deepStrictEqual (get (compilerCorpusRequest record "wasm" (js-object)) :memory)
+                (get record :memory) id)
+              (js-call assert :deepStrictEqual (get declared :runtimeOptions)
+                (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216) id)
+              ;; Every original gate stays exactly as retained, not rewritten.
+              (js-call assert :strictEqual (get declared :timeoutMs) before-timeout))))
+        (let ((record (find-record "stable-compatibility:program:stdlib/json.eli")))
+          (js-call (js-array
+              (js-object :runtimeOptions (js-object :maxSlots 4096))
+              (js-object :budget (js-object :maxSlots 4096 :initialBytes 262144 :maxBytes 16777216))
+              (js-object :memory (js-object :initialPages 4 :maximumPages 1024))
+              (js-object :auto 0)
+              (js-object :functionalRuntimeProfile "small"))
+            :forEach (lambda (options)
+              (js-call assert :strictEqual (programCorpusResourceSelection record (get record :request)
+                (get record :execution) options "wasm") undefined)))
+          (js-call assert :ok (programCorpusResourceSelection record (get record :request)
+            (get record :execution) (js-object :profile "small" :nativeTarget "arm64-macos"
+              :sourceAssets (js-array) :console (js-object)) "wasm")))
+        (let ((changed (globalThis.structuredClone (find-record "stable-compatibility:program:stdlib/json.eli"))))
+          (put (get changed :execution) :runtimeOptions (js-object :originalHostLifetime "process"))
+          (js-call assert :ok (programCorpusResourceSelection changed (get changed :request)
+            (get changed :execution) (js-object) "wasm"))
+          (put (get changed :execution) :runtimeOptions (js-object :maxSlots 64))
+          (js-call assert :strictEqual (programCorpusResourceSelection changed (get changed :request)
+            (get changed :execution) (js-object) "wasm") undefined))
+        (setq records undefined corpus undefined)))))
+

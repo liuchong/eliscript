@@ -69,7 +69,10 @@
                  (before (js-call forms :find (lambda (node) (head? node "beforeAll"))))
                  (setup (js-call (get (aref (get before :items) 1) :items) :slice 2))
                  (assertions (js-call setup :slice 3))
-                 (provider (get (aref (get (definition forms "checkProvider") :items) 4) :items))
+                 (provider (let ((body (js-call (js-call (get (definition forms "checkProvider") :items) :slice 3)
+                                 :find (lambda (node) (head? node "let*")))))
+                            (unless body (throw (new globalThis.TypeError "maintained sorted assertion layout changed")))
+                            (get body :items)))
                  (provider-assertions (js-call provider :slice 3 -1))
                  (declarations (js-array))
                  (imports (js-array
@@ -114,7 +117,7 @@
                                    (setq form (js-call form :replace "(js-call (get runtime :project) :invoke"
                                                        "(invoke-provider-boundary runtime name")))
                                  (js-call declarations :push form))))
-      (js-call declarations :push "(defun invoke (runtime name &optional arguments) (let ((value (invoke-unobserved runtime name arguments))) (when partitioned (js-call (get actualPart :calls) :push (js-array name value))) value))")
+            (js-call declarations :push "(defun invoke (runtime name &optional arguments) (let ((value (invoke-unobserved runtime name arguments))) (when partitioned (js-call (get actualPart :calls) :push (js-array name value))) value))")
             (js-call declarations :push
                      "(defun observe (m) (let ((out (js-object))) (js-call cases :forEach (lambda (name) (put out name (funcall (get m (js-call name :replaceAll \"-\" \"_\")))))) (put out :randomized (js-call m :randomized randomOperations)) (let ((state (js-call m :held_state))) (put out :held (Array/from (js-object :length 5) (lambda () (js-call m :held_step state))))) (try (js-call m :throw_comparison) (throw (new globalThis.Error \"missing expected comparison failure\")) (catch error (js-call assert :strictEqual (get error :name) \"TypeError\") (js-call assert :strictEqual (get error :message) \"sorted comparison marker\") (put out :failure (js-array (get error :name) (get error :message))))) out))")
             (let ((observer (aref declarations (1- (js-length declarations)))))
@@ -152,6 +155,16 @@
         (defun provider-locator? (locator)
           (let ((bound (get locator :originalCase)))
             (and bound (js-call (get bound :templateTitle "") :startsWith "Given actual provider"))))
+        (defun brand-locator? (locator)
+          ;; The maintained sixth case keeps its own runtime, its original
+          ;; 120000 ms gate and every assertion inside the unchanged complete
+          ;; original suite. `original-managed-suite:complete-fixture-suites`
+          ;; already claims all six sorted case identities, so an ordinary
+          ;; checkAll/checkProvider record must not claim that fifth/sixth
+          ;; source region again, and must not run it under a merged deadline.
+          (let ((bound (get locator :originalCase)))
+            (and bound (js-call (get bound :templateTitle "") :startsWith
+                   "Given a replaced Symbol.hasInstance"))))
   (defun make-sorted-record (options modules assets locators identity original source provider-mode auto engine part)
     (let* ((family (if provider-mode "sorted-core-provider" "sorted-core"))
            (base (str "original-managed:" family ":" engine ":auto-" auto))
@@ -165,7 +178,8 @@
            (bound-cases (js-array)))
       (js-call locators :forEach (lambda (locator)
         (let* ((bound (get locator :originalCase)) (parameters (when bound (get bound :parameters))))
-          (when (and (eq (funcall globalThis.Boolean (provider-locator? locator)) provider-mode)
+          (when (and (not (brand-locator? locator))
+                     (eq (funcall globalThis.Boolean (provider-locator? locator)) provider-mode)
                      (or (nullish? bound)
                        (and (or (undefined? (get parameters :engine)) (= (get parameters :engine) engine))
                             (or (undefined? (get parameters :auto)) (= (get parameters :auto) auto))
