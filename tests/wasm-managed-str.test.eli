@@ -101,7 +101,7 @@
            (cur (if (undefined? current) b current))
            (p (js-call (get cur :compiler) :compile_ir_string src "str.eli"))
            (before (JSON/stringify p))
-           (bytes (Uint8Array/from (js-call (get cur :managed) :emit_managed_wasm p rt (js-object :abi "managed-module-v1")))))
+           (bytes (Uint8Array/from (js-call (get cur :managed) :emit_managed_wasm p rt (js-object :abi "managed-module")))))
       (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
       (js-call assert :equal (JSON/stringify p) before)
       (js-object :p p :bytes bytes :r rt))))
@@ -257,7 +257,7 @@
     (lambda ()
       (let* ((source (js-call runtime-source :replace
                        (definition runtime-source "heap-join-text")
-                       "(defun heap-join-text (heap value) (load-u32 4294967295))"))
+                       "(defun heap-join-text (heap value) (memory-sig v64 u32 v64) (load-u32 4294967295) (v64-literal 0 0))"))
              (r (js-call (get b :compiler) :compile_ir_string source "trap-runtime.eli"))
              (a (instantiateManagedRuntime (get (make-artifact family r) :bytes))))
         (js-call a :auto 1)
@@ -356,7 +356,7 @@
       (let* ((r (js-call (get b :compiler) :compile_ir_string
                   (js-call runtime-source :replace
                     (definition runtime-source "heap-join-text")
-                    "(defun heap-join-text (heap value) (load-u32 4294967295))")
+                    "(defun heap-join-text (heap value) (memory-sig v64 u32 v64) (load-u32 4294967295) (v64-literal 0 0))")
                   "trap-runtime.eli"))
              (a (await (native-of (make-artifact family r) "native-trap")))
              (input (js-call a :number 7))
@@ -460,7 +460,7 @@
                     (js-call assert :equal (js-call (get current :compiler) :emit_ir_string p) javascript)
                     (let ((before (JSON/stringify p)))
                       (js-call outputs :push
-                        (Uint8Array/from (js-call (get current :managed) :emit_managed_wasm p r (js-object :abi "managed-module-v1"))))
+                        (Uint8Array/from (js-call (get current :managed) :emit_managed_wasm p r (js-object :abi "managed-module"))))
                       (let ((lowered (js-call (get current :managed) :lower_managed_program p r t)))
                         (js-call native-outputs :push
                           (Uint8Array/from (js-call (get current :native) :emit_typed_native_memory_library (get lowered :typed) "arm64-macos"))))

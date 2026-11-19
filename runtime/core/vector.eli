@@ -18,6 +18,7 @@
     recordTransientVectorPersistent
     recordTransientVectorTailCopy
     recordTransientVectorTailMutation
+    transientMetrics
     visitNode)
   (import "./value-internals.mjs"
     VALUE_EQUAL
@@ -45,17 +46,24 @@
     EDITABLE_TRANSIENT
     TRANSIENT_ASSOC
     TRANSIENT_CONJ
-    TRANSIENT_PERSISTENT)
+    TRANSIENT_PERSISTENT
+    dispatchTransientConj
+    registerTransientVectorConjArray)
+  (import "./transient.mjs" conjBang persistentBang)
   (import "./metadata-internals.mjs"
     METADATA_READ
     METADATA_WITH)
 
   (defun typeof-value (value) (js* "typeof value"))
+  (defconst INITIAL_ARRAY (js* "Array"))
   ;; Keep copy-array allocation at a distinct host allocation site.
   ;; Read the live Array binding even when the globalThis property is rebound.
   ;; Reflect.construct also preserves Proxy construction after host JIT warmup.
   (defun allocate-copy-array (length)
-    (Reflect/construct (js* "Array") (js-array length)))
+    (let ((ctor (js* "Array")))
+      (if (eq ctor INITIAL_ARRAY)
+          (new ctor length)
+          (Reflect/construct ctor (js-array length)))))
   (defmacro instance-of? (value Constructor)
     `(funcall (js* "(a, b) => a instanceof b") ,value ,Constructor))
   (defconst host-generator (js* "(create) => function* () { yield* create(this); }"))
@@ -82,12 +90,36 @@
   (defmacro index-mask (a b)
     `(funcall (js* "(a, b) => a & b") ,a ,b))
   (defconst MAX_COUNT 2147483647)
+
   (defconst TWO_CHUNK_WIDTH (index-shl BRANCH_WIDTH 1))
+  ;; Plain default Array identity guards for the private whole-array conj
+  ;; entry. Reading these once keeps the per-call checks allocation free.
+  (defconst host-array-prototype (get globalThis.Array :prototype))
+  (defconst host-default-array-slice (aref host-array-prototype "slice"))
+  (defconst host-iterator-symbol (get globalThis.Symbol :iterator))
+  (defconst host-default-array-iterator
+    (aref host-array-prototype host-iterator-symbol))
+  (defconst host-array-iterator-prototype
+    (Object/getPrototypeOf (js-call (js-array) host-iterator-symbol)))
+  (defconst host-array-iterator-next (aref host-array-iterator-prototype "next"))
+  ;; Genuine transient vectors created by this module. Checking membership
+  ;; first means an arbitrary custom transient or Proxy is never probed with a
+  ;; property or prototype read before it takes the ordinary protocol path.
+  (defconst transient-vector-instances (new globalThis/WeakSet))
   (defconst MISSING (funcall globalThis/Symbol "eliscript.vector.missing"))
   (defconst VECTOR_HASH_TAG 1327180861)
   (defconst SUBVECTOR_STATE (new globalThis/WeakMap))
+  ;; Public conj dispatch reads the method off the receiver once and only takes
+  ;; the own-`call` shortcut while `.call` is still the native one, exactly like
+  ;; `conj-one` in `runtime/core/transient.eli`.
   (defconst native-call (get (get globalThis.Function :prototype) :call))
+  (defconst intrinsic-reflect-apply Reflect/apply)
+  (defconst call-1 (js* "(fn, receiver, a) => fn.call(receiver, a)"))
   (defvar vector-metadata-reader undefined)
+  ;; The public factory is replaceable. Slice construction must keep observing
+  ;; a caller-supplied replacement, so the direct small-slice builder is used
+  ;; only while this exact maintained factory is still installed.
+  (defvar vector-from-factory undefined)
 
   (defun callable? (value)
     (= (funcall typeof-value value) "function"))
@@ -170,41 +202,41 @@
     ;; Hoist the single count read and its tail offset so the tail test reduces
     ;; to one native comparison. Conversions still finish before the index is
     ;; converted, and every visited node and tail read keeps its original order.
-    (let* ((count (get state :count))
+    (let* ((count (aref state "count"))
            (tail-start (tail-offset count)))
       (if (index-at-least? index tail-start)
-          (get state :tail)
-          (let ((node (get state :root))
-                (level (get state :shift)))
+          (aref state "tail")
+          (let ((node (aref state "root"))
+                (level (aref state "shift")))
             (while (index-greater? level 0)
               (visitNode node)
               ;; Read slots before converting the index, as in the original
               ;; indexed property expression; do not move effects past getters.
-              (let* ((slots (get node :slots))
+              (let* ((slots (aref node "slots"))
                      (shifted (index-ushr index level))
                      (slot (index-mask shifted BRANCH_MASK)))
-                (setq node (get slots slot)
+                (setq node (aref slots slot)
                       level (index-subtract level BRANCH_BITS))))
             (visitNode node)
-            (get node :slots)))))
+            (aref node "slots")))))
 
   (defun publish-path-value (state value)
     ;; Zipper parent links are frozen only when first exposed to user code.
     ;; Keep this cold publication path out of ordinary indexed access.
-    (when (and (= (get state :count) 2)
-               (not (eq (get state :metadata) nil))
+    (when (and (= (aref state "count") 2)
+               (not (eq (aref state "metadata") nil))
                (Array/isArray value)
                (= (js-length value) 6)
-               (eq (get value 5) t)
+               (eq (aref value 5) t)
                (not (Object/isFrozen value)))
       (Object/freeze value))
     value)
 
   (defun vector-index-value (state index)
-    (if (index-greater? (get state :count) BRANCH_WIDTH)
+    (if (index-greater? (aref state "count") BRANCH_WIDTH)
       (let ((chunk (array-for state index)))
         (aref chunk (index-mask index BRANCH_MASK)))
-      (let ((value (aref (get state :tail) index)))
+      (let ((value (aref (aref state "tail") index)))
         (if (= index 1) (publish-path-value state value) value))))
 
   (defun missing-vector-index (state index fallback)
@@ -281,33 +313,36 @@
     (if (= level 0)
         node
         (new VectorNode
-          (js-array (transient-new-path (- level BRANCH_BITS) node owner))
+          (js-array (transient-new-path (index-subtract level BRANCH_BITS) node owner))
           owner)))
 
   (defun transient-push-tail (level parent tail-node count owner)
     (visitNode parent)
     (let* ((editable (editableVectorNode parent owner))
-           (subindex (funcall bit-and (funcall bit-ushr (- count 1) level) BRANCH_MASK)))
+           (slots (aref editable "slots"))
+           (subindex (index-mask (index-ushr (index-subtract count 1) level) BRANCH_MASK)))
       (if (= level BRANCH_BITS)
-          (put (get editable :slots) subindex tail-node)
-          (let ((child (get (get editable :slots) subindex)))
-            (put (get editable :slots) subindex
+          (put slots subindex tail-node)
+          (let ((child (aref slots subindex))
+                (next-level (index-subtract level BRANCH_BITS)))
+            (put slots subindex
                   (if (undefined? child)
-                      (transient-new-path (- level BRANCH_BITS) tail-node owner)
-                      (transient-push-tail (- level BRANCH_BITS) child tail-node count owner)))))
+                      (transient-new-path next-level tail-node owner)
+                      (transient-push-tail next-level child tail-node count owner)))))
       (recordTransientVectorNodeMutation)
       editable))
 
   (defun transient-assoc-node (level node index value owner)
     (visitNode node)
-    (let ((editable (editableVectorNode node owner)))
+    (let* ((editable (editableVectorNode node owner))
+           (slots (aref editable "slots")))
       (if (= level 0)
-          (put (get editable :slots) (funcall bit-and index BRANCH_MASK) value)
-          (let ((subindex (funcall bit-and (funcall bit-ushr index level) BRANCH_MASK)))
-            (put (get editable :slots) subindex
+          (put slots (index-mask index BRANCH_MASK) value)
+          (let ((subindex (index-mask (index-ushr index level) BRANCH_MASK)))
+            (put slots subindex
                   (transient-assoc-node
-                    (- level BRANCH_BITS)
-                    (get (get editable :slots) subindex)
+                    (index-subtract level BRANCH_BITS)
+                    (aref slots subindex)
                     index
                     value
                     owner))))
@@ -330,23 +365,18 @@
                 (put slots subindex undefined)
                 (new VectorNode slots))))))
 
-  (defun initialize-persistent-vector (self token count shift root tail metadata)
-    (unless (eq token VECTOR_CONSTRUCTOR_TOKEN)
-      (throw (new globalThis.TypeError "PersistentVector values must be created with persistentVector or PersistentVector.from")))
-    (put self VECTOR_STATE (js-object :count count :shift shift :root root :tail tail :metadata metadata))
-    (Object/freeze self))
-
   (defconst PersistentVector
-    (funcall (js* "(initialize) => class PersistentVector { constructor(token, count, shift, root, tail, metadata = null) { initialize(this, token, count, shift, root, tail, metadata); } }") initialize-persistent-vector))
+    (funcall
+      (js* "(tok, stateSym, freeze) => class PersistentVector { constructor(token, count, shift, root, tail, metadata = null) { if (token !== tok) { throw new globalThis.TypeError(\"PersistentVector values must be created with persistentVector or PersistentVector.from\"); } this[stateSym] = { count, shift, root, tail, metadata }; freeze(this); } }")
+      VECTOR_CONSTRUCTOR_TOKEN VECTOR_STATE Object/freeze))
+
+  (defconst make-vector-impl
+    (funcall
+      (js* "(Ctor, tok) => (count, shift, root, tail, metadata = null) => new Ctor(tok, count, shift, root, tail, metadata === undefined ? null : metadata)")
+      PersistentVector VECTOR_CONSTRUCTOR_TOKEN))
 
   (defun make-vector (count shift root tail &optional metadata)
-    (new PersistentVector
-      VECTOR_CONSTRUCTOR_TOKEN
-      count
-      shift
-      root
-      tail
-      (if (undefined? metadata) nil metadata)))
+    (funcall make-vector-impl count shift root tail metadata))
 
   (defconst EMPTY_VECTOR
     (make-vector 0 BRANCH_BITS EMPTY_ROOT EMPTY_TAIL))
@@ -367,6 +397,7 @@
     (Object/defineProperty self "__eliscript_transient__"
       (js-object :enumerable t :get (funcall (js* "(reject) => ({ get() { return reject(); } }).get") (lambda ()
         (throw (new globalThis.TypeError "transient vectors cannot be serialized"))))))
+    (js-call transient-vector-instances :add self)
     (Object/freeze self))
 
   (defconst TransientVector
@@ -377,89 +408,182 @@
 
   (defun active-transient-vector-state (vector)
     (let ((state (aref vector TRANSIENT_VECTOR_STATE)))
-      (unless (get state :active)
+      (unless (aref state "active")
         (recordInvalidTransientVectorCall)
         (throw (new globalThis/TypeError "transient vector is no longer editable")))
       state))
 
   (defun editable-transient-tail (state)
-    (unless (get state :tailOwned)
-      (put state "tail" (js-call (get state :tail) :slice))
-      (put state "tailOwned" t)
-      (recordTransientVectorTailCopy))
-    (get state :tail))
+    (let ((tail (aref state "tail")))
+      (if (aref state "tailOwned")
+          tail
+          (let ((copied (js-call tail :slice)))
+            (put state "tail" copied)
+            (put state "tailOwned" t)
+            (recordTransientVectorTailCopy)
+            copied))))
+
+  (defun transient-conj-value (self value)
+    (let* ((state (active-transient-vector-state self))
+           (count (aref state "count")))
+      (when (= count MAX_COUNT)
+        (throw (new globalThis/RangeError
+                 (str "persistent vector cannot exceed " MAX_COUNT " values"))))
+      (let* ((tail (aref state "tail"))
+             (tail-len (aref tail "length")))
+        (if (index-less? tail-len BRANCH_WIDTH)
+            (let ((editable-tail (editable-transient-tail state)))
+              (put editable-tail tail-len value)
+              (recordTransientVectorTailMutation))
+            (progn
+              (unless (aref state "tailOwned")
+                (setq tail (js-call tail :slice))
+                (put state "tail" tail)
+                (recordTransientVectorTailCopy))
+              (let* ((owner (aref state "owner"))
+                     (shift (aref state "shift"))
+                     (root (aref state "root"))
+                     (tail-node (new VectorNode tail owner)))
+                (if (index-greater? (index-ushr count BRANCH_BITS)
+                                    (index-shl 1 shift))
+                    (progn
+                      (put state "root"
+                            (new VectorNode
+                              (js-array
+                                root
+                                (transient-new-path shift tail-node owner))
+                              owner))
+                      (put state "shift" (index-add shift BRANCH_BITS))
+                      (recordRootGrowth))
+                    (put state "root"
+                          (transient-push-tail
+                            shift
+                            root
+                            tail-node
+                            count
+                            owner)))
+                (put state "tail" (js-array value))
+                (put state "tailOwned" t)
+                (recordTransientVectorTailMutation)))))
+      (put state "count" (index-add count 1))
+      (put state "changed" t)
+      self))
 
   (let ((tproto (get TransientVector :prototype)))
     (define-unary-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]"
-      (lambda (self value)
-        (let ((state (active-transient-vector-state self)))
-          (when (= (get state :count) MAX_COUNT)
-            (throw (new globalThis/RangeError
-                     (str "persistent vector cannot exceed " MAX_COUNT " values"))))
-          (if (< (js-length (get state :tail)) BRANCH_WIDTH)
-              (progn
-                (js-call (editable-transient-tail state) :push value)
-                (recordTransientVectorTailMutation))
-              (progn
-                (unless (get state :tailOwned)
-                  (put state "tail" (js-call (get state :tail) :slice))
-                  (recordTransientVectorTailCopy))
-                (let ((tail-node (new VectorNode (get state :tail) (get state :owner))))
-                  (if (> (funcall bit-ushr (get state :count) BRANCH_BITS)
-                         (funcall bit-shl 1 (get state :shift)))
+      (lambda (self value) (transient-conj-value self value)))
+    (let ((canonical-transient-conj (aref tproto TRANSIENT_CONJ)))
+      ;; Private identity `into` entry. Registration keeps this off every
+      ;; public prototype: custom transients and Proxies return before any
+      ;; property, prototype or symbol read.
+      ;;
+      ;; The source guard is exactly the plain-array shape the runtime already
+      ;; reduces element-wise (`reduceArrayValues`), so no other reducible or
+      ;; iterable source changes meaning here: Array subclasses, array-like
+      ;; objects, custom iterators, strings, sets and null keep the original
+      ;; `transduce` path untouched and are never probed with an extra read.
+      (registerTransientVectorConjArray
+        (lambda (self source)
+          (if (and (js-call transient-vector-instances :has self)
+                   (Array/isArray source)
+                   (eq (Object/getPrototypeOf source) host-array-prototype)
+                   (not (Object/hasOwn source host-iterator-symbol))
+                   (eq (aref host-array-prototype host-iterator-symbol)
+                       host-default-array-iterator)
+                   (eq (aref host-array-iterator-prototype "next")
+                       host-array-iterator-next)
+                   (eq (aref host-array-iterator-prototype "return") undefined))
+              (let ((state (aref self TRANSIENT_VECTOR_STATE))
+                    (std-call native-call)
+                    (apply-hook intrinsic-reflect-apply)
+                    (index 0)
+                    (acc self)
+                    (early false))
+                ;; `reduceArrayValues` compares the raw length on every step
+                ;; and keeps its accumulator/early contract: mirror both so a
+                ;; Proxy length such as 1.5 or a reduced accumulator behaves
+                ;; exactly as the shared reduction does.
+                (while (and (index-less? index (aref source "length")) (eq early false))
+                  ;; Read the element before any `conj!` state work so a
+                  ;; getter observes the same state and exception order as
+                  ;; `%ArrayIteratorPrototype%.next()`.
+                  (let ((value (aref source index)))
+                    (if (eq acc self)
+                        (let ((direct (aref self TRANSIENT_CONJ)))
+                          (if (eq direct canonical-transient-conj)
+                              (if (eq (aref direct "call") std-call)
+                                  (let ((second-call (aref direct "call")))
+                                    (if (eq second-call std-call)
+                                        (if (and (eq (aref state "active") t)
+                                                 (eq (aref state "tailOwned") t))
+                                            (let* ((count (aref state "count"))
+                                                   (tail (aref state "tail"))
+                                                   (tail-len (aref tail "length")))
+                                              (if (and (index-less? count 2147483647)
+                                                       (index-less? tail-len BRANCH_WIDTH))
+                                                  (let ((prev-mutations (aref transientMetrics "tailMutations")))
+                                                    (put tail tail-len value)
+                                                    (put transientMetrics "tailMutations" (index-add prev-mutations 1))
+                                                    (put state "count" (index-add count 1))
+                                                    (put state "changed" t))
+                                                (transient-conj-value self value)))
+                                          (transient-conj-value self value))
+                                      (progn
+                                        (setq acc (funcall apply-hook second-call direct (js-array self value)))
+                                        (when (isReducedValue acc)
+                                          (setq acc (unreducedValue acc) early t)))))
+                                (progn
+                                  (setq acc (js-call direct :call self value))
+                                  (when (isReducedValue acc)
+                                    (setq acc (unreducedValue acc) early t))))
+                            (progn
+                              (setq acc
+                                    (if (callable? direct)
+                                        (if (eq (aref direct "call") std-call)
+                                            (funcall call-1 direct self value)
+                                          (js-call direct :call self value))
+                                      (dispatchTransientConj self value)))
+                              (when (isReducedValue acc)
+                                (setq acc (unreducedValue acc) early t)))))
                       (progn
-                        (put state "root"
-                              (new VectorNode
-                                (js-array
-                                  (get state :root)
-                                  (transient-new-path (get state :shift) tail-node (get state :owner)))
-                                (get state :owner)))
-                        (put state "shift" (+ (get state :shift) BRANCH_BITS))
-                        (recordRootGrowth))
-                      (put state "root"
-                            (transient-push-tail
-                              (get state :shift)
-                              (get state :root)
-                              tail-node
-                              (get state :count)
-                              (get state :owner))))
-                  (put state "tail" (js-array value))
-                  (put state "tailOwned" t)
-                  (recordTransientVectorTailMutation))))
-          (put state "count" (+ (get state :count) 1))
-          (put state "changed" t)
-          self)))
+                        (setq acc (conjBang acc value))
+                        (when (isReducedValue acc)
+                          (setq acc (unreducedValue acc) early t)))))
+                  (setq index (index-add index 1)))
+                (persistentBang acc))
+              undefined))))
     (define-binary-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]"
       (lambda (self index value)
-        (let ((state (active-transient-vector-state self)))
-          (if (= index (get state :count))
+        (let* ((state (active-transient-vector-state self))
+               (count (aref state "count")))
+          (if (= index count)
               (js-call (aref self TRANSIENT_CONJ) :call self value)
               (progn
-                (assert-index index (get state :count) "assocBang")
-                (if (>= index (tail-offset (get state :count)))
+                (assert-index index count "assocBang")
+                (if (index-at-least? index (tail-offset count))
                     (progn
-                      (put (editable-transient-tail state) (funcall bit-and index BRANCH_MASK) value)
+                      (put (editable-transient-tail state) (index-mask index BRANCH_MASK) value)
                       (recordTransientVectorTailMutation))
                     (put state "root"
                           (transient-assoc-node
-                            (get state :shift)
-                            (get state :root)
+                            (aref state "shift")
+                            (aref state "root")
                             index
                             value
-                            (get state :owner))))
+                            (aref state "owner"))))
                 (put state "changed" t)
                 self)))))
     (define-zero-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]"
       (lambda (self)
         (let* ((state (active-transient-vector-state self))
-               (result (if (get state :changed)
+               (result (if (aref state "changed")
                            (make-vector
-                             (get state :count)
-                             (get state :shift)
-                             (get state :root)
-                             (get state :tail)
-                             (get state :metadata))
-                           (get state :source))))
+                             (aref state "count")
+                             (aref state "shift")
+                             (aref state "root")
+                             (aref state "tail")
+                             (aref state "metadata"))
+                           (aref state "source"))))
           (put state "active" false)
           (put state "owner" nil)
           (recordTransientVectorPersistent)
@@ -531,6 +655,11 @@
               count next-end)))
     (make-vector length shift root tail))
 
+  (defconst bulk-vector-from-array
+    (funcall
+      (js* "(Ctor, VecNode, tok, allocTail, recGrowth) => (arr, n) => { const tailOff = ((n - 1) >>> 5) << 5; const numLeaves = tailOff >>> 5; let nodes = []; for (let b = 0; b < numLeaves; b = (b + 1) | 0) nodes.push(new VecNode(allocTail(arr.slice(b << 5, (b + 1) << 5)))); const tail = allocTail(arr.slice(tailOff, n)); let shift = 0; do { shift = (shift + 5) | 0; if (shift > 5) recGrowth(); const pCount = (nodes.length + 31) >>> 5; const parents = []; for (let p = 0; p < pCount; p = (p + 1) | 0) parents.push(new VecNode(nodes.slice(p << 5, (p + 1) << 5))); nodes = parents; } while (nodes.length > 1); return new Ctor(tok, n, shift, nodes[0], tail, null); }")
+      PersistentVector VectorNode VECTOR_CONSTRUCTOR_TOKEN allocateTail recordRootGrowth))
+
   (defun vector-from-array (iterable)
     (let ((length (js-length iterable)))
       (cond
@@ -551,6 +680,11 @@
            (if (= next-end length)
              (make-vector length BRANCH_BITS root tail)
              (finish-vector-array iterable length root BRANCH_BITS next-end tail))))
+        ((and (= (js* "typeof length") "number")
+              (index-greater? length 96)
+              (not (Object/hasOwn iterable "slice"))
+              (eq (aref iterable "slice") host-default-array-slice))
+         (funcall bulk-vector-from-array iterable length))
         (t
          (finish-vector-array iterable length EMPTY_ROOT BRANCH_BITS BRANCH_WIDTH
            (allocateTail (js-call iterable :slice 0 BRANCH_WIDTH)))))))
@@ -560,18 +694,25 @@
              (for-each-iterable iterable (lambda (value) (setq result (js-call result :conj value))))
              result))
 
-  (let ((proto (get PersistentVector :prototype)))
+  (let* ((proto (get PersistentVector :prototype))
+         (iterator-symbol (get globalThis/Symbol :iterator))
+         (gen-fn (funcall host-generator (lambda (self) (vector-step-iterator self))))
+         (gen-proto (Object/getPrototypeOf (get gen-fn :prototype)))
+         (default-gen-next (aref gen-proto "next"))
+         (default-gen-return (aref gen-proto "return")))
     (define-zero-method PersistentVector "empty" "empty"
       (lambda (_self) EMPTY_VECTOR))
-    (define-unary-static-method PersistentVector "single" "single"
-      (lambda (value)
-        (make-vector 1 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array value)) nil)))
-    (define-pair-static-method PersistentVector "pairWithMeta" "pairWithMeta"
-      (lambda (first second metadata)
-        (make-vector 2 BRANCH_BITS EMPTY_ROOT (allocateTail (js-array first second)) metadata)))
+    (define-method-value PersistentVector "single"
+      (funcall
+        (js* "(Ctor, tok, bits, emptyRoot, allocTail) => ({ single(value) { return new Ctor(tok, 1, bits, emptyRoot, allocTail([value]), null); } }).single")
+        PersistentVector VECTOR_CONSTRUCTOR_TOKEN BRANCH_BITS EMPTY_ROOT allocateTail))
+    (define-method-value PersistentVector "pairWithMeta"
+      (funcall
+        (js* "(Ctor, tok, bits, emptyRoot, allocTail) => ({ pairWithMeta(first, second, metadata = null) { return new Ctor(tok, 2, bits, emptyRoot, allocTail([first, second]), metadata); } }).pairWithMeta")
+        PersistentVector VECTOR_CONSTRUCTOR_TOKEN BRANCH_BITS EMPTY_ROOT allocateTail))
     (define-binary-static-method PersistentVector "rawSlot" "rawSlot"
       (lambda (vector index)
-        (get (get (aref vector VECTOR_STATE) :tail) index)))
+        (aref (aref (aref vector VECTOR_STATE) "tail") index)))
     ;; Give hot callbacks distinct host call sites instead of sharing the
     ;; polymorphic bridge used by unrelated methods. Algorithms remain Eli.
     (define-method-value PersistentVector "from"
@@ -582,25 +723,26 @@
              iterable)
             ((and (Array/isArray iterable)
                   (eq (Object/getPrototypeOf iterable) Array/prototype)
-                  (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
-                  (eq (aref iterable (get globalThis/Symbol :iterator))
-                      (aref Array/prototype (get globalThis/Symbol :iterator))))
+                  (not (Object/hasOwn iterable iterator-symbol))
+                  (eq (aref Array/prototype iterator-symbol)
+                      (aref iterable iterator-symbol)))
              (vector-from-array iterable))
             (t
              (vector-from-iterable iterable))))))
+    (setq vector-from-factory (aref PersistentVector "from"))
     (Object/defineProperty proto "count"
       (js-object :configurable t
         :get (funcall
           (js* "(fn) => Object.getOwnPropertyDescriptor({ get count() { return fn(this); } }, 'count').get")
-          (lambda (self) (get (aref self VECTOR_STATE) :count)))))
+          (lambda (self) (aref (aref self VECTOR_STATE) "count")))))
     (define-getter proto "size" "size"
-      (lambda (self) (get (aref self VECTOR_STATE) :count)))
+      (lambda (self) (aref (aref self VECTOR_STATE) "count")))
     (define-method-value proto "nth"
       (funcall (js* "(fn) => ({ nth(index, notFound = undefined) { return fn(this, index, notFound); } }).nth")
         (lambda (self index fallback)
         (let ((state (aref self VECTOR_STATE)))
           (if (if (if (eq (funcall bit-or-zero index) index) t (Number/isInteger index))
-                  (if (index-at-least? index 0) (index-less? index (get state :count)) false)
+                  (if (index-at-least? index 0) (index-less? index (aref state "count")) false)
                   false)
             (vector-index-value state index)
             (missing-vector-index state index fallback))))))
@@ -658,14 +800,9 @@
                   (allocateTail (js-array value))
                   (get state :metadata)))))))
     (define-method-value proto "peek"
-      (funcall (js* "(fn) => ({ peek(notFound = undefined) { return fn(this, notFound); } }).peek")
-        (lambda (self fallback)
-        (let ((not-found (if (undefined? fallback) nil fallback))
-              (state (aref self VECTOR_STATE)))
-          (if (= (get state :count) 0)
-              not-found
-              (let ((tail (get state :tail)))
-                (get tail (index-subtract (js-length tail) 1))))))))
+      (funcall
+        (js* "(sym) => ({ peek(notFound = null) { const state = this[sym]; if (state.count === 0) return notFound; const tail = state.tail; return tail[tail.length - 1]; } }).peek")
+        VECTOR_STATE))
     (define-zero-method proto "pop" "pop"
       (lambda (self)
         (let ((state (aref self VECTOR_STATE)))
@@ -757,24 +894,59 @@
             (sequenceView
               (lambda () (js-call (aref self (get globalThis/Symbol :iterator)) :call self))
               (get self :count)))))
-    (define-unary-rest-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]"
-      (lambda (self reducer initial)
-        (apply reduceIterable self reducer initial)))
+    (define-method-value proto COLLECTION_REDUCE
+      (funcall
+        (js* "(fn, noInit) => ({ '[eliscript.collection.reduce]'(reducer) { return arguments.length < 2 ? fn(this, reducer, noInit, arguments) : fn(this, reducer, arguments[1], arguments); } })['[eliscript.collection.reduce]']")
+        (lambda (self reducer initial raw-args)
+          (if (and (callable? reducer)
+                   (eq (Object/getPrototypeOf self) proto)
+                   (eq (aref proto iterator-symbol) gen-fn)
+                   (eq (aref gen-proto "next") default-gen-next)
+                   (eq (aref gen-proto "return") default-gen-return))
+              (let* ((state (aref self VECTOR_STATE))
+                     (total (aref state "count"))
+                     (acc initial)
+                     (index 0)
+                     (halted false))
+                (while (and (index-less? index total) (not halted))
+                  (let* ((chunk (array-for state index))
+                         (chunk-start (index-mask index BRANCH_MASK))
+                         (chunk-length (Math/min (aref chunk "length") (index-subtract total (index-subtract index chunk-start))))
+                         (offset chunk-start))
+                    (while (and (index-less? offset chunk-length) (not halted))
+                      (let ((item (aref chunk offset)))
+                        (if (eq acc MISSING)
+                            (setq acc item)
+                            (progn
+                              (setq acc (funcall reducer acc item))
+                              (when (isReducedValue acc)
+                                (setq acc (unreducedValue acc)
+                                      halted t)))))
+                      (setq index (index-add index 1)
+                            offset (index-add offset 1)))))
+                (when (eq acc MISSING)
+                  (throw (new globalThis/TypeError "cannot reduce an empty collection without an initial value")))
+                acc)
+              (if (index-less? (aref raw-args "length") 2)
+                  (reduceIterable self reducer)
+                  (reduceIterable self reducer initial))))
+        MISSING))
     (define-binary-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]"
       (lambda (self reducer initial)
-        (let ((state (aref self VECTOR_STATE))
-              (result initial)
-              (index 0)
-              (halted false))
-          (while (and (< index (get state :count)) (not halted))
+        (let* ((state (aref self VECTOR_STATE))
+               (total (aref state "count"))
+               (result initial)
+               (index 0)
+               (halted false))
+          (while (and (index-less? index total) (not halted))
             (let* ((chunk (array-for state index))
-                   (chunk-start (funcall bit-and index BRANCH_MASK))
-                   (chunk-length (Math/min (get chunk :length) (- (get state :count) (- index chunk-start))))
+                   (chunk-start (index-mask index BRANCH_MASK))
+                   (chunk-length (Math/min (aref chunk "length") (index-subtract total (index-subtract index chunk-start))))
                    (offset chunk-start))
-              (while (and (< offset chunk-length) (not halted))
-                (setq result (funcall reducer result index (get chunk offset))
-                      index (+ index 1)
-                      offset (+ offset 1))
+              (while (and (index-less? offset chunk-length) (not halted))
+                (setq result (funcall reducer result index (aref chunk offset))
+                      index (index-add index 1)
+                      offset (index-add offset 1))
                 (when (isReducedValue result)
                   (setq result (unreducedValue result)
                         halted t)))))
@@ -792,24 +964,59 @@
       (funcall (js* "(fn) => ({ sliceVector(start, end) { return fn(this, start, end); } }).sliceVector")
         (lambda (self start end)
           (let* ((state (aref self VECTOR_STATE))
+                 (state-count (aref state "count"))
                  (length (index-subtract end start)))
             (cond
               ((index-at-least? 0 length) EMPTY_VECTOR)
-              ((and (= start 0) (>= end (get state :count)) (eq (get state :metadata) nil))
+              ((and (eq start 0) (index-at-least? end state-count) (eq (aref state "metadata") nil))
                self)
               (t
-               (let ((values (allocate-copy-array length)) (out-index 0) (index start))
-                 (while (index-less? index end)
-                   (let* ((chunk (array-for state index))
-                          (chunk-offset (index-mask index BRANCH_MASK))
-                          (chunk-base (index-subtract index chunk-offset))
-                          (chunk-end (Math/min (index-subtract end chunk-base) (get chunk :length)))
-                          (offset chunk-offset))
-                     (while (index-less? offset chunk-end)
-                       (put values out-index (aref chunk offset))
-                       (setq out-index (1+ out-index) offset (1+ offset)))
-                     (setq index (index-add chunk-base chunk-end))))
-                 (js-call PersistentVector :from values))))))))
+               (if (and (index-at-least? TWO_CHUNK_WIDTH length)
+                        (eq (aref PersistentVector "from") vector-from-factory))
+                   ;; Up to two chunks are common for take-last. Build the
+                   ;; destination chunks directly instead of copying through
+                   ;; one flat array and re-slicing it in PersistentVector.from.
+                   (let* ((first-length (if (index-less? length BRANCH_WIDTH) length BRANCH_WIDTH))
+                          (second-length (index-subtract length first-length))
+                          (first (allocate-copy-array first-length))
+                          (second (if (index-greater? second-length 0)
+                                      (allocate-copy-array second-length)
+                                      nil))
+                          (out-index 0) (index start))
+                     (while (index-less? index end)
+                       (let* ((chunk (array-for state index))
+                              (chunk-offset (index-mask index BRANCH_MASK))
+                              (chunk-base (index-subtract index chunk-offset))
+                              (rem-end (index-subtract end chunk-base))
+                              (chunk-len (aref chunk "length"))
+                              (chunk-end (if (index-less? rem-end chunk-len) rem-end chunk-len))
+                              (offset chunk-offset))
+                         (while (index-less? offset chunk-end)
+                           (if (index-less? out-index BRANCH_WIDTH)
+                               (put first out-index (aref chunk offset))
+                               (let ((second-idx (index-subtract out-index BRANCH_WIDTH)))
+                                 (put second second-idx (aref chunk offset))))
+                           (setq out-index (index-add out-index 1) offset (index-add offset 1)))
+                         (setq index (index-add chunk-base chunk-end))))
+                     (if (index-greater? second-length 0)
+                         (make-vector length BRANCH_BITS
+                           (new VectorNode (js-array (new VectorNode (allocateTail first))))
+                           (allocateTail second))
+                         (make-vector length BRANCH_BITS EMPTY_ROOT (allocateTail first))))
+                   (let ((values (allocate-copy-array length)) (out-index 0) (index start))
+                     (while (index-less? index end)
+                       (let* ((chunk (array-for state index))
+                              (chunk-offset (index-mask index BRANCH_MASK))
+                              (chunk-base (index-subtract index chunk-offset))
+                              (rem-end (index-subtract end chunk-base))
+                              (chunk-len (aref chunk "length"))
+                              (chunk-end (if (index-less? rem-end chunk-len) rem-end chunk-len))
+                              (offset chunk-offset))
+                         (while (index-less? offset chunk-end)
+                           (put values out-index (aref chunk offset))
+                           (setq out-index (index-add out-index 1) offset (index-add offset 1)))
+                         (setq index (index-add chunk-base chunk-end))))
+                     (js-call PersistentVector :from values)))))))))
     (define-binary-method proto VALUE_EQUAL "[eliscript.value.equal]"
       (lambda (self other equal)
         (cond
@@ -846,11 +1053,10 @@
                 (get state :root)
                 (get state :tail)
                 metadata)))))
-    (let ((gen-fn (funcall host-generator (lambda (self) (vector-step-iterator self)))))
-      (Object/defineProperty gen-fn "name" (js-object :value "[Symbol.iterator]" :configurable t))
-      (Object/defineProperty gen-fn "length" (js-object :value 0 :configurable t))
-      (Object/defineProperty proto (get globalThis/Symbol :iterator)
-        (js-object :value gen-fn :writable t :configurable t)))
+    (Object/defineProperty gen-fn "name" (js-object :value "[Symbol.iterator]" :configurable t))
+    (Object/defineProperty gen-fn "length" (js-object :value 0 :configurable t))
+    (Object/defineProperty proto iterator-symbol
+      (js-object :value gen-fn :writable t :configurable t))
     (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
       (lambda (_self) "EliscriptPersistentVector")))
 
@@ -1052,7 +1258,7 @@
     (js-call SUBVECTOR_STATE :get value))
 
   (defun read-vector-metadata (self)
-    (get (aref self VECTOR_STATE) :metadata))
+    (aref (aref self VECTOR_STATE) "metadata"))
 
   (defun readPersistentVectorMetadataReader (method call)
     ;; Select the actual Eli body only for this exact method and native call.

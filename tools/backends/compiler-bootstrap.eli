@@ -363,7 +363,7 @@
       (await (archive-one directory records "runtime" (get snapshot :runtime) 0))
       (await (saveCompilerMetadata (join directory "identity.json") identity))
       (await (saveCompilerMetadata (join directory "source-archive.json")
-               (js-object :format "eliscript-compiler-source-archive" :version 1 :encoding "utf16le"
+               (js-object :format "eliscript-compiler-source-archive" :encoding "utf16le"
                  :identityPath "identity.json" :identitySha256 (get identity :sha256) :records records)))
       identity))
 
@@ -454,7 +454,7 @@
            (manifest (await (read-archived-json directory "source-archive.json")))
            (identity (await (read-archived-json directory "identity.json"))))
       (unless (and (= (host-get manifest "format") "eliscript-compiler-source-archive")
-                   (= (get manifest :version) 1) (= (get manifest :encoding) "utf16le")
+                   (= (get manifest :encoding) "utf16le")
                    (= (get manifest :identityPath) "identity.json")
                    (Array/isArray (get manifest :records))
                    (= (host-get identity "encoding") "utf16le")
@@ -946,7 +946,7 @@ sources))))
         (await (mkdir (get options :outputRoot) (js-object :recursive t)))
         (let* ((directory (await (mkdtemp (join (resolve (get options :outputRoot)) "compiler-chain-"))))
                (sourceIdentity (await (archiveCompilerSources sources (join directory "sources"))))
-               (metadata (js-object :format "eliscript-compiler-bootstrap" :version 1 :directory directory :hosts hosts :sourceIdentity sourceIdentity
+               (metadata (js-object :format "eliscript-compiler-bootstrap" :directory directory :hosts hosts :sourceIdentity sourceIdentity
                  :status "created" :verification "unverified" :generations (js-array)))
                (manifest (join directory "bootstrap.json")) (active nil) (artifact nil) (phase "seed"))
           (put metadata :fixedPoint (js-object :status "insufficient-generations" :comparisons (js-array)))
@@ -1003,7 +1003,7 @@ sources))))
         (await (mkdir (get options :outputRoot) (js-object :recursive t)))
         (let* ((directory (await (mkdtemp (join (resolve (get options :outputRoot)) "compiler-bootstrap-"))))
                (seed (await (seed-compiler options sources (join directory "seed"))))
-               (metadata (js-object :format "eliscript-independent-compiler-bootstrap" :version 1 :status "building" :verification "unverified"
+               (metadata (js-object :format "eliscript-independent-compiler-bootstrap" :status "building" :verification "unverified"
                  :sourceIdentity (await (archiveCompilerSources sources (join directory "sources"))) :chains (js-array)))
                (manifest (join directory "bootstrap.json")) (artifacts (js-array)) (index 0))
           (await (saveCompilerMetadata manifest metadata))
@@ -1028,7 +1028,7 @@ sources))))
       (let ((sources (await (complete-sources (null-default (get options :sourceRoot) root) (get options :sources)))))
         (await (mkdir (get options :outputRoot) (js-object :recursive t)))
         (let* ((directory (await (mkdtemp (join (resolve (get options :outputRoot)) "compiler-grid-"))))
-               (metadata (js-object :format "eliscript-independent-compiler-grid" :version 1 :status "building" :verification "unverified"
+               (metadata (js-object :format "eliscript-independent-compiler-grid" :status "building" :verification "unverified"
                  :sourceIdentity (await (archiveCompilerSources sources (join directory "sources"))) :cells (js-array) :comparisons (js-array)))
                (manifest (join directory "grid.json")) (artifacts (js-array)) (producers (new globalThis.Map)))
           (await (saveCompilerMetadata manifest metadata))

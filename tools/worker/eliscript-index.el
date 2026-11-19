@@ -80,7 +80,7 @@ COMMAND has the same meaning as in `eliscript-worker-start'."
                  '(score-document)
                  directory
                  project-root)
-                module (eliscript-project-build-result-entry-output build))
+                module (car (eliscript-project-build-result-entry-outputs build)))
           (setq service
                 (eliscript-service-start
                  (eliscript-service-module-declare

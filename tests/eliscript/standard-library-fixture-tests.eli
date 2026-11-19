@@ -19,6 +19,7 @@
     readStandardLibraryDescriptor standardLibraryRuntimeFacade standardLibraryFixtureTestRegistration)
   (defconst environment (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"
     :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"))
+  (defun num-val (runtime value) (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
   (defun test (title callback &rest deadlines)
     (js-call node-test :test title
       (js-object :timeout (if (> (js-length deadlines) 0) (aref deadlines 0) 30000)) callback))
@@ -113,7 +114,7 @@
               (let ((values (Array/from (js-object :length (js-call runtime :length out)) (lambda (ignored index)
                 (let ((value (js-call runtime :get out index)))
                   (try (if (and (not (nullish? value)) (= (value-type value) "object") (= (get value :kind) 4))
-                         (js-call runtime :readNumber value) value)
+                         (funcall num-val runtime value) value)
                     (finally (js-call runtime :release value))))))))
                 (js-call assert :deepStrictEqual values expected))
               (js-call runtime :release out) (setq out undefined)
@@ -276,7 +277,7 @@
                  (js-call assert :strictEqual error source) (if (eq key name-key) name message))
                :readString (lambda (value) (get value :value))
                :release (lambda (value) (js-call released :push value)))))
-             (descriptor (js-object :format "eliscript-managed-control" :version 1
+             (descriptor (js-object :format "eliscript-managed-control"
                :functions (js-array (js-object :name "throw_comparison"))))
              (plan (aref standardLibraryFixturePlans 2))
              (facade (standardLibraryRuntimeFacade runtime descriptor plan)))
@@ -363,7 +364,7 @@
       (let* ((calls (js-array)) (value (js-object)) (vector (js-object)) (original-array (lambda (&rest arguments) vector))
              (source-array (lambda (&rest arguments) (js-call calls :push arguments) value))
              (runtime (Object/freeze (js-object :invoke (lambda () nil) :array original-array :sourceArray source-array)))
-             (descriptor (js-object :format "eliscript-managed-control" :version 1 :functions (js-array)))
+             (descriptor (js-object :format "eliscript-managed-control" :functions (js-array)))
              (plan (aref standardLibraryFixturePlans 2))
              (facade (standardLibraryRuntimeFacade runtime descriptor plan)) (input (js-array 17)))
         (js-call assert :strictEqual (get facade :array) original-array)
@@ -395,12 +396,12 @@
               (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update source) :digest "hex") (get plan :sha256))
               (when (= suite "tests/wasm-managed-sorted-core.test.mjs")
                 (let ((cases (originalSourceCaseLocators suite (js-call source :toString "utf8"))))
-                  (js-call assert :strictEqual (js-length cases) 5 "all original suite contracts, including both native cases, remain discoverable")
+                  (js-call assert :strictEqual (js-length cases) 6 "all original suite contracts, including native cases, remain discoverable")
                   (js-call assert :strictEqual (get (new globalThis.Set (js-call cases :map
-                    (lambda (item) (get (get item :originalCase) :title)))) :size) 5)
+                    (lambda (item) (get (get item :originalCase) :title)))) :size) 6)
                   (js-call assert :deepStrictEqual (js-call (js-call cases :map
                     (lambda (item) (get (get item :originalCase) :timeoutMs))) :sort (lambda (a b) (- a b)))
-                    (js-array 30000 30000 30000 120000 120000))))
+                    (js-array 30000 30000 30000 120000 120000 120000))))
               (js-call (js-array (js-object) (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")
                                 (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")) :forEach
                 (lambda (env)
@@ -430,7 +431,7 @@
                  (if (= (aref arguments 0) "read_value") marker (throw marker))))))
              (release (lambda (value) value))
              (_actual (setq actual (Object/freeze (js-object :invoke invoke :invokeAsync invoke :release release :tag marker))))
-             (descriptor (js-object :format "eliscript-managed-control" :version 1
+             (descriptor (js-object :format "eliscript-managed-control"
                :functions (js-array (js-object :name "read_value"))))
              (facade (standardLibraryRuntimeFacade actual descriptor)))
         (js-call assert :strictEqual (Object/isFrozen facade) t)
@@ -473,7 +474,7 @@
                 (unless (or (= key "invoke") (= key "invokeAsync"))
                   (js-call assert :deepStrictEqual (Object/getOwnPropertyDescriptor facade key) (Object/getOwnPropertyDescriptor runtime key)))))
               (setq out (js-call facade :invoke "read-value"))
-              (js-call assert :strictEqual (js-call runtime :readNumber out) 17)
+              (js-call assert :strictEqual (funcall num-val runtime out) 17)
               (js-call runtime :release out) (setq out undefined)
               (js-call assert :throws (lambda () (js-call facade :invoke "no-such-name"))
                 (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003"))))

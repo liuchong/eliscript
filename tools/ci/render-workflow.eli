@@ -65,6 +65,18 @@
              "          name: compatibility-${{ matrix.name }}-${{ github.sha }}\n"
              "          path: .eliscript-cache/test-results/\n"
              "          if-no-files-found: warn\n")))
+        (setq text (js-call text
+          :replace (new globalThis.RegExp
+            "      - name: (Run test file shard 1/1(?: \\(performance reacceptance deferred\\))?)\\n        id: test-suite\\n        run: bun run test\\n")
+          (+ "      - name: Build the prepared stage3\n"
+             "        run: make bootstrap-release\n"
+             "      - name: Prepare the release package\n"
+             "        run: make prepare-release-package\n"
+             "      - name: $1\n"
+             "        id: test-suite\n"
+             "        env:\n"
+             "          ELISCRIPT_PREPARED_STAGE3: \"1\"\n"
+             "        run: bun run test\n")))
         ;; Capacity deferral is an existing explicit release mode. Its normal
         ;; functional heap must be selected too; one flag alone remains strict.
         (if (= (get matrix :performanceAcceptance) "deferred")
@@ -86,8 +98,7 @@
       (unless (= actual (renderWorkflow matrix))
         (throw (new CompatibilityMatrixError (js-array
           (str (get validated :workflow) " differs from the compatibility matrix; run the renderer with --write")))))
-      (js-object :schemaVersion 1
-        :systems (js-call (get validated :systems) :map (lambda (system) (js-object :id (get system :id)
+      (js-object :systems (js-call (get validated :systems) :map (lambda (system) (js-object :id (get system :id)
           :architecture (get system :architecture) :runner (get system :runner)
           :operatingSystem (get system :operatingSystem (get system :id)))))
         :acceptanceSystems (js-call (get validated :acceptanceSystems) :map (lambda (system)

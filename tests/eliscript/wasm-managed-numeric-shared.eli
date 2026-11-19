@@ -59,8 +59,12 @@
   (defun rawNumber (exports heap value)
     (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
       (js-call view :setFloat64 0 value t)
-      (funcall (get exports "value-number") heap (js-call view :getUint32 0 t) (js-call view :getUint32 4 t))))
+      (js-call globalThis.BigInt :asUintN 64
+        (funcall (get exports "value-number") heap (js-call view :getUint32 0 t) (js-call view :getUint32 4 t)))))
   (defun rawRead (exports heap value)
-    (js-call (new globalThis.DataView (get (get exports :memory) :buffer)) :getFloat64
-      (funcall (get exports "value-data") heap value 4) t))
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setBigUint64 0
+        (js-call globalThis.BigInt :asUintN 64
+          (funcall (get exports "value-number-bits") heap value)) t)
+      (js-call view :getFloat64 0 t)))
   (export makeFixture closeFixture box read check rawNumber rawRead loadReference))

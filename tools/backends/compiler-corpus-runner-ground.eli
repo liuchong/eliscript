@@ -1,0 +1,493 @@
+(module tools.backends.compiler-corpus-runner-ground
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile)
+  (import "node:path" resolve join relative isAbsolute sep)
+  (import "node:url" pathToFileURL)
+  (import "./managed-runtime.mjs" instantiateManagedRuntime instantiateManagedRuntimeWithHostModules)
+  (import "./compiler-build.mjs" independentCompilerResources)
+  (import "./compiler-bootstrap.mjs" archiveCompilerArtifact normalizeCompilerHost saveCompilerMetadata)
+  (import "./compiler-corpus-generations.mjs" prepareOriginalCompilerGenerations)
+  (import "./compiler-corpus-reference.mjs" prepareOriginalReferenceArtifact)
+  (import "./compiler-session.mjs" encodeCompilerIR)
+  (import "./compiler-corpus-program-ground.mjs"
+    typeof-str nullish? undefined? truthy? box-val unbox set-box! merge-objs valueRecord managedValue
+    childOutput box javascriptEnvironment javascriptModule
+    originalProgramAliases originalProgramSidecars originalProgramArguments originalCompilerSourceMaps)
+
+  (defasync
+    executeOriginalProgram
+    (context)
+    (let*
+      ((artifact (get context :artifact)) (record (get context :record)) (target (get context :target)) (sourceRoot (get context :sourceRoot)) (signal (get context :signal)) (supplied (or (get context :options) (js-object))) (resources (if
+            (= (get (get record :execution) :runtimeProfile) "compiler")
+            (independentCompilerResources supplied)
+            nil)) (configured (if
+            (truthy? resources)
+            (merge-objs supplied (js-object :profile (get resources :profile) :budget (get resources :budget) :memory (get resources :memory) :auto (get resources :auto) :runtimeOptions (merge-objs (get resources :budget) (js-object :auto (get resources :auto)) (get supplied :runtimeOptions))))
+            supplied)) (options (merge-objs configured (if
+              (truthy? (get record :memory))
+              (js-object :memory (globalThis.structuredClone (get record :memory)))
+              (js-object)) (js-object :runtimeOptions (merge-objs (get configured :runtimeOptions) (get (get record :execution) :runtimeOptions))))) (ctx (merge-objs context (js-object :options options))) (supportingProducts (await (originalCompilerSourceMaps ctx))))
+      (when
+        (and (= (get (get record :execution) :zeroImports) t) (= target "wasm"))
+        (let*
+          ((mod (new globalThis.WebAssembly.Module (new globalThis.Uint8Array (await (readFile (get artifact :path)))))))
+          (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports mod) (js-array) "original source graph must remain a zero-import WASM product")))
+      (let*
+        ((reference (await (prepareOriginalReferenceArtifact ctx))))
+        (when
+          (truthy? reference)
+          (let*
+            ((__coll_61 (Array/from (get reference :supportingProducts))) (__idx_62 0))
+            (while
+              (< __idx_62 (js-length __coll_61))
+              (let
+                ((sp (aref __coll_61 __idx_62)))
+                (js-call supportingProducts :push sp))
+              (setq __idx_62 (1+ __idx_62)))))
+        (let*
+          ((generations (await (prepareOriginalCompilerGenerations ctx))))
+          (when
+            (truthy? generations)
+            (let*
+              ((__coll_63 (Array/from (get generations :supportingProducts))) (__idx_64 0))
+              (while
+                (< __idx_64 (js-length __coll_63))
+                (let
+                  ((sp (aref __coll_63 __idx_64)))
+                  (js-call supportingProducts :push sp))
+                (setq __idx_64 (1+ __idx_64)))))
+          (let*
+            ((generationEnvironment (if
+                  (truthy? generations)
+                  (js-object :ELISCRIPT_ORIGINAL_COMPILER_GENERATIONS (get generations :manifestPath))
+                  (js-object))) (javascriptCompanion (js-call supportingProducts :find (lambda (item) (= (get item :role) "original-compiler-javascript-source-maps")))) (javascriptDirectory (cond
+                  ((= target "javascript") (get artifact :directory))
+                  ((truthy? javascriptCompanion) (resolve (get ctx :directory) (get javascriptCompanion :directory)))
+                  (t undefined))))
+            (when
+              (truthy? reference)
+              (put generationEnvironment :ELISCRIPT_ORIGINAL_REFERENCE_PRODUCT_ROOT (get reference :directory)))
+            (when
+              (not (undefined? javascriptDirectory))
+              (put generationEnvironment :ELISCRIPT_ORIGINAL_JAVASCRIPT_PRODUCT_ROOT javascriptDirectory))
+            (let*
+              ((hostFile (await (originalProgramSidecars artifact (merge-objs record (js-object :sourceRoot sourceRoot))))) (__ign_65 (await (originalProgramAliases artifact (js-object :sourceRoot sourceRoot)))) (directory (if
+                    (not (nullish? (get artifact :directory)))
+                    (get artifact :directory)
+                    (resolve (get artifact :path) ".."))) (entry (resolve directory (get artifact :entry))) (contract (get record :execution)) (timeoutMs (if
+                    (and (not (nullish? (get contract :timeoutByTarget))) (not (nullish? (aref (get contract :timeoutByTarget) target))))
+                    (aref (get contract :timeoutByTarget) target)
+                    (get contract :timeoutMs))) (loader (resolve sourceRoot "tests/fixtures/compiled-eli-node-loader.mjs")))
+              (when
+                (and (not (undefined? (get contract :hostRuntime))) (not (js-call (js-array "node" "bun") :includes (get contract :hostRuntime))))
+                (throw (new globalThis.TypeError "original host runtime must be node or bun")))
+              (let*
+                ((bunHost (if
+                      (not (undefined? (get contract :hostRuntime)))
+                      (= (get contract :hostRuntime) "bun")
+                      (or (= (get options :programHost) "bun") (truthy? (get contract :requiresBun))))) (command (if
+                      bunHost
+                      (or (get options :bun) (get (get globalThis.process :env) :BUN) "bun")
+                      (or (get options :node) (get (get globalThis.process :env) :NODE) "node"))) (preload (if
+                      bunHost
+                      (js-array "--preload" (resolve sourceRoot "tests/fixtures/compiled-eli-bun-preload.mjs"))
+                      (js-array "--experimental-loader" loader))))
+                (if
+                  (= target "javascript")
+                  (let*
+                    ((env (merge-objs (js-object :ELISCRIPT_ORIGINAL_TARGET target :ELISCRIPT_ORIGINAL_SOURCE_ROOT sourceRoot) generationEnvironment)) (args (if
+                          (truthy? (get contract :hostEval))
+                          (let*
+                            ((script (resolve directory "__eliscript_original_inline.mjs")))
+                            (await (writeFile script (get contract :hostEval)))
+                            (put env (get contract :environment) entry)
+                            (js-call preload :concat (js-array script)))
+                          (if
+                            (truthy? hostFile)
+                            (js-call preload :concat (js-array hostFile) (originalProgramArguments contract (get artifact :entry) (get (pathToFileURL (str directory "/")) :href)))
+                            (js-call preload :concat (js-array entry))))) (stdout (await (childOutput command args (js-object :cwd directory :signal signal :env env :timeoutMs timeoutMs)))))
+                    (merge-objs (js-object :kind "original-program" :stdout stdout) (if
+                        (> (get supportingProducts :length) 0)
+                        (js-object :supportingProducts supportingProducts)
+                        (js-object))))
+                  (let*
+                    ((driver (resolve directory "__eliscript_original_program.mjs")) (configuration (resolve directory "__eliscript_original_program.json")) (default-native (if
+                          (= (get globalThis.process :platform) "linux")
+                          "arm64-linux"
+                          "arm64-macos")))
+                    (await (saveCompilerMetadata configuration (js-object :target target :path (get artifact :path) :descriptor (get artifact :descriptor) :typed (get artifact :typed) :nativeTarget (or (get artifact :nativeTarget) (get options :nativeTarget) default-native) :entry (get artifact :entry) :host hostFile :argument (get contract :argument) :arguments (get contract :arguments) :argumentModules (if
+                            (not (nullish? (get contract :argumentModules)))
+                            (get contract :argumentModules)
+                            (js-array (get artifact :entry))) :hostEval (get contract :hostEval) :environment (get contract :environment) :base (get (pathToFileURL (str directory "/")) :href) :sourceRoot sourceRoot :childProcesses (get contract :childProcesses) :runtimeLaunchers (= (get contract :runtimeLaunchers) t) :memory (get options :memory) :runtimeOptions (merge-objs (get options :runtimeOptions) (if
+                              (undefined? (get record :auto))
+                              (js-object)
+                              (js-object :auto (get record :auto))) (if
+                              (truthy? (get artifact :debug))
+                              (js-object :debug (get artifact :debug))
+                              (js-object))))))
+                    (let*
+                      ((selfURL (get (pathToFileURL (resolve sourceRoot "tools/backends/compiler-corpus-execution-ground.mjs")) :href)) (source (str "import {runOriginalProgramDriver} from " (globalThis.JSON.stringify selfURL) ";\n" "await runOriginalProgramDriver(" (globalThis.JSON.stringify configuration) ");\n")))
+                      (await (writeFile driver source))
+                      (let*
+                        ((stdout (await (childOutput command (js-call preload :concat (js-array driver)) (js-object :cwd directory :signal signal :timeoutMs timeoutMs :env (merge-objs (js-object :ELISCRIPT_ORIGINAL_SOURCE_ROOT sourceRoot :ELISCRIPT_ORIGINAL_TARGET target) generationEnvironment))))))
+                        (merge-objs (js-object :kind "original-program" :stdout stdout) (if
+                            (> (get supportingProducts :length) 0)
+                            (js-object :supportingProducts supportingProducts)
+                            (js-object))))))))))))))
+  (defasync
+    executeCompilerSessionProgram
+    (context)
+    (let*
+      ((artifact (get context :artifact)) (record (get context :record)) (target (get context :target)) (sourceRoot (get context :sourceRoot)) (signal (get context :signal)) (contract (get record :execution)) (resources (independentCompilerResources (if
+              (undefined? (get contract :compilerProfile))
+              (or (get context :options) (js-object))
+              (js-object :profile (get contract :compilerProfile))))) (ctx-opts (or (get context :options) (js-object))) (options (merge-objs ctx-opts (js-object :memory (if
+                (not (nullish? (get record :memory)))
+                (get record :memory)
+                (get resources :memory)) :runtimeOptions (merge-objs (get resources :budget) (js-object :auto (get resources :auto)) (get ctx-opts :runtimeOptions) (get contract :runtimeOptions))))))
+      (when
+        (not (js-call (js-array "javascript" "wasm" "native") :includes target))
+        (throw (new globalThis.TypeError "original compiler tools require a real selected compiler target")))
+      (when
+        (not (js-call (js-array "node" "bun") :includes (get contract :hostRuntime)))
+        (throw (new globalThis.TypeError "original compiler tools require their explicit host runtime")))
+      (let*
+        ((directory (if
+              (not (nullish? (get artifact :directory)))
+              (get artifact :directory)
+              (resolve (get artifact :path) ".."))))
+        (await (javascriptEnvironment artifact sourceRoot))
+        (let*
+          ((host (await (originalProgramSidecars artifact (merge-objs record (js-object :sourceRoot sourceRoot))))))
+          (when
+            (not (truthy? host))
+            (throw (new globalThis.TypeError "original compiler tools require their retained original host source")))
+          (let*
+            ((configuration (resolve directory "__eliscript_original_compiler_session.json")) (supportingDirectory (resolve (get context :directory) "original-tool-products")) (supportingManifest (resolve (get context :directory) "original-tool-products.json")) (prepTimeout (get contract :preparationTimeoutMs)))
+            (when
+              (and (not (undefined? prepTimeout)) (or (not (globalThis.Number.isSafeInteger prepTimeout)) (<= prepTimeout 0)))
+              (throw (new globalThis.TypeError "original compiler preparation requires its positive original beforeAll timeout")))
+            (let*
+              ((timeoutMs (if
+                    (undefined? prepTimeout)
+                    (get contract :timeoutMs)
+                    (+ prepTimeout (get contract :timeoutMs)))) (default-native (if
+                    (= (get globalThis.process :platform) "linux")
+                    "arm64-linux"
+                    "arm64-macos")))
+              (await (saveCompilerMetadata configuration (merge-objs (js-object :target target :path (get artifact :path) :sourceRoot sourceRoot :entry (get artifact :entry) :descriptor (get artifact :descriptor) :typed (get artifact :typed) :memory (get options :memory)) (if
+                      (undefined? prepTimeout)
+                      (js-object)
+                      (js-object :preparationTimeoutMs prepTimeout)) (if
+                      (= (get contract :supportingCompilerProducts) t)
+                      (js-object :supportingDirectory supportingDirectory :supportingManifest supportingManifest)
+                      (js-object)) (js-object :runtimeOptions (merge-objs (get options :runtimeOptions) (js-object :nativeTarget (or (get artifact :nativeTarget) (get options :nativeTarget) default-native)) (if
+                          (truthy? (get artifact :debug))
+                          (js-object :debug (get artifact :debug))
+                          (js-object)))))))
+              (let*
+                ((command (if
+                      (= (get contract :hostRuntime) "bun")
+                      (or (get options :bun) (get (get globalThis.process :env) :BUN) "bun")
+                      (or (get options :node) (get (get globalThis.process :env) :NODE) "node"))) (stdout (await (childOutput command (js-array host) (js-object :cwd sourceRoot :signal signal :timeoutMs timeoutMs :env (js-object :ELISCRIPT_ORIGINAL_SOURCE_ROOT sourceRoot :ELISCRIPT_ORIGINAL_TARGET target :ELISCRIPT_ORIGINAL_COMPILER_SESSION configuration))))) (supportingProducts (js-array)))
+                (when
+                  (= (get contract :supportingCompilerProducts) t)
+                  (let*
+                    ((manifest (globalThis.JSON.parse (await (readFile supportingManifest "utf8")))))
+                    (when
+                      (or (not (= (when
+                              (not (nullish? manifest))
+                              (get manifest :format)) "eliscript-original-compiler-supporting-products")) (not (globalThis.Array.isArray (get manifest :products))) (= (get (get manifest :products) :length) 0))
+                      (throw (new globalThis.TypeError "original compiler tools did not retain their real supporting products")))
+                    (let*
+                      ((roles (new globalThis.Set)) (products (get manifest :products)))
+                      (let*
+                        ((index 0) (__loop_66 t))
+                        (while
+                          __loop_66
+                          (setq __loop_66 false)
+                          (when
+                            (< index (get products :length))
+                            (let*
+                              ((product (aref products index)) (role (when
+                                    (not (nullish? product))
+                                    (get product :role))))
+                              (when
+                                (or (not (= (typeof-str role) "string")) (not (truthy? role)) (js-call roles :has role))
+                                (throw (new globalThis.TypeError "original compiler supporting product role is missing or duplicate")))
+                              (js-call roles :add role)
+                              (let*
+                                ((built (get product :artifact)))
+                                (let*
+                                  ((__coll_67 (Array/from (js-array (when
+                                            (not (nullish? built))
+                                            (get built :directory)) (when
+                                            (not (nullish? built))
+                                            (get built :path))))) (__idx_68 0))
+                                  (while
+                                    (< __idx_68 (js-length __coll_67))
+                                    (let
+                                      ((p (aref __coll_67 __idx_68)))
+                                      (when
+                                        (not (= (typeof-str p) "string"))
+                                        (throw (new globalThis.TypeError "original compiler supporting product requires actual local files")))
+                                      (let*
+                                        ((inside (relative supportingDirectory (resolve p))))
+                                        (when
+                                          (or (not (truthy? inside)) (isAbsolute inside) (= inside "..") (js-call inside :startsWith (str ".." sep)))
+                                          (throw (new globalThis.TypeError "original compiler supporting product escapes its case archive")))))
+                                    (setq __idx_68 (1+ __idx_68))))
+                                (let*
+                                  ((prov (get built :provenance)) (src-id (get built :sourceIdentity)))
+                                  (when
+                                    (or (not (= (when
+                                            (not (nullish? prov))
+                                            (get prov :mode)) "session")) (not (= (normalizeCompilerHost (get prov :producerHost)) target)) (not (= (get prov :runtimeCompiled) t)) (not (globalThis.Array.isArray (get prov :compiledModuleIds))) (not (globalThis.Array.isArray (when
+                                            (not (nullish? src-id))
+                                            (get src-id :modules)))) (not (= (globalThis.JSON.stringify (js-call (js-call (get prov :compiledModuleIds) :slice) :sort)) (globalThis.JSON.stringify (js-call (js-call (get src-id :modules) :map (lambda (item) (get item :id))) :sort)))))
+                                    (throw (new globalThis.Error "original compiler supporting product was not built completely by the selected real compiler")))
+                                  (let*
+                                    ((archived (await (archiveCompilerArtifact built (resolve (get context :directory) (str "original-tool-product-" index "-metadata"))))))
+                                    (when
+                                      (not (truthy? (when
+                                            (not (nullish? (get archived :productIdentity)))
+                                            (get (get archived :productIdentity) :sha256))))
+                                      (throw (new globalThis.Error "original compiler supporting product has no authenticated emitted file identity")))
+                                    (js-call supportingProducts :push (js-object :role role :target (normalizeCompilerHost (get built :host)) :producerHost target :directory (js-call (js-call (relative (get context :directory) (get built :directory)) :split sep) :join "/") :identitySha256 (get (get archived :productIdentity) :sha256)))))))
+                            (progn
+                              (setq index (+ index 1))
+                              (setq __loop_66 t))))))))
+                (merge-objs (js-object :kind "original-program" :stdout stdout) (if
+                    (> (get supportingProducts :length) 0)
+                    (js-object :supportingProducts supportingProducts)
+                    (js-object))))))))))
+  (defasync
+    runIsolatedExports
+    (url encodedContract)
+    (let*
+      ((m (await (funcall (js* "(u) => import(u)") url))) (c (globalThis.JSON.parse encodedContract)) (out (js-array)) (values (or (get c :values) (js-object))) (calls (or (get c :calls) (js-array))))
+      (let*
+        ((__coll_69 (Array/from (globalThis.Object.entries values))) (__idx_70 0))
+        (while
+          (< __idx_70 (js-length __coll_69))
+          (let
+            ((entry (aref __coll_69 __idx_70)))
+            (let*
+              ((name (aref entry 0)) (expected (aref entry 1)) (actual (aref m name)))
+              (js-call assert :deepEqual actual expected)
+              (js-call out :push (js-object :name name :value (valueRecord actual)))))
+          (setq __idx_70 (1+ __idx_70))))
+      (let*
+        ((__coll_71 (Array/from calls)) (__idx_72 0))
+        (while
+          (< __idx_72 (js-length __coll_71))
+          (let
+            ((call (aref __coll_71 __idx_72)))
+            (let*
+              ((fn-name (or (get call :javascriptName) (get call :name))) (res (try
+                    (js-object :failed false :value (await (js-call (aref m fn-name) :apply m (get call :args))))
+                    (catch
+                      e
+                      (js-object :failed t :error e)))))
+              (if
+                (not (undefined? (get call :error)))
+                (progn
+                  (assert (get res :failed))
+                  (js-call assert :equal (when
+                      (not (nullish? (get res :error)))
+                      (get (get res :error) :message)) (get call :error))
+                  (js-call out :push (js-object :name (get call :name) :error (get call :error))))
+                (progn
+                  (when
+                    (get res :failed)
+                    (throw (get res :error)))
+                  (js-call assert :deepEqual (get res :value) (get call :expected))
+                  (js-call out :push (js-object :name (get call :name) :value (valueRecord (get res :value))))))))
+          (setq __idx_72 (1+ __idx_72))))
+      (js-call (get globalThis.process :stdout) :write (globalThis.JSON.stringify out))))
+  (defasync
+    managedRuntime
+    (artifact target options)
+    (when
+      (not (truthy? (get options :allowHostCapabilities)))
+      (let*
+        ((caps-len (if
+              (and (not (nullish? (get artifact :descriptor))) (globalThis.Array.isArray (get (get artifact :descriptor) :hostCapabilities)))
+              (get (get (get artifact :descriptor) :hostCapabilities) :length)
+              0)))
+        (js-call assert :equal caps-len 0 "original pure corpus declares no host capabilities")))
+    (let*
+      ((rt-opts (or (get options :runtimeOptions) (js-object))) (runtimeOptions (merge-objs rt-opts (if
+              (truthy? (get artifact :debug))
+              (js-object :debug (get artifact :debug))
+              (js-object)) (js-object :moduleBaseURL (or (get options :moduleBaseURL) (get (pathToFileURL (get artifact :path)) :href)) :projectModuleBaseURL (or (get options :projectModuleBaseURL) (get (pathToFileURL (str (resolve (get artifact :path) "..") "/")) :href)) :projectEntry (get artifact :entry) :importModule (or (get options :importModule) (get rt-opts :importModule)) :hostModules (or (get options :hostModules) (get rt-opts :hostModules))))))
+      (if
+        (= target "wasm")
+        (let*
+          ((bytes (new globalThis.Uint8Array (await (readFile (get artifact :path))))) (mod (new globalThis.WebAssembly.Module bytes)))
+          (when
+            (not (truthy? (get options :allowHostCapabilities)))
+            (js-call assert :deepEqual (globalThis.WebAssembly.Module.imports mod) (js-array) "original pure corpus requires zero imports"))
+          (if
+            (truthy? (get options :allowHostCapabilities))
+            (instantiateManagedRuntimeWithHostModules bytes runtimeOptions)
+            (instantiateManagedRuntime bytes runtimeOptions)))
+        (let*
+          ((native-mod (await (js* "import('./native-managed-runtime.mjs')"))) (instantiateNativeManagedRuntime (get native-mod :instantiateNativeManagedRuntime)) (default-native (if
+                (= (get globalThis.process :platform) "linux")
+                "arm64-linux"
+                "arm64-macos")))
+          (instantiateNativeManagedRuntime (get artifact :path) (js-object :typed (get artifact :typed) :descriptor (get artifact :descriptor)) (merge-objs (get options :memory) runtimeOptions (js-object :nativeTarget (or (get artifact :nativeTarget) (get options :nativeTarget) default-native))))))))
+  (defasync
+    executeExports
+    (context contract)
+    (let*
+      ((artifact (get context :artifact)) (target (get context :target)) (sourceRoot (get context :sourceRoot)) (options (or (get context :options) (js-object))) (observations (js-array)))
+      (if
+        (= target "javascript")
+        (if
+          (truthy? (get contract :isolated))
+          (let*
+            ((url (await (javascriptEnvironment artifact sourceRoot))) (selfURL (get (pathToFileURL (resolve sourceRoot "tools/backends/compiler-corpus-execution-ground.mjs")) :href)) (script (str "import {runIsolatedExports} from " (globalThis.JSON.stringify selfURL) ";await runIsolatedExports(process.argv[1],process.argv[2]);")) (node-cmd (or (get options :node) (get (get globalThis.process :env) :NODE) "node")) (stdout (await (childOutput node-cmd (js-array "--input-type=module" "--eval" script url (encodeCompilerIR contract)) (js-object :cwd (get context :directory) :signal (get context :signal))))))
+            (globalThis.JSON.parse stdout))
+          (let*
+            ((mod (await (javascriptModule artifact sourceRoot))))
+            (let*
+              ((__coll_73 (Array/from (globalThis.Object.entries (or (get contract :values) (js-object))))) (__idx_74 0))
+              (while
+                (< __idx_74 (js-length __coll_73))
+                (let
+                  ((entry (aref __coll_73 __idx_74)))
+                  (let*
+                    ((name (aref entry 0)) (expected (aref entry 1)) (actual (aref mod name)))
+                    (js-call assert :deepEqual actual expected)
+                    (js-call observations :push (js-object :name name :value (valueRecord actual)))))
+                (setq __idx_74 (1+ __idx_74))))
+            (let*
+              ((__coll_75 (Array/from (or (get contract :calls) (js-array)))) (__idx_76 0))
+              (while
+                (< __idx_76 (js-length __coll_75))
+                (let
+                  ((call (aref __coll_75 __idx_76)))
+                  (let*
+                    ((fn-name (or (get call :javascriptName) (get call :name))) (res (try
+                          (js-object :failed false :value (await (js-call (aref mod fn-name) :apply mod (get call :args))))
+                          (catch
+                            failure
+                            (js-object :failed t :error failure)))))
+                    (if
+                      (not (undefined? (get call :error)))
+                      (progn
+                        (assert (get res :failed) "original exported call must throw")
+                        (js-call assert :equal (when
+                            (not (nullish? (get res :error)))
+                            (get (get res :error) :message)) (get call :error))
+                        (js-call observations :push (js-object :name (get call :name) :error (get call :error))))
+                      (progn
+                        (when
+                          (get res :failed)
+                          (throw (get res :error)))
+                        (js-call assert :deepEqual (get res :value) (get call :expected))
+                        (js-call observations :push (js-object :name (get call :name) :value (valueRecord (get res :value))))))))
+                (setq __idx_76 (1+ __idx_76))))
+            observations))
+        (let*
+          ((a (await (managedRuntime artifact target (merge-objs options (js-object :allowHostCapabilities t))))) (failed-box (box-val false)))
+          (try
+            (js-call a :auto (if
+                (not (nullish? (get contract :auto)))
+                (get contract :auto)
+                65536))
+            (let*
+              ((__coll_77 (Array/from (globalThis.Object.entries (or (get contract :values) (js-object))))) (__idx_78 0))
+              (while
+                (< __idx_78 (js-length __coll_77))
+                (let
+                  ((entry (aref __coll_77 __idx_78)))
+                  (let*
+                    ((name (aref entry 0)) (expected (aref entry 1)) (value (js-call a :getExport name)))
+                    (try
+                      (let*
+                        ((actual (managedValue a value)))
+                        (js-call assert :deepEqual actual expected)
+                        (js-call observations :push (js-object :name name :value (valueRecord actual))))
+                      (finally
+                        (js-call a :release value)))))
+                (setq __idx_78 (1+ __idx_78))))
+            (let*
+              ((__coll_79 (Array/from (or (get contract :calls) (js-array)))) (__idx_80 0))
+              (while
+                (< __idx_80 (js-length __coll_79))
+                (let
+                  ((call (aref __coll_79 __idx_80)))
+                  (let*
+                    ((args (js-array)) (value-box (box-val undefined)))
+                    (try
+                      (let*
+                        ((__coll_81 (Array/from (get call :args))) (__idx_82 0))
+                        (while
+                          (< __idx_82 (js-length __coll_81))
+                          (let
+                            ((arg (aref __coll_81 __idx_82)))
+                            (js-call args :push (box a arg)))
+                          (setq __idx_82 (1+ __idx_82))))
+                      (let*
+                        ((res (try
+                              (let*
+                                ((v (js-call a :invoke (get call :name) args)))
+                                (set-box! value-box v)
+                                (js-object :failed false :value v))
+                              (catch
+                                caught
+                                (js-object :failed t :error caught)))))
+                        (if
+                          (not (undefined? (get call :error)))
+                          (progn
+                            (assert (get res :failed) "original exported call must throw")
+                            (js-call assert :equal (when
+                                (not (nullish? (get res :error)))
+                                (get (get res :error) :message)) (get call :error))
+                            (js-call observations :push (js-object :name (get call :name) :error (get call :error))))
+                          (progn
+                            (when
+                              (get res :failed)
+                              (throw (get res :error)))
+                            (let*
+                              ((actual (managedValue a (get res :value))))
+                              (js-call assert :deepEqual actual (get call :expected))
+                              (js-call observations :push (js-object :name (get call :name) :value (valueRecord actual)))))))
+                      (finally
+                        (js-call a :release (unbox value-box))
+                        (js-call args :forEach (lambda (arg) (js-call a :release arg)))))))
+                (setq __idx_80 (1+ __idx_80))))
+            observations
+            (catch
+              error
+              (set-box! failed-box t)
+              (throw error))
+            (finally
+              (let*
+                ((cleanup-box (box-val undefined)) (cleanup-failed (box-val false)) (actions (js-array (lambda () (js-call a :closeModule)) (lambda () (js-call a :collect)) (lambda () (js-call assert :equal (js-call a :live) 0)) (lambda () (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)) (lambda () (when
+                          (= (typeof-str (get a :close)) "function")
+                          (js-call a :close))))))
+                (let*
+                  ((__coll_83 (Array/from actions)) (__idx_84 0))
+                  (while
+                    (< __idx_84 (js-length __coll_83))
+                    (let
+                      ((action (aref __coll_83 __idx_84)))
+                      (try
+                        (action)
+                        (catch
+                          error
+                          (when
+                            (not (unbox cleanup-failed))
+                            (set-box! cleanup-failed t)
+                            (set-box! cleanup-box error)))))
+                    (setq __idx_84 (1+ __idx_84))))
+                (when
+                  (and (not (unbox failed-box)) (unbox cleanup-failed))
+                  (throw (unbox cleanup-box))))))))))
+  (export executeOriginalProgram executeCompilerSessionProgram runIsolatedExports managedRuntime executeExports)
+)

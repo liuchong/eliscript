@@ -433,7 +433,12 @@
                   (path (resolve (get fixture :preparation) (str host "-raw-ir" (if (= (get process :platform) "linux") ".so" ".dylib"))))
                   (originalTrap undefined) (snapshot undefined))
                   (await (writeFile path (get product :bytes)))
-                  (let ((runtime (await (openNativeMemory path (js-object :read32 1 :set32 2 :grow 1 :size 0)
+                  (let ((runtime (await (openNativeMemory path
+                    (js-object
+                      :read32 (js-object :parameterTypes (js-array "u32") :resultType "u32")
+                      :set32 (js-object :parameterTypes (js-array "u32" "u32") :resultType "u32")
+                      :grow (js-object :parameterTypes (js-array "u32") :resultType "u32")
+                      :size (js-object :parameterTypes (js-array) :resultType "u32"))
                     (js-object :initialPages 1 :maximumPages 2 :nativeTarget fullProjectNativeTarget :debug (get (get product :metadata) :debug) :trapSites (get (get (get product :metadata) :debug) :trapSites))))))
                     (try
                       (ae (unsigned-bit-shift-right (js-call runtime :invoke "set32" 8 4294967295) 0) 4294967295) (ae (unsigned-bit-shift-right (js-call runtime :invoke "read32" 8) 0) 4294967295)

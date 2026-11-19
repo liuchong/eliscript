@@ -1,0 +1,650 @@
+(module tools.backends.compiler-corpus-migrated-ground
+  (import "../../dist/bootstrap/reader.mjs" read-string)
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "node:crypto" createHash)
+  (import "node:fs/promises" readdir)
+  (import "node:path" resolve)
+  (import "node:url" pathToFileURL)
+  (import "./compiler-corpus-source-ground.mjs"
+    nullish-or digest originalReportOnlyLocators originalRegion sourcePath
+    cloneCompilerCorpusModules cloneSourceProjectRequest)
+
+  (defasync migrated-original-input (context suite name top)
+    (let* ((filename (str (js-call suite :slice 0 -4) ".eli"))
+           (source (await (funcall (get context :text) filename)))
+           (forms (read-string source filename)) (nodes (migrated-nodes forms))
+           (matches (if top (js-call nodes :filter (lambda (node)
+             (and (migrated-head-p node "defconst") (migrated-symbol-p (aref (get node :items) 1) name)))) nil))
+           (node (if top
+             (progn (unless (= (js-length matches) 1) (throw (new globalThis.TypeError "original maintained declaration changed")))
+               (aref (get (aref matches 0) :items) 2))
+             (migrated-binding nodes name)))
+           (points (Array/from source)) (span (get node :span))
+           (start (js-length (js-call (js-call points :slice 0 (get span :start)) :join "")))
+           (end (js-length (js-call (js-call points :slice 0 (get span :end)) :join "")))
+           (artifact (await (funcall (get context :text) suite))))
+      (unless (= (compile-string source filename)
+        (js-call artifact :replace (new globalThis.RegExp "\\n?//# sourceMappingURL=[^\\r\\n]*\\r?\\n?$") "\n"))
+        (throw (new globalThis.TypeError "original maintained fixture differs from its emitted artifact")))
+      (js-object :code (migrated-data node) :filename filename :source source :nodes nodes
+        :sourceSha256 (digest source) :region (js-object :start start :end end
+          :byteStart (globalThis.Buffer.byteLength (js-call source :slice 0 start))
+          :byteEnd (globalThis.Buffer.byteLength (js-call source :slice 0 end))
+          :sha256 (digest (js-call source :slice start end))))))
+
+  (defun migrated-node-text (source node)
+    (let ((span (get node :span)))
+      (js-call (js-call (Array/from source) :slice (get span :start) (get span :end)) :join "")))
+
+  (defasync addOriginalFormatterRecipes (options)
+    (let* ((add (get options :add))
+           (locators (get options :locators))
+           (text (get options :text))
+           (file (get options :file))
+           (sourceRoot (get options :sourceRoot))
+           (suite "tests/bootstrap-formatter.test.mjs")
+           (suiteLocators (js-call locators :filter (lambda (item) (= (get item :file) suite)))))
+      (if (= (js-length suiteLocators) 0)
+        undefined
+        (let* ((original (await (funcall text suite)))
+               (input (await (migrated-original-input options suite "source" false)))
+               (expected (await (migrated-original-input options suite "expected" false)))
+               (semantic (await (migrated-original-input options suite "semanticSource" false)))
+               (origin (js-object :suite suite :sourceSha256 (get (await (funcall file suite)) :sha256)
+                         :regions (js-array (migrated-whole-region original))
+                         :maintainedSource (js-object :sourceFile (get input :filename) :sourceSha256 (get input :sourceSha256)
+                           :sourceRegions (js-array (get input :region) (get expected :region) (get semantic :region)))))
+               (refs (lambda (path) (js-object :$compilerCorpusRef path)))
+               (append-seq
+                 (lambda (id steps)
+                   (funcall add
+                     (js-object :id (str "original-sequence:formatter-" id) :kind "sequence"
+                       :coverage (js-call suiteLocators :map (lambda (item) (get item :id)))
+                       :original (globalThis.structuredClone origin)
+                       :expected (js-object :kind "sequence") :steps steps))))
+               (modules (js-array))
+               (mod-names (js-array "formatter" "reader" "syntax"))
+               (m-idx 0))
+          (while (< m-idx (js-length mod-names))
+            (let ((name (aref mod-names m-idx)))
+              (js-call modules :push
+                (js-object :id (str "bootstrap/compiler/" name ".mjs")
+                  :filename (str "bootstrap/compiler/" name ".eli")
+                  :source (await (funcall text (str "bootstrap/compiler/" name ".eli"))))))
+            (setq m-idx (1+ m-idx)))
+          (let* ((bridge (str "(import \"./bootstrap/compiler/formatter.mjs\" formatter-format formatter-width formatter-indent format-source)\n"
+                           "(defconst formatName formatter-format) (defconst formatWidth formatter-width) (defconst formatIndent formatter-indent)\n"
+                           "(defun format-source-for-host (source filename) (format-source source filename))\n"
+                           "(defun diagnostic-report (source mode) (try (format-source source \"broken.eli\") (catch error (let ((d (get error :eliscriptDiagnostic))) "
+                           "(if (= mode 0) (js-array (get d :format) (get d :code) (get d :phase) (get (get d :location) :file)) "
+                           "(js-array (get d :code) (get d :phase) (get d :message)))))))\n"
+                           "(export formatName formatWidth formatIndent format-source-for-host diagnostic-report)"))
+                 (project (js-object :operation "project" :resolveImports t :entry "entry.mjs"
+                            :modules (js-call (js-array (js-object :id "entry.mjs" :filename "formatter-original-oracle.eli" :source bridge))
+                                       :concat modules))))
+            (funcall append-seq "metadata-and-errors"
+              (js-array
+                (js-object :id "original-exports" :request project
+                  :artifact (js-object :kind "exports" :isolated t
+                              :values (js-object :formatName "eliscript-formatter" :formatWidth 88 :formatIndent 2)
+                              :calls (js-array
+                                       (js-object :name "diagnostic-report" :javascriptName "diagnostic_report"
+                                         :args (js-array "(module broken" 0)
+                                         :expected (js-array "eliscript-diagnostic" "ELI-R0001" "reader" "broken.eli"))
+                                       (js-object :name "diagnostic-report" :javascriptName "diagnostic_report"
+                                         :args (js-array 42 1)
+                                         :expected (js-array "ELI-F0001" "formatter" "formatter source must be a string"))
+                                       (js-object :name "format-source-for-host" :javascriptName "format_source_for_host"
+                                         :args (js-array (get input :code) "node.eli")
+                                         :expected (get expected :code)))))))
+            (funcall add
+              (js-object :id "original-program:formatter-node" :kind "project"
+                :coverage (js-call suiteLocators :map (lambda (item) (get item :id)))
+                :modules modules :entry "bootstrap/compiler/formatter.mjs"
+                :request (js-object :operation "project" :resolveImports t)
+                :execution (js-object :kind "original-program" :host nil :hostSource nil :environment "COMPILER_URL" :aliases t
+                             :hostEval (str "import {pathToFileURL} from \"node:url\";\n"
+                                         "const c = await import(pathToFileURL(process.env.COMPILER_URL).href); "
+                                         "process.stdout.write(c.format_source(" (JSON/stringify (get input :code)) ", 'node.eli'));"))
+                :expected (js-object :kind "seed-program" :oracleRequired t :stdout (get expected :code))
+                :original (Object/assign (js-object) (globalThis.structuredClone origin)
+                            (js-object :fixture "bootstrap/compiler/formatter.eli" :host suite))))
+            (funcall append-seq "concrete-syntax"
+              (js-array
+                (js-object :id "canonical" :request (js-object :operation "format" :source (get input :code) :filename "formatter-case.eli")
+                  :expected (js-object :source (get expected :code)))
+                (js-object :id "idempotent" :request (js-object :operation "format" :source (funcall refs "canonical.source") :filename "formatter-case.eli")
+                  :sameFieldsAs (js-object :step "canonical" :fields (js-array "source")))))
+            (let ((sources (js-array))
+                  (visit nil))
+              (setq visit
+                (async (directory)
+                  (let ((entries (await (readdir (sourcePath sourceRoot directory) (js-object :withFileTypes t))))
+                        (e-idx 0))
+                    (while (< e-idx (js-length entries))
+                      (let* ((entry (aref entries e-idx))
+                             (name (str directory "/" (get entry :name))))
+                        (if (js-call entry :isDirectory)
+                          (await (funcall visit name))
+                          (when (and (js-call entry :isFile) (js-call name :endsWith ".eli"))
+                            (js-call sources :push name))))
+                      (setq e-idx (1+ e-idx))))))
+              (await (funcall visit "bootstrap/compiler"))
+              (await (funcall visit "stdlib"))
+              (js-call sources :sort)
+              (when (< (js-length sources) 40)
+                (throw (new globalThis.Error "original formatter source corpus has fewer than forty programs")))
+              (let ((all-sources (js-call (js-array "formatter-semantic.eli") :concat sources))
+                    (index 0))
+                (while (< index (js-length all-sources))
+                  (let* ((filename (aref all-sources index))
+                         (source (if (= index 0) (get semantic :code) (await (funcall text filename)))))
+                    (funcall append-seq (str "semantic-" index)
+                      (js-array
+                        (js-object :id "canonical" :request (js-object :operation "format" :source source :filename filename))
+                        (js-object :id "idempotent" :request (js-object :operation "format" :source (funcall refs "canonical.source") :filename filename)
+                          :sameFieldsAs (js-object :step "canonical" :fields (js-array "source")))
+                        (js-object :id "original-js" :request (js-object :operation "compile" :source source :filename filename))
+                        (js-object :id "formatted-js" :request (js-object :operation "compile" :source (funcall refs "canonical.source") :filename filename)
+                          :sameFieldsAs (js-object :step "original-js" :fields (js-array "javascript"))))))
+                  (setq index (1+ index))))
+              suite))))))
+
+  (defasync addOriginalGeneratedNamesRecipes (options)
+    (let* ((add (get options :add))
+           (locators (get options :locators))
+           (text (get options :text))
+           (file (get options :file))
+           (suite "tests/macro-generated-names.test.mjs")
+           (coverage (js-call (js-call locators :filter (lambda (item) (= (get item :file) suite)))
+                       :map (lambda (item) (get item :id)))))
+      (if (= (js-length coverage) 0)
+        undefined
+        (let* ((original (await (funcall text suite)))
+               (input (await (migrated-original-input options suite "source" t)))
+               (input-code (get input :code))
+               (scopes (js-call (get input :nodes) :filter (lambda (node)
+                 (and (migrated-head-p node "let")
+                   (let* ((bindings (aref (get node :items) 1)) (first (aref (get bindings :items) 0)))
+                     (and first (migrated-symbol-p (aref (get first :items) 0) "module")))))))
+               (assertions (progn
+                 (unless (= (js-length scopes) 1) (throw (new globalThis.TypeError "original generated-name assertion scope changed")))
+                 (js-call (js-call (get (aref scopes 0) :items) :slice 2) :map
+                   (lambda (node) (migrated-node-text (get input :source) node)))))
+               (bun-source (str "(module original.generated-name-check
+(import \"bun:test\" expect)
+"
+                 "(import \"node:process\" :default process) (import \"node:url\" pathToFileURL)
+"
+                 "(defun be (actual expected) (js-call (expect actual) :toBe expected))
+"
+                 "(defun same (actual expected) (js-call (expect actual) :toEqual expected))
+"
+                 "(defasync main () (let ((module (await (funcall (js* \"(specifier) => import(specifier)\") "
+                 "(get (pathToFileURL (aref (get process :argv) 2)) :href)))))
+"
+                 (js-call assertions :join "\n") "))
+(main))"))
+               (node-source (str "(import \"node:process\" :default process) (import \"node:url\" pathToFileURL)
+"
+                 "(defasync main () (put (get process :argv) 2 (get (pathToFileURL (aref (get process :argv) 2)) :href))
+"
+                 "(await (funcall (js* \"(specifier) => import(specifier)\") "
+                 (JSON/stringify (get (pathToFileURL (resolve (get options :sourceRoot) "tests/fixtures/macro-generated-names-host.mjs")) :href)) ")))
+(main)"))
+               (origin (js-object :suite suite :fixture suite :host suite
+                         :sourceSha256 (get (await (funcall file suite)) :sha256)
+                         :regions (js-array (migrated-whole-region original))
+                         :maintainedSource (js-object :sourceFile (get input :filename) :sourceSha256 (get input :sourceSha256)
+                           :sourceRegions (js-array (get input :region)))))
+               (modules (js-array (js-object :id "generated-names.mjs" :filename "generated-names.eli" :source input-code))))
+          (js-call (js-array "bun" "node") :forEach (lambda (host)
+            (let ((hostSource (compile-string (if (= host "bun") bun-source node-source) (str "generated-name-" host ".eli"))))
+              (funcall add
+                (js-object :id (str "original-program:macro-generated-names-" host) :kind "project" :coverage coverage
+                  :modules (cloneCompilerCorpusModules modules) :entry "generated-names.mjs"
+                  :request (js-object :operation "project" :sourceMap t)
+                  :execution (js-object :kind "original-program"
+                               :host (str "tests/__eliscript_original_generated_names_" host ".mjs")
+                               :hostSource hostSource :argument "path" :argumentModules (js-array "generated-names.mjs")
+                               :aliases t :requiresBun (= host "bun") :hostRuntime host)
+                  :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+                  :original (globalThis.structuredClone origin))))))
+          (funcall add
+            (js-object :id "original-stage:macro-generated-names-emitter" :kind "stage" :coverage coverage
+              :request (js-object :operation "stage" :stage "emitter" :source input-code :filename "generated-names.eli"
+                         :sourceMap (js-object :generatedFile "fixture.mjs" :sourceName "generated-names.eli"))
+              :expected (js-object :kind "stage" :oracleRequired t)
+              :original (Object/assign (js-object) (globalThis.structuredClone origin)
+                          (js-object :manifest "stable-compatibility"
+                            :oracleCase (js-object :name "macro-generated-names" :source input-code :filename "generated-names.eli")))))
+          (let* ((includes (js-array))
+                 (excludes (js-array))
+                 (matches (js-call (get input :nodes) :filter (lambda (node)
+                   (and (migrated-head-p node "js-call")
+                     (= (get (aref (get node :items) 2) :name) "toContain")
+                     (js-call (migrated-node-text (get input :source) node) :includes "(expect seedJavaScript)")))))
+                 (m-idx 0))
+            (while (< m-idx (js-length matches))
+              (let* ((node (aref matches m-idx)) (items (get node :items)) (receiver (aref items 1))
+                     (value (migrated-data (aref items 3))))
+                (js-call (if (migrated-head-p receiver "get") excludes includes) :push value))
+              (setq m-idx (1+ m-idx)))
+            (when (or (/= (js-length includes) 3) (/= (js-length excludes) 1))
+              (throw (new globalThis.Error "original generated-name emission assertion inventory changed")))
+            (funcall add
+              (js-object :id "original-sequence:macro-generated-name-emission" :kind "sequence" :coverage coverage
+                :original (globalThis.structuredClone origin) :expected (js-object :kind "sequence")
+                :steps (js-array
+                         (js-object :id "first"
+                           :request (js-object :operation "compile" :source input-code :filename "generated-names.eli"
+                                      :sourceMap (js-object :generatedFile "generated-names.mjs" :sourceName "generated-names.eli"))
+                           :includesJavascript includes :excludesJavascript excludes)
+                         (js-object :id "repeat"
+                           :request (js-object :operation "compile" :source input-code :filename "generated-names.eli"
+                                      :sourceMap (js-object :generatedFile "generated-names.mjs" :sourceName "generated-names.eli"))
+                           :sameFieldsAs (js-object :step "first" :fields (js-array "javascript" "sourceMap")))))))
+          suite))))
+
+  ;; These two maintained recipes read Eliscript syntax, never generated JS
+  ;; formatting. Unrelated original recipes above remain unchanged.
+  (defun migrated-symbol-p (node name)
+    (and node (= (get node :kind) "symbol") (= (get node :name) name)))
+  (defun migrated-head-p (node name)
+    (and node (= (get node :kind) "list") (Array/isArray (get node :items))
+      (> (js-length (get node :items)) 0) (migrated-symbol-p (aref (get node :items) 0) name)))
+  (defun migrated-nodes (forms)
+    (let ((pending (js-call forms :slice)) (nodes (js-array)))
+      (while (> (js-length pending) 0)
+        (let ((node (js-call pending :pop)))
+          (js-call nodes :push node)
+          (when (Array/isArray (get node :items))
+            (Reflect/apply (get pending :push) pending (get node :items))))) nodes))
+  (defun migrated-data (node)
+    (cond ((= (get node :kind) "literal") (get node :value))
+      ((migrated-head-p node "str")
+        (let ((values (js-call (js-call (get node :items) :slice 1) :map migrated-data)))
+          (unless (js-call values :every (lambda (value) (= (value-type value) "string")))
+            (throw (new globalThis.TypeError "maintained fixture string must contain literal text only")))
+          (js-call values :join "")))
+      ((migrated-head-p node "js-array")
+        (js-call (js-call (get node :items) :slice 1) :map migrated-data))
+      (t (throw (new globalThis.TypeError "maintained fixture data must be literal Eliscript syntax")))))
+  (defun migrated-binding (nodes name)
+    (let ((matches (js-call nodes :filter (lambda (node)
+      (and (= (get node :kind) "list") (= (js-length (get node :items)) 2)
+        (migrated-symbol-p (aref (get node :items) 0) name))))))
+      (unless (= (js-length matches) 1)
+        (throw (new globalThis.TypeError (str "maintained fixture binding is not unique: " name))))
+      (aref (get (aref matches 0) :items) 1)))
+  (defun migrated-expect-p (node variable method)
+    (and (migrated-head-p node "js-call") (= (js-length (get node :items)) 4)
+      (let* ((items (get node :items)) (expectation (aref items 1)) (member (aref items 2)))
+        (and (migrated-head-p expectation "expect") (= (js-length (get expectation :items)) 2)
+          (migrated-symbol-p (aref (get expectation :items) 1) variable)
+          (= (get member :kind) "keyword") (= (get member :name) method)))))
+  (defun migrated-hash (source)
+    (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
+  (defun migrated-whole-region (source)
+    (js-object :start 0 :end (js-length source) :byteStart 0
+      :byteEnd (js-call globalThis.Buffer :byteLength source)
+      :sha256 (migrated-hash source)))
+  (defasync migrated-source-assets (context files)
+    (let ((proofs (js-array)) (index 0))
+      (while (< index (js-length files))
+        (let* ((file (aref files index)) (asset (await (funcall (get context :file) file))))
+          (js-call proofs :push (js-object :file file :sourceSha256 (get asset :sha256))))
+        (setq index (1+ index))) proofs))
+  (defasync addOriginalESMRecipes (context)
+    (let* ((suite "tests/esm-imports.test.mjs") (maintained "tests/esm-imports.test.eli")
+           (coverage (js-call (js-call (get context :locators) :filter
+             (lambda (item) (= (get item :file) suite))) :map (lambda (item) (get item :id)))))
+      (when (> (js-length coverage) 0)
+        (let* ((source-asset (await (funcall (get context :file) maintained)))
+               (original (await (funcall (get context :text) suite)))
+               (source (await (funcall (get context :text) maintained)))
+               (nodes (migrated-nodes (read-string source maintained)))
+               (input (migrated-data (migrated-binding nodes "source")))
+               (provider-expression (migrated-binding nodes "provider"))
+               (provider-items (get provider-expression :items))
+               (includes (js-call (js-call nodes :filter (lambda (node)
+                 (migrated-expect-p node "javascript" "toContain"))) :map
+                 (lambda (node) (migrated-data (aref (get node :items) 3)))))
+               (expected-nodes (js-call nodes :filter (lambda (node)
+                 (migrated-expect-p node "actual" "toEqual")))))
+          (unless (= (get source-asset :sha256)
+            "a6e8e0166cae35aebf3187f421609a5e57afad89fd6d2cc1a9c77d9da754a878")
+            (throw (new globalThis.TypeError "maintained ESM assertions changed; update their complete recipe")))
+          (unless (and (= (value-type input) "string") (= (js-length includes) 3)
+            (= (js-length expected-nodes) 1) (migrated-head-p provider-expression "js-call")
+            (= (js-length provider-items) 5) (migrated-symbol-p (aref provider-items 1) "compiler")
+            (= (get (aref provider-items 2) :name) "compile_string"))
+            (throw (new globalThis.TypeError "maintained ESM fixture shape or assertion inventory changed")))
+          (let* ((provider (compile-string (migrated-data (aref provider-items 3))
+                             (migrated-data (aref provider-items 4))))
+                 (expected (migrated-data (aref (get (aref expected-nodes 0) :items) 3)))
+                 (proofs (await (migrated-source-assets context (js-array maintained
+                   "tools/backends/compiler-corpus-ground.eli" "tools/backends/compiler-corpus-ground.mjs"
+                   "tools/backends/eliscript/compiler-corpus-esm-host.eli" "tools/backends/compiler-corpus-esm-host.mjs"
+                   "bootstrap/host/bun.eli" "bootstrap/host/bun.mjs"))))
+                 (origin (js-object :suite suite :fixture suite :host suite
+                   :sourceSha256 (get (await (funcall (get context :file) suite)) :sha256)
+                   :regions (js-array (migrated-whole-region original)) :sourceAssets proofs
+                   :maintainedAssertions (js-object :sourceFile maintained :sourceSha256 (get source-asset :sha256)
+                     :generatedFile suite)))
+                 (add (get context :add)))
+            (unless (Array/isArray expected)
+              (throw (new globalThis.TypeError "maintained ESM expected result must remain an array")))
+            (funcall add (js-object :id "original-stage:esm-imports-emitter" :kind "stage" :coverage coverage
+              :request (js-object :operation "stage" :stage "emitter" :source input :filename "imports.eli"
+                :sourceMap (js-object :generatedFile "fixture.mjs" :sourceName "imports.eli"))
+              :expected (js-object :kind "stage" :oracleRequired t)
+              :original (Object/assign (js-object) (globalThis.structuredClone origin)
+                (js-object :manifest "stable-compatibility"
+                  :oracleCase (js-object :name "esm-imports" :source input :filename "imports.eli")))))
+            (funcall add (js-object :id "original-sequence:esm-imports-emission" :kind "sequence" :coverage coverage
+              :original (globalThis.structuredClone origin) :expected (js-object :kind "sequence")
+              :steps (js-array (js-object :id "emission" :request
+                (js-object :operation "compile" :source input :filename "imports.eli") :includesJavascript includes))))
+            (js-call (js-array "bun" "node") :forEach (lambda (host)
+              (funcall add (js-object :id (str "original-program:esm-imports-" host) :kind "project" :coverage coverage
+                :modules (js-array (js-object :id "imports.mjs" :filename "imports.eli" :source input)) :entry "imports.mjs"
+                :request (js-object :operation "project" :resolveImports false :sourceMap t
+                  :hostModules (js-array (js-object :id "provider.mjs" :specifier "./provider.mjs"
+                    :referrer "imports.mjs" :allowedExports (js-array "default" "effect_count" "named_value") :namespace t))
+                  :hostSources (js-array (js-object :id "provider.mjs" :filename "provider.mjs" :source provider)))
+                :execution (js-object :kind "original-program" :host "tools/backends/compiler-corpus-esm-host.mjs"
+                  :argument "path" :argumentModules (js-array "imports.mjs") :aliases t
+                  :requiresBun (= host "bun") :hostRuntime host)
+                :expected (js-object :kind "seed-program" :oracleRequired t :stdout (str (JSON/stringify expected) "\n"))
+                :original (globalThis.structuredClone origin))))) suite)))))
+  (defasync migrated-add-ir-recipe (context)
+    (let* ((suite "tests/bootstrap-ir.test.mjs") (maintained "tests/bootstrap-ir.test.eli")
+           (coverage (js-call (js-call (get context :locators) :filter
+             (lambda (item) (= (get item :file) suite))) :map (lambda (item) (get item :id)))))
+      (when (> (js-length coverage) 0)
+        (let* ((source-asset (await (funcall (get context :file) maintained)))
+               (source (await (funcall (get context :text) suite)))
+               (modules (js-array)) (index 0)
+               (bootstrap-sources (get context :bootstrapSources)))
+          (unless (= (get source-asset :sha256)
+            "5580b47174bf5e2f088de2a688e56d98ce80fa87192212a15ed21d8b2fbec9e0")
+            (throw (new globalThis.TypeError "maintained IR assertions changed; update their complete replay")))
+          (while (< index (js-length bootstrap-sources))
+            (let ((filename (aref bootstrap-sources index)))
+              (unless (and (js-call filename :startsWith "bootstrap/compiler/") (js-call filename :endsWith ".eli"))
+                (throw (new globalThis.TypeError "original compiler source graph changed")))
+              (js-call modules :push (js-object :id (str (js-call filename :slice 0 -4) ".mjs")
+                :filename filename :source (await (funcall (get context :text) filename)))))
+            (setq index (1+ index)))
+          (let ((proofs (await (migrated-source-assets context (js-array maintained
+            "tools/backends/compiler-corpus-ground.eli" "tools/backends/compiler-corpus-ground.mjs"
+            "tools/backends/eliscript/compiler-corpus-ir-host.eli" "tools/backends/compiler-corpus-ir-host.mjs"
+            "tests/bootstrap-ir-oracle.el" "tests/fixtures/bootstrap-ir.json")))))
+            (funcall (get context :add) (js-object :id "original-program:compiler-module-bootstrap-ir" :kind "project"
+              :coverage coverage :modules modules :entry "bootstrap/compiler/compiler.mjs"
+              :request (js-object :operation "project" :resolveImports t :phased t :sourceMap t
+                :entries (js-call modules :map (lambda (item) (get item :id))))
+              :execution (js-object :kind "original-program" :host "tools/backends/compiler-corpus-ir-host.mjs"
+                :arguments (js-array (js-object :directory t)) :aliases t :requiresBun t
+                :runtimeProfile "compiler" :compilerSourceMaps t)
+              :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+              :original (js-object :manifest "stable-compatibility" :suite suite :fixture suite :host suite
+                :sourceSha256 (get (await (funcall (get context :file) suite)) :sha256)
+                :regions (js-array (migrated-whole-region source)) :sourceAssets proofs
+                :originalAssertion "bootstrapped lowerer matches complete seed IR trees and spans"
+                :maintainedAssertions (js-object :sourceFile maintained :sourceSha256 (get source-asset :sha256)
+                  :generatedFile suite))))
+            suite)))))
+  (defasync unaffectedCompilerModulePrograms (context)
+    (let* ((add (get context :add))
+           (locators (get context :locators))
+           (text (get context :text))
+           (file (get context :file))
+           (bootstrapSources (get context :bootstrapSources))
+           (modules (js-array))
+           (mappedSuites (js-array))
+           (bs-idx 0))
+      (while (< bs-idx (js-length bootstrapSources))
+        (let ((filename (aref bootstrapSources bs-idx)))
+          (unless (and (js-call filename :startsWith "bootstrap/compiler/") (js-call filename :endsWith ".eli"))
+            (throw (new globalThis.TypeError "original compiler source graph changed")))
+          (js-call modules :push
+            (js-object :id (str (js-call filename :slice 0 -4) ".mjs")
+              :filename filename :source (await (funcall text filename)))))
+        (setq bs-idx (1+ bs-idx)))
+      (let ((plans
+              (js-array
+                (js-object :name "bootstrap-reader" :suite "tests/bootstrap-reader.test.mjs"
+                  :assertion "bootstrapped reader matches normalized seed syntax and diagnostics"
+                  :helperStart "const artifactNames = [" :helperEnd "\nlet directory ="
+                  :begin "  return (await (async (reader) => {" :end "\n}), 30000);"
+                  :stage "reader" :diagnostics t :repeatGraph t)
+                (js-object :name "bootstrap-expander" :suite "tests/bootstrap-expander.test.mjs"
+                  :assertion "bootstrapped expander matches seed syntax, spans, and diagnostics"
+                  :helperStart "function generatedResult("
+                  :begin "        return (await (async (reader) => {" :end "\n      } finally {" :stage "expander" :diagnostics t)
+                (js-object :name "bootstrap-analyzer" :suite "tests/bootstrap-analyzer.test.mjs"
+                  :assertion "bootstrapped analyzer matches seed acceptance and diagnostics"
+                  :helperStart "function generatedResult("
+                  :begin "        return (await (async (reader) => {" :end "\n      } finally {" :stage "analyzer" :diagnostics t)
+                (js-object :name "bootstrap-emitter" :suite "tests/bootstrap-emitter.test.mjs"
+                  :assertion "bootstrapped emitter matches seed ESM and Source Map output"
+                  :helperStart "const fixturePath = "
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :stage "emitter" :child t)
+                (js-object :name "reader-program-fuzz" :suite "tests/reader-program-fuzz.test.mjs"
+                  :assertion "100000 deterministic reader and program mutations preserve every invariant"
+                  :helperStart "function be(actual, expected) {" :begin "  await (proveFuzzProgramEmission());"
+                  :end "\n}), 320000);" :child t :fuzz t)
+                (js-object :name "canonical-ir" :suite "tests/bootstrap-ir-serialization.test.mjs"
+                  :assertion "canonical IR is lossless, strict, and host reproducible"
+                  :helperStart "function be(actual, expected) {"
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :child t)
+                (js-object :name "ir-kind" :suite "tests/compiler-ir-kind.test.mjs"
+                  :assertion "optimized IR node-kind decisions match the linear reference"
+                  :helperStart "const reportPath = "
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :constants "compilerSources")
+                (js-object :name "locate" :suite "tests/compiler-locate.test.mjs"
+                  :assertion "ordered compiler mark location matches its scan and copy reference"
+                  :helperStart "const reportPath = "
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :constants "compilerSources")
+                (js-object :name "indent" :suite "tests/compiler-indent.test.mjs"
+                  :assertion "chunked compiler indentation matches its character reference"
+                  :helperStart "function artifactFragments("
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :constants "compilerSources")
+                (js-object :name "runtime-scan" :suite "tests/compiler-runtime-scan.test.mjs"
+                  :assertion "optimized compiler runtime scan matches its readable reference"
+                  :helperStart "const reportPath = "
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :constants "compilerSources")
+                (js-object :name "source-map-cursor" :suite "tests/compiler-source-map-cursor.test.mjs"
+                  :assertion "ordered Source Map cursors match their complete scan references"
+                  :helperStart "const reportPath = "
+                  :begin "        return (await (async (modules) => {" :end "\n      } finally {" :constants "compilerSources")
+                (js-object :name "reader-character" :suite "tests/compiler-reader-character.test.mjs"
+                  :assertion "reader character predicates match their Eliscript references"
+                  :helperStart "const reportPath = "
+                  :begin "        return ((reader, hostBoundaries, checked) => {" :end "\n      } finally {")
+                (js-object :name "binary-comparison" :suite "tests/compiler-binary-comparison.test.mjs"
+                  :assertion "binary comparison emission preserves strict argument evaluation"
+                  :helperStart "const reportPath = "
+                  :begin "        return (await (async (compiler) => {" :end "\n      } finally {" :child t)))
+            (plan-idx 0))
+        (while (< plan-idx (js-length plans))
+          (let ((plan (aref plans plan-idx)))
+            (when (js-call locators :some (lambda (item) (= (get item :file) (get plan :suite))))
+              (let* ((original (await (funcall text (get plan :suite))))
+                     (helpers (originalRegion original (nullish-or (get plan :helperStart) "async function run(")
+                                (nullish-or (get plan :helperEnd) "\ntest(")))
+                     (body (originalRegion original (get plan :begin) (nullish-or (get plan :end) "\n  } finally {")))
+                     (transported (str (get plan :assertion) "\n" (get helpers :text) "\n" (get body :text)))
+                     (coverage (js-call (js-call locators :filter (lambda (item)
+                                 (and (= (get item :file) (get plan :suite))
+                                      (= (value-type (get item :contains)) "string")
+                                      (js-call transported :includes (get item :contains))
+                                      (/= (js-call originalReportOnlyLocators :get (get item :file)) (get item :contains)))))
+                                 :map (lambda (item) (get item :id)))))
+                (when (= (js-length coverage) 0)
+                  (throw (new globalThis.TypeError (str "original compiler host has no matching assertion locator: " (get plan :suite)))))
+                (let ((regions (js-array helpers body))
+                      (parts (js-array (get helpers :text) (str "await (async () => {\n" (get body :text) "\n})();")))
+                      (fuzzProofTransport undefined))
+                  (when (get plan :fuzz)
+                    (let* ((before "  await (proveFuzzProgramEmission());")
+                           (after "  await (proveFuzzProgramEmission(directory));")
+                           (start (js-call (get body :text) :indexOf before)))
+                      (when (or (/= start 0) (>= (js-call (get body :text) :indexOf before (js-length before)) 0))
+                        (throw (new globalThis.TypeError "original fuzz semantic proof entry changed")))
+                      (put parts 1 (str "await (async () => {\n" after (js-call (get body :text) :slice (js-length before)) "\n})();"))
+                      (let ((generator (await (funcall file "tools/fuzz/reader-program-fuzz.mjs"))))
+                        (setq fuzzProofTransport
+                          (js-object :kind "selected-compiler-semantic-proof"
+                            :sourceFile (get plan :suite) :originalCall before :selectedCall after
+                            :beforeSha256 (digest (js-call globalThis.Buffer :from before))
+                            :afterSha256 (digest (js-call globalThis.Buffer :from after))
+                            :compilerDirectory "selected-artifact/bootstrap/compiler"
+                            :compilerSources (js-call modules :map (lambda (m)
+                              (js-object :id (get m :id) :filename (get m :filename)
+                                :sourceSha256 (digest (js-call globalThis.Buffer :from (get m :source))))))
+                            :generator (js-object :file (get generator :file) :sourceSha256 (get generator :sha256))
+                            :independentOracle "tests/bootstrap-emitter-oracle.el"
+                            :fallback false)))))
+                  (when (get plan :constants)
+                    (let ((constants (originalRegion original (str "const " (get plan :constants) " = [") "];")))
+                      (js-call regions :push constants)
+                      (js-call parts :unshift (str (get constants :text) "];"))))
+                  (when (get plan :repeatGraph)
+                    (let* ((comparison (originalRegion original
+                             "  (artifactNames)[\"forEach\"](((name) => {"
+                             "\n  return (await (async (reader) => {"))
+                           (request (js-object :operation "project" :resolveImports t :phased t :sourceMap t
+                                      :modules (cloneCompilerCorpusModules modules)
+                                      :entry "bootstrap/compiler/compiler.mjs"
+                                      :entries (js-call modules :map (lambda (item) (get item :id))))))
+                      (js-call regions :push comparison)
+                      (funcall add
+                        (js-object :id "original-sequence:compiler-reader-complete-artifacts" :kind "sequence" :coverage coverage
+                          :original (js-object :suite (get plan :suite)
+                                      :sourceSha256 (get (await (funcall file (get plan :suite))) :sha256)
+                                      :regions (js-array (js-object :start (get comparison :start) :end (get comparison :end)
+                                                           :byteStart (get comparison :byteStart) :byteEnd (get comparison :byteEnd)
+                                                           :sha256 (get comparison :sha256))))
+                          :expected (js-object :kind "sequence")
+                          :steps (js-array (js-object :id "first" :request request)
+                                           (js-object :id "repeat" :request (cloneSourceProjectRequest request) :sameProductAs "first"))))))
+                  (let ((preamble-lines
+                          (js-array
+                            "import {expect} from \"bun:test\";"
+                            "import {readFile,writeFile,mkdtemp,rm} from \"node:fs/promises\";"
+                            "import path,{resolve} from \"node:path\";"
+                            "import {pathToFileURL} from \"node:url\";"
+                            "const projectDirectory=process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT;"
+                            "if(!projectDirectory)throw new Error(\"original compiler host requires its source root\");"
+                            "await import(pathToFileURL(resolve(projectDirectory,\"runtime/unicode-case.mjs\")).href);"
+                            "const {__eliscript_at,__eliscript_at_direct,__eliscript_to_number,__eliscript_numeric_decrement,__eliscript_numeric_relation,__eliscript_numeric_sub,__eliscript_numeric_mul,__eliscript_numeric_div,__eliscript_numeric_rem,__eliscript_numeric_and,__eliscript_numeric_or,__eliscript_numeric_xor,__eliscript_numeric_shl,__eliscript_numeric_shr,__eliscript_numeric_ushr,__eliscript_numeric_neg,__eliscript_numeric_int32,__eliscript_numeric_uint32,__eliscript_numeric_not,__eliscript_numeric_imul}=await import(pathToFileURL(resolve(projectDirectory,\"runtime/prelude.mjs\")).href);"
+                            "const {valueType:__eliscript_value_type,createHostIdentityToken:__eliscript_create_host_identity_token,arrayBuild:__eliscript_array_build,arityError:__eliscript_arity_error,stringToBigint:__eliscript_string_to_bigint,numberFloat64Words:__eliscript_number_float64_words}=await import(pathToFileURL(resolve(projectDirectory,\"runtime/primitives.mjs\")).href);"
+                            "const __eliscript_truthy=(value)=>value!==false&&value!=null;"
+                            "const {run,caseSource,seedResults,loadModule}=await import(pathToFileURL(resolve(projectDirectory,\"tests/helpers/bootstrap-fixture.mjs\")).href);"
+                            "const {copyHostRecord}=await import(pathToFileURL(resolve(projectDirectory,\"tools/backends/compiler-host-record.mjs\")).href);"
+                            "const directory=resolve(process.argv[2],\"bootstrap/compiler\");")))
+                    (unless (js-call (get helpers :text) :includes "function be(")
+                      (js-call preamble-lines :push
+                        "function be(actual,expected){return expect(actual).toBe(expected);}"
+                        "function same(actual,expected){return expect(actual).toEqual(expected);}"))
+                    (unless (js-call (get helpers :text) :includes "const fixturePath =")
+                      (js-call preamble-lines :push
+                        (str "const fixturePath=resolve(projectDirectory,"
+                          (JSON/stringify (str "tests/fixtures/bootstrap-"
+                            (if (and (get plan :stage) (/= (get plan :stage) "emitter")) (get plan :stage) "ir") ".json")) ");")))
+                    (when (get plan :repeatGraph)
+                      (js-call preamble-lines :push
+                        "const firstArtifacts=new Map([[\"reader.mjs.map\",await readFile(resolve(directory,\"reader.mjs.map\"),\"utf8\")]]);"
+                        "const secondArtifacts=firstArtifacts;"))
+                    (when (get plan :stage)
+                      (js-call preamble-lines :push
+                        "const emacs=process.env.EMACS??\"emacs\";"
+                        (str "const oraclePath=resolve(projectDirectory," (JSON/stringify (str "tests/bootstrap-" (get plan :stage) "-oracle.el")) ");")))
+                    (when (get plan :fuzz)
+                      (js-call preamble-lines :push
+                        "const root=projectDirectory;"
+                        "const hostTypeof=(value)=>typeof value;"
+                        "const {fuzzCases}=await import(pathToFileURL(resolve(projectDirectory,\"tools/fuzz/reader-program-fuzz.mjs\")).href);"
+                        "const fuzzPath=resolve(process.argv[2],\"__eliscript_original_fuzz_runner.mjs\");"
+                        "const __eliscript_tdz_ready_0=true,__eliscript_tdz_ready_1=true,__eliscript_tdz_ready_2=true;"
+                        "process.env.ELISCRIPT_ORIGINAL_COMPILER_DIRECTORY=directory;"
+                        (str "await writeFile(fuzzPath,"
+                          (JSON/stringify
+                            (str "import {resolve} from \"node:path\";\n"
+                              "import {pathToFileURL} from \"node:url\";\n"
+                              "await import(pathToFileURL(resolve(process.env.ELISCRIPT_ORIGINAL_SOURCE_ROOT,"
+                              (JSON/stringify "tools/fuzz/reader-program-selected-host.mjs") ")).href);\n"))
+                          ");")))
+                    (when (get plan :diagnostics)
+                      (js-call preamble-lines :push
+                        "const {diagnosticCorpusSuite}=await import(pathToFileURL(resolve(projectDirectory,\"tools/diagnostics/check.mjs\")).href);"
+                        "const diagnosticCorpus=await Bun.file(resolve(projectDirectory,\"contracts/diagnostic-corpus.json\")).json();"
+                        (str "const diagnosticCases=diagnosticCorpusSuite(diagnosticCorpus," (JSON/stringify (get plan :stage)) ").cases;")))
+                    (let* ((preamble (js-call preamble-lines :join "\n"))
+                           (execution (js-object :kind "original-program"
+                                        :host (str "tests/__eliscript_original_compiler_" (get plan :name) ".mjs")
+                                        :hostSource (str preamble "\n" (js-call parts :join "\n") "\n")
+                                        :arguments (js-array (js-object :directory t))
+                                        :aliases t :requiresBun t :runtimeProfile "compiler"))
+                           (orig-meta (js-object :manifest "stable-compatibility" :suite (get plan :suite)
+                                        :fixture (get plan :suite) :host (get plan :suite)
+                                        :sourceSha256 (get (await (funcall file (get plan :suite))) :sha256)
+                                        :regions (js-call regions :map (lambda (r)
+                                          (js-object :start (get r :start) :end (get r :end)
+                                            :byteStart (get r :byteStart) :byteEnd (get r :byteEnd) :sha256 (get r :sha256))))
+                                        :originalAssertion (get plan :assertion))))
+                      (when (get plan :fuzz) (put execution :timeoutMs 320000))
+                      (when (get plan :child) (put execution :childProcesses "inherit-selected-artifact"))
+                      (when (get plan :stage) (put execution :compilerSourceMaps t))
+                      (when fuzzProofTransport
+                        (put orig-meta :setupReplacement fuzzProofTransport)
+                        (let ((paths (js-array "tools/fuzz/reader-program-selected-host.eli"
+                                             "tools/fuzz/reader-program-selected-host.mjs"))
+                              (assets (js-array)) (index 0))
+                          (while (< index (js-length paths))
+                            (let* ((filename (aref paths index)) (identity (await (funcall file filename))))
+                              (js-call assets :push (js-object :file filename :sourceSha256 (get identity :sha256))))
+                            (setq index (1+ index)))
+                          (put orig-meta :sourceAssets assets)))
+                      (funcall add
+                        (js-object :id (str "original-program:compiler-module-" (get plan :name)) :kind "project" :coverage coverage
+                          :modules (cloneCompilerCorpusModules modules) :entry "bootstrap/compiler/compiler.mjs"
+                          :request (js-object :operation "project" :resolveImports t :phased t :sourceMap t
+                                     :entries (js-call modules :map (lambda (item) (get item :id))))
+                          :execution execution
+                          :expected (js-object :kind "seed-program" :oracleRequired t :stdout "")
+                          :original orig-meta))
+                      (js-call mappedSuites :push (get plan :suite))))))))
+          (setq plan-idx (1+ plan-idx)))
+        mappedSuites)))
+  (defasync addOriginalCompilerModulePrograms (context)
+      (if (not (js-call (get context :locators) :some
+             (lambda (item) (= (get item :file) "tests/bootstrap-ir.test.mjs"))))
+        (await (unaffectedCompilerModulePrograms context))
+        (let* ((records (js-array))
+               (forwarded (Object/assign (js-object) context
+                 (js-object :add (lambda (record) (js-call records :push record)))))
+               (mapped (await (unaffectedCompilerModulePrograms forwarded)))
+               (ir-suite (await (migrated-add-ir-recipe forwarded)))
+               (ir-record (js-call records :pop))
+               (earlier (js-array "tests/bootstrap-reader.test.mjs" "tests/bootstrap-expander.test.mjs"
+                          "tests/bootstrap-analyzer.test.mjs"))
+               (index 0))
+          (unless (= (get ir-record :id) "original-program:compiler-module-bootstrap-ir")
+            (throw (new globalThis.TypeError "maintained IR recipe must retain its original identity")))
+          ;; Retain the original position between analyzer and emitter recipes,
+          ;; including the reader's separate complete-product comparison.
+          (while (and (< index (js-length records))
+            (js-call earlier :includes (get (get (aref records index) :original) :suite)))
+            (setq index (1+ index)))
+          (js-call records :splice index 0 ir-record)
+          (js-call records :forEach (lambda (record) (funcall (get context :add) record)))
+          (setq index 0)
+          (while (and (< index (js-length mapped)) (js-call earlier :includes (aref mapped index)))
+            (setq index (1+ index)))
+          (js-call mapped :splice index 0 ir-suite) mapped)))
+  (export addOriginalFormatterRecipes addOriginalGeneratedNamesRecipes addOriginalESMRecipes addOriginalCompilerModulePrograms)
+)

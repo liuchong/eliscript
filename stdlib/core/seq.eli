@@ -11,10 +11,10 @@
     sequenceView
     unboundedSequenceView
     unreduced)
-  (import "../../runtime/core/protocol.mjs" implementsProtocolOperation)
   (import "../../runtime/core/collection-internals.mjs"
     prependSequenceView
     sliceSequenceView)
+  (import "../../runtime/core/protocol.mjs" implementsProtocolOperation)
   (import "../../runtime/core/list.mjs" EMPTY_LIST isPersistentList)
   (import "../../runtime/core/transducer.mjs"
     deduping
@@ -48,6 +48,9 @@
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
   (defconst sequence-finite? (js* "Number.isFinite"))
   (defconst sequence-ceil (js* "Math.ceil"))
+  (defmacro seq-int>= (a b) `(funcall (js* "(a, b) => a >= b") ,a ,b))
+  (defmacro seq-int> (a b) `(funcall (js* "(a, b) => a > b") ,a ,b))
+  (defmacro seq-int- (a b) `(funcall (js* "(a, b) => a - b") ,a ,b))
   (defun require-function
     (value label)
     (if (= (value-type value) "function")
@@ -55,13 +58,13 @@
       (throw (new globalThis/TypeError (str label " must be a function")))))
   (defun require-non-negative-safe-integer
     (value label)
-    (if (and (funcall sequence-safe-integer? value) (>= value 0))
+    (if (and (funcall sequence-safe-integer? value) (seq-int>= value 0))
       value
       (throw
         (new globalThis/TypeError (str label " must be a non-negative safe integer")))))
   (defun require-positive-safe-integer
     (value label)
-    (if (and (funcall sequence-safe-integer? value) (> value 0))
+    (if (and (funcall sequence-safe-integer? value) (seq-int> value 0))
       value
       (throw (new globalThis/TypeError (str label " must be a positive safe integer")))))
   (defun sequence-materialize-sources
@@ -361,18 +364,19 @@
 
   (defun take-last
     (limit collection)
-    (require-non-negative-safe-integer limit "take-last limit")
-    (if (= limit 0)
+    (unless (and (funcall sequence-safe-integer? limit) (seq-int>= limit 0))
+      (throw (new globalThis/TypeError "take-last limit must be a non-negative safe integer")))
+    (if (eq limit 0)
       EMPTY_VECTOR
       (if (eq (isPersistentVector collection) t)
-        (let ((total (get collection :count)))
-          (if (= total 0)
+        (let ((total (aref collection "count")))
+          (if (eq total 0)
             EMPTY_VECTOR
-            (if (>= limit total)
+            (if (seq-int>= limit total)
               collection
-              (if (not (undefined? (get collection :sliceVector)))
-                (js-call collection :sliceVector (- total limit) total)
-                (let ((builder (transient EMPTY_VECTOR)) (index (- total limit)))
+              (if (not (undefined? (aref collection "sliceVector")))
+                (js-call collection :sliceVector (seq-int- total limit) total)
+                (let ((builder (transient EMPTY_VECTOR)) (index (seq-int- total limit)))
                   (while (< index total)
                     (conjBang builder (js-call collection :nth index))
                     (setq index (1+ index)))

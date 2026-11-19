@@ -1,7 +1,7 @@
 (module tests.wire-project-fixture
   (import "node:test" test)
   (import "node:assert/strict" :default assert)
-  (import "node:fs/promises" readFile writeFile mkdtemp)
+  (import "node:fs/promises" readFile writeFile mkdtemp mkdir rm)
   (import "node:path" resolve)
   (import "node:url" pathToFileURL)
   (import "../bootstrap/host/bun.mjs" loadCompiler)
@@ -173,7 +173,7 @@
              (calls (js-array)) (marker (js-object))
              (auto (lambda (&rest arguments) (js-call calls :push arguments) marker))
              (runtime (Object/freeze (js-object :auto auto :invoke (lambda () marker))))
-             (descriptor (js-object :format "eliscript-managed-control" :version 1 :functions (js-array))))
+             (descriptor (js-object :format "eliscript-managed-control" :functions (js-array))))
         (put environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")
         (try
           (js-call (js-array (standardLibraryRuntimeFacade runtime descriptor) (wireHTTPRuntimeFacade runtime)) :forEach
@@ -378,7 +378,9 @@
   (test "diagnostic only: original HTTP contracts on the actual persisted wire artifact without the portable corpus"
     (js-object :skip (/= (get (get globalThis.process :env) :ELISCRIPT_WIRE_HTTP_DIAGNOSTIC) "1"))
     (async ()
-      (let* ((directory (await (mkdtemp (resolve root "_worktree/evidence/goal-0.0.2/c67-wire-http-attempt-"))))
+      (let* ((base (resolve root ".eliscript-cache/wire-http-diagnostic"))
+             (_base (await (mkdir base (js-object :recursive t))))
+             (directory (await (mkdtemp (resolve base "attempt-"))))
              (backend (await (buildBackends (js-object :outputRoot directory))))
              (compiler (get backend :compiler))
              (runtimeIR (js-call compiler :compile_ir_string (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
@@ -443,7 +445,8 @@
                   (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
                   (js-call assert :equal (js-call runtime :live) 0)
                   (catch cleanup (unless failed (throw cleanup)))))
-              (await (js-call fixture :close))))))))
+              (await (js-call fixture :close))
+              (await (rm directory (js-object :recursive t :force t)))))))))
   (test "diagnostic only: resume original HTTP contracts from the actual persisted wire artifact and ABI"
     (js-object :skip (or (/= (get (get globalThis.process :env) :ELISCRIPT_WIRE_HTTP_DIAGNOSTIC) "1")
       (undefined? (get (get globalThis.process :env) :ELISCRIPT_WIRE_HTTP_ARTIFACT_DIRECTORY))))

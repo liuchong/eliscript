@@ -99,7 +99,7 @@
             (await (funcall dyn-import (str "data:text/javascript;base64,"
                                             (js-call (Buffer/from alias-js) :toString "base64"))))))
         (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
-               (appended (str "\n(defun property-data-alias (heap text start length) (begin-operation) (heap-regexp-property-id-base heap text start length))"
+               (appended (str "\n(defun property-data-alias (heap text start length) (memory-sig u32 u32 v64 u32 u32) (begin-operation) (heap-regexp-property-id-base heap text start length))"
                               "\n(export property-data-alias "
                               (js-call (js-call rows :map (lambda (row) (row-name (get row :id)))) :join " ")
                               ")")))
@@ -107,29 +107,6 @@
         (let ((raw (Uint8Array/from (js-call wasm :emit_memory_wasm runtime-ir (js-object :initialPages 1 :maximumPages 32)))))
           (setq raw-module (new WebAssembly.Module raw))
           (js-call assert :deepEqual (WebAssembly.Module/imports raw-module) (js-array)))
-        (js-call (js-array "last-error" "retire" "runtime-case-version" "heap-live" "heap-collect" "heap-release"
-                           "heap-pin" "frame-pop" "frame-depth" "buffer-new") :forEach
-          (lambda (name)
-            (put raw-signatures name 1)))
-        (put raw-signatures "last-error" 0)
-        (put raw-signatures "retire" 0)
-        (put raw-signatures "runtime-case-version" 1)
-        (put raw-signatures "heap-new" 3)
-        (put raw-signatures "value-number" 3)
-        (put raw-signatures "value-data" 3)
-        (put raw-signatures "value-string" 2)
-        (put raw-signatures "value-unit-set" 4)
-        (put raw-signatures "value-seal" 2)
-        (put raw-signatures "heap-pin" 2)
-        (put raw-signatures "heap-release" 2)
-        (put raw-signatures "frame-new" 2)
-        (put raw-signatures "frame-set" 4)
-        (put raw-signatures "frame-get" 3)
-        (put raw-signatures "frame-pop" 2)
-        (put raw-signatures "property-data-alias" 4)
-        (js-call rows :forEach
-          (lambda (row)
-            (put raw-signatures (row-name (get row :id)) 1)))
         (let* ((program (js-call compiler :compile_ir_string (await (readFile fixture "utf8")) fixture))
                (program-js (js-call compiler :emit_ir_string program)))
           (setq reference
@@ -137,6 +114,20 @@
                                             (js-call (Buffer/from program-js) :toString "base64")))))
           (let ((lowered (js-call managed :lower_managed_program program runtime-ir t)))
             (setq typed lowered)
+            (let ((raw-names (js-call (js-array "last-error" "retire" "runtime-case-version" "heap-live" "heap-collect"
+                                                "heap-release" "heap-pin" "frame-pop" "frame-depth" "buffer-new"
+                                                "heap-new" "value-number" "value-number-bits" "value-data" "value-string"
+                                                "value-unit-set" "value-seal" "frame-new" "frame-set" "frame-get"
+                                                "property-data-alias")
+                               :concat (js-call rows :map (lambda (row) (row-name (get row :id)))))))
+              (js-call raw-names :forEach
+                (lambda (name)
+                  (let ((fn (js-call (get (get lowered :typed) :functions) :find (lambda (item) (= (get item :name) name)))))
+                    (funcall assert fn name)
+                    (put raw-signatures name
+                      (js-object :arity (get fn :arity)
+                                 :parameterTypes (get fn :parameterTypes)
+                                 :resultType (get fn :resultType)))))))
             (setq managed-bytes
               (Uint8Array/from
                 (js-call wasm :append_metadata_section
@@ -166,7 +157,10 @@
            (exports (get inst :exports)))
       (js-object
         :invoke (lambda (name &rest args)
-                  (unsigned-bit-shift-right (apply (get exports name) args) 0))
+                  (let ((out (apply (get exports name) args)))
+                    (if (= (funcall js-typeof out) "bigint")
+                        (globalThis.BigInt.asUintN 64 out)
+                        (unsigned-bit-shift-right out 0))))
         :read (lambda (at len)
                 (js-call (new globalThis.Uint8Array (get (get exports :memory) :buffer)) :slice at (+ at len)))
         :size (lambda ()
@@ -183,7 +177,10 @@
                             (Object/assign (js-object) cfg (js-object :nativeTarget target))))))
             (js-object
               :invoke (lambda (name &rest args)
-                        (unsigned-bit-shift-right (apply (get r :invoke) name args) 0))
+                        (let ((out (apply (get r :invoke) name args)))
+                          (if (= (funcall js-typeof out) "bigint")
+                              (globalThis.BigInt.asUintN 64 out)
+                              (unsigned-bit-shift-right out 0))))
               :read (lambda (at len) (js-call r :read at len))
               :size (lambda () (get r :byteLength))
               :close (lambda () (js-call r :close))))))))
@@ -196,7 +193,7 @@
   (defun alloc-string (r heap text)
     (let ((value (js-call r :invoke "value-string" heap (get text :length)))
           (i 0))
-      (funcall assert (> value 3))
+      (funcall assert (> value (globalThis.BigInt 3)))
       (while (< i (get text :length))
         (js-call assert :equal (js-call r :invoke "value-unit-set" heap value i (js-call text :charCodeAt i)) 1)
         (setq i (+ i 1)))
@@ -225,8 +222,8 @@
           (funcall assert (> pointer 0))
           ;; Every row has already been observed; changing rows must reuse the same
           ;; instance-wide buffer, not allocate a table or an object per query/heap.
-          (let ((first (js-call r :invoke "heap-new" 16 2048 8192))
-                (second (js-call r :invoke "heap-new" 16 2048 8192)))
+          (let ((first (js-call r :invoke "heap-new" 16 8192 8192))
+                (second (js-call r :invoke "heap-new" 16 8192 8192)))
             (funcall assert (and (> first 0) (> second 0)))
             (let ((after-heaps (read-word r 0))
                   (after-heap-pages (js-call r :size))
@@ -324,13 +321,13 @@
                  (r (await (funcall open-fn))))
             (try
               (js-call r :invoke "runtime-case-version" 0)
-              (let ((heap (js-call r :invoke "heap-new" 32 2048 2048)))
+              (let ((heap (js-call r :invoke "heap-new" 32 8192 8192)))
                 (funcall assert (> heap 0))
                 (let ((held (js-call r :invoke "value-number" heap 0 2147483648)))
-                  (funcall assert (> held 3))
+                  (funcall assert (> held (globalThis.BigInt 3)))
                   (js-call assert :equal (js-call r :invoke "heap-pin" heap held) 1)
                   (let ((frame (js-call r :invoke "frame-new" heap 1)))
-                    (funcall assert (> frame 0))
+                    (funcall assert (> frame (globalThis.BigInt 0)))
                     (js-call assert :equal (js-call r :invoke "frame-set" heap frame 0 held) 1)
                     (let ((filled 0)
                           (keep-filling t))
@@ -349,9 +346,10 @@
                       (js-call assert :equal (read-word r 0) cursor)
                       (js-call assert :equal (js-call r :invoke "frame-get" heap frame 0) held)
                       (js-call r :invoke "heap-collect" heap)
-                      (let* ((address (js-call r :invoke "value-data" heap held 4))
-                             (bytes (js-call r :read address 8))
-                             (view (new globalThis.DataView (get bytes :buffer) (get bytes :byteOffset) 8)))
+                      (let* ((bits (js-call r :invoke "value-number-bits" heap held))
+                             (buf (new globalThis.ArrayBuffer 8))
+                             (view (new globalThis.DataView buf)))
+                        (js-call view :setBigUint64 0 bits t)
                         (funcall assert (Object/is (js-call view :getFloat64 0 t) -0.0)))
                       (js-call assert :equal (js-call r :invoke "frame-depth" heap) 1)
                       (js-call assert :equal (js-call r :invoke "frame-pop" heap frame) 1)
@@ -381,7 +379,7 @@
            (lead-surrogate (String/fromCharCode 55296))
            (trail-surrogate (String/fromCharCode 57343)))
       (js-call r :invoke "runtime-case-version" 0)
-      (let ((heap (js-call r :invoke "heap-new" 32 4096 1048576))
+      (let ((heap (js-call r :invoke "heap-new" 32 16384 1048576))
             (expected-fn (lambda (text)
                            (let ((found (js-call aliases :filter
                                           (lambda (record)
@@ -440,7 +438,7 @@
             (js-call assert :equal (read-word r 0) cursor "repeat lookup allocates no raw table")
             (js-call r :invoke "heap-collect" heap)
             (js-call assert :equal (js-call r :invoke "heap-live" heap) 0)
-            (let* ((peer (js-call r :invoke "heap-new" 32 4096 1048576))
+            (let* ((peer (js-call r :invoke "heap-new" 32 16384 1048576))
                    (peer-text (alloc-string r peer "ASCII"))
                    (after-peer (read-word r 0)))
               (js-call assert :equal (js-call r :invoke "property-data-alias" peer peer-text 0 5) (funcall expected-fn "ASCII"))
@@ -450,7 +448,7 @@
               (js-call assert :equal (js-call r :invoke "heap-live" peer) 0))
             (js-call assert :equal (js-call r :invoke "retire") 1)
             (js-call assert :equal (read-word r 52) pointer)
-            (let* ((fresh (js-call r :invoke "heap-new" 32 4096 1048576))
+            (let* ((fresh (js-call r :invoke "heap-new" 32 16384 1048576))
                    (fresh-text (alloc-string r fresh "ASCII"))
                    (after-fresh (read-word r 0)))
               (js-call assert :equal (js-call r :invoke "property-data-alias" fresh fresh-text 0 5) (funcall expected-fn "ASCII"))

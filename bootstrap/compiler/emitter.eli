@@ -1,5 +1,5 @@
 (module bootstrap.compiler.emitter
-  (import "./symbol.mjs" binding-name reference-name)
+  (import "./symbol.mjs" :as raw-symbol)
   (import "./ir.mjs"
     node-p
     program-filename
@@ -44,7 +44,7 @@
         (str "import { " (js-call names :join ", ") " } from \"eliscript/runtime/prelude.mjs\";\n"))))
   (defvar numeric-emission-profile false)
   (defconst primitive-runtime-import
-    "import { stringToBigint as __eliscript_string_to_bigint, float64Words as __eliscript_number_float64_words, buildArray as __eliscript_array_build, unsupportedArity as __eliscript_arity_error } from \"eliscript/runtime/primitives.mjs\";\n")
+    "import { stringToBigint as __eliscript_string_to_bigint, float64Words as __eliscript_number_float64_words, buildArray as __eliscript_array_build, arrayCopyAssoc as __eliscript_array_copy_assoc, unsupportedArity as __eliscript_arity_error } from \"eliscript/runtime/primitives.mjs\";\n")
   (defconst value-type-import
     "import { valueType as __eliscript_value_type } from \"eliscript/runtime/primitives.mjs\";\n")
   (defconst host-identity-token-helper
@@ -53,24 +53,84 @@
     (lambda (message)
       (throw (new globalThis.Error message))))
   (defvar function-source-profile false)
+  (defconst emit-shared-bname-cache (new globalThis.Map))
+  (defconst emit-shared-rname-cache (new globalThis.Map))
+  (defvar emit-bname-cache nil)
+  (defvar emit-rname-cache nil)
+  (defconst binding-name
+    (lambda (name)
+      (let ((cache emit-bname-cache))
+        (if (nil? cache)
+            (js-call raw-symbol :binding_name name)
+          (let ((cached (js-call cache :get name)))
+            (if (not (eq cached undefined))
+                cached
+              (let ((computed (js-call raw-symbol :binding_name name)))
+                (js-call cache :set name computed)
+                computed)))))))
+  (defconst reference-name
+    (lambda (name)
+      (let ((cache emit-rname-cache))
+        (if (nil? cache)
+            (js-call raw-symbol :reference_name name)
+          (let ((cached (js-call cache :get name)))
+            (if (not (eq cached undefined))
+                cached
+              (let ((computed (js-call raw-symbol :reference_name name)))
+                (js-call cache :set name computed)
+                computed)))))))
+  (defconst emit-iterator-key globalThis.Symbol.iterator)
+  (defconst emit-array-is-array Array/isArray)
+  (defconst emit-get-prototype-of Object/getPrototypeOf)
+  (defconst emit-array-prototype (get globalThis.Array :prototype))
+  (defconst emit-default-array-iterator (aref emit-array-prototype emit-iterator-key))
+  (defconst emit-array-iterator-prototype
+    (funcall emit-get-prototype-of (Reflect/apply emit-default-array-iterator (js-array) (js-array))))
+  (defconst emit-default-array-iterator-next (aref emit-array-iterator-prototype "next"))
+  (defconst emit-is-concat-spreadable globalThis.Symbol.isConcatSpreadable)
+  (defconst emit-default-array-slice (aref emit-array-prototype "slice"))
+  (defconst emit-default-array-concat (aref emit-array-prototype "concat"))
+  (defconst emit-string-prototype (get globalThis.String :prototype))
+  (defconst emit-default-string-substring (aref emit-string-prototype "substring"))
+  (defconst emit-default-string-index-of (aref emit-string-prototype "indexOf"))
+  (defconst emit-default-string-char-code-at (aref emit-string-prototype "charCodeAt"))
+  (defconst emit-array-from Array/from)
+  (defconst emit-default-array-for-each (aref emit-array-prototype "forEach"))
+  (defconst emit-species-key globalThis.Symbol.species)
+  (defconst fast-locate-kernel
+    (js* "/* @eliscript-js-host-fastpath */ (span, output) => { if (typeof output === 'string') { return (span == null || span === false || output.length === 0) ? { text: output, marks: [] } : { text: output, marks: [{ offset: 0, span }] }; } const marks = output.marks; const text1 = output.text; if (text1.length === 0 || span == null || span === false) return output; const mlen = marks.length; if (mlen > 0 && marks[0].offset === 0) return output; return { text: output.text, marks: [{ offset: 0, span }, ...marks] }; }"))
+  (defconst empty-children (Object/freeze (js-array)))
+  (defconst empty-fragment (Object/freeze (js-object :text "" :marks empty-children)))
+  (defvar emit-mark-mode 0)
+  (defconst emit-unpatched-string-p
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (strProto, defSlice, defSplit, defSub, defIndexOf) => () => strProto.slice === defSlice && strProto.split === defSplit && strProto.substring === defSub && strProto.indexOf === defIndexOf")))
+      (if (nil? factory)
+          (lambda () false)
+        (funcall factory
+          emit-string-prototype (aref emit-string-prototype "slice") (aref emit-string-prototype "split") emit-default-string-substring emit-default-string-index-of))))
+  (defconst lazy-locate-kernel
+    (js* "/* @eliscript-js-host-fastpath */ (mode, span, output) => { if (mode === 2) return typeof output === 'string' ? { text: output, m: null } : output; if (typeof output === 'string') return (span == null || span === false || output.length === 0) ? { text: output, m: null } : { text: output, m: { k: 1, span, child: null, h0: true } }; if (output.text.length === 0 || span == null || span === false) return output; const m = output.m; if (m !== null && m.h0) return output; return { text: output.text, m: { k: 1, span, child: m, h0: true } }; }"))
+  (defconst materialize-lazy-marks
+    (js* "/* @eliscript-js-host-fastpath */ (rootM) => { if (rootM === null) return []; const out = []; const walk = (node, baseOff) => { const k = node.k; if (k === 1) { out.push({ offset: baseOff, span: node.span }); if (node.child !== null) walk(node.child, baseOff); } else if (k === 2) { walk(node.child, (baseOff + node.off) | 0); } else if (k === 3) { const offs = node.offs, kids = node.kids, n = kids.length | 0; for (let i = 0; i < n; i = (i + 1) | 0) walk(kids[i], (baseOff + offs[i]) | 0); } else if (k === 5) { const ms = node.marks, n = ms.length | 0; if (baseOff === 0) { for (let i = 0; i < n; i = (i + 1) | 0) out.push(ms[i]); } else { for (let i = 0; i < n; i = (i + 1) | 0) { const mk = ms[i]; out.push({ offset: (mk.offset + baseOff) | 0, span: mk.span }); } } } else { const startIdx = out.length | 0; walk(node.child, 0); const endIdx = out.length | 0; if (startIdx === endIdx) return; const ls_b = node.ls, ns = node.ns | 0, slen = node.slen | 0; let mi = startIdx; let mk = out[mi]; let mo = mk.offset | 0; const firstStart = ls_b[0]; while (mo < firstStart) { if (baseOff !== 0) mk.offset = (mo + baseOff) | 0; mi = (mi + 1) | 0; if (mi >= endIdx) return; mk = out[mi]; mo = mk.offset | 0; } for (let li = 1; li <= ns; li = (li + 1) | 0) { const limit = ls_b[li]; if (mo >= limit) continue; const add = (baseOff + (li << 1)) | 0; for (;;) { mk.offset = (mo + add) | 0; mi = (mi + 1) | 0; if (mi >= endIdx) return; mk = out[mi]; mo = mk.offset | 0; if (mo >= limit) { if (mo >= slen) { out.length = mi; return; } break; } } } if (mi < endIdx) out.length = mi; } }; walk(rootM, 0); return out; }"))
   (defconst native-locate
     (lambda (span output)
-      (let* ((fragment (if (= (value-type output) "string")
-                           (js-object :text output :marks (js-array)) output))
-             (marks (aref fragment "marks")))
-        ;; Function text capture consumes function ranges only. Building the
-        ;; unrelated per-expression Source Map marks here copies every child's
-        ;; marks through its ancestors while retaining the complete source IR.
-        ;; Ordinary JS and Source Map emission keep the original locate path.
-        (if (or function-source-profile
-                (= (aref (aref fragment "text") "length") 0)
-                (nullish? span) (eq span false)
-                (and (> (aref marks "length") 0) (= (aref (aref marks 0) "offset") 0)))
-            fragment
-          (let ((result (js-object :text (aref fragment "text")
-                  :marks (js-cons (js-object :offset 0 :span span) marks))))
-            (when function-source-profile (put result :functions (get fragment :functions (js-array))))
-            result)))))
+      (if (not (eq emit-mark-mode 0))
+          (funcall lazy-locate-kernel emit-mark-mode span output)
+        (if function-source-profile
+            (if (eq (js* "typeof output") "string")
+                (make-fragment output (js-array))
+              output)
+          (if (nil? fast-locate-kernel)
+              (let* ((fragment (as-fragment output))
+                     (marks (get fragment :marks)))
+                (if (or (= (get (get fragment :text) :length) 0)
+                        (not span)
+                        (js-call marks :some (lambda (mark) (= (get mark :offset) 0))))
+                    fragment
+                  (make-fragment (get fragment :text)
+                    (js-call (js-array (js-object :offset 0 :span span)) :concat marks))))
+            (funcall fast-locate-kernel span output))))))
   (defvar temporary-counter 0)
   (defvar binding-temporaries (new globalThis.Map))
   (defconst tdz-import
@@ -82,24 +142,64 @@
     (let ((dot (js-call name :indexOf ".")) (slash (js-call name :indexOf "/")))
       (let ((end (if (< dot 0) slash (if (< slash 0) dot (if (< dot slash) dot slash)))))
         (if (< end 0) name (js-call name :slice 0 end)))))
-  (defun tdz-scope (parent) (js-object :parent parent :names (new globalThis.Map)))
-  (defun tdz-find (scope name)
-    (let ((current scope) (found false) (record nil) (key (binding-name name)))
+  (defun tdz-key (state name)
+    (let ((cache (get state :keyCache)))
+      (let ((cached (js-call cache :get name)))
+        (if (not (eq cached undefined))
+            cached
+          (let ((computed (binding-name name)))
+            (js-call cache :set name computed)
+            computed)))))
+  (defun tdz-scope (parent) (js-object :parent parent :names nil))
+  (defun tdz-scope-set (scope key value)
+    (let ((names (get scope :names)))
+      (when (nil? names)
+        (setq names (new globalThis.Map))
+        (put scope :names names))
+      (js-call names :set key value)))
+  (defun tdz-resolve-key (raw-name state)
+    (let* ((cache (get state :rawLookup))
+           (cached (js-call cache :get raw-name)))
+      (if (not (eq cached undefined))
+          cached
+        (let* ((root (tdz-root-name raw-name))
+               (key (tdz-key state root))
+               (tracked (if (js-call (get state :rootNames) :has key) key false)))
+          (js-call cache :set raw-name tracked)
+          tracked))))
+  (defun tdz-find-key (scope key)
+    (let ((current scope) (found false) (record nil))
       (while (and current (not found))
         (let ((names (get current :names)))
-          (if (js-call names :has key)
-            (progn (setq record (js-call names :get key)) (setq found t))
-            (setq current (get current :parent))))) record))
-  (defun tdz-pattern-names (node scope)
+          (if (and names (js-call names :has key))
+              (progn (setq record (js-call names :get key)) (setq found t))
+            (setq current (get current :parent)))))
+      record))
+  (defun tdz-find (scope name state)
+    (let ((root-names (get state :rootNames))
+          (key (tdz-key state name)))
+      (if (not (js-call root-names :has key))
+          nil
+        (tdz-find-key scope key))))
+  (defun tdz-pattern-names (node scope state)
     (let ((kind (ir-kind node)) (nodes (children node)))
       (cond
-        ((= kind "binding-name") (js-call (get scope :names) :set (binding-name (ir-value node)) nil))
-        ((= kind "map-binding-entry") (tdz-pattern-names (js-nth 0 nodes) scope))
+        ((= kind "binding-name")
+         (let ((key (tdz-key state (ir-value node))))
+           (when (js-call (get state :rootNames) :has key)
+             (tdz-scope-set scope key nil))))
+        ((= kind "map-binding-entry") (tdz-pattern-names (js-nth 0 nodes) scope state))
         ((or (= kind "array-binding-pattern") (= kind "map-binding-pattern"))
-         (js-call nodes :forEach (lambda (child) (tdz-pattern-names child scope)))))))
-  (defun tdz-bind (node scope)
-    (if (ir-property node "pattern") (tdz-pattern-names (js-nth 0 (children node)) scope)
-      (js-call (get scope :names) :set (binding-name (ir-value node)) nil)))
+         (let ((idx 0) (len (js-length nodes)))
+           (while (< idx len)
+             (tdz-pattern-names (js-nth idx nodes) scope state)
+             (setq idx (1+ idx))))))))
+  (defun tdz-bind (node scope state)
+    (if (ir-property node "pattern")
+        (tdz-pattern-names (js-nth 0 (children node)) scope state)
+      (let ((key (tdz-key state (ir-value node))))
+        (when (js-call (get state :rootNames) :has key)
+          (tdz-scope-set scope key nil)))))
   (defun tdz-pattern-defaults (node scope state)
     (let ((kind (ir-kind node)) (nodes (children node)))
       (cond
@@ -107,50 +207,67 @@
          (when (> (js-length nodes) 2) (tdz-walk (js-nth 2 nodes) scope state))
          (tdz-pattern-defaults (js-nth 0 nodes) scope state))
         ((or (= kind "array-binding-pattern") (= kind "map-binding-pattern"))
-         (js-call nodes :forEach (lambda (child) (tdz-pattern-defaults child scope state)))))))
+         (let ((idx 0) (len (js-length nodes)))
+           (while (< idx len)
+             (tdz-pattern-defaults (js-nth idx nodes) scope state)
+             (setq idx (1+ idx))))))))
   (defun tdz-defaults (node scope state)
     (when (ir-property node "pattern")
       (tdz-pattern-defaults (js-nth 0 (children node)) scope state)))
   (defun tdz-statements (nodes statements)
-    (js-call nodes :forEach
-      (lambda (node)
-        (if (= (ir-kind node) "module-declaration")
-            (tdz-statements (children node) statements)
-          (js-call statements :push node))))
+    (let ((idx 0) (len (js-length nodes)))
+      (while (< idx len)
+        (let ((node (js-nth idx nodes)))
+          (if (= (ir-kind node) "module-declaration")
+              (tdz-statements (children node) statements)
+            (js-call statements :push node)))
+        (setq idx (1+ idx))))
     statements)
   (defun tdz-predeclare (statements scope state)
-    (js-call statements :forEach
-      (lambda (node)
-        (let ((kind (ir-kind node)) (name (ir-value node)))
+    (let ((root-names (get scope :names))
+          (sidx 0)
+          (slen (js-length statements)))
+      (while (< sidx slen)
+        (let* ((node (js-nth sidx statements))
+               (kind (ir-kind node))
+               (name (ir-value node)))
           (cond
             ((= kind "variable-declaration")
-             (let ((record (js-object :name name :index (js-length (get state :variables))
+             (let ((key (tdz-key state name))
+                   (record (js-object :name name :index (js-length (get state :variables))
                              :mutable (ir-property node "mutable") :statement (get state :position)
                              :read false :write false)))
                (js-call (get state :variables) :push record)
                (js-call (get state :declarations) :set node record)
-               (js-call (get scope :names) :set (binding-name name) record)))
+               (js-call root-names :set key record)))
             ((= kind "function-declaration")
-             (let ((key (binding-name name)))
+             (let ((key (tdz-key state name)))
                (js-call (get state :functions) :add key)
-               (js-call (get scope :names) :set key (js-object :function key))
+               (js-call root-names :set key (js-object :function key))
                (when (ir-property node "portable") (js-call (get state :exported) :push key))))
             ((= kind "export-declaration")
-             (js-call (children node) :forEach
-               (lambda (reference) (js-call (get state :exported) :push (binding-name (ir-value reference))))))
+             (let ((enodes (children node)) (eidx 0))
+               (while (< eidx (js-length enodes))
+                 (js-call (get state :exported) :push (tdz-key state (ir-value (js-nth eidx enodes))))
+                 (setq eidx (1+ eidx)))))
             ((= kind "import-declaration")
              (put state :imports t)
-             (js-call (children node) :forEach
-               (lambda (child) (js-call (get scope :names) :set (binding-name (ir-value child)) nil))))))
-        (put state :position (1+ (get state :position))))))
+             (let ((inodes (children node)) (iidx 0))
+               (while (< iidx (js-length inodes))
+                 (js-call root-names :set (tdz-key state (ir-value (js-nth iidx inodes))) nil)
+                 (setq iidx (1+ iidx)))))))
+        (put state :position (1+ (get state :position)))
+        (setq sidx (1+ sidx)))))
   (defun tdz-variable-p (record)
     (and record (= (value-type (get record :index)) "number")))
   (defun tdz-guarded-p (record)
     (and record (or (get record :read) (get record :write))))
   (defun tdz-reference (state record)
     (let ((owner (get state :owner)) (references (get state :references)))
-      (unless (js-call references :has owner) (js-call references :set owner (js-array)))
-      (js-call (js-call references :get owner) :push (get record :function))))
+      ;; Repeated references have the same reachability edge. Keep source-node
+      ;; visits intact and store each edge once in this private analysis graph.
+      (unless (js-call references :has owner) (js-call references :set owner (new globalThis.Set)))
+      (js-call (js-call references :get owner) :add (get record :function))))
   (defun tdz-site (state kind record node)
     (js-call (get state :sites) :push
       (js-object :kind kind :record record :owner (get state :owner) :node node)))
@@ -162,13 +279,18 @@
   (defun tdz-finalize (state)
     (let ((functions (get state :functions)) (references (get state :references))
           (raw (get state :raw)) (early (new globalThis.Map)) (pending (js-array))
+          (queued (new globalThis.Set))
           (never (get state :position)) (all (get state :position)))
       (let ((lower
               (lambda (key index)
                 (when (and (js-call functions :has key)
                            (< index (if (js-call early :has key) (js-call early :get key) never)))
                   (js-call early :set key index)
-                  (js-call pending :push key)))))
+                  ;; A queued function reads its newest lower bound when it
+                  ;; runs; another copy cannot add a distinct propagation.
+                  (unless (js-call queued :has key)
+                    (js-call queued :add key)
+                    (js-call pending :push key))))))
         (when (get state :imports)
           (js-call (get state :exported) :forEach (lambda (key) (funcall lower key -1))))
         (js-call references :forEach
@@ -179,6 +301,8 @@
           (lambda (owner) (when (and (= (value-type owner) "number") (< owner all)) (setq all owner))))
         (while (> (js-length pending) 0)
           (let* ((key (js-call pending :pop)) (index (js-call early :get key)))
+            ;; Permit a later strict decrease to schedule this function again.
+            (js-call queued :delete key)
             (when (and (js-call raw :has key) (< index all)) (setq all index))
             (when (js-call references :has key)
               (js-call (js-call references :get key) :forEach (lambda (callee) (funcall lower callee index)))))))
@@ -194,55 +318,73 @@
   (defun tdz-walk (node scope state)
     (let ((kind (ir-kind node)) (nodes (children node)))
       (cond
-        ((or (= kind "reference") (= kind "assignment-pair"))
-         (let ((record (tdz-find scope (tdz-root-name (ir-value node)))))
-           (cond ((tdz-variable-p record)
-                  (tdz-site state (if (= kind "reference") "read" "write") record node))
-                 ((and record (= kind "reference")) (tdz-reference state record))))
-         (js-call nodes :forEach (lambda (child) (tdz-walk child scope state))))
-        ((= kind "raw-javascript") (js-call (get state :raw) :add (get state :owner)))
-        ((or (= kind "function-declaration") (= kind "function-expression"))
-         (let ((child (tdz-scope scope)) (count (ir-property node "parameterCount")) (index 0))
-           (while (< index count) (tdz-defaults (js-nth index nodes) scope state) (setq index (1+ index)))
+        ((or (eq kind "reference") (eq kind "assignment-pair"))
+         (let ((key (tdz-resolve-key (ir-value node) state))
+               (idx 0) (len (aref nodes "length")))
+           (when key
+             (let ((record (tdz-find-key scope key)))
+               (cond ((tdz-variable-p record)
+                      (tdz-site state (if (eq kind "reference") "read" "write") record node))
+                     ((and record (eq kind "reference")) (tdz-reference state record)))))
+           (while (< idx len)
+             (tdz-walk (aref nodes idx) scope state)
+             (setq idx (+ idx 1)))))
+        ((eq kind "raw-javascript") (js-call (get state :raw) :add (get state :owner)))
+        ((or (eq kind "function-declaration") (eq kind "function-expression"))
+         (let ((child (tdz-scope scope)) (count (ir-property node "parameterCount")) (index 0) (len (aref nodes "length")))
+           (while (< index count) (tdz-defaults (aref nodes index) scope state) (setq index (+ index 1)))
            (setq index 0)
-           (while (< index count) (tdz-bind (js-nth index nodes) child) (setq index (1+ index)))
-           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
-        ((or (= kind "lexical-bindings") (= kind "binding-loop"))
+           (while (< index count) (tdz-bind (aref nodes index) child state) (setq index (+ index 1)))
+           (let ((body-scope (if (nil? (get child :names)) scope child)))
+             (while (< index len) (tdz-walk (aref nodes index) body-scope state) (setq index (+ index 1))))))
+        ((or (eq kind "lexical-bindings") (eq kind "binding-loop"))
          (let ((child (tdz-scope scope)) (count (ir-property node "bindingCount"))
-               (sequential (ir-property node "sequential")) (index 0))
+               (sequential (ir-property node "sequential")) (index 0) (len (aref nodes "length")))
            (while (< index count)
-             (let* ((binding (js-nth index nodes)) (values (children binding))
-                    (outer (if sequential child scope)) (start (if (ir-property binding "pattern") 1 0)))
-               (while (< start (js-length values)) (tdz-walk (js-nth start values) outer state) (setq start (1+ start)))
+             (let* ((binding (aref nodes index)) (values (children binding))
+                    (outer (if (and sequential (not (nil? (get child :names)))) child scope))
+                    (start (if (ir-property binding "pattern") 1 0))
+                    (vlen (aref values "length")))
+               (while (< start vlen) (tdz-walk (aref values start) outer state) (setq start (+ start 1)))
                (tdz-defaults binding outer state)
-               (when sequential (tdz-bind binding child)))
-             (setq index (1+ index)))
+               (when sequential (tdz-bind binding child state)))
+             (setq index (+ index 1)))
            (unless sequential
              (setq index 0)
-             (while (< index count) (tdz-bind (js-nth index nodes) child) (setq index (1+ index))))
-           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
-        ((= kind "catch-clause")
-         (let ((child (tdz-scope scope)) (binding (js-nth 0 nodes)) (index 1))
-           (tdz-defaults binding scope state) (tdz-bind binding child)
-           (while (< index (js-length nodes)) (tdz-walk (js-nth index nodes) child state) (setq index (1+ index)))))
-        ((or (= kind "quoted-literal") (= kind "import-declaration") (= kind "export-declaration")) nil)
-        (t (js-call nodes :forEach (lambda (child) (tdz-walk child scope state)))))))
+             (while (< index count) (tdz-bind (aref nodes index) child state) (setq index (+ index 1))))
+           (let ((body-scope (if (nil? (get child :names)) scope child)))
+             (while (< index len) (tdz-walk (aref nodes index) body-scope state) (setq index (+ index 1))))))
+        ((eq kind "catch-clause")
+         (let ((child (tdz-scope scope)) (binding (aref nodes 0)) (index 1) (len (aref nodes "length")))
+           (tdz-defaults binding scope state) (tdz-bind binding child state)
+           (let ((body-scope (if (nil? (get child :names)) scope child)))
+             (while (< index len) (tdz-walk (aref nodes index) body-scope state) (setq index (+ index 1))))))
+        ((or (eq kind "quoted-literal") (eq kind "import-declaration") (eq kind "export-declaration")) nil)
+        (t
+         (let ((idx 0) (len (aref nodes "length")))
+           (while (< idx len)
+             (tdz-walk (aref nodes idx) scope state)
+             (setq idx (+ idx 1))))))))
   (defun tdz-prepare (program)
-    (let* ((state (js-object :variables (js-array) :declarations (new globalThis.Map)
+    (let* ((root-names (new globalThis.Map))
+           (scope (js-object :parent nil :names root-names))
+           (state (js-object :variables (js-array) :declarations (new globalThis.Map)
                     :reads (new globalThis.Map) :writes (new globalThis.Map)
                     :functions (new globalThis.Set) :references (new globalThis.Map) :raw (new globalThis.Set)
-                    :exported (js-array) :imports false :sites (js-array) :position 0 :owner nil))
-           (scope (tdz-scope nil))
+                    :exported (js-array) :imports false :sites (js-array) :position 0 :owner nil
+                    :rootNames root-names :keyCache (new globalThis.Map) :rawLookup (new globalThis.Map)))
            (statements (tdz-statements (program-body program) (js-array))))
       (tdz-predeclare statements scope state)
       ;; With no tracked module variable, every possible lookup is absent.
       ;; Function-only modules therefore need no TDZ traversal of their bodies.
       (when (> (js-length (get state :variables)) 0)
-        (js-call statements :forEach
-          (lambda (node position)
-            (put state :owner
-              (if (= (ir-kind node) "function-declaration") (binding-name (ir-value node)) position))
-            (tdz-walk node scope state)))
+        (let ((sidx 0) (slen (js-length statements)))
+          (while (< sidx slen)
+            (let ((node (js-nth sidx statements)))
+              (put state :owner
+                (if (= (ir-kind node) "function-declaration") (tdz-key state (ir-value node)) sidx))
+              (tdz-walk node scope state))
+            (setq sidx (1+ sidx))))
         (tdz-finalize state))
       state))
   (defun tdz-writer-name (record) (str "__eliscript_tdz_write_" (get record :index)))
@@ -262,18 +404,18 @@
                     ""))))) :join "")))))
   (defun tdz-read (node)
     (let ((record (and tdz-state (js-call (get tdz-state :reads) :get node))))
-      (if (not record) (text-fragment (reference-name (ir-value node)))
+      (if (not record) (emit-text (reference-name (ir-value node)))
         (let* ((name (binding-name (get record :name))) (reference (reference-name (ir-value node))))
           ;; Keep the initialized lexical value visible to host JITs while
           ;; retaining the exact guard, error helper and property receiver.
-          (text-fragment (str "(" (tdz-ready-name record) " === true ? " name
+          (emit-text (str "(" (tdz-ready-name record) " === true ? " name
             " : __eliscript_tdz_error(" (json-string name) "))"
             (js-call reference :slice (js-length name))))))))
   (defun tdz-assignment (pair)
     (let* ((record (and tdz-state (js-call (get tdz-state :writes) :get pair)))
            (value (emit-expression (js-nth 0 (children pair)))))
-      (if (not record) (combine (js-array "(" (emit-binding-name pair) " = " value ")"))
-        (combine (js-array (tdz-writer-name record) "(" value ")")))))
+      (if (not record) (fast-combine (js-array "(" (emit-binding-name pair) " = " value ")"))
+        (fast-combine (js-array (tdz-writer-name record) "(" value ")")))))
 
   (defun make-fragment (text marks &optional functions)
     (let ((fragment (js-object :text text :marks marks)))
@@ -307,6 +449,11 @@
 
   (defun text-fragment (text)
     (make-fragment text (js-array)))
+
+  (defun emit-text (text)
+    (if (eq emit-mark-mode 0)
+        (make-fragment text (js-array))
+      (js-object :text text :m nil)))
 
   (defun as-fragment (part)
     (if (= (value-type part) "string")
@@ -343,15 +490,114 @@
         (setq part-index (1+ part-index)))
       (make-fragment text marks functions)))
 
+  (defmacro p< (a b) `(funcall (js* "(a, b) => a < b") ,a ,b))
+  (defmacro p> (a b) `(funcall (js* "(a, b) => a > b") ,a ,b))
+  (defmacro p>= (a b) `(funcall (js* "(a, b) => a >= b") ,a ,b))
+  (defmacro p- (a b) `(funcall (js* "(a, b) => a - b") ,a ,b))
+  (defmacro p& (a b) `(funcall (js* "(a, b) => a & b") ,a ,b))
+  (defmacro p| (a b) `(funcall (js* "(a, b) => a | b") ,a ,b))
+  (defmacro p^ (a b) `(funcall (js* "(a, b) => a ^ b") ,a ,b))
+  (defmacro p<< (a b) `(funcall (js* "(a, b) => a << b") ,a ,b))
+  (defmacro p>>> (a b) `(funcall (js* "(a, b) => a >>> b") ,a ,b))
+
+  (defconst fast-join-parts
+    (js* "/* @eliscript-js-host-fastpath */ (parts, part_count, separator, sep_len, empty_frag) => { if (part_count === 0) return { text: '', marks: [] }; if (part_count === 1) { const p0 = parts[0]; if (typeof p0 === 'string') return { text: p0, marks: [] }; const f0 = p0 == null ? empty_frag : p0; const fm = f0.marks; return { text: f0.text, marks: fm.length === 0 ? [] : fm.slice(0) }; } let total_marks = 0, first_frag = -1, frag_with_marks = 0; for (let i = 0; i < part_count; i = (i + 1) | 0) { const p = parts[i]; if (typeof p !== 'string' && p != null) { const ml = p.marks.length | 0; if (ml > 0) { total_marks = (total_marks + ml) | 0; first_frag = i; frag_with_marks = (frag_with_marks + 1) | 0; } } } if (total_marks === 0) { let text = ''; for (let i = 0; i < part_count; i = (i + 1) | 0) { if (i > 0 && sep_len > 0) text += separator; const p = parts[i]; const s = typeof p === 'string' ? p : (p == null ? empty_frag : p).text; if (s.length > 0) text += s; } return { text, marks: [] }; } if (frag_with_marks === 1 && first_frag === 0) { const f0 = parts[0]; let text = f0.text; for (let i = 1; i < part_count; i = (i + 1) | 0) { if (sep_len > 0) text += separator; const p = parts[i]; const s = typeof p === 'string' ? p : (p == null ? empty_frag : p).text; if (s.length > 0) text += s; } return { text, marks: f0.marks.slice(0) }; } const marks = new Array(total_marks); let mw = 0, text = ''; for (let index = 0; index < part_count; index = (index + 1) | 0) { if (index > 0 && sep_len > 0) text += separator; const part = parts[index]; if (typeof part === 'string') { if (part.length > 0) text += part; } else { const fragment = part == null ? empty_frag : part; const fmarks = fragment.marks; const ftext = fragment.text; const offset = text.length | 0; const mcount = fmarks.length | 0; if (mcount > 0) { if (offset === 0) { for (let m = 0; m < mcount; m = (m + 1) | 0) marks[mw++] = fmarks[m]; } else { for (let m = 0; m < mcount; m = (m + 1) | 0) { const mk = fmarks[m]; marks[mw++] = { offset: (offset + mk.offset) | 0, span: mk.span }; } } } if (ftext.length > 0) text += ftext; } } return { text, marks }; }"))
+
+  (defconst fast-combine-kernel
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (joinParts, emptyFrag) => (parts) => { const n = parts.length | 0; if (n === 2) { const p0 = parts[0], p1 = parts[1]; if (typeof p0 === 'string') { if (typeof p1 === 'string') return { text: p0 + p1, marks: [] }; const f1 = p1 == null ? emptyFrag : p1; const m1 = f1.marks, mlen = m1.length | 0, off = p0.length | 0; if (mlen === 0) return { text: off === 0 ? f1.text : p0 + f1.text, marks: [] }; if (off === 0) return { text: f1.text, marks: m1.slice(0) }; const marks = new Array(mlen); for (let i = 0; i < mlen; i = (i + 1) | 0) { const mk = m1[i]; marks[i] = { offset: (off + mk.offset) | 0, span: mk.span }; } return { text: p0 + f1.text, marks }; } if (typeof p1 === 'string') { const f0 = p0 == null ? emptyFrag : p0; const m0 = f0.marks; return { text: p1.length === 0 ? f0.text : f0.text + p1, marks: m0.length === 0 ? [] : m0.slice(0) }; } } else if (n === 3) { const p0 = parts[0], p1 = parts[1], p2 = parts[2]; if (typeof p0 === 'string' && typeof p2 === 'string') { if (typeof p1 === 'string') return { text: p0 + p1 + p2, marks: [] }; const f1 = p1 == null ? emptyFrag : p1; const m1 = f1.marks, mlen = m1.length | 0, off = p0.length | 0; const text = p0 + f1.text + p2; if (mlen === 0) return { text, marks: [] }; if (off === 0) return { text, marks: m1.slice(0) }; const marks = new Array(mlen); for (let i = 0; i < mlen; i = (i + 1) | 0) { const mk = m1[i]; marks[i] = { offset: (off + mk.offset) | 0, span: mk.span }; } return { text, marks }; } } return joinParts(parts, n, '', 0, emptyFrag); }")))
+      (if (nil? factory)
+          nil
+        (funcall factory fast-join-parts empty-fragment))))
+
+  (defun emit-join-parts (parts part-count separator sep-len)
+    (if (and (not function-source-profile) (not (nil? fast-join-parts)))
+        (funcall fast-join-parts parts part-count separator sep-len empty-fragment)
+    (let ((text "")
+          (marks (js-array))
+          (has-profile function-source-profile)
+          (functions nil)
+          (index 0)
+          (plen 0)
+          (raw-off 0)
+          (offset 0)
+          (raw-mc 0)
+          (mcount 0))
+      (when has-profile (setq functions (js-array)))
+      (while (p< index part-count)
+        (when (and (p> index 0) (p> sep-len 0))
+          (setq text (+ text separator)))
+        (let ((part (aref parts index)))
+          (if (eq (js* "typeof part") "string")
+              (progn
+                (setq plen (aref part "length"))
+                (when (p> plen 0)
+                  (setq text (+ text part))))
+            (let* ((fragment (if (nullish? part) empty-fragment part))
+                   (fmarks (aref fragment "marks"))
+                   (ftext (aref fragment "text"))
+                   (midx 0))
+              (setq raw-off (aref text "length"))
+              (setq offset (p| raw-off 0))
+              (setq raw-mc (aref fmarks "length"))
+              (setq mcount (p| raw-mc 0))
+              (when (p> mcount 0)
+                (if (eq offset 0)
+                    (if (eq (aref marks "length") 0)
+                        (setq marks (js-call fmarks :slice 0))
+                      (while (p< midx mcount)
+                        (js-call marks :push (aref fmarks midx))
+                        (setq midx (p| (+ midx 1) 0))))
+                  (while (p< midx mcount)
+                    (let ((m (aref fmarks midx)))
+                      (js-call marks :push
+                        (js-object :offset (+ offset (aref m "offset")) :span (aref m "span"))))
+                    (setq midx (p| (+ midx 1) 0)))))
+              (setq plen (aref ftext "length"))
+              (when (p> plen 0)
+                (setq text (+ text ftext)))
+              (when has-profile
+                (js-call (get fragment :functions (js-array)) :forEach
+                  (lambda (record)
+                    (js-call functions :push
+                      (js-object :node (get record :node)
+                        :start (+ offset (get record :start))
+                        :end (+ offset (get record :end))))))))))
+        (setq index (p| (+ index 1) 0)))
+      (make-fragment text marks functions))))
+
+  (defconst lazy-join-parts
+    (js* "/* @eliscript-js-host-fastpath */ (mode, parts, separator) => { const n = parts.length | 0; if (n === 0) return { text: '', m: null }; if (n === 1) { const p0 = parts[0]; return typeof p0 === 'string' ? { text: p0, m: null } : (p0 == null ? { text: '', m: null } : p0); } const sepLen = separator.length | 0; if (mode === 2) { let text = ''; for (let i = 0; i < n; i = (i + 1) | 0) { if (i > 0 && sepLen > 0) text += separator; const p = parts[i]; const s = typeof p === 'string' ? p : (p == null ? '' : p.text); if (s.length > 0) text += s; } return { text, m: null }; } let text = '', cCount = 0, singleOff = 0, singleM = null, offs = null, kids = null; for (let i = 0; i < n; i = (i + 1) | 0) { if (i > 0 && sepLen > 0) text += separator; const p = parts[i]; if (typeof p === 'string') { if (p.length > 0) text += p; } else if (p != null) { const pm = p.m; if (pm !== null) { const off = text.length | 0; if (cCount === 0) { singleOff = off; singleM = pm; cCount = 1; } else if (cCount === 1) { offs = [singleOff, off]; kids = [singleM, pm]; cCount = 2; } else { offs.push(off); kids.push(pm); cCount = (cCount + 1) | 0; } } const pt = p.text; if (pt.length > 0) text += pt; } } if (cCount === 0) return { text, m: null }; if (cCount === 1) { if (singleOff === 0) return { text, m: singleM }; return { text, m: singleM.k === 2 ? { k: 2, off: (singleOff + singleM.off) | 0, child: singleM.child, h0: false } : { k: 2, off: singleOff, child: singleM, h0: false } }; } return { text, m: { k: 3, offs, kids, h0: offs[0] === 0 && kids[0].h0 } }; }"))
+
+  (defconst lazy-combine-kernel
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (lazyJoin) => (mode, parts) => { const n = parts.length | 0; if (mode === 2) { if (n === 2) { const p0 = parts[0], p1 = parts[1]; return { text: (typeof p0 === 'string' ? p0 : (p0 == null ? '' : p0.text)) + (typeof p1 === 'string' ? p1 : (p1 == null ? '' : p1.text)), m: null }; } if (n === 3) { const p0 = parts[0], p1 = parts[1], p2 = parts[2]; return { text: (typeof p0 === 'string' ? p0 : (p0 == null ? '' : p0.text)) + (typeof p1 === 'string' ? p1 : (p1 == null ? '' : p1.text)) + (typeof p2 === 'string' ? p2 : (p2 == null ? '' : p2.text)), m: null }; } return lazyJoin(2, parts, ''); } if (n === 2) { const p0 = parts[0], p1 = parts[1]; const s0 = typeof p0 === 'string' ? p0 : (p0 == null ? '' : p0.text); const s1 = typeof p1 === 'string' ? p1 : (p1 == null ? '' : p1.text); const m0 = (typeof p0 === 'string' || p0 == null) ? null : p0.m; const m1 = (typeof p1 === 'string' || p1 == null) ? null : p1.m; const text = s0.length === 0 ? s1 : (s1.length === 0 ? s0 : s0 + s1); if (m1 === null) return { text, m: m0 }; const off1 = s0.length | 0; if (m0 === null) { if (off1 === 0) return { text, m: m1 }; return { text, m: m1.k === 2 ? { k: 2, off: (off1 + m1.off) | 0, child: m1.child, h0: false } : { k: 2, off: off1, child: m1, h0: false } }; } return { text, m: { k: 3, offs: [0, off1], kids: [m0, m1], h0: m0.h0 } }; } if (n === 3) { const p0 = parts[0], p1 = parts[1], p2 = parts[2]; if (typeof p0 === 'string' && typeof p2 === 'string') { if (typeof p1 === 'string') return { text: p0 + p1 + p2, m: null }; const s1 = p1 == null ? '' : p1.text; const m1 = p1 == null ? null : p1.m; const text = p0 + s1 + p2; if (m1 === null) return { text, m: null }; const off1 = p0.length | 0; if (off1 === 0) return { text, m: m1 }; return { text, m: m1.k === 2 ? { k: 2, off: (off1 + m1.off) | 0, child: m1.child, h0: false } : { k: 2, off: off1, child: m1, h0: false } }; } } return lazyJoin(1, parts, ''); }")))
+      (if (nil? factory)
+          nil
+        (funcall factory lazy-join-parts))))
+
   (defun join-fragments (parts separator)
-    (let ((joined (js-array))
-          (index 0))
-      (while (< index (get parts :length))
-        (when (> index 0)
-          (js-call joined :push separator))
-        (js-call joined :push (js-nth index parts))
-        (setq index (1+ index)))
-      (combine joined)))
+    (if (not (eq emit-mark-mode 0))
+        (funcall lazy-join-parts emit-mark-mode parts separator)
+      (let ((raw-pcount (aref parts "length"))
+            (part-count 0))
+        (setq part-count (p| raw-pcount 0))
+        (if (eq part-count 0)
+            (make-fragment "" (js-array))
+          (if (eq part-count 1)
+              (let ((single (aref parts 0)))
+                (if (eq (js* "typeof single") "string")
+                    (make-fragment single (js-array))
+                  (emit-join-parts parts 1 "" 0)))
+            (let ((raw-slen (aref separator "length")))
+              (emit-join-parts parts part-count separator (p| raw-slen 0))))))))
+
+  (defun fast-combine (parts)
+    (if (not (eq emit-mark-mode 0))
+        (funcall lazy-combine-kernel emit-mark-mode parts)
+      (if (and (not function-source-profile) (not (nil? fast-combine-kernel)))
+          (funcall fast-combine-kernel parts)
+        (emit-join-parts parts (p| (aref parts "length") 0) "" 0))))
 
   (defun reference-indent (fragment)
     (let* ((input (as-fragment fragment))
@@ -378,6 +624,14 @@
           (setq index (1+ index))))
       (make-fragment text marks (when function-source-profile
         (indent-function-sources source (get input :functions (js-array)))))))
+
+  (defconst shared-indent-state
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (matMarks) => { const Arr = globalThis.Array, isArr = Arr.isArray, getProto = globalThis.Object.getPrototypeOf, arrProto = Arr.prototype, strProto = globalThis.String.prototype, defArrSlice = arrProto.slice, defArrJoin = arrProto.join, defArrPush = arrProto.push, defStrSlice = strProto.slice, defStrSplit = strProto.split, defStrSub = strProto.substring; const scanIndex = (source, slen, ls_b, nl0) => { let ns = 0; if (nl0 !== 0) ls_b[ns++] = 0; let pos = (nl0 + 1) | 0; while (pos < slen) { const nl = source.indexOf('\\n', pos); if (nl === -1) { ls_b[ns++] = pos; break; } if (nl !== pos) ls_b[ns++] = pos; pos = (nl + 1) | 0; } ls_b[ns] = slen; return ns; }; const buildTextFallback = (source, ls_b, ns) => { if (ns === 0) return source; let p0 = ls_b[0]; let text = p0 === 0 ? '' : source.slice(0, p0); for (let k = 0; k < ns; k = (k + 1) | 0) { const p1 = ls_b[(k + 1) | 0]; text = `${text}  ${source.slice(p0, p1)}`; p0 = p1; } return text; }; const coldExit = (nm, nmo, prev_mo, slen, marks, mi) => { if (nm == null) return nm === undefined ? defArrSlice.call(marks, 0, mi) : null; if (typeof nmo !== 'number') return nmo === undefined ? defArrSlice.call(marks, 0, mi) : null; return (nmo >= prev_mo && !(nmo < slen)) ? defArrSlice.call(marks, 0, mi) : null; }; const buildMarks = (src_marks, mlen, ls_b, slen) => { let nm = src_marks[0]; if (nm == null) return nm === undefined ? [] : null; let nmo = nm.offset; let mo = nmo | 0; if (nmo !== mo) { if (typeof nmo !== 'number') return nmo === undefined ? [] : null; return (nmo >= 0 && nmo < slen) ? null : []; } if (mo < 0) return null; if (mo >= slen) return []; const marks = new Arr(mlen); let mi = 0, li = 0; for (;;) { let limit = ls_b[li]; if (mo >= limit) { do { li = (li + 1) | 0; limit = ls_b[li]; } while (mo >= limit); } const shift = li << 1; for (;;) { const sp = nm.span; marks[mi] = { offset: (mo + shift) | 0, span: sp }; mi = (mi + 1) | 0; if (mi >= mlen) return marks; nm = src_marks[mi]; if (nm == null) return coldExit(nm, undefined, mo, slen, marks, mi); nmo = nm.offset; const next_mo = nmo | 0; if (nmo !== next_mo) return coldExit(nm, nmo, mo, slen, marks, mi); if (next_mo < limit) { if (next_mo < mo) return null; mo = next_mo; continue; } mo = next_mo; if (mo >= slen) return defArrSlice.call(marks, 0, mi); break; } li = (li + 1) | 0; } }; const shortIndent = (source, slen, src_marks, ls_b) => { for (let i = 0; i < slen; i = (i + 1) | 0) if (source.charCodeAt(i) > 127) return null; let ns = 0, lineStart = true, text = ''; for (let i = 0; i < slen; i = (i + 1) | 0) { const c = source.charCodeAt(i); if (lineStart && c !== 10) { ls_b[ns++] = i; text += '  '; } text += source[i]; lineStart = c === 10; } ls_b[ns] = slen; const mlen = src_marks.length | 0; if (mlen === 0) return { text, marks: [] }; const marks = buildMarks(src_marks, mlen, ls_b, slen); return marks === null ? null : { text, marks }; }; let bigLs = null; const fallbackLazy = (mode, fragment) => { const isStr = typeof fragment === 'string'; const source = isStr ? fragment : fragment.text; const slen = source.length | 0; if (slen === 0) return { text: '', m: null }; const fm = (mode === 2 || isStr) ? null : fragment.m; const nl0 = source.indexOf('\\n'); if (nl0 === -1) { const text = `  ${source}`; if (fm === null) return { text, m: null }; return { text, m: fm.k === 2 ? { k: 2, off: (2 + fm.off) | 0, child: fm.child, h0: false } : { k: 2, off: 2, child: fm, h0: false } }; } if (!bigLs || bigLs.length < slen + 4) bigLs = new globalThis.Int32Array(slen + 4096); const ns = scanIndex(source, slen, bigLs, nl0); const text = buildTextFallback(source, bigLs, ns); if (fm === null) return { text, m: null }; return { text, m: { k: 4, ls: bigLs.slice(0, (ns + 1) | 0), ns, slen, child: fm, h0: bigLs[0] > 0 && fm.h0 } }; }; try { const b64 = 'AGFzbQEAAAABBgFgAX8BfwMCAQAFAwEAYAcNAgNtZW0CAANydW4AAArNBAHKBAINfwN7QQr9DyEOIAAgDv0LAAAgACAO/QsAECAAIA79CwAgIAAgDv0LADAgACAO/QsAQCAAIA79CwBQQYCAoAIhBUGAgIABIQZBAC0AAEEKRwRAIAVBADYCACAFQQRqIQUgBkGgwAA7AAAgBkECaiEGCwJAA0AgASAATg0BIAH9AAAAIA79IyIPIAH9AAAQIA79IyIQ/VD9UyAEckUEQCABQSBqIQEMAQsgD/1kIBD9ZEEQdHIhAiACQQF0IARyIAJBf3NxIQMgAkEfdiEEIAMEQCADIQgDQCABIAhoaiEJIAUgCTYCACAFQQRqIQUgBiAH/QAAAP0LAAAgBiAH/QAAEP0LABAgCSAHayIMQSBKBEAgB0EgaiEKIAZBIGohDQNAIA0gCv0AAAD9CwAAIA0gCv0AABD9CwAQIA0gCv0AACD9CwAgIA0gCv0AADD9CwAwIA1BwABqIQ0gCkHAAGoiCiAJSA0ACwsgBiAMaiEGIAZBoMAAOwAAIAZBAmohBiAJIQcgCCAIQQFrcSIIDQALCyABQSBqIQEMAAsLIAAgB0oEQCAGIAf9AAAA/QsAACAGIAf9AAAQ/QsAECAAIAdrIgxBIEoEQCAHQSBqIQogBkEgaiENA0AgDSAK/QAAAP0LAAAgDSAK/QAAEP0LABAgDSAK/QAAIP0LACAgDSAK/QAAMP0LADAgDUHAAGohDSAKQcAAaiIKIABIDQALCyAGIAxqIQYLIAUgADYCAEH8/58CIAVBgICgAmtBAnY2AgAgBkGAgIABaws='; const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; const lut = new globalThis.Int16Array(128); for (let i = 0; i < 64; i++) lut[alpha.charCodeAt(i)] = i; const rawLen = ((b64.length * 3) >> 2) - (b64.endsWith('==') ? 2 : (b64.endsWith('=') ? 1 : 0)); const bin = new globalThis.Uint8Array(rawLen); let bi = 0; for (let i = 0; i < b64.length; i += 4) { const v = (lut[b64.charCodeAt(i)] << 18) | (lut[b64.charCodeAt(i + 1)] << 12) | (lut[b64.charCodeAt(i + 2)] << 6) | lut[b64.charCodeAt(i + 3)]; bin[bi++] = (v >> 16) & 255; if (bi < rawLen) bin[bi++] = (v >> 8) & 255; if (bi < rawLen) bin[bi++] = v & 255; } const inst = new globalThis.WebAssembly.Instance(new globalThis.WebAssembly.Module(bin)); const wMem = inst.exports.mem, wRun = inst.exports.run; const u8 = new globalThis.Uint8Array(wMem.buffer, 0, 2097152); const outU8 = new globalThis.Uint8Array(wMem.buffer, 2097152, 2621436); const hasBuf = typeof globalThis.Buffer === 'function'; const inBuf = hasBuf ? globalThis.Buffer.from(wMem.buffer, 0, 2097152) : null; const outBuf = hasBuf ? globalThis.Buffer.from(wMem.buffer, 2097152, 2621436) : null; const defBufWrite = inBuf !== null ? inBuf.write : null; const defBufToStr = outBuf !== null ? outBuf.toString : null; const nsView = new globalThis.Int32Array(wMem.buffer, 4718588, 1); const ls = new globalThis.Int32Array(wMem.buffer, 4718592, 393216); const te = new globalThis.TextEncoder(), td = new globalThis.TextDecoder('latin1'); const fastIndent = hasBuf ? (input) => { if (input == null) return null; const source = input.text; if (typeof source !== 'string') return null; const slen = source.length | 0; const src_marks = input.marks; if (!isArr(src_marks) || getProto(src_marks) !== arrProto || arrProto.slice !== defArrSlice || arrProto.join !== defArrJoin || arrProto.push !== defArrPush || strProto.slice !== defStrSlice || strProto.split !== defStrSplit || strProto.substring !== defStrSub || inBuf.write !== defBufWrite || outBuf.toString !== defBufToStr) return null; if (slen === 0) return { text: '', marks: [] }; if (slen < 8) return shortIndent(source, slen, src_marks, ls); if (slen > 2097000) return null; if (inBuf.write(source, 0, (slen + 4) | 0, 'utf8') !== slen) return null; const outLen = wRun(slen); const text = outLen === slen ? source : outBuf.toString('latin1', 0, outLen); const mlen = src_marks.length | 0; if (mlen === 0) return { text, marks: [] }; const marks = buildMarks(src_marks, mlen, ls, slen); return marks === null ? null : { text, marks }; } : (input) => { if (input == null) return null; const source = input.text; if (typeof source !== 'string') return null; const slen = source.length | 0; const src_marks = input.marks; if (!isArr(src_marks) || getProto(src_marks) !== arrProto || arrProto.slice !== defArrSlice || arrProto.join !== defArrJoin || arrProto.push !== defArrPush || strProto.slice !== defStrSlice || strProto.split !== defStrSplit || strProto.substring !== defStrSub) return null; if (slen === 0) return { text: '', marks: [] }; if (slen < 8) return shortIndent(source, slen, src_marks, ls); if (slen > 2097000) return null; const enc = te.encodeInto(source, u8); if (enc.read !== slen || enc.written !== slen) return null; const outLen = wRun(slen); const text = outLen === slen ? source : td.decode(outU8.subarray(0, outLen)); const mlen = src_marks.length | 0; if (mlen === 0) return { text, marks: [] }; const marks = buildMarks(src_marks, mlen, ls, slen); return marks === null ? null : { text, marks }; }; const lazyIndent = (mode, fragment, pubIndent) => { const isStr = typeof fragment === 'string'; const source = isStr ? fragment : fragment.text; const slen = source.length | 0; if (slen === 0) return { text: '', m: null }; const fm = (mode === 2 || isStr) ? null : fragment.m; if (mode === 1 && fm !== null && slen >= 64 && slen <= 2097000) { const flat = matMarks(fm); const res = pubIndent({ text: source, marks: flat }); const rm = res.marks; return { text: res.text, m: rm.length === 0 ? null : { k: 5, marks: rm, h0: rm[0].offset === 0 } }; } if (slen >= 16 && slen <= 2097000 && slen < 393210) { const asciiOk = hasBuf && inBuf.write === defBufWrite && outBuf.toString === defBufToStr ? inBuf.write(source, 0, (slen + 4) | 0, 'utf8') === slen : (() => { const enc = te.encodeInto(source, u8); return enc.read === slen && enc.written === slen; })(); if (asciiOk) { const outLen = wRun(slen); const text = outLen === slen ? source : (hasBuf && outBuf.toString === defBufToStr ? outBuf.toString('latin1', 0, outLen) : td.decode(outU8.subarray(0, outLen))); if (fm === null) return { text, m: null }; const ns = nsView[0]; return { text, m: { k: 4, ls: ls.slice(0, (ns + 1) | 0), ns, slen, child: fm, h0: ls[0] > 0 && fm.h0 } }; } } return fallbackLazy(mode, fragment); }; return { fastIndent, lazyIndent }; } catch { return { fastIndent: () => null, lazyIndent: fallbackLazy }; } }")))
+      (if (nil? factory)
+          (js-object :fastIndent (lambda (_input) nil) :lazyIndent nil)
+        (funcall factory materialize-lazy-marks))))
+  (defconst fast-indent-kernel (get shared-indent-state :fastIndent))
 
   (defconst native-indent
     (lambda (input)
@@ -410,29 +664,54 @@
         (js-object :text (js-call parts :join "\n") :marks marks))))
 
   (defun indent (fragment)
-    (let* ((input (as-fragment fragment)) (output (funcall native-indent input)))
+    (if (or function-source-profile (eq (js* "typeof fragment") "string"))
+        (indent-slow fragment)
+      (let ((fast (funcall fast-indent-kernel fragment)))
+        (if (eq fast nil) (funcall native-indent fragment) fast))))
+
+  (defun indent-slow (fragment)
+    (let* ((input (if (eq (js* "typeof fragment") "string") (make-fragment fragment (js-array)) fragment))
+           (fast (funcall fast-indent-kernel input))
+           (output (if (eq fast nil) (funcall native-indent input) fast)))
       (when function-source-profile
         (put output :functions (indent-function-sources (get input :text) (get input :functions (js-array)))))
       output))
 
-  (defun reference-locate (node output)
-    (let* ((fragment (as-fragment output))
-           (marks (get fragment :marks))
-           (has-start
-            (js-call marks :some
-              (lambda (mark) (= (get mark :offset) 0)))))
-      (if (or (= (get (get fragment :text) :length) 0)
-              (not (ir-span node))
-              has-start)
-          fragment
-        (let ((located
-               (js-array (js-object :offset 0 :span (ir-span node)))))
-          (js-call marks :forEach
-            (lambda (mark) (js-call located :push mark)))
-          (make-fragment (get fragment :text) located (get fragment :functions (js-array)))))))
+  (defconst lazy-emit-indent-kernel (get shared-indent-state :lazyIndent))
 
-  (defun locate (node output)
-    (native-locate (ir-span node) output))
+  (defun emit-indent (fragment)
+    (if (not (eq emit-mark-mode 0))
+        (funcall lazy-emit-indent-kernel emit-mark-mode fragment indent)
+      (indent fragment)))
+
+  (defun reference-locate (node output)
+    (if function-source-profile
+        (if (eq (js* "typeof output") "string")
+            (make-fragment output (js-array))
+          output)
+      (let* ((fragment (as-fragment output))
+             (marks (get fragment :marks))
+             (has-start
+              (js-call marks :some
+                (lambda (mark) (= (get mark :offset) 0)))))
+        (if (or (= (get (get fragment :text) :length) 0)
+                (not (ir-span node))
+                has-start)
+            fragment
+          (let ((located
+                 (js-array (js-object :offset 0 :span (ir-span node)))))
+            (js-call marks :forEach
+              (lambda (mark) (js-call located :push mark)))
+            (make-fragment (get fragment :text) located (get fragment :functions (js-array))))))))
+
+  (defconst fsp-flag (js-array 0))
+  (defconst locate
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (irSpan, fspFlag, makeFrag, Arr, isArr, getProto, arrProto, defForEach, defConcat, symSpread, symSpecies, defProp) => function locate(node, output) { if (fspFlag[0] !== 0) return typeof output === 'string' ? makeFrag(output, []) : output; const span = irSpan(node); if (typeof output === 'string') return (span == null || span === false || output.length === 0) ? { text: output, marks: [] } : { text: output, marks: [{ offset: 0, span }] }; const text = output.text; if (text.length === 0 || span == null || span === false) return output; const marks = output.marks; const mlen = marks.length; if (mlen > 0 && marks[0] != null && marks[0].offset === 0) return output; const head = { offset: 0, span }; if (isArr(marks) && getProto(marks) === arrProto && marks.forEach === defForEach && arrProto.concat === defConcat && arrProto[symSpread] === undefined && arrProto.constructor === Arr && Arr[symSpecies] === Arr && (mlen === 0 || (marks[0] !== undefined && marks[(mlen - 1) | 0] !== undefined))) return { text, marks: [head].concat(marks) }; const fallback = [head]; marks.forEach((m) => { defProp(fallback, fallback.length, { value: m, writable: true, enumerable: true, configurable: true }); }); return { text, marks: fallback }; }")))
+      (if (nil? factory)
+          reference-locate
+        (funcall factory
+          ir-span fsp-flag make-fragment globalThis.Array emit-array-is-array emit-get-prototype-of emit-array-prototype emit-default-array-for-each emit-default-array-concat emit-is-concat-spreadable emit-species-key Object/defineProperty))))
 
   (defun fresh-name ()
     (setq temporary-counter (1+ temporary-counter))
@@ -442,7 +721,7 @@
     (JSON/stringify value))
 
   (defun children (node)
-    (or (ir-children node) (js-array)))
+    (or (ir-children node) empty-children))
 
   (defun require-arity (name nodes minimum maximum)
     (let ((count (get nodes :length)))
@@ -491,13 +770,13 @@
           (js-call parts :push
             (cond
               ((and rest (= index last-index))
-               (combine (js-array "..." (emit-binding-pattern-node child))))
+               (fast-combine (js-array "..." (emit-binding-pattern-node child))))
               (last-hole "")
               (t (emit-binding-pattern-node child))))
           (setq index (1+ index))))
       (native-locate
         (ir-span node)
-        (combine
+        (fast-combine
           (js-array "[" (join-fragments parts ", ")
            (if (and last-hole (not rest)) "," "") "]")))))
 
@@ -520,7 +799,7 @@
            (parts (js-array)))
       (when as
         (js-call parts :push
-          (combine (js-array "let " (emit-binding-name as) " = " source ";"))))
+          (fast-combine (js-array "let " (emit-binding-name as) " = " source ";"))))
       (js-call entries :forEach
         (lambda (entry)
           (let* ((entry-nodes (children entry))
@@ -530,13 +809,13 @@
                                (js-nth 2 entry-nodes)))
                  (temporary (fresh-name))
                  (resolved
-                  (combine
+                  (fast-combine
                     (js-array "(" temporary
                      " === __eliscript_binding_missing ? "
                      (if default (emit-expression default) "null")
                      " : " temporary ")"))))
             (js-call parts :push
-              (combine
+              (fast-combine
                 (js-array "const " temporary
                  " = __eliscript_binding_get(" source ", "
                  (emit-expression key)
@@ -548,9 +827,9 @@
     (let ((kind (ir-kind pattern)))
       (cond
         ((= kind "binding-name")
-         (combine (js-array "let " (emit-binding-name pattern) " = " source ";")))
+         (fast-combine (js-array "let " (emit-binding-name pattern) " = " source ";")))
         ((= kind "array-binding-pattern")
-         (combine
+         (fast-combine
            (js-array "let " (emit-array-binding-pattern pattern) " = " source ";")))
         ((= kind "map-binding-pattern")
          (emit-map-binding-pattern pattern source))
@@ -560,7 +839,7 @@
     (if (map-binding-pattern-p binding)
         (emit-map-binding-pattern
           (js-nth 0 (children binding)) (binding-temporary binding))
-      (text-fragment "")))
+      (emit-text "")))
 
   (defun emit-binding-setups (bindings)
     (let ((parts (js-array)))
@@ -607,10 +886,10 @@
           (pattern (ir-property node "pattern")))
       (cond
         ((= kind "optional")
-         (combine
+         (fast-combine
            (js-array name " = "
             (if pattern (binding-default-value node) "null"))))
-        ((= kind "rest") (combine (js-array "..." name)))
+        ((= kind "rest") (fast-combine (js-array "..." name)))
         (t name))))
 
   (defun emit-arguments (nodes)
@@ -629,12 +908,12 @@
     (let ((output (emit-expression node)))
       (cond
         ((qualified-apply-reference-p node)
-          (combine (js-array "__eliscript_at("
+          (fast-combine (js-array "__eliscript_at("
             (native-locate (ir-span node)
-              (text-fragment (js-call (get output :text) :slice 0 -6)))
+              (emit-text (js-call (get output :text) :slice 0 -6)))
             ", \"apply\")")))
         ((= (ir-kind node) "reference") output)
-        (t (combine (js-array "(" output ")"))))))
+        (t (fast-combine (js-array "(" output ")"))))))
 
   (defun boolean-reference-text-p (text)
     (let ((length (js-length text)) (index 2) (valid t))
@@ -696,8 +975,8 @@
                 (t
                  (let ((output (emit-expression value)))
                    (js-call parts :push (if (boolean-p value) output
-                     (combine (js-array "__eliscript_truthy(" output ")")))))))))))
-      (combine parts)))
+                     (fast-combine (js-array "__eliscript_truthy(" output ")")))))))))))
+      (fast-combine parts)))
 
   ;; Direct declarations are safe only when initializers cannot observe a new
   ;; TDZ or capture a new binding. Parallel groups exclude every new name.
@@ -737,10 +1016,10 @@
           (let ((declarations (js-array)))
             (js-call bindings :forEach (lambda (binding)
               (let ((initializer (binding-initializer binding)))
-                (js-call declarations :push (combine (js-array "let " (emit-binding-target binding) " = "
+                (js-call declarations :push (fast-combine (js-array "let " (emit-binding-target binding) " = "
                   (if initializer (emit-expression initializer) "null") ";"))))))
             (js-call declarations :push (if returning (emit-returning-body body) (emit-statement-body body)))
-            (combine (js-array "{\n" (indent (join-fragments declarations "\n")) "\n}")))
+            (fast-combine (js-array "{\n" (emit-indent (join-fragments declarations "\n")) "\n}")))
       (let* ((group (if sequential (js-array (js-nth 0 bindings)) bindings))
              (temporaries (temporary-names group))
              (initializers (js-array))
@@ -750,14 +1029,14 @@
           (let* ((binding (js-nth index group))
                  (initializer (binding-initializer binding)))
             (js-call initializers :push
-              (combine
+              (fast-combine
                 (js-array "const " (js-nth index temporaries) " = "
                   (if initializer (emit-expression initializer) "null") ";"))))
           (setq index (1+ index)))
         (setq index 0)
         (while (< index (get group :length))
           (js-call declarations :push
-            (combine
+            (fast-combine
               (js-array "let " (emit-binding-target (js-nth index group)) " = "
                 (js-nth index temporaries) ";")))
           (setq index (1+ index)))
@@ -766,12 +1045,12 @@
             (if sequential (js-call bindings :slice 1) (js-array))
             body sequential returning))
         (js-call initializers :push
-          (combine (js-array "{\n" (indent (join-fragments declarations "\n")) "\n}")))
-        (combine (js-array "{\n" (indent (join-fragments initializers "\n")) "\n}"))))))
+          (fast-combine (js-array "{\n" (emit-indent (join-fragments declarations "\n")) "\n}")))
+        (fast-combine (js-array "{\n" (emit-indent (join-fragments initializers "\n")) "\n}"))))))
 
   (defun emit-context-cond (clauses returning)
     (if (= (get clauses :length) 0)
-        (text-fragment (if returning "return null;" ""))
+        (emit-text (if returning "return null;" ""))
       (let* ((clause (js-nth 0 clauses))
              (nodes (children clause))
              (test (js-nth 0 nodes))
@@ -779,44 +1058,44 @@
         (native-locate (ir-span clause)
           (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
               (if returning (emit-returning-body body) (emit-statement-body body))
-            (combine
+            (fast-combine
               (js-array "if (" (emit-test test) ") {\n"
-                (indent (if returning (emit-returning-body body) (emit-statement-body body)))
+                (emit-indent (if returning (emit-returning-body body) (emit-statement-body body)))
                 "\n} else {\n"
-                (indent (emit-context-cond (js-call clauses :slice 1) returning)) "\n}")))))))
+                (emit-indent (emit-context-cond (js-call clauses :slice 1) returning)) "\n}")))))))
 
   (defun emit-context (node returning)
     (let ((kind (ir-kind node)) (nodes (children node)))
-      (locate node
+      (native-locate (ir-span node)
         (cond
           ;; Preserve async expression boundaries and their promise scheduling.
           ((contains-await-p node)
-           (combine (js-array (if returning "return " "") (emit-expression node) ";")))
+           (fast-combine (js-array (if returning "return " "") (emit-expression node) ";")))
           ((= kind "sequence")
            (if returning (emit-returning-body nodes) (emit-statement-body nodes)))
           ((= kind "conditional")
-           (combine
+           (fast-combine
              (js-array "if (" (emit-test (js-nth 0 nodes)) ") {\n"
-               (indent (emit-context (js-nth 1 nodes) returning)) "\n}"
+               (emit-indent (emit-context (js-nth 1 nodes) returning)) "\n}"
                (if (or returning (> (get nodes :length) 2))
-                   (combine (js-array " else {\n"
-                     (indent (if (> (get nodes :length) 2)
-                                 (emit-context (js-nth 2 nodes) returning)
-                               (text-fragment "return null;"))) "\n}")) ""))))
+                   (fast-combine (js-array " else {\n"
+                     (emit-indent (if (> (get nodes :length) 2)
+                                      (emit-context (js-nth 2 nodes) returning)
+                                    (emit-text "return null;"))) "\n}")) ""))))
           ((= kind "conditional-sugar")
-           (combine
+           (fast-combine
              (js-array "if ("
                (if (= (ir-value node) "when") (emit-test (js-nth 0 nodes))
-                 (combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
+                 (fast-combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
                ") {\n"
-               (indent (if returning (emit-returning-body (js-call nodes :slice 1))
-                         (emit-statement-body (js-call nodes :slice 1)))) "\n}"
+               (emit-indent (if returning (emit-returning-body (js-call nodes :slice 1))
+                              (emit-statement-body (js-call nodes :slice 1)))) "\n}"
                (if returning " else {\n  return null;\n}" ""))))
           ((= kind "conditional-chain") (emit-context-cond nodes returning))
           ((= kind "loop")
-           (combine
+           (fast-combine
              (js-array "while (" (emit-test (js-nth 0 nodes)) ") {\n"
-               (indent (emit-statement-body (js-call nodes :slice 1))) "\n}"
+               (emit-indent (emit-statement-body (js-call nodes :slice 1))) "\n}"
                (if returning "\nreturn null;" ""))))
           ((and (= kind "lexical-bindings")
                 (js-call (js-call nodes :slice 0 (ir-property node "bindingCount"))
@@ -825,11 +1104,11 @@
              (emit-context-let (js-nth 0 parts) (js-nth 1 parts)
                (ir-property node "sequential") returning)))
           (t
-           (combine (js-array (if returning "return " "") (emit-expression node) ";")))))))
+           (fast-combine (js-array (if returning "return " "") (emit-expression node) ";")))))))
 
   (defun emit-returning-body (nodes)
     (if (= (get nodes :length) 0)
-        (text-fragment "return null;")
+        (emit-text "return null;")
       (let ((parts (js-array)) (index 0) (last-index (1- (get nodes :length))))
         (while (< index last-index)
           (js-call parts :push (emit-context (js-nth index nodes) false))
@@ -841,48 +1120,127 @@
     (join-fragments
       (js-call nodes :map (lambda (node) (emit-context node false))) "\n"))
 
-  (defun contains-await-p (value)
-    (let ((pending (js-array value))
-          (current nil)
-          (kind nil)
-          (nodes nil)
-          (index 0)
+  (defvar await-node-cache nil)
+  (defvar module-has-await t)
+  (defvar module-has-recur t)
+  (defconst scan-program-flags
+    (js* "/* @eliscript-js-host-fastpath */ (body) => { const stack = body.slice(0); let flags = 0; while (stack.length > 0 && flags !== 3) { const node = stack.pop(); if (node !== null && typeof node === 'object') { const k = node.kind; if (k === 'await-expression') flags |= 1; else if (k === 'recur') flags |= 2; const ch = node.children; if (ch !== undefined) { for (let i = 0, n = ch.length | 0; i < n; i = (i + 1) | 0) stack.push(ch[i]); } } } return flags; }"))
+
+  (defun scan-program-flags-portable (body)
+    (let ((stack (js-call body :slice 0))
+          (flags 0))
+      (while (and (> (bit-or (aref stack "length") 0) 0)
+                  (not (eq flags 3)))
+        (let ((node (js-call stack :pop)))
+          (when (and (not (nil? node)) (eq (js* "typeof node") "object"))
+            (let ((k (aref node "kind")))
+              (if (eq k "await-expression")
+                  (setq flags (bit-or flags 1))
+                (when (eq k "recur")
+                  (setq flags (bit-or flags 2))))
+              (let ((ch (aref node "children")))
+                (unless (eq ch undefined)
+                  (let ((i 0) (n (bit-or (aref ch "length") 0)))
+                    (while (< i n)
+                      (js-call stack :push (aref ch i))
+                      (setq i (+ i 1))))))))))
+      flags))
+
+  (defun program-contains-await-p (program)
+    (let ((pending (js-call (program-body program) :slice))
           (found false))
-      (while (and (not found) (> (get pending :length) 0))
-        (setq current (js-call pending :pop))
-        (cond
-          ((node-p current)
-           (setq kind (ir-kind current))
-           (cond
-             ((= kind "await-expression") (setq found t))
-             ((not (= kind "function-expression"))
-              (setq nodes (children current))
-              (setq index (1- (get nodes :length)))
-              (while (>= index 0)
-                (js-call pending :push (js-nth index nodes))
-                (setq index (1- index))))))
-          ((Array/isArray current)
-           (setq index (1- (get current :length)))
-           (while (>= index 0)
-             (js-call pending :push (js-nth index current))
-             (setq index (1- index))))))
+      (while (and (eq found false) (> (bit-or (aref pending "length") 0) 0))
+        (let ((node (js-call pending :pop)))
+          (when (node-p node)
+            (if (eq (ir-kind node) "await-expression")
+                (setq found t)
+              (let ((nodes (children node)))
+                (let ((len (bit-or (aref nodes "length") 0))
+                      (idx 0))
+                  (while (< idx len)
+                    (js-call pending :push (aref nodes idx))
+                    (setq idx (+ idx 1)))))))))
       found))
+
+  (defun node-contains-await-cached-p (node cache)
+    (let ((cached (js-call cache :get node)))
+      (if (not (eq cached undefined))
+          cached
+        (let ((kind (ir-kind node))
+              (found false))
+          (if (eq kind "await-expression")
+              (setq found t)
+            (when (not (eq kind "function-expression"))
+              (let ((nodes (children node)))
+                (let ((len (bit-or (aref nodes "length") 0))
+                      (index 0))
+                  (while (and (eq found false) (< index len))
+                    (let ((child (aref nodes index)))
+                      (when (and (node-p child) (node-contains-await-cached-p child cache))
+                        (setq found t)))
+                    (setq index (+ index 1)))))))
+          (js-call cache :set node found)
+          found))))
+
+  (defun contains-await-p (value)
+    (if (not module-has-await)
+        false
+      (let ((cache await-node-cache))
+        (if (not (nil? cache))
+            (cond
+              ((node-p value) (node-contains-await-cached-p value cache))
+              ((funcall emit-array-is-array value)
+               (let ((len (bit-or (aref value "length") 0))
+                     (index 0)
+                     (found false))
+                 (while (and (eq found false) (< index len))
+                   (let ((item (aref value index)))
+                     (when (contains-await-p item)
+                       (setq found t)))
+                   (setq index (+ index 1)))
+                 found))
+              (t false))
+          (let ((pending (js-array value))
+                (current nil)
+                (kind nil)
+                (nodes nil)
+                (index 0)
+                (found false))
+            (while (and (not found) (> (get pending :length) 0))
+              (setq current (js-call pending :pop))
+              (cond
+                ((node-p current)
+                 (setq kind (ir-kind current))
+                 (cond
+                   ((= kind "await-expression") (setq found t))
+                   ((not (= kind "function-expression"))
+                    (setq nodes (children current))
+                    (setq index (1- (get nodes :length)))
+                    (while (>= index 0)
+                      (js-call pending :push (js-nth index nodes))
+                      (setq index (1- index))))))
+                ((Array/isArray current)
+                 (setq index (1- (get current :length)))
+                 (while (>= index 0)
+                   (js-call pending :push (js-nth index current))
+                   (setq index (1- index))))))
+            found)))))
 
   (defun emit-iife (parameters body invocation asynchronous)
     (if asynchronous
-        (combine
+        (fast-combine
           (js-array "(await (async (" parameters ") => {\n" body "\n})("
            invocation "))"))
-      (combine
+      (fast-combine
         (js-array "((" parameters ") => {\n" body "\n})(" invocation ")"))))
 
   (defun emit-do (nodes)
     (cond
-      ((= (get nodes :length) 0) (text-fragment "null"))
+      ((= (get nodes :length) 0) (emit-text "null"))
       ((= (get nodes :length) 1) (emit-expression (js-nth 0 nodes)))
       (t
        (emit-iife
-         "" (indent (emit-returning-body nodes)) ""
+         "" (emit-indent (emit-returning-body nodes)) ""
          (contains-await-p nodes)))))
 
   (defun split-counted-children (node property)
@@ -894,51 +1252,53 @@
     (let* ((parts (split-counted-children node "parameterCount"))
            (parameters (js-nth 0 parts))
            (body (js-nth 1 parts)))
-      (let ((fragment (combine
+      (let ((fragment (fast-combine
         (js-array "(" (if (ir-property node "async") "async " "") "("
          (join-fragments
            (js-call parameters :map
              (lambda (parameter) (emit-parameter parameter)))
            ", ")
          ") => {\n"
-         (indent (emit-function-body parameters body))
+         (emit-indent (emit-function-body parameters body))
          "\n})"))))
         (function-source-fragment node fragment 1 (1- (js-length (get fragment :text)))))))
 
   (defun contains-recur-target-p (value target-kind)
-    (let ((pending (js-array value))
-          (current nil)
-          (kind nil)
-          (nodes nil)
-          (index 0)
-          (found false))
-      (while (and (not found) (> (get pending :length) 0))
-        (setq current (js-call pending :pop))
-        (cond
-          ((node-p current)
-           (setq kind (ir-kind current))
-           (cond
-             ((= kind "recur")
-              (when (= (ir-property current "targetKind") target-kind)
-                (setq found t)))
-             ((not (= kind "function-expression"))
-              (setq nodes (children current))
-              (setq index (1- (get nodes :length)))
-              (while (>= index 0)
-                (js-call pending :push (js-nth index nodes))
-                (setq index (1- index))))))
-          ((Array/isArray current)
-           (setq index (1- (get current :length)))
-           (while (>= index 0)
-             (js-call pending :push (js-nth index current))
-             (setq index (1- index))))))
-      found))
+    (if (not module-has-recur)
+        false
+      (let ((pending (js-array value))
+            (current nil)
+            (kind nil)
+            (nodes nil)
+            (index 0)
+            (found false))
+        (while (and (not found) (> (get pending :length) 0))
+          (setq current (js-call pending :pop))
+          (cond
+            ((node-p current)
+             (setq kind (ir-kind current))
+             (cond
+               ((= kind "recur")
+                (when (= (ir-property current "targetKind") target-kind)
+                  (setq found t)))
+               ((not (= kind "function-expression"))
+                (setq nodes (children current))
+                (setq index (1- (get nodes :length)))
+                (while (>= index 0)
+                  (js-call pending :push (js-nth index nodes))
+                  (setq index (1- index))))))
+            ((Array/isArray current)
+             (setq index (1- (get current :length)))
+             (while (>= index 0)
+               (js-call pending :push (js-nth index current))
+               (setq index (1- index))))))
+        found)))
 
   (defun emit-rebinding-target (binding temporary)
     (let ((target (emit-binding-target binding)))
       (if (ir-property binding "pattern")
-          (combine (js-array "(" target " = " temporary ");"))
-        (combine (js-array target " = " temporary ";")))))
+          (fast-combine (js-array "(" target " = " temporary ");"))
+        (fast-combine (js-array target " = " temporary ";")))))
 
   (defun emit-recur-tail (node target)
     (unless (= (ir-property node "targetKind") (get target :kind))
@@ -952,7 +1312,7 @@
         (let ((temporary (fresh-name)))
           (js-call temporaries :push temporary)
           (js-call parts :push
-            (combine
+            (fast-combine
               (js-array "const " temporary " = "
                (emit-expression (js-nth index args)) ";"))))
         (setq index (1+ index)))
@@ -963,18 +1323,18 @@
             (js-nth index bindings) (js-nth index temporaries)))
         (setq index (1+ index)))
       (js-call parts :push
-        (combine (js-array "continue " (get target :label) ";")))
+        (fast-combine (js-array "continue " (get target :label) ";")))
       (native-locate (ir-span node) (join-fragments parts "\n"))))
 
   (defun emit-tail-body (nodes target)
     (if (= (get nodes :length) 0)
-        (text-fragment "return null;")
+        (emit-text "return null;")
       (let ((parts (js-array))
             (index 0)
             (last-index (1- (get nodes :length))))
         (while (< index last-index)
           (js-call parts :push
-            (combine (js-array (emit-expression (js-nth index nodes)) ";")))
+            (fast-combine (js-array (emit-expression (js-nth index nodes)) ";")))
           (setq index (1+ index)))
         (js-call parts :push
           (emit-tail-node (js-nth last-index nodes) target))
@@ -982,7 +1342,7 @@
 
   (defun emit-tail-cond (clauses target)
     (if (= (get clauses :length) 0)
-        (text-fragment "return null;")
+        (emit-text "return null;")
       (let* ((clause (js-nth 0 clauses))
              (nodes (children clause))
              (test (js-nth 0 nodes))
@@ -992,11 +1352,11 @@
           (if (and (= (ir-kind test) "literal")
                    (eq (ir-value test) t))
               (emit-tail-body body target)
-            (combine
+            (fast-combine
               (js-array "if (__eliscript_truthy(" (emit-expression test)
-               ")) {\n" (indent (emit-tail-body body target))
+               ")) {\n" (emit-indent (emit-tail-body body target))
                "\n} else {\n"
-               (indent
+               (emit-indent
                  (emit-tail-cond (js-call clauses :slice 1) target))
                "\n}")))))))
 
@@ -1013,7 +1373,7 @@
             (let* ((binding (js-nth index bindings))
                    (initializer (binding-initializer binding)))
               (js-call statements :push
-                (combine
+                (fast-combine
                   (js-array "let " (emit-binding-target binding) " = "
                    (if initializer
                        (emit-expression initializer)
@@ -1029,7 +1389,7 @@
                    (temporary (fresh-name)))
               (js-call temporaries :push temporary)
               (js-call statements :push
-                (combine
+                (fast-combine
                   (js-array "const " temporary " = "
                    (if initializer
                        (emit-expression initializer)
@@ -1039,7 +1399,7 @@
           (setq index 0)
           (while (< index (get bindings :length))
             (js-call statements :push
-              (combine
+              (fast-combine
                 (js-array "let " (emit-binding-target (js-nth index bindings)) " = "
                  (js-nth index temporaries) ";")))
             (when (map-binding-pattern-p (js-nth index bindings))
@@ -1049,13 +1409,13 @@
       (js-call statements :push (emit-tail-body body target))
       (native-locate
         (ir-span node)
-        (combine
-          (js-array "{\n" (indent (join-fragments statements "\n")) "\n}")))))
+        (fast-combine
+          (js-array "{\n" (emit-indent (join-fragments statements "\n")) "\n}")))))
 
   (defun emit-tail-short-circuit (nodes kind target)
     (cond
       ((= (get nodes :length) 0)
-       (text-fragment (if (= kind "and") "return true;" "return null;")))
+       (emit-text (if (= kind "and") "return true;" "return null;")))
       ((= (get nodes :length) 1)
        (emit-tail-node (js-nth 0 nodes) target))
       (t
@@ -1065,15 +1425,15 @@
               (truthy
                (if (= kind "and")
                    (emit-tail-short-circuit rest kind target)
-                 (combine (js-array "return " temporary ";"))))
+                 (fast-combine (js-array "return " temporary ";"))))
               (falsey
                (if (= kind "and")
-                   (combine (js-array "return " temporary ";"))
+                   (fast-combine (js-array "return " temporary ";"))
                  (emit-tail-short-circuit rest kind target))))
-         (combine
+         (fast-combine
            (js-array "const " temporary " = " first ";\n"
             "if (__eliscript_truthy(" temporary ")) {\n"
-            (indent truthy) "\n} else {\n" (indent falsey) "\n}"))))))
+            (emit-indent truthy) "\n} else {\n" (emit-indent falsey) "\n}"))))))
 
   (defun emit-tail-node (node target)
     (let ((kind (ir-kind node))
@@ -1081,28 +1441,28 @@
       (cond
         ((= kind "recur") (emit-recur-tail node target))
         ((= kind "conditional")
-         (combine
+         (fast-combine
            (js-array "if (__eliscript_truthy(" (emit-expression (js-nth 0 nodes))
-            ")) {\n" (indent (emit-tail-node (js-nth 1 nodes) target))
+            ")) {\n" (emit-indent (emit-tail-node (js-nth 1 nodes) target))
             "\n} else {\n"
-            (indent
+            (emit-indent
               (if (> (get nodes :length) 2)
                   (emit-tail-node (js-nth 2 nodes) target)
-                (text-fragment "return null;")))
+                (emit-text "return null;")))
             "\n}")))
         ((= kind "conditional-sugar")
-         (combine
+         (fast-combine
            (js-array "if (" (if (= (ir-value node) "when") "" "!")
             "__eliscript_truthy(" (emit-expression (js-nth 0 nodes))
             ")) {\n"
-            (indent (emit-tail-body (js-call nodes :slice 1) target))
+            (emit-indent (emit-tail-body (js-call nodes :slice 1) target))
             "\n} else {\n  return null;\n}")))
         ((= kind "conditional-chain") (emit-tail-cond nodes target))
         ((= kind "sequence") (emit-tail-body nodes target))
         ((= kind "lexical-bindings") (emit-tail-let node target))
         ((= kind "short-circuit")
          (emit-tail-short-circuit nodes (ir-value node) target))
-        (t (combine (js-array "return " (emit-expression node) ";"))))))
+        (t (fast-combine (js-array "return " (emit-expression node) ";"))))))
 
   (defconst closed-scalar-operators
     (js-array "+" "-" "*" "/" "%" "mod" "1+" "1-" "=" "eq" "<" "<=" ">" ">=" "/=" "not=" "not"))
@@ -1144,28 +1504,34 @@
         (t false)))))
 
   (defun closed-scalar-loop-p (parameters body)
-    (let ((state (js-object :loop false))
-          (scope (js-call parameters :map (lambda (parameter) (ir-value parameter)))))
-      (and (> (js-length parameters) 0)
-           (js-call parameters :every
-             (lambda (parameter)
-               (and (= (ir-property parameter "parameterKind") "required")
-                    (not (ir-property parameter "pattern")))))
-           (js-call body :every (lambda (node) (closed-scalar-node-p node scope state)))
-           (get state :loop))))
+    (and (> (aref parameters "length") 0)
+         (js-call parameters :every
+           (lambda (parameter)
+             (and (eq (ir-property parameter "parameterKind") "required")
+                  (not (ir-property parameter "pattern")))))
+         (let ((state (js-object :loop false))
+               (scope (js-call parameters :map (lambda (parameter) (ir-value parameter)))))
+           (and (js-call body :every (lambda (node) (closed-scalar-node-p node scope state)))
+                (get state :loop)))))
 
   (defun emit-function-body (parameters body)
+    (let ((proven (proven-number-locals-for parameters body)))
+      (if (and (eq proven false) (eq proven-number-locals undefined))
+          (emit-function-body-guarded parameters body)
+        (with-proven-number-locals (if proven proven undefined)
+          (lambda () (emit-function-body-guarded parameters body))))))
+
+  (defun emit-function-body-guarded (parameters body)
     (if (and (not numeric-emission-profile) (closed-scalar-loop-p parameters body))
-        (let ((fast nil) (slow nil) (previous numeric-emission-profile))
-          (setq numeric-emission-profile t)
-          (try (setq fast (emit-function-body-unversioned parameters body))
-            (finally (setq numeric-emission-profile previous)))
+        (let ((fast nil) (slow nil))
+          (setq fast (with-numeric-emission-profile
+                       (lambda () (emit-function-body-unversioned parameters body))))
           (setq slow (emit-function-body-unversioned parameters body))
-          (combine
+          (fast-combine
             (js-array "if ("
              (js-call (js-call parameters :map
                         (lambda (parameter) (str "typeof " (binding-name (ir-value parameter)) " === \"number\""))) :join " && ")
-             ") {\n" (indent fast) "\n} else {\n" (indent slow) "\n}")))
+             ") {\n" (emit-indent fast) "\n} else {\n" (emit-indent slow) "\n}")))
       (emit-function-body-unversioned parameters body)))
 
   (defun emit-function-body-unversioned (parameters body)
@@ -1173,22 +1539,22 @@
       (if (not (contains-recur-target-p body "function"))
           (if (= (get (get setups :text) :length) 0)
               (emit-returning-body body)
-            (combine (js-array setups "\n" (emit-returning-body body))))
+            (fast-combine (js-array setups "\n" (emit-returning-body body))))
         (let* ((label (fresh-name))
              (target
               (js-object
                 :kind "function" :bindings parameters :label label)))
-          (combine
+          (fast-combine
             (js-array label ": while (true) {\n"
-             (indent
+             (emit-indent
                (if (= (get (get setups :text) :length) 0)
                    (emit-tail-body body target)
-                 (combine
+                 (fast-combine
                    (js-array setups "\n" (emit-tail-body body target)))))
              "\n}"))))))
 
   (defun emit-if (nodes)
-    (combine
+    (fast-combine
       (js-array "("
        (emit-test (js-nth 0 nodes))
        " ? "
@@ -1203,14 +1569,14 @@
     (let* ((nodes (children node))
            (test (emit-test (js-nth 0 nodes)))
            (body (emit-do (js-call nodes :slice 1))))
-      (combine
+      (fast-combine
         (js-array "("
           (if (= (ir-value node) "when") test
-            (combine (js-array "(!" test ")"))) " ? " body " : null)"))))
+            (fast-combine (js-array "(!" test ")"))) " ? " body " : null)"))))
 
   (defun emit-cond (clauses)
     (if (= (get clauses :length) 0)
-        (text-fragment "null")
+        (emit-text "null")
       (let* ((clause (js-nth 0 clauses))
              (nodes (children clause))
              (test (js-nth 0 nodes))
@@ -1219,7 +1585,7 @@
           (ir-span clause)
           (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
               (emit-do body)
-            (combine
+            (fast-combine
               (js-array "("
                (emit-test test)
                " ? "
@@ -1230,7 +1596,7 @@
 
   (defun emit-throw (node)
     (let ((temporary (fresh-name)))
-      (combine
+      (fast-combine
         (js-array "((" temporary ") => { throw " temporary "; })("
          (emit-expression (js-nth 0 (children node))) ")"))))
 
@@ -1240,11 +1606,11 @@
            (body (js-call nodes :slice 1)))
       (native-locate
         (ir-span node)
-        (combine
+        (fast-combine
           (js-array " catch (" (emit-binding-target binding) ") {\n"
-           (indent
+           (emit-indent
              (if (map-binding-pattern-p binding)
-                 (combine
+                 (fast-combine
                    (js-array (emit-binding-setup binding) "\n"
                     (emit-returning-body body)))
                (emit-returning-body body)))
@@ -1253,9 +1619,9 @@
   (defun emit-finally (node)
     (native-locate
       (ir-span node)
-      (combine
+      (fast-combine
         (js-array " finally {\n"
-         (indent (emit-statement-body (children node)))
+         (emit-indent (emit-statement-body (children node)))
          "\n}"))))
 
   (defun emit-try (node)
@@ -1269,14 +1635,14 @@
             (js-call clauses :find
               (lambda (clause) (= (ir-kind clause) "finally-clause"))))
            (try-block
-            (combine
+            (fast-combine
               (js-array "try {\n"
-               (indent (emit-returning-body body))
+               (emit-indent (emit-returning-body body))
                "\n}"
                (if catch-clause (emit-catch catch-clause) "")
                (if finally-clause (emit-finally finally-clause) "")))))
       (emit-iife
-        "" (indent try-block) "" (contains-await-p node))))
+        "" (emit-indent try-block) "" (contains-await-p node))))
 
   (defun emit-binding-values (bindings)
     (let ((result (js-array)))
@@ -1298,10 +1664,10 @@
            (values (join-fragments (emit-binding-values bindings) ", "))
            (setups (emit-binding-setups bindings))
            (body-output
-            (indent
+            (emit-indent
               (if (= (get (get setups :text) :length) 0)
                   (emit-returning-body body)
-                (combine
+                (fast-combine
                   (js-array setups "\n" (emit-returning-body body)))))))
       (emit-iife names body-output values (contains-await-p body))))
 
@@ -1314,11 +1680,11 @@
                (tail (emit-sequential-let (js-call bindings :slice 1) body)))
           (emit-iife
             name
-            (indent
-              (combine
+            (emit-indent
+              (fast-combine
                 (js-array
                   (if (map-binding-pattern-p binding)
-                      (combine (js-array (emit-binding-setup binding) "\n"))
+                      (fast-combine (js-array (emit-binding-setup binding) "\n"))
                     "")
                   "return " tail ";")))
             initializer
@@ -1339,17 +1705,17 @@
       (js-call (children node) :forEach
         (lambda (pair) (js-call assignments :push (native-locate (ir-span pair) (tdz-assignment pair)))))
       (if (= (ir-value node) "set!") (js-nth 0 assignments)
-        (combine (js-array "(" (join-fragments assignments ", ") ")")))))
+        (fast-combine (js-array "(" (join-fragments assignments ", ") ")")))))
 
   (defun emit-loop (node)
     (let* ((nodes (children node))
            (test-output (emit-test (js-nth 0 nodes)))
            (body (js-call nodes :slice 1)))
       (emit-iife ""
-        (indent
-          (combine
+        (emit-indent
+          (fast-combine
             (js-array "while (" test-output ") {\n"
-              (indent (emit-statement-body body)) "\n}\nreturn null;")))
+              (emit-indent (emit-statement-body body)) "\n}\nreturn null;")))
         "" (contains-await-p nodes))))
 
   (defun emit-binding-loop (node)
@@ -1373,13 +1739,13 @@
            (setups (emit-binding-setups bindings)))
       (emit-iife
         parameters
-        (indent
-          (combine
+        (emit-indent
+          (fast-combine
             (js-array label ": while (true) {\n"
-             (indent
+             (emit-indent
                (if (= (get (get setups :text) :length) 0)
                    (emit-tail-body body target)
-                 (combine
+                 (fast-combine
                    (js-array setups "\n" (emit-tail-body body target)))))
              "\n}")))
         initializers
@@ -1388,10 +1754,10 @@
   (defun emit-short-circuit (nodes kind)
     (cond
       ((= (get nodes :length) 0)
-       (text-fragment (if (= kind "and") "true" "null")))
+       (emit-text (if (= kind "and") "true" "null")))
       ((= (get nodes :length) 1) (emit-expression (js-nth 0 nodes)))
       ((and (js-call nodes :every boolean-p) (not (contains-await-p nodes)))
-       (combine
+       (fast-combine
          (js-array "("
            (join-fragments
              (js-call nodes :map (lambda (node) (emit-expression node)))
@@ -1401,16 +1767,16 @@
              (first (emit-expression (js-nth 0 nodes)))
              (rest (emit-short-circuit (js-call nodes :slice 1) kind)))
          (let ((body
-                (combine
+                (fast-combine
                   (js-array "(__eliscript_truthy(" temporary ") ? "
                    (if (= kind "and") rest temporary)
                    " : "
                    (if (= kind "and") temporary rest)
                    ")"))))
            (if (contains-await-p (js-call nodes :slice 1))
-               (combine
+               (fast-combine
                  (js-array "(await (async (" temporary ") => " body ")(" first "))"))
-             (combine (js-array "((" temporary ") => " body ")(" first ")"))))))))
+             (fast-combine (js-array "((" temporary ") => " body ")(" first ")"))))))))
 
   (defun numeric-operator-tag (operator)
     (cond ((= operator "-") "sub") ((= operator "*") "mul") ((= operator "/") "div")
@@ -1419,20 +1785,236 @@
       ((= operator ">>>") "ushr") ((= operator "imul") "imul") (t nil)))
   (defun relational-operator-p (operator)
     (or (= operator "<") (= operator "<=") (= operator ">") (= operator ">=")))
+  (defvar proven-number-locals undefined)
+  (defun with-proven-number-locals (locals function)
+    (let ((previous proven-number-locals))
+      (setq proven-number-locals locals)
+      (try (funcall function)
+        (finally (setq proven-number-locals previous)))))
+  (defun with-numeric-emission-profile (function)
+    (let ((previous numeric-emission-profile))
+      (setq numeric-emission-profile t)
+      (try (funcall function)
+        (finally (setq numeric-emission-profile previous)))))
+  (defun proven-number-literal-p (node)
+    (and (= (ir-kind node) "literal")
+         (= (value-type (aref node "value")) "number")))
+  (defun proven-number-expr-p (node &optional proven)
+    (let ((set (if (nullish? proven) proven-number-locals proven)))
+      (if (nullish? node) false
+        (let ((kind (ir-kind node)) (name (ir-value node)) (nodes (children node)))
+          (cond
+            ((= kind "literal") (= (value-type (aref node "value")) "number"))
+            ((= kind "reference") (and (not (undefined? set)) (js-call set :has name)))
+            ((= kind "intrinsic")
+             (cond
+               ((= name "1+") (and (= (js-length nodes) 1)
+                                   (proven-number-expr-p (js-nth 0 nodes) set)))
+               ((= name "1-") (= (js-length nodes) 1))
+               ((= name "+") (and (> (js-length nodes) 0)
+                                  (js-call nodes :every
+                                    (lambda (child) (proven-number-expr-p child set)))))
+               ((js-call (js-array "-" "*" "/" "%" "mod"
+                            "bit-and" "bit-or" "bit-xor" "bit-shift-left"
+                            "bit-shift-right" "unsigned-bit-shift-right"
+                            "&" "|" "^" "<<" ">>" ">>>") :includes name)
+                (js-call nodes :some
+                  (lambda (child) (proven-number-expr-p child set))))
+               (t false)))
+            (t false))))))
+  (defun contains-assignment-node-p (node)
+    (if (nullish? node) false
+      (if (= (ir-kind node) "assignment") t
+        (js-call (children node) :some
+          (lambda (child) (contains-assignment-node-p child))))))
+  (defun node-object-p (node)
+    (and (not (nullish? node)) (eq (js* "typeof node") "object") (ir-kind node)))
+  (defconst fast-proven-number-eligible
+    (js* "/* @eliscript-js-host-fastpath */ (body) => { let hasLoop = false; const check = (nodes) => { for (let i = 0, n = nodes.length | 0; i < n; i = (i + 1) | 0) { const node = nodes[i]; if (node !== null && typeof node === 'object') { const k = node.kind; if (!k) continue; if (k === 'function-expression' || k === 'function-declaration' || k === 'variable-declaration' || k === 'await-expression' || k === 'raw-javascript') return false; if (k === 'loop' || k === 'binding-loop') hasLoop = true; const ch = node.children; if (ch !== undefined && ch.length > 0 && !check(ch)) return false; } } return true; }; return check(body) && hasLoop; }"))
+  (defun proven-number-nodes-eligible-p (nodes state)
+    (let ((i 0) (n (bit-or (aref nodes "length") 0)) (ok t))
+      (while (and ok (< i n))
+        (let ((node (aref nodes i)))
+          (when (and (not (nil? node)) (eq (js* "typeof node") "object"))
+            (let ((k (aref node "kind")))
+              (when k
+                (if (or (eq k "function-expression")
+                        (eq k "function-declaration")
+                        (eq k "variable-declaration")
+                        (eq k "await-expression")
+                        (eq k "raw-javascript"))
+                    (setq ok false)
+                  (progn
+                    (when (or (eq k "loop") (eq k "binding-loop"))
+                      (put state :hasLoop t))
+                    (let ((ch (aref node "children")))
+                      (when (and (not (eq ch undefined))
+                                 (> (aref ch "length") 0)
+                                 (not (proven-number-nodes-eligible-p ch state)))
+                        (setq ok false)))))))))
+        (setq i (+ i 1)))
+      ok))
+  (defun proven-number-body-eligible-p (body)
+    (if (nil? fast-proven-number-eligible)
+        (let ((state (js-object :hasLoop false)))
+          (and (proven-number-nodes-eligible-p body state)
+               (get state :hasLoop)))
+      (funcall fast-proven-number-eligible body)))
+  ;; `catch` and `loop` introduce bindings outside `let`/`let*`. Only a plain
+  ;; identifier can be tracked here; anything else, or a name already bound by
+  ;; a parameter or candidate, disqualifies the whole proof.
+  (defun proven-number-shadow-target (binding)
+    (if (or (nullish? binding)
+            (ir-property binding "pattern")
+            (let ((bval (aref binding "value")))
+              (not (eq (js* "typeof bval") "string"))))
+        nil
+      (ir-value binding)))
+  (defun proven-number-shadow-name (binding parameters candidates state)
+    (let ((name (proven-number-shadow-target binding)))
+      (if (or (nullish? name)
+              (js-call parameters :has name)
+              (js-call candidates :has name))
+          (put state :invalid t)
+        (js-call parameters :add name))))
+  (defun proven-number-collect (nodes parameters candidates state)
+    (let ((nidx 0) (nlen (js-length nodes)))
+      (while (< nidx nlen)
+        (let ((node (js-nth nidx nodes)))
+          (when (node-object-p node)
+            (let ((kind (ir-kind node)))
+              (cond
+                ((= kind "function-expression") nil)
+                ((= kind "lexical-bindings")
+                 (let* ((parts (split-counted-children node "bindingCount"))
+                        (bindings (js-nth 0 parts))
+                        (bidx 0) (blen (js-length bindings)))
+                   (while (< bidx blen)
+                     (let* ((binding (js-nth bidx bindings))
+                            (name (ir-value binding)))
+                       (if (or (not (= (ir-kind binding) "lexical-binding"))
+                               (ir-property binding "pattern")
+                               (js-call parameters :has name)
+                               (js-call candidates :has name))
+                           (put state :invalid t)
+                         (js-call candidates :set name binding))
+                       (let ((initializer (binding-initializer binding)))
+                         (when initializer
+                           (proven-number-collect
+                             (js-array initializer) parameters candidates state))))
+                     (setq bidx (1+ bidx)))
+                   (proven-number-collect (js-nth 1 parts) parameters candidates state)))
+                ((= kind "catch-clause")
+                 (proven-number-shadow-name
+                   (js-nth 0 (children node)) parameters candidates state)
+                 (proven-number-collect
+                   (js-call (children node) :slice 1) parameters candidates state))
+                ((= kind "binding-loop")
+                 (let* ((parts (split-counted-children node "bindingCount"))
+                        (bindings (js-nth 0 parts))
+                        (bidx 0) (blen (js-length bindings)))
+                   (while (< bidx blen)
+                     (let ((binding (js-nth bidx bindings)))
+                       (proven-number-shadow-name binding parameters candidates state)
+                       (let ((initializer (binding-initializer binding)))
+                         (when initializer
+                           (proven-number-collect
+                             (js-array initializer) parameters candidates state))))
+                     (setq bidx (1+ bidx)))
+                   (proven-number-collect (js-nth 1 parts) parameters candidates state)))
+                (t (proven-number-collect (children node) parameters candidates state))))))
+        (setq nidx (1+ nidx)))))
+  (defun proven-number-scope-valid (nodes scope candidates state)
+    (let ((nidx 0) (nlen (js-length nodes)))
+      (while (< nidx nlen)
+        (let ((node (js-nth nidx nodes)))
+          (when (node-object-p node)
+            (let ((kind (ir-kind node)) (ch (children node)))
+              (cond
+                ((= kind "reference")
+                 (when (and (js-call candidates :has (ir-value node))
+                            (< (js-call scope :indexOf (ir-value node)) 0))
+                   (put state :invalid t)))
+                ((= kind "lexical-bindings")
+                 (let* ((parts (split-counted-children node "bindingCount"))
+                        (bindings (js-nth 0 parts))
+                        (inner (js-call scope :slice))
+                        (bidx 0) (blen (js-length bindings)))
+                   (while (< bidx blen)
+                     (let ((binding (js-nth bidx bindings)))
+                       (js-call inner :push (ir-value binding))
+                       (let ((initializer (binding-initializer binding)))
+                         (when initializer
+                           (proven-number-scope-valid
+                             (js-array initializer) scope candidates state))))
+                     (setq bidx (1+ bidx)))
+                   (proven-number-scope-valid (js-nth 1 parts) inner candidates state)))
+                ((= kind "function-expression") nil)
+                (t (proven-number-scope-valid ch scope candidates state))))))
+        (setq nidx (1+ nidx)))))
+  (defun proven-number-assignments-valid-p (nodes candidates proven)
+    (let ((valid t)
+          (pending (js-call nodes :slice)))
+      (while (and valid (> (js-length pending) 0))
+        (let ((node (js-call pending :pop)))
+          (when (node-object-p node)
+            (if (= (ir-kind node) "assignment-pair")
+                (progn
+                  (let ((name (ir-value node)))
+                    (when (js-call candidates :has name)
+                      (unless (proven-number-expr-p (js-nth 0 (children node)) proven)
+                        (setq valid false))))
+                  (when valid
+                    (let ((ch (children node)) (ci 0) (clen 0))
+                      (setq clen (js-length ch))
+                      (while (< ci clen)
+                        (js-call pending :push (js-nth ci ch))
+                        (setq ci (1+ ci))))))
+              (let ((ch (children node)) (ci 0) (clen 0))
+                (setq clen (js-length ch))
+                (while (< ci clen)
+                  (js-call pending :push (js-nth ci ch))
+                  (setq ci (1+ ci))))))))
+      valid))
+  ;; A successful empty Set is different from failed admission (false).
+  ;; Constant-derived numeric operands remain provable without local bindings.
+  (defun proven-number-locals-for (parameters body)
+    (if (not (proven-number-body-eligible-p body)) false
+      (let* ((parameter-names (new globalThis.Set
+                               (js-call parameters :map (lambda (parameter) (ir-value parameter)))))
+             (candidates (new globalThis.Map))
+             (state (js-object :invalid false))
+             (proven (new globalThis.Set)))
+        (proven-number-collect body parameter-names candidates state)
+        (when (not (get state :invalid))
+          (proven-number-scope-valid body (js-array) candidates state))
+        (when (not (get state :invalid))
+          (let ((changed t))
+            (while changed
+              (setq changed false)
+              (js-call candidates :forEach
+                (lambda (binding name)
+                  (unless (js-call proven :has name)
+                    (when (proven-number-expr-p (binding-initializer binding) proven)
+                      (js-call proven :add name) (setq changed t))))))))
+        (if (and (not (get state :invalid))
+                 (= (get proven :size) (get candidates :size))
+                 (proven-number-assignments-valid-p body candidates proven))
+            proven false))))
   (defun emit-numeric-binary (operator left right)
     (if numeric-emission-profile
-      (combine (js-array "(" left " " operator " " right ")"))
+      (fast-combine (js-array "(" left " " operator " " right ")"))
       ;; A Number literal one has no evaluation effects and subtraction cannot
       ;; return BigInt. A unary helper saves recursive-call argument registers.
       (if (and (= operator "-") (= (get (as-fragment right) :text) "1"))
-        (combine (js-array "__eliscript_numeric_decrement(" left ")"))
+        (fast-combine (js-array "__eliscript_numeric_decrement(" left ")"))
         (if (relational-operator-p operator)
-        (combine (js-array "__eliscript_numeric_relation(" (json-string operator) ", " left ", " right ")"))
+        (fast-combine (js-array "__eliscript_numeric_relation(" (json-string operator) ", " left ", " right ")"))
         (let ((tag (numeric-operator-tag operator)))
-          (if tag (combine (js-array "__eliscript_numeric_" tag "(" left ", " right ")"))
-            (combine (js-array "(" left " " operator " " right ")"))))))))
+          (if tag (fast-combine (js-array "__eliscript_numeric_" tag "(" left ", " right ")"))
+            (fast-combine (js-array "(" left " " operator " " right ")"))))))))
   (defun emit-numeric-unary (tag operand)
-    (combine (js-array "__eliscript_numeric_" tag "(" (emit-expression operand) ")")))
+    (fast-combine (js-array "__eliscript_numeric_" tag "(" (emit-expression operand) ")")))
   (defun numeric-coercion-intrinsic-p (name)
     (or (numeric-operator-tag name) (relational-operator-p name)
       (= name "mod") (= name "1-") (= name "int32") (= name "uint32") (= name "imul32")
@@ -1440,22 +2022,37 @@
       (= name "bit-shift-left") (= name "bit-shift-right") (= name "unsigned-bit-shift-right")))
   (defun emit-infix (name nodes operator minimum)
     (require-arity name nodes minimum nil)
-    (if (and (not numeric-emission-profile) (numeric-operator-tag operator) (> (js-length nodes) 1))
-      (let ((result (emit-expression (js-nth 0 nodes))) (index 1))
-        (while (< index (js-length nodes))
-          (setq result (emit-numeric-binary operator result (emit-expression (js-nth index nodes))))
-          (setq index (1+ index))) result)
-      (combine
-        (js-array "("
-         (join-fragments
-           (js-call nodes :map (lambda (node) (emit-expression node)))
-           (str " " operator " "))
-         ")"))))
+    ;; Emit every operand under the ambient profile first: only this level may
+    ;; drop its own conversions, never an operand that is not itself proved.
+    (let ((expressions (js-call nodes :map (lambda (node) (emit-expression node)))))
+      (if (and (not numeric-emission-profile) (numeric-operator-tag operator) (> (js-length nodes) 1)
+               (not (undefined? proven-number-locals))
+               (js-call nodes :every (lambda (node) (proven-number-expr-p node))))
+          (fast-combine
+            (js-array "("
+             (join-fragments expressions (str " " operator " "))
+             ")"))
+        (if (and (not numeric-emission-profile) (numeric-operator-tag operator) (> (js-length nodes) 1))
+          (let ((result (js-nth 0 expressions)) (index 1))
+            (while (< index (js-length expressions))
+              (setq result (emit-numeric-binary operator result (js-nth index expressions)))
+              (setq index (1+ index))) result)
+          (fast-combine
+            (js-array "("
+             (join-fragments expressions (str " " operator " "))
+             ")"))))))
 
   (defun emit-binary-infix (node operator)
     (require-node-arity node 2 2)
-    (let ((nodes (children node)))
-      (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))))
+    (let* ((nodes (children node))
+           (left (emit-expression (js-nth 0 nodes)))
+           (right (emit-expression (js-nth 1 nodes))))
+      (if (and (not numeric-emission-profile)
+               (not (undefined? proven-number-locals))
+               (proven-number-expr-p (js-nth 0 nodes))
+               (proven-number-expr-p (js-nth 1 nodes)))
+          (fast-combine (js-array "(" left " " operator " " right ")"))
+        (emit-numeric-binary operator left right))))
 
   (defun temporary-names (nodes)
     (let ((result (js-array)))
@@ -1466,7 +2063,15 @@
   (defun emit-comparison (name nodes operator)
     (require-arity name nodes 2 nil)
     (if (= (get nodes :length) 2)
-        (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))
+        (let ((left (emit-expression (js-nth 0 nodes)))
+              (right (emit-expression (js-nth 1 nodes))))
+          (if (and (not numeric-emission-profile) (relational-operator-p operator)
+                   (not (undefined? proven-number-locals))
+                   (proven-number-expr-p (js-nth 0 nodes))
+                   (proven-number-expr-p (js-nth 1 nodes))
+                   (not (contains-assignment-node-p (js-nth 1 nodes))))
+              (fast-combine (js-array "(" left " " operator " " right ")"))
+            (emit-numeric-binary operator left right)))
       (let ((parameters (temporary-names nodes))
             (comparisons (js-array))
             (index 0))
@@ -1476,7 +2081,7 @@
               (str "__eliscript_numeric_relation(" (json-string operator) ", " (js-nth index parameters) ", " (js-nth (1+ index) parameters) ")")
               (str (js-nth index parameters) " " operator " " (js-nth (1+ index) parameters))))
           (setq index (1+ index)))
-        (combine
+        (fast-combine
           (js-array "(("
            (js-call parameters :join ", ")
            ") => ("
@@ -1497,7 +2102,7 @@
               (str (js-nth left parameters) " !== " (js-nth right parameters)))
             (setq right (1+ right))))
         (setq left (1+ left)))
-      (combine
+      (fast-combine
         (js-array "(("
          (js-call parameters :join ", ")
          ") => ("
@@ -1512,11 +2117,11 @@
       (cond
         ((= name "not")
          (require-node-arity node 1 1)
-         (combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
+         (fast-combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
         ((= name "+")
          (if (= (get nodes :length) 0)
-             (text-fragment "0")
-           (combine
+             (emit-text "0")
+           (fast-combine
              (js-array "("
               (join-fragments
                 (js-call nodes :map (lambda (node) (emit-expression node)))
@@ -1524,40 +2129,40 @@
               ")"))))
         ((= name "*")
          (if (= (get nodes :length) 0)
-             (text-fragment "1")
+             (emit-text "1")
            (emit-infix name nodes "*" 1)))
         ((= name "-")
          (require-node-arity node 1 nil)
          (if (= (get nodes :length) 1)
              (if numeric-emission-profile
-               (combine (js-array "(-" (emit-expression (js-nth 0 nodes)) ")"))
+               (fast-combine (js-array "(-" (emit-expression (js-nth 0 nodes)) ")"))
                (emit-numeric-unary "neg" (js-nth 0 nodes)))
            (emit-infix "-" nodes "-" 2)))
         ((= name "/")
          (require-node-arity node 1 nil)
          (if (= (get nodes :length) 1)
-             (emit-numeric-binary "/" (text-fragment "1") (emit-expression (js-nth 0 nodes)))
+             (emit-numeric-binary "/" (emit-text "1") (emit-expression (js-nth 0 nodes)))
            (emit-infix "/" nodes "/" 2)))
         ((or (= name "%") (= name "mod")) (emit-infix name nodes "%" 2))
         ((= name "int32")
          (require-node-arity node 1 1)
-         (if numeric-emission-profile (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " | 0)"))
+         (if numeric-emission-profile (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " | 0)"))
            (emit-numeric-unary "int32" (js-nth 0 nodes))))
         ((= name "uint32")
          (require-node-arity node 1 1)
-         (if numeric-emission-profile (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " >>> 0)"))
+         (if numeric-emission-profile (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " >>> 0)"))
            (emit-numeric-unary "uint32" (js-nth 0 nodes))))
         ((= name "imul32")
          (require-node-arity node 2 2)
          (if numeric-emission-profile
-           (combine (js-array "Math.imul(" (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")"))
+           (fast-combine (js-array "Math.imul(" (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")"))
            (emit-numeric-binary "imul" (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))))
         ((= name "bit-and") (emit-binary-infix node "&"))
         ((= name "bit-or") (emit-binary-infix node "|"))
         ((= name "bit-xor") (emit-binary-infix node "^"))
         ((= name "bit-not")
          (require-node-arity node 1 1)
-         (if numeric-emission-profile (combine (js-array "(~" (emit-expression (js-nth 0 nodes)) ")"))
+         (if numeric-emission-profile (fast-combine (js-array "(~" (emit-expression (js-nth 0 nodes)) ")"))
            (emit-numeric-unary "not" (js-nth 0 nodes))))
         ((= name "bit-shift-left") (emit-binary-infix node "<<"))
         ((= name "bit-shift-right") (emit-binary-infix node ">>"))
@@ -1565,33 +2170,33 @@
          (emit-binary-infix node ">>>"))
         ((= name "value-type")
          (require-node-arity node 1 1)
-         (combine (js-array "__eliscript_value_type("
+         (fast-combine (js-array "__eliscript_value_type("
                     (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "host-identity-token")
          (require-node-arity node 1 1)
-         (combine
+         (fast-combine
            (js-array "__eliscript_host_identity_token("
             (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "string-code-unit-at")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "(" (emit-expression (js-nth 0 nodes)) ").charCodeAt("
             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "string-from-code-unit")
          (require-node-arity node 1 1)
-         (combine
+         (fast-combine
            (js-array "String.fromCharCode(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "string-to-number")
          (require-node-arity node 1 1)
-         (combine (js-array "__eliscript_to_number(" (emit-expression (js-nth 0 nodes)) ")")))
+         (fast-combine (js-array "__eliscript_to_number(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "string-to-bigint")
          (require-node-arity node 1 1)
-         (combine
+         (fast-combine
            (js-array "__eliscript_string_to_bigint("
             (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "number-float64-words")
          (require-node-arity node 1 1)
-         (combine
+         (fast-combine
            (js-array "__eliscript_number_float64_words("
             (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "=") (emit-comparison name nodes "==="))
@@ -1602,92 +2207,98 @@
         ((= name ">=") (emit-comparison name nodes ">="))
         ((= name "1+")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " + 1)")))
+         (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " + 1)")))
         ((= name "1-")
          (require-node-arity node 1 1)
-         (emit-numeric-binary "-" (emit-expression (js-nth 0 nodes)) (text-fragment "1")))
+         (emit-numeric-binary "-" (emit-expression (js-nth 0 nodes)) (emit-text "1")))
         ((= name "eq")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "(" (emit-expression (js-nth 0 nodes)) " === "
             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "equal")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "__eliscript_equal(" (emit-expression (js-nth 0 nodes)) ", "
             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "nil?")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " === null)")))
+         (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " === null)")))
         ((= name "undefined?")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " === undefined)")))
+         (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " === undefined)")))
         ((or (= name "null") (= name "nullish?"))
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " == null)")))
+         (fast-combine (js-array "(" (emit-expression (js-nth 0 nodes)) " == null)")))
         ((= name "js-array")
-         (combine (js-array "[" (emit-arguments nodes) "]")))
+         (fast-combine (js-array "[" (emit-arguments nodes) "]")))
         ((= name "car")
          (require-node-arity node 1 1)
-         (combine (js-array "__eliscript_first(" (emit-expression (js-nth 0 nodes)) ")")))
+         (fast-combine (js-array "__eliscript_first(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "cdr")
          (require-node-arity node 1 1)
-         (combine (js-array "__eliscript_rest(" (emit-expression (js-nth 0 nodes)) ")")))
+         (fast-combine (js-array "__eliscript_rest(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "cons")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "__eliscript_cons(" (emit-expression (js-nth 0 nodes)) ", "
             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "__eliscript_array_build")
          (require-node-arity node 2 2)
-         (combine (js-array
+         (fast-combine (js-array
            "__eliscript_array_build("
            (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")")))
+        ((= name "__eliscript_array_copy_assoc")
+         (require-node-arity node 4 4)
+         (fast-combine (js-array
+           "__eliscript_array_copy_assoc("
+           (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ", "
+           (emit-expression (js-nth 2 nodes)) ", " (emit-expression (js-nth 3 nodes)) ")")))
         ((= name "js-cons")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "[" (emit-expression (js-nth 0 nodes)) ", ...(("
             (emit-expression (js-nth 1 nodes)) ") ?? [])]")))
         ((= name "nth")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "__eliscript_nth(" (emit-expression (js-nth 1 nodes)) ", "
             (emit-expression (js-nth 0 nodes)) ", null)")))
         ((= name "js-nth")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "((((" (emit-expression (js-nth 1 nodes)) ") ?? [])["
             (emit-expression (js-nth 0 nodes)) "]) ?? null)")))
         ((= name "aref")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "(" (emit-expression (js-nth 0 nodes)) ")["
             (emit-property-key (js-nth 1 nodes)) "]")))
         ((= name "length")
          (require-node-arity node 1 1)
-         (combine (js-array "__eliscript_count(" (emit-expression (js-nth 0 nodes)) ")")))
+         (fast-combine (js-array "__eliscript_count(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "js-length")
          (require-node-arity node 1 1)
-         (combine (js-array "((" (emit-expression (js-nth 0 nodes)) ") ?? []).length")))
+         (fast-combine (js-array "((" (emit-expression (js-nth 0 nodes)) ") ?? []).length")))
         ((= name "__eliscript_arity_error")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array
              "__eliscript_arity_error("
              (emit-expression (js-nth 0 nodes)) ", "
              (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "object-keys")
          (require-node-arity node 1 1)
-         (combine (js-array "Object.keys((" (emit-expression (js-nth 0 nodes)) ") ?? {})")))
+         (fast-combine (js-array "Object.keys((" (emit-expression (js-nth 0 nodes)) ") ?? {})")))
         ((= name "object-has?")
          (require-node-arity node 2 2)
-         (combine
+         (fast-combine
            (js-array "Object.prototype.hasOwnProperty.call(("
             (emit-expression (js-nth 0 nodes)) ") ?? {}, "
             (emit-property-key (js-nth 1 nodes)) ")")))
         ((= name "object-assoc")
          (require-node-arity node 3 3)
-         (combine
+         (fast-combine
            (js-array "({...((" (emit-expression (js-nth 0 nodes)) ") ?? {}), ["
             (emit-property-key (js-nth 1 nodes)) "]: "
             (emit-expression (js-nth 2 nodes)) "})")))
@@ -1702,16 +2313,16 @@
               (native-locate
                 (ir-span property)
                 (if (ir-property property "computed")
-                    (combine
+                    (fast-combine
                       (js-array "[" (emit-expression (js-nth 0 nodes)) "]: "
                        (emit-expression (js-nth 1 nodes))))
-                  (combine
+                  (fast-combine
                     (js-array (json-string (ir-value property)) ": "
                      (emit-expression (js-nth 0 nodes))))))))))
       (join-fragments result ", ")))
 
   (defun emit-object (node)
-    (combine (js-array "({" (emit-object-properties (children node)) "})")))
+    (fast-combine (js-array "({" (emit-object-properties (children node)) "})")))
 
   (defun literal-kind (node)
     (ir-property node "literalKind"))
@@ -1720,19 +2331,19 @@
     (let ((value (ir-value node))
           (kind (literal-kind node)))
       (cond
-        ((= kind "undefined") (text-fragment "undefined"))
+        ((= kind "undefined") (emit-text "undefined"))
         ((= kind "keyword")
-         (combine
+         (fast-combine
            (js-array "__eliscript_keyword(" (json-string value) ")")))
-        ((null value) (text-fragment "null"))
-        ((eq value t) (text-fragment "true"))
-        ((eq value false) (text-fragment "false"))
+        ((null value) (emit-text "null"))
+        ((eq value t) (emit-text "true"))
+        ((eq value false) (emit-text "false"))
         ((= (value-type value) "number")
          (unless (Number/isFinite value)
            (fail (str "non-finite numbers are not supported: " value)))
-         (text-fragment (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
+         (emit-text (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
         ((= (value-type value) "string")
-         (text-fragment (json-string value)))
+         (emit-text (json-string value)))
         (t (fail (str "unsupported IR literal: " value))))))
 
   (defun datum-kind (value)
@@ -1743,25 +2354,25 @@
   (defun emit-quoted (value)
     (let ((kind (datum-kind value)))
       (cond
-        ((null value) (text-fragment "__eliscript_list()"))
-        ((eq value t) (text-fragment "true"))
+        ((null value) (emit-text "__eliscript_list()"))
+        ((eq value t) (emit-text "true"))
         ((eq value false)
-         (text-fragment "__eliscript_symbol(\"false\")"))
+         (emit-text "__eliscript_symbol(\"false\")"))
         ((= (value-type value) "number")
-         (text-fragment (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
+         (emit-text (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
         ((= (value-type value) "string")
-         (text-fragment (json-string value)))
-        ((= kind "undefined") (text-fragment "undefined"))
+         (emit-text (json-string value)))
+        ((= kind "undefined") (emit-text "undefined"))
         ((= kind "symbol")
-         (combine
+         (fast-combine
            (js-array "__eliscript_symbol("
-            (text-fragment (json-string (get value :name))) ")")))
+            (emit-text (json-string (get value :name))) ")")))
         ((= kind "keyword")
-         (combine
+         (fast-combine
            (js-array "__eliscript_keyword("
-            (text-fragment (json-string (get value :name))) ")")))
+            (emit-text (json-string (get value :name))) ")")))
         ((= kind "list")
-         (combine
+         (fast-combine
            (js-array "__eliscript_list("
             (join-fragments
               (js-call (get value :items) :map
@@ -1769,7 +2380,7 @@
               ", ")
             ")")))
         ((= kind "vector")
-         (combine
+         (fast-combine
            (js-array "__eliscript_vector("
             (join-fragments
               (js-call (get value :items) :map
@@ -1793,7 +2404,7 @@
       (if (and (= (ir-kind node) "literal")
                (or (= (literal-kind node) "keyword")
                    (= (value-type (aref node "value")) "string")))
-          (text-fragment (json-string (ir-value node)))
+          (emit-text (json-string (ir-value node)))
         (emit-expression node))))
 
   (defun array-text-key-p (node)
@@ -1934,20 +2545,20 @@
                          (signature (js-call formals :map (lambda (name index)
                                       (str name (if (aref defaults index) " = undefined" "")))))
                          (method (native-locate (ir-span callback)
-                           (combine (js-array (if (get spec :getter) "get " "") (get spec :name) "("
+                           (fast-combine (js-array (if (get spec :getter) "get " "") (get spec :name) "("
                              (js-call signature :join ", ") ") {\n"
-                             (indent (combine (js-array
+                             (emit-indent (fast-combine (js-array
                                (if receiver (str "let " (aref names 0) " = this;\n") "")
                                (emit-function-body parameters body)))) "\n}"))))
                          (profiled (function-source-fragment callback method 0 (js-length (get method :text)))))
                     (if (get spec :getter)
-                      (combine (js-array "(0, Object.getOwnPropertyDescriptor({" profiled "}, '" (get spec :name) "').get)"))
-                      (combine (js-array "(0, ({" profiled "})." (get spec :name) ")"))))))))))))
+                      (fast-combine (js-array "(0, Object.getOwnPropertyDescriptor({" profiled "}, '" (get spec :name) "').get)"))
+                      (fast-combine (js-array "(0, ({" profiled "})." (get spec :name) ")"))))))))))))
 
   (defun emit-primitive-invocation (nodes)
     (let ((operator (primitive-invocation-operator nodes)))
       (when operator
-        (combine (js-array "((" (emit-expression (aref nodes 1)) ") " operator " ("
+        (fast-combine (js-array "((" (emit-expression (aref nodes 1)) ") " operator " ("
                            (emit-expression (aref nodes 2)) "))")))))
 
   (defun emit-expression (node)
@@ -1958,66 +2569,64 @@
       (native-locate
         (ir-span node)
         (cond
-          ((= kind "literal") (emit-literal node))
-          ((= kind "reference") (tdz-read node))
-          ((= kind "array-literal") (combine (js-array "[" (emit-arguments nodes) "]")))
-          ((= kind "persistent-list-literal")
-           (combine (js-array "__eliscript_list(" (emit-arguments nodes) ")")))
-          ((= kind "persistent-vector-literal")
-           (combine (js-array "__eliscript_vector(" (emit-arguments nodes) ")")))
-          ((= kind "persistent-map-literal")
-           (combine (js-array "__eliscript_hash_map(" (emit-arguments nodes) ")")))
-          ((= kind "persistent-set-literal")
-           (combine (js-array "__eliscript_hash_set(" (emit-arguments nodes) ")")))
-          ((= kind "persistent-queue-literal")
-           (combine (js-array "__eliscript_queue(" (emit-arguments nodes) ")")))
-          ((= kind "quoted-literal") (emit-quoted (ir-value node)))
-          ((= kind "function-expression") (emit-function node))
-          ((= kind "await-expression")
-           (combine (js-array "await (" (emit-expression (js-nth 0 nodes)) ")")))
-          ((= kind "throw-expression") (emit-throw node))
-          ((= kind "try-expression") (emit-try node))
-          ((= kind "conditional") (emit-if nodes))
-          ((= kind "conditional-sugar") (emit-conditional-sugar node))
-          ((= kind "conditional-chain") (emit-cond nodes))
-          ((= kind "sequence") (emit-do nodes))
-          ((= kind "lexical-bindings") (emit-let node))
-          ((= kind "assignment") (emit-assignment node))
-          ((= kind "loop") (emit-loop node))
-          ((= kind "binding-loop") (emit-binding-loop node))
-          ((= kind "recur")
-           (fail "recur is only valid in an analyzed tail position"))
-          ((= kind "short-circuit") (emit-short-circuit nodes (ir-value node)))
-          ((= kind "intrinsic") (emit-intrinsic node))
-          ((= kind "object-literal") (emit-object node))
-          ((= kind "property-read")
-           (let ((access
-                  (combine
-                    (js-array "(" (emit-expression (js-nth 0 nodes)) ")["
-                     (emit-property-key (js-nth 1 nodes)) "]"))))
-             (if (= (get nodes :length) 3)
-                 (combine (js-array "(" access " ?? " (emit-expression (js-nth 2 nodes)) ")"))
-               access)))
-          ((= kind "property-write")
-           (combine
-             (js-array "((" (emit-expression (js-nth 0 nodes)) ")["
-              (emit-property-key (js-nth 1 nodes)) "] = "
-              (emit-expression (js-nth 2 nodes)) ")")))
-          ((= kind "method-call")
+          ((eq kind "reference") (tdz-read node))
+          ((eq kind "literal") (emit-literal node))
+          ((eq kind "invoke")
+           (or (emit-method-wrapper nodes)
+             (emit-primitive-invocation nodes)
+             (fast-combine
+               (js-array (emit-callee (js-nth 0 nodes)) "("
+                (emit-arguments (js-call nodes :slice 1)) ")"))))
+          ((eq kind "intrinsic") (emit-intrinsic node))
+          ((eq kind "method-call")
            (let* ((arguments (js-call nodes :slice 2))
                   (array-text (array-text-key-p (js-nth 1 nodes)))
                   (direct (and array-text (primitive-literal-arguments-p arguments))))
-             (combine
+             (fast-combine
                (js-array (if direct "__eliscript_at_direct(" (if array-text "__eliscript_at(" "("))
                  (emit-expression (js-nth 0 nodes)) (if array-text ", " ")[")
                  (emit-property-key (js-nth 1 nodes))
                  (if direct (if (> (get arguments :length) 0) ", " "") (if array-text ")(" "]("))
                  (emit-arguments arguments) ")"))))
-          ((= kind "constructor-call")
-           (combine
+          ((eq kind "property-read")
+           (let ((access
+                  (fast-combine
+                    (js-array "(" (emit-expression (js-nth 0 nodes)) ")["
+                     (emit-property-key (js-nth 1 nodes)) "]"))))
+             (if (= (get nodes :length) 3)
+                 (fast-combine (js-array "(" access " ?? " (emit-expression (js-nth 2 nodes)) ")"))
+               access)))
+          ((eq kind "lexical-bindings") (emit-let node))
+          ((eq kind "conditional") (emit-if nodes))
+          ((eq kind "call")
+           (fast-combine
+             (js-array (emit-callee (js-nth 0 nodes)) "("
+              (emit-arguments (js-call nodes :slice 1)) ")")))
+          ((eq kind "sequence") (emit-do nodes))
+          ((eq kind "assignment") (emit-assignment node))
+          ((eq kind "short-circuit") (emit-short-circuit nodes (ir-value node)))
+          ((eq kind "conditional-sugar") (emit-conditional-sugar node))
+          ((eq kind "conditional-chain") (emit-cond nodes))
+          ((eq kind "function-expression") (emit-function node))
+          ((eq kind "object-literal") (emit-object node))
+          ((eq kind "property-write")
+           (fast-combine
+             (js-array "((" (emit-expression (js-nth 0 nodes)) ")["
+              (emit-property-key (js-nth 1 nodes)) "] = "
+              (emit-expression (js-nth 2 nodes)) ")")))
+          ((eq kind "array-literal") (fast-combine (js-array "[" (emit-arguments nodes) "]")))
+          ((eq kind "constructor-call")
+           (fast-combine
              (js-array "new (" (emit-expression (js-nth 0 nodes))
               ")(" (emit-arguments (js-call nodes :slice 1)) ")")))
-          ((= kind "raw-javascript")
+          ((eq kind "loop") (emit-loop node))
+          ((eq kind "binding-loop") (emit-binding-loop node))
+          ((eq kind "quoted-literal") (emit-quoted (ir-value node)))
+          ((eq kind "await-expression")
+           (fast-combine (js-array "await (" (emit-expression (js-nth 0 nodes)) ")")))
+          ((eq kind "throw-expression") (emit-throw node))
+          ((eq kind "try-expression") (emit-try node))
+          ((eq kind "raw-javascript")
            ;; The raw form is exactly one string. Accepting several arguments
            ;; emitted only the first, so the module's braces did not close and
            ;; the JavaScript was not what the source said. The reference
@@ -2025,36 +2634,38 @@
            (require-arity "js*" nodes 1 1)
            (unless (= (ir-kind (js-nth 0 nodes)) "literal")
              (fail "js* expects a string literal"))
-           (text-fragment (ir-value (js-nth 0 nodes))))
-          ((= kind "print") (combine (js-array "console.log(" (emit-arguments nodes) ")")))
-          ((= kind "string-concat")
+           (emit-text (ir-value (js-nth 0 nodes))))
+          ((eq kind "string-concat")
            (if (= (get nodes :length) 0)
-               (text-fragment "\"\"")
+               (emit-text "\"\"")
              (let ((parts (js-array)))
                (js-call nodes :forEach
                  (lambda (child)
                    (js-call parts :push
-                     (combine (js-array "String(" (emit-expression child) ")")))))
-               (combine (js-array "(" (join-fragments parts " + ") ")")))))
-          ((= kind "invoke")
-           (or (emit-method-wrapper nodes)
-             (emit-primitive-invocation nodes)
-             (combine
-               (js-array (emit-callee (js-nth 0 nodes)) "("
-                (emit-arguments (js-call nodes :slice 1)) ")"))))
-          ((= kind "apply-call")
+                     (fast-combine (js-array "String(" (emit-expression child) ")")))))
+               (fast-combine (js-array "(" (join-fragments parts " + ") ")")))))
+          ((eq kind "apply-call")
            (require-arity "apply" nodes 2 nil)
            (let ((fixed (js-call nodes :slice 1 -1))
                  (tail (aref nodes (1- (js-length nodes)))))
-             (combine
+             (fast-combine
                (js-array (emit-callee (js-nth 0 nodes)) "("
                  (if (> (js-length fixed) 0)
-                     (combine (js-array (emit-arguments fixed) ", ")) "")
+                     (fast-combine (js-array (emit-arguments fixed) ", ")) "")
                  "...(" (emit-expression tail) " ?? []))"))))
-          ((= kind "call")
-           (combine
-             (js-array (emit-callee (js-nth 0 nodes)) "("
-              (emit-arguments (js-call nodes :slice 1)) ")")))
+          ((eq kind "persistent-list-literal")
+           (fast-combine (js-array "__eliscript_list(" (emit-arguments nodes) ")")))
+          ((eq kind "persistent-vector-literal")
+           (fast-combine (js-array "__eliscript_vector(" (emit-arguments nodes) ")")))
+          ((eq kind "persistent-map-literal")
+           (fast-combine (js-array "__eliscript_hash_map(" (emit-arguments nodes) ")")))
+          ((eq kind "persistent-set-literal")
+           (fast-combine (js-array "__eliscript_hash_set(" (emit-arguments nodes) ")")))
+          ((eq kind "persistent-queue-literal")
+           (fast-combine (js-array "__eliscript_queue(" (emit-arguments nodes) ")")))
+          ((eq kind "print") (fast-combine (js-array "console.log(" (emit-arguments nodes) ")")))
+          ((eq kind "recur")
+           (fail "recur is only valid in an analyzed tail position"))
           (t (fail (str "IR node is not valid in expression position: " kind)))))))
 
   (defun emit-import (node)
@@ -2075,13 +2686,13 @@
       (let ((clauses (js-array)))
         (when default-binding (js-call clauses :push default-binding))
         (when namespace-binding
-          (js-call clauses :push (combine (js-array "* as " namespace-binding))))
+          (js-call clauses :push (fast-combine (js-array "* as " namespace-binding))))
         (when (> (get named-bindings :length) 0)
           (js-call clauses :push
-            (combine (js-array "{" (join-fragments named-bindings ", ") "}"))))
+            (fast-combine (js-array "{" (join-fragments named-bindings ", ") "}"))))
         (if (= (get clauses :length) 0)
-            (text-fragment (str "import " (json-string (ir-value node)) ";"))
-          (combine
+            (emit-text (str "import " (json-string (ir-value node)) ";"))
+          (fast-combine
             (js-array "import " (join-fragments clauses ", ") " from "
              (json-string (ir-value node)) ";"))))))
 
@@ -2099,7 +2710,7 @@
              "\n"))
           ((= kind "import-declaration") (emit-import node))
           ((= kind "variable-declaration")
-           (combine
+           (fast-combine
              (js-array (if (ir-property node "mutable") "let " "const ")
               (binding-name (ir-value node))
               " = "
@@ -2113,7 +2724,7 @@
            (let* ((parts (split-counted-children node "parameterCount"))
                   (parameters (js-nth 0 parts))
                   (body (js-nth 1 parts)))
-             (let ((fragment (combine
+             (let ((fragment (fast-combine
                (js-array (if (ir-property node "async") "async " "")
                 "function " (binding-name (ir-value node)) "("
                 (join-fragments
@@ -2121,11 +2732,11 @@
                     (lambda (parameter) (emit-parameter parameter)))
                   ", ")
                 ") {\n"
-                  (indent (emit-function-body parameters body))
+                  (emit-indent (emit-function-body parameters body))
                 "\n}"))))
                (function-source-fragment node fragment 0 (js-length (get fragment :text))))))
           ((= kind "export-declaration")
-           (combine
+           (fast-combine
              (js-array "export {"
               (join-fragments
                 (js-call nodes :map
@@ -2133,9 +2744,9 @@
                 ", ")
               "};")))
           ((= kind "export-default")
-           (combine (js-array "export default " (emit-expression (js-nth 0 nodes)) ";")))
+           (fast-combine (js-array "export default " (emit-expression (js-nth 0 nodes)) ";")))
           ((= kind "expression-statement")
-           (combine (js-array (emit-expression (js-nth 0 nodes)) ";")))
+           (fast-combine (js-array (emit-expression (js-nth 0 nodes)) ";")))
           (t (fail (str "IR node is not valid at module top level: " kind)))))))
 
   (defun node-uses-number-conversion-p (node)
@@ -2321,7 +2932,7 @@
 
   (defun node-uses-primitive-runtime-p (node)
     (or (and (= (ir-kind node) "intrinsic")
-             (js-call (js-array "string-to-bigint" "number-float64-words" "__eliscript_array_build" "__eliscript_arity_error") :includes (ir-value node)))
+             (js-call (js-array "string-to-bigint" "number-float64-words" "__eliscript_array_build" "__eliscript_array_copy_assoc" "__eliscript_arity_error") :includes (ir-value node)))
         (js-call (children node) :some node-uses-primitive-runtime-p)))
 
   (defun reference-runtime-requirements (program)
@@ -2341,15 +2952,26 @@
       :value (program-uses-value-runtime-p program)))
 
   (defun math-runtime-reference-p (value)
-    (and (= (value-type value) "string")
-      (or (js-call (js-array "Math" "globalThis/Math" "globalThis.Math") :includes value)
-        (js-call (js-array "Math/" "Math." "globalThis/Math/" "globalThis/Math."
-                           "globalThis.Math/" "globalThis.Math.") :some
-          (lambda (prefix) (js-call value :startsWith prefix))))))
+    (and (eq (js* "typeof value") "string")
+      (> (aref value "length") 0)
+      (let ((c0 (js-call value :charCodeAt 0)))
+        (if (eq c0 77)
+            (or (= value "Math")
+                (js-call value :startsWith "Math/")
+                (js-call value :startsWith "Math."))
+          (if (eq c0 103)
+              (or (= value "globalThis/Math")
+                  (= value "globalThis.Math")
+                  (js-call value :startsWith "globalThis/Math/")
+                  (js-call value :startsWith "globalThis/Math.")
+                  (js-call value :startsWith "globalThis.Math/")
+                  (js-call value :startsWith "globalThis.Math."))
+            false)))))
   (defun node-uses-math-runtime-p (node)
-    (or (and (js-call (js-array "reference" "raw-javascript") :includes (ir-kind node))
-             (math-runtime-reference-p (ir-value node)))
-        (js-call (children node) :some node-uses-math-runtime-p)))
+    (let ((k (ir-kind node)))
+      (or (and (or (= k "reference") (= k "raw-javascript"))
+               (math-runtime-reference-p (ir-value node)))
+          (js-call (children node) :some node-uses-math-runtime-p))))
 
   (defun node-uses-imul-p (node)
     (or (and (= (ir-kind node) "intrinsic") (= (ir-value node) "imul32"))
@@ -2357,7 +2979,7 @@
 
   (defun node-uses-numeric-coercion-p (node)
     (or (and (= (ir-kind node) "intrinsic") (numeric-coercion-intrinsic-p (ir-value node))
-             (or (/= (ir-value node) "*") (> (js-length (children node)) 1)))
+             (or (not (= (ir-value node) "*")) (> (js-length (children node)) 1)))
       (let ((found false))
         (js-call (children node) :forEach (lambda (child) (when (node-uses-numeric-coercion-p child) (setq found t)))) found)))
   (defun program-uses-numeric-coercion-p (program)
@@ -2366,69 +2988,84 @@
 
   (defun static-literal-key-p (node index static-key-index)
     (and static-key-index
-         (= index static-key-index)
-         (= (ir-kind node) "literal")
-         (= (literal-kind node) "keyword")))
+         (eq index static-key-index)
+         (eq (ir-kind node) "literal")
+         (eq (literal-kind node) "keyword")))
 
   (defun collect-runtime-requirements
       (node requirements suppress-literal)
     (let ((kind (ir-kind node))
-           (value (ir-value node))
-           (nodes (children node))
-           (static-key-index (literal-runtime-static-key-index node))
+          (value (ir-value node))
+          (nodes (children node))
+          (static-key-index nil)
+          (raw-nlen 0)
           (index 0)
+          (nlen 0)
           (child nil))
-      (when (or (and (= kind "method-call") (array-text-key-p (js-nth 1 nodes)))
-                (and (js-call (js-array "call" "invoke" "apply-call") :includes kind)
-                     (qualified-apply-reference-p (js-nth 0 nodes))))
-        (put requirements :arrayText t))
-      (when (and (js-call (js-array "reference" "raw-javascript") :includes kind)
-                 (math-runtime-reference-p value))
-        (put requirements :math t))
+      (setq raw-nlen (aref nodes "length"))
+      (setq nlen (p| raw-nlen 0))
+      (when (or (eq kind "property-read") (eq kind "property-write") (eq kind "method-call"))
+        (setq static-key-index 1))
       (cond
-        ((= kind "map-binding-pattern")
+        ((or (eq kind "reference") (eq kind "raw-javascript"))
+         (when (math-runtime-reference-p value)
+           (put requirements :math t)))
+        ((eq kind "method-call")
+         (when (array-text-key-p (aref nodes 1))
+           (put requirements :arrayText t)))
+        ((or (eq kind "call") (eq kind "invoke") (eq kind "apply-call"))
+         (when (qualified-apply-reference-p (aref nodes 0))
+           (put requirements :arrayText t)))
+        ((eq kind "map-binding-pattern")
          (put requirements :binding t))
+        ((and (not suppress-literal) (eq kind "literal"))
+         (when (eq (literal-kind node) "keyword")
+           (put requirements :literal t)))
+        ((and (not suppress-literal) (eq kind "quoted-literal"))
+         (when (quoted-uses-literal-runtime-p value)
+           (put requirements :literal t)))
         ((and (not suppress-literal)
-              (or (= kind "persistent-list-literal")
-                  (= kind "persistent-vector-literal")
-                  (= kind "persistent-map-literal")
-                  (= kind "persistent-set-literal")
-                  (= kind "persistent-queue-literal")))
+              (or (eq kind "persistent-list-literal")
+                  (eq kind "persistent-vector-literal")
+                  (eq kind "persistent-map-literal")
+                  (eq kind "persistent-set-literal")
+                  (eq kind "persistent-queue-literal")))
          (put requirements :literal t))
-        ((and (not suppress-literal)
-              (= kind "quoted-literal")
-              (quoted-uses-literal-runtime-p value))
-         (put requirements :literal t))
-        ((and (not suppress-literal)
-              (= kind "literal")
-              (= (literal-kind node) "keyword"))
-         (put requirements :literal t))
-        ((= kind "intrinsic")
-         (when (= value "imul32") (put requirements :imul t))
+        ((eq kind "intrinsic")
+         (when (or (eq value "aref") (eq value "object-has?") (eq value "object-assoc"))
+           (setq static-key-index 1))
+         (when (eq value "imul32") (put requirements :imul t))
          (when (and (numeric-coercion-intrinsic-p value)
-                    (or (/= value "*") (> (js-length nodes) 1)))
+                    (or (not (eq value "*")) (p> nlen 1)))
            (put requirements :numericCoercion t))
          (cond
-           ((= value "string-to-number") (put requirements :numberConversion t))
-           ((= value "value-type") (put requirements :valueType t))
-           ((js-call (js-array "string-to-bigint" "number-float64-words" "__eliscript_array_build" "__eliscript_arity_error") :includes value)
+           ((eq value "string-to-number") (put requirements :numberConversion t))
+           ((eq value "value-type") (put requirements :valueType t))
+           ((or (eq value "string-to-bigint")
+                (eq value "number-float64-words")
+                (eq value "__eliscript_array_build")
+                (eq value "__eliscript_array_copy_assoc")
+                (eq value "__eliscript_arity_error"))
             (put requirements :primitiveRuntime t))
-           ((= value "host-identity-token")
+           ((eq value "host-identity-token")
             (put requirements :hostIdentityToken t))
-           ((or (= value "nth") (= value "length"))
+           ((or (eq value "nth") (eq value "length"))
             (put requirements :collection t))
-           ((or (= value "car") (= value "cdr") (= value "cons"))
+           ((or (eq value "car") (eq value "cdr") (eq value "cons"))
             (put requirements :list t))
-           ((= value "equal")
+           ((eq value "equal")
             (put requirements :value t)))))
-      (while (< index (get nodes :length))
-        (setq child (js-nth index nodes))
+      (while (p< index nlen)
+        (setq child (aref nodes index))
         (collect-runtime-requirements
           child
           requirements
           (or suppress-literal
-              (static-literal-key-p child index static-key-index)))
-        (setq index (1+ index))))
+              (and (eq static-key-index 1)
+                   (eq index 1)
+                   (eq (ir-kind child) "literal")
+                   (eq (literal-kind child) "keyword"))))
+        (setq index (p| (+ index 1) 0))))
     requirements)
 
   (defun runtime-requirements (program)
@@ -2453,16 +3090,23 @@
       requirements))
 
   (defun collect-portable-metadata (node portable exported)
-    (when (and (= (ir-kind node) "function-declaration")
-               (ir-property node "portable"))
-      (js-call portable :push node))
-    (when (= (ir-kind node) "export-declaration")
-      (js-call (children node) :forEach
-        (lambda (reference)
-          (js-call exported :push (ir-value reference)))))
-    (js-call (children node) :forEach
-      (lambda (child)
-        (collect-portable-metadata child portable exported))))
+    (let ((kind (ir-kind node)))
+      (cond
+        ((eq kind "function-declaration")
+         (when (ir-property node "portable")
+           (js-call portable :push node)))
+        ((eq kind "export-declaration")
+         (let ((ch (children node)) (idx 0) (len 0))
+           (setq len (aref ch "length"))
+           (while (< idx len)
+             (js-call exported :push (ir-value (aref ch idx)))
+             (setq idx (+ idx 1)))))
+        ((eq kind "module-declaration")
+         (let ((ch (children node)) (idx 0) (len 0))
+           (setq len (aref ch "length"))
+           (while (< idx len)
+             (collect-portable-metadata (aref ch idx) portable exported)
+             (setq idx (+ idx 1))))))))
 
   (defun emit-portable-manifest (program)
     (let ((portable (js-array))
@@ -2471,14 +3115,14 @@
         (lambda (node)
           (collect-portable-metadata node portable exported)))
       (if (= (get portable :length) 0)
-          (text-fragment "")
+          (emit-text "")
         (let ((implicit
                (js-call portable :filter
                  (lambda (node)
                    (not (js-call exported :includes (ir-value node)))))))
-          (combine
+          (fast-combine
             (js-array (if (> (get implicit :length) 0)
-                 (combine
+                 (fast-combine
                    (js-array "\n\nexport {"
                     (join-fragments
                       (js-call implicit :map
@@ -2490,17 +3134,39 @@
              (join-fragments
                (js-call portable :map
                  (lambda (node)
-                   (combine
+                   (fast-combine
                      (js-array "[" (json-string (ir-value node)) ", "
                       (binding-name (ir-value node)) "]"))))
                ", ")
              "]));"))))))
 
   (defun emit-module-artifact-in-profile (program)
-    (let ((previous tdz-state))
+    (let* ((previous tdz-state)
+           (previous-await await-node-cache)
+           (previous-has-await module-has-await)
+           (previous-has-recur module-has-recur)
+           (previous-bcache emit-bname-cache)
+           (previous-rcache emit-rname-cache)
+           (flags (if (nil? scan-program-flags)
+                      (scan-program-flags-portable (program-body program))
+                    (funcall scan-program-flags (program-body program))))
+           (has-await (not (eq (bit-and flags 1) 0))))
+      (when (> (aref emit-shared-bname-cache "size") 8192) (js-call emit-shared-bname-cache :clear))
+      (when (> (aref emit-shared-rname-cache "size") 8192) (js-call emit-shared-rname-cache :clear))
+      (setq emit-bname-cache emit-shared-bname-cache)
+      (setq emit-rname-cache emit-shared-rname-cache)
       (setq tdz-state (tdz-prepare program))
+      (setq module-has-await has-await)
+      (setq module-has-recur (not (eq (bit-and flags 2) 0)))
+      (setq await-node-cache (if has-await (new globalThis.WeakMap) nil))
       (try (emit-module-artifact-in-profile-ready program)
-        (finally (setq tdz-state previous)))))
+        (finally
+          (setq tdz-state previous)
+          (setq await-node-cache previous-await)
+          (setq module-has-await previous-has-await)
+          (setq module-has-recur previous-has-recur)
+          (setq emit-bname-cache previous-bcache)
+          (setq emit-rname-cache previous-rcache)))))
 
   (defun runtime-capsule-p (program entries)
     (let* ((filename (program-filename program)) (body (program-body program))
@@ -2546,7 +3212,7 @@
                   (js-call (program-body program) :map
                     (lambda (node) (emit-top-level node)))
                   "\n\n")))
-          (combine
+          (fast-combine
             (js-array "// Generated by Eliscript. Do not edit.\n"
              (tdz-prologue)
              (if (unicode-bootstrap-capsule-p program) "" "import \"eliscript/runtime/unicode-case.mjs\";\n")
@@ -2585,13 +3251,25 @@
         (finally (setq numeric-emission-profile previous-numeric)))))
 
   (defun emit-module-artifact (program)
-    (let ((previous numeric-emission-profile))
+    (let ((previous numeric-emission-profile)
+          (previous-mode emit-mark-mode)
+          (use-lazy (and (not function-source-profile) (eq emit-mark-mode 0) (funcall emit-unpatched-string-p))))
       (setq numeric-emission-profile false)
-      (try (emit-module-artifact-in-profile program)
-        (finally (setq numeric-emission-profile previous)))))
+      (when use-lazy (setq emit-mark-mode 1))
+      (try
+        (let ((raw (emit-module-artifact-in-profile program)))
+          (if use-lazy
+              (js-object :text (aref raw "text") :marks (funcall materialize-lazy-marks (aref raw "m")))
+            raw))
+        (finally
+          (setq numeric-emission-profile previous)
+          (setq emit-mark-mode previous-mode)))))
   (defun emit-module-function-sources (program)
-    (let ((previous function-source-profile))
+    (let ((previous function-source-profile)
+          (previous-mode emit-mark-mode))
       (setq function-source-profile t)
+      (put fsp-flag 0 1)
+      (setq emit-mark-mode 0)
       (try
         (let* ((artifact (emit-module-artifact program)) (javascript (get artifact :text)))
           (js-object :javascript javascript
@@ -2599,17 +3277,29 @@
               (lambda (record)
                 (js-object :node (get record :node) :start (get record :start) :end (get record :end)
                   :sourceText (js-call javascript :slice (get record :start) (get record :end)))))))
-        (finally (setq function-source-profile previous)))))
+        (finally
+          (setq function-source-profile previous)
+          (put fsp-flag 0 (if previous 1 0))
+          (setq emit-mark-mode previous-mode)))))
   ;; Internal code generation entry. The numeric backend must validate the
   ;; complete original program before optimization and before calling this.
   (defun emit-module-numeric (program)
-    (let ((previous numeric-emission-profile))
+    (let ((previous numeric-emission-profile)
+          (previous-mode emit-mark-mode))
       (setq numeric-emission-profile t)
+      (when (and (not function-source-profile) (funcall emit-unpatched-string-p))
+        (setq emit-mark-mode 2))
       (try (get (emit-module-artifact-in-profile program) :text)
-        (finally (setq numeric-emission-profile previous)))))
+        (finally
+          (setq numeric-emission-profile previous)
+          (setq emit-mark-mode previous-mode)))))
 
   (defun emit-module (program)
-    (get (emit-module-artifact program) :text))
+    (let ((previous-mode emit-mark-mode))
+      (when (and (not function-source-profile) (funcall emit-unpatched-string-p))
+        (setq emit-mark-mode 2))
+      (try (get (emit-module-artifact program) :text)
+        (finally (setq emit-mark-mode previous-mode)))))
 
   (defun emit-module-with-source-map
       (program source generated-name source-name)

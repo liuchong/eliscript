@@ -28,7 +28,7 @@
            ;; Only the loader's minimal ABI is needed here. The actual memory32 load
            ;; and trap-site transport are emitted by the production WASM backend; this
            ;; fixture does not build a compiler binary or claim managed-heap coverage.
-           (source "(import \"eliscript:memory32\" load-u32)\n    (defun heap-new (slots initial maximum) 256)\n    (defun last-error () 0)\n    (defun frame-current (heap) 0)\n    (defun frame-unwind (heap target) 1)\n    (defun value-standard-prototypes-close (heap) 1)\n    (defun safe (heap) 2)\n    (defun crash (heap) (load-u32 65536) 3)\n    (export heap-new last-error frame-current frame-unwind\n      value-standard-prototypes-close safe crash)")
+           (source "(import \"eliscript:memory32\" load-u32 v64-literal)\n    (defun heap-new (slots initial maximum) 256)\n    (defun last-error () 0)\n    (defun frame-current (heap) (memory-sig v64 u32) (v64-literal 0 0))\n    (defun frame-unwind (heap target) (memory-sig u32 u32 v64) 1)\n    (defun value-standard-prototypes-close (heap) 1)\n    (defun safe (heap) (memory-sig v64 u32) (v64-literal 2 0))\n    (defun crash (heap) (memory-sig v64 u32) (load-u32 65536) (v64-literal 3 0))\n    (export heap-new last-error frame-current frame-unwind\n      value-standard-prototypes-close safe crash)")
            (typed (js-call memory :lower_memory_program (js-call (get backend :compiler) :compile_ir_string source filename)))
            (artifact (js-call (get backend :wasm) :emit_typed_memory_wasm_artifact typed (js-object :initialPages 1 :maximumPages 1))))
       (setq debug (get artifact :debug))
@@ -44,10 +44,21 @@
                                  :returnAddress false)))
           (let ((descriptor (js-object
                               :format "eliscript-managed-control"
-                              :version 1
-                              :abi "managed-control-v1"
-                              :functions (js-array (js-object :name "safe" :arity 0)
-                                                   (js-object :name "crash" :arity 0)))))
+
+                              :abi "managed-control"
+                              :functions (js-array
+                                (js-object :name "safe" :arity 1 :publicArity 0
+                                  :parameterTypes (js-array "u32") :resultType "v64")
+                                (js-object :name "crash" :arity 1 :publicArity 0
+                                  :parameterTypes (js-array "u32") :resultType "v64"))
+                              :exportSignatures (js-object
+                                :heap-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+                                :last-error (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
+                                :frame-current (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "v64")
+                                :frame-unwind (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+                                :value-standard-prototypes-close (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                                :safe (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "v64")
+                                :crash (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "v64")))))
             (setq bytes
               (Uint8Array/from
                 (js-call (get backend :wasm) :append_metadata_section

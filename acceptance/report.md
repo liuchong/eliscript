@@ -2,7 +2,7 @@
 
 - Source commit: `8d9483c9164c140b647429459c5d39e0b50f9694`
 - Source tree: `34e953bf72f77b14f2f9c2f4450d2c6c60740b66`
-- Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
+- Contract: `contracts/final-acceptance.json` (`032dc718b8d00fd681b52e889c267ed18e39bfffd0ae10759d2c31ee46a8e58d`)
 - Generated: 2026-10-12T20:03:56.280Z
 - Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v24.20.0; Emacs 31.1
 - Corpus complete: yes

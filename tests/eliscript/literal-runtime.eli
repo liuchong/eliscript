@@ -430,7 +430,8 @@
               ;; fromHostValue. Declare that boundary explicitly; the original
               ;; five literal cases and raw owned-handle ABI remain unchanged.
               (js-call (expect (get (get lowered :descriptor) :hostCapabilities)) :toEqual
-                (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+                (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+                  :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
               (let ((imports (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes))))
                 (js-call (expect (js-call imports :map (lambda (item)
                   (js-object :module (get item :module) :name (get item :name) :kind (get item :kind))))) :toEqual
@@ -438,7 +439,7 @@
                 (js-call imports :forEach (lambda (item)
                   (when (Object/hasOwn item "type")
                     (js-call (expect (get item :type)) :toEqual
-                      (js-object :parameters (js-array "i32" "i32") :results (js-array "i32")))))))
+                      (js-object :parameters (js-array "i32" "i64") :results (js-array "i64")))))))
               (await (writeFile wasm-path bytes))
               (await (writeFile descriptor-path (JSON/stringify (get lowered :descriptor))))
               ;; Independent Seed output executes the exact same fixture and

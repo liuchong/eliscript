@@ -37,7 +37,7 @@
       (await (writeFile configuration (JSON/stringify (js-object :target "javascript" :sourceRoot root
         :path (resolve (dirname (get verified :stage3MetadataPath)) (get artifact :path))
         :supportingDirectory (resolve directory "original-tool-products")))))
-      (setq projection (js-object :kind "original-tools-final-cli" :version 1
+      (setq projection (js-object :kind "original-tools-final-cli"
         :recordId "original-tools-artifact:compiler-session-tools:node"
         :sourceRoot root :configurationPath configuration
         :producerPath (resolve (dirname (get verified :stage3MetadataPath)) (get artifact :path))
@@ -120,7 +120,6 @@
                       (let ((result (JSON/parse (get child :stderr))))
                         (js-call assert :strictEqual (get child :stdout) "")
                         (js-call assert :strictEqual (get result :format) "eliscript-compiler-cli-error")
-                        (js-call assert :strictEqual (get result :version) 1)
                         (js-call assert :strictEqual (get (get result :error) :message) (get original :message))
                         (js-call assert :deepStrictEqual (get (get result :error) :eliscriptDiagnostic) (get original :eliscriptDiagnostic)))
                       (progn
@@ -175,7 +174,6 @@
                  (proof (get (get prepared :transportEvidence) :originalToolsDataReference)))
             (js-call assert :ok record)
             (js-call assert :strictEqual (get proof :kind) "original-tools-data-reference")
-            (js-call assert :strictEqual (get proof :version) 1)
             (js-call assert :strictEqual (get proof :recordId) id)
             (js-call assert :strictEqual (get proof :originalHostSource) (get (get record :execution) :hostSource))
             (js-call assert :deepStrictEqual (get proof :importSites) (js-array "compile" "aggregate-error" "edit-preview"))

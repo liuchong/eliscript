@@ -121,7 +121,7 @@
                               (js-call waiters :push waiter))))))))))
            (close (async ()
                     (unless closed
-                      (funcall send (js-object :version 1 :type "shutdown"))
+                      (funcall send (js-object :type "shutdown"))
                       (await (funcall next (lambda (message) (= (get message :type) "shutdown"))))
                       (js-call (get child :stdin) :end))
                     (let ((exitCode (await (get child :exited))))
@@ -144,7 +144,6 @@
     (js-call client :send
       (Object/assign
         (js-object
-          :version 1
           :type "request"
           :id id
           :valueEncoding workerValueEncoding
@@ -170,7 +169,6 @@
           (let ((final (= sequence (- (js-length chunks) 1))))
             (js-call client :send
               (js-object
-                :version 1
                 :type "value-chunk"
                 :id id
                 :channel "arguments"
@@ -240,10 +238,9 @@
                    "import value from 'eliscript/platform/../package.json';\nexport function run() { return value; }\n"))
           (setq client (createWorkerClient))
           (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
-            (js-call (expect (get ready :capabilities)) :toContain "operation-capabilities-v1"))
+            (js-call (expect (get ready :capabilities)) :toContain "operation-capabilities"))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "platform-capabilities"
               :module modulePath
@@ -264,14 +261,12 @@
               :value (js-object
                        :descriptor (js-object
                                      :format "eliscript-worker-capabilities"
-                                     :version 1
                                      :grants (js-array "cancellation" "progress"))
                        :cancelled false
                        :contextFrozen t
                        :signalMatches t)))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "platform-escape"
               :module escapePath
@@ -311,13 +306,12 @@
                    "import value from 'eliscript/runtime/../package.json';\nexport function run() { return value; }\n"))
           (setq client (createWorkerClient))
           (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
-            (js-call (expect (get ready :capabilities)) :toContain "value-codec-v1")
-            (js-call (expect (get ready :capabilities)) :toContain "value-chunks-v1")
+            (js-call (expect (get ready :capabilities)) :toContain "value-codec")
+            (js-call (expect (get ready :capabilities)) :toContain "value-chunks")
             (js-call (expect (get ready :capabilities)) :toContain "runtime-resolution"))
           (let ((argument (persistentHashMap (js-array (keyword "items") (persistentVector 1 undefined 3)))))
             (js-call client :send
               (js-object
-                :version 1
                 :type "request"
                 :id "codec-echo"
                 :module modulePath
@@ -360,7 +354,6 @@
                 (js-call (expect (> (get vs :responseChunks) 0)) :toBe t))))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "chunk-order"
               :module modulePath
@@ -373,7 +366,6 @@
                           (= (get message :type) "value-ack")))))
           (js-call client :send
             (js-object
-              :version 1
               :type "value-chunk"
               :id "chunk-order"
               :channel "arguments"
@@ -386,7 +378,6 @@
             :toMatchObject (js-object :ok false :error (js-object :code "invalid-value-chunk")))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "chunk-cancel"
               :module modulePath
@@ -397,7 +388,7 @@
                    (lambda (message)
                      (and (= (get message :id) "chunk-cancel")
                           (= (get message :type) "value-ack")))))
-          (js-call client :send (js-object :version 1 :type "cancel" :id "chunk-cancel"))
+          (js-call client :send (js-object :type "cancel" :id "chunk-cancel"))
           (js-call (expect (await (js-call client :next
                                     (lambda (message)
                                       (and (= (get message :id) "chunk-cancel")
@@ -410,7 +401,6 @@
             :toMatchObject (js-object :ok false :error (js-object :code "cancelled")))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "codec-result"
               :module modulePath
@@ -426,7 +416,6 @@
               :toBe t))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "ground-result"
               :module modulePath
@@ -436,7 +425,6 @@
             :toMatchObject (js-object :ok t :value (js-object)))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "unsupported-encoding"
               :module modulePath
@@ -447,7 +435,6 @@
             :toMatchObject (js-object :ok false :error (js-object :code "invalid-request")))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "invalid-value"
               :module modulePath
@@ -458,7 +445,6 @@
             :toMatchObject (js-object :ok false :error (js-object :code "value-decoding-invalid")))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "unsupported-value"
               :module modulePath
@@ -469,7 +455,6 @@
             :toMatchObject (js-object :ok false :error (js-object :code "value-encoding-unsupported")))
           (js-call client :send
             (js-object
-              :version 1
               :type "request"
               :id "runtime-escape"
               :module escapePath
@@ -483,7 +468,7 @@
             (when client (await (js-call client :close)))
             (await (rm directory (js-object :recursive t :force t))))))))
 
-  (test "long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps"
+  (test "long-lived worker implements the NDJSON protocol and maps failures through project source maps"
     (async ()
       (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-worker-"))))
              (modulePath (resolve directory "worker.mjs"))
@@ -493,6 +478,7 @@
              (otherMapPath (resolve directory "other.mjs.map"))
              (outsidePath (resolve directory "outside.mjs"))
              (invalidManifestPath (resolve directory "invalid-project.json"))
+             (unknownManifestPath (resolve directory "unknown-project.json"))
              (multiManifestPath (resolve directory "multi-project.json"))
              (client undefined))
         (try
@@ -524,13 +510,19 @@
                      (JSON/stringify
                        (js-object
                          :format "eliscript-project"
-                         :version 1
-                         :entry "reload.mjs"
+                         :entries (js-array)
                          :modules (js-array)
                          :digest (js-call "0" :repeat 64)))))
+            (await (writeFile unknownManifestPath
+                     (JSON/stringify
+                       (js-object
+                         :format "eliscript-project"
+                         :entries (js-array "reload.mjs")
+                         :modules (js-array)
+                         :digest (js-call "0" :repeat 64)
+                         :mystery t))))
             (let* ((multiIdentity (js-object
                                     :format "eliscript-project"
-                                    :version 2
                                     :entries (js-array "other.mjs" "reload.mjs")
                                     :modules (js-array
                                                (js-object
@@ -551,67 +543,95 @@
                                                  :outputDigest (js-call (js-call (createHash "sha256") :update reloadSource)
                                                                  :digest "hex")
                                                  :sourceMapDigest (js-call (js-call (createHash "sha256") :update reloadMap)
-                                                                    :digest "hex")))))
+                                                                    :digest "hex")
+                                                 :macroDependencies (js-array
+                                                                      (js-object
+                                                                        :path "macro-input.txt"
+                                                                        :digest (js-call "2" :repeat 64)))))))
                    (multiDigest (js-call (js-call (createHash "sha256")
                                            :update (JSON/stringify multiIdentity))
-                                  :digest "hex")))
+                                  :digest "hex"))
+                   (multiCacheIdentity (js-object
+                                         :format "eliscript-project-cache"
+                                         :compilerDigest (js-call "3" :repeat 64)
+                                         :mode "standard"
+                                         :portableEntries (js-array)
+                                         :modules (js-array
+                                                    (js-object :source "other.eli" :dependencies (js-array) :portableEntries (js-array))
+                                                    (js-object :source "reload.eli" :dependencies (js-array)
+                                                      :macroDependencies (js-array (js-object :path "macro-input.txt" :digest (js-call "2" :repeat 64)))
+                                                      :portableEntries (js-array)))))
+                   (multiCache (Object/assign (js-object) multiCacheIdentity
+                                 (js-object :digest (js-call (js-call (createHash "sha256")
+                                                               :update (JSON/stringify multiCacheIdentity))
+                                                      :digest "hex")))))
               (await (writeFile multiManifestPath
                        (JSON/stringify
-                         (Object/assign (js-object) multiIdentity (js-object :digest multiDigest)))))
+                         (Object/assign (js-object) multiIdentity
+                           (js-object :digest multiDigest :cache multiCache)))))
               (setq client (createWorkerClient))
               (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
-                (js-call (expect (get ready :version)) :toBe 1)
                 (js-call (expect (get ready :capabilities)) :toContain "cancel")
                 (js-call (expect (get ready :capabilities)) :toContain "progress")
-                (js-call (expect (get ready :capabilities)) :toContain "module-version")
+                (js-call (expect (get ready :capabilities)) :toContain "module-digest")
                 (js-call (expect (get ready :capabilities)) :toContain "project-manifest")
                 (js-call (expect (get ready :capabilities)) :toContain "portable-manifest"))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "multi-project-entry"
                   :module reloadPath
                   :projectManifest multiManifestPath
-                  :moduleVersion multiDigest
+                  :moduleDigest multiDigest
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "multi-project-entry")))))
                 :toMatchObject (js-object :ok t :value 1))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "multi-project-outside-entry"
                   :module outsidePath
                   :projectManifest multiManifestPath
-                  :moduleVersion multiDigest
+                  :moduleDigest multiDigest
                   :export "outside"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "multi-project-outside-entry")))))
                 :toMatchObject (js-object :ok false :error (js-object :code "invalid-project-manifest")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "invalid-project-manifest"
                   :module reloadPath
                   :projectManifest invalidManifestPath
-                  :moduleVersion (js-call "0" :repeat 64)
+                  :moduleDigest (js-call "0" :repeat 64)
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "invalid-project-manifest")))))
                 :toMatchObject (js-object :ok false :error (js-object :code "invalid-project-manifest")))
+              (js-call client :send
+                (js-object
+                  :type "request"
+                  :id "unknown-project-manifest"
+                  :module reloadPath
+                  :projectManifest unknownManifestPath
+                  :moduleDigest (js-call "0" :repeat 64)
+                  :export "value"
+                  :arguments (js-array)))
+              (let ((unknown (await (js-call client :next (lambda (message) (= (get message :id) "unknown-project-manifest"))))))
+                (js-call (expect (get unknown :ok)) :toBe false)
+                (js-call (expect (get (get unknown :error) :code)) :toBe "invalid-project-manifest")
+                (js-call (expect (get (get unknown :error) :message))
+                  :toContain "unsupported field: mystery"))
               (js-call client :sendRaw "{not-json")
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :type) "protocol-error")))))
                 :toMatchObject (js-object :error (js-object :code "invalid-json")))
-              (js-call client :send (js-object :version 99 :type "request" :id "wrong-version"))
-              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "wrong-version")))))
-                :toMatchObject (js-object :type "protocol-error" :error (js-object :code "version-mismatch")))
+              (js-call client :send (js-object :mystery 99 :type "request" :id "unknown-field"))
+              (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "unknown-field")))))
+                :toMatchObject (js-object :type "protocol-error" :error (js-object :code "invalid-message")))
               (let ((values (Array/from (js-object :length 2000) (lambda (_ign index) (mod index 997)))))
                 (js-call client :send
                   (js-object
-                    :version 1
                     :type "request"
                     :id "score"
                     :module modulePath
@@ -623,13 +643,12 @@
                     (js-object
                       :moduleLoadMs (js-call expect :any globalThis.Number)
                       :moduleCacheHit false
-                      :moduleVersion (js-call expect :any globalThis.String)
+                      :moduleDigest (js-call expect :any globalThis.String)
                       :executionMs (js-call expect :any globalThis.Number)
                       :serializationMs (js-call expect :any globalThis.Number)
                       :workerMs (js-call expect :any globalThis.Number))))
                 (js-call client :send
                   (js-object
-                    :version 1
                     :type "request"
                     :id "portable-score"
                     :module modulePath
@@ -643,7 +662,6 @@
                     :timing (js-object :moduleCacheHit t))))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "source-error"
                   :module modulePath
@@ -671,7 +689,6 @@
                   :toBe t))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "reload-cold"
                   :module reloadPath
@@ -681,7 +698,6 @@
                 :toMatchObject (js-object :ok t :value 1 :timing (js-object :moduleCacheHit false)))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "reload-warm"
                   :module reloadPath
@@ -692,24 +708,22 @@
               (await (writeFile reloadPath "export function value() { return 22; }\n"))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "reload-changed"
                   :module reloadPath
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "reload-changed")))))
-                :toMatchObject (js-object :ok false :error (js-object :code "module-version-changed")))
+                :toMatchObject (js-object :ok false :error (js-object :code "module-digest-changed")))
               (await (js-call client :close))
               (setq client (createWorkerClient))
               (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "version-one"
                   :module reloadPath
-                  :moduleVersion "fixed"
+                  :moduleDigest "fixed"
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-one")))))
@@ -717,11 +731,10 @@
               (await (writeFile reloadPath "export function value() { return 3; }\n"))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "version-one-warm"
                   :module reloadPath
-                  :moduleVersion "fixed"
+                  :moduleDigest "fixed"
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-one-warm")))))
@@ -729,18 +742,16 @@
               (await (writeFile reloadPath "export function value() { return 4; }\n"))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "version-two"
                   :module reloadPath
-                  :moduleVersion "next"
+                  :moduleDigest "next"
                   :export "value"
                   :arguments (js-array)))
               (js-call (expect (await (js-call client :next (lambda (message) (= (get message :id) "version-two")))))
-                :toMatchObject (js-object :ok false :error (js-object :code "module-version-changed")))
+                :toMatchObject (js-object :ok false :error (js-object :code "module-digest-changed")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "missing"
                   :module modulePath
@@ -750,7 +761,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "missing-export")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "missing-portable"
                   :module modulePath
@@ -760,7 +770,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "missing-portable")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "inherited-portable"
                   :module modulePath
@@ -770,7 +779,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "missing-portable")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "cancel-me"
                   :module modulePath
@@ -781,7 +789,7 @@
                                           (and (= (get message :type) "progress")
                                                (= (get message :id) "cancel-me"))))))
                 :toMatchObject (js-object :value (js-object :stage "started")))
-              (js-call client :send (js-object :version 1 :type "cancel" :id "cancel-me"))
+              (js-call client :send (js-object :type "cancel" :id "cancel-me"))
               (js-call (expect (await (js-call client :next
                                         (lambda (message)
                                           (and (= (get message :type) "cancel")
@@ -794,7 +802,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "cancelled")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "time-out"
                   :module modulePath
@@ -808,7 +815,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "timeout")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "unserializable"
                   :module modulePath
@@ -818,7 +824,6 @@
                 :toMatchObject (js-object :ok false :error (js-object :code "serialization")))
               (js-call client :send
                 (js-object
-                  :version 1
                   :type "request"
                   :id "noisy"
                   :module modulePath

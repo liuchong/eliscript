@@ -12,8 +12,16 @@
     (if (= (get process :platform) "darwin") "arm64-macos" (if (= (get process :platform) "linux") "arm64-linux" undefined)) undefined))
   (defconst nativeTest (js-call test :skipIf (not target)))
   (defvar directory undefined) (defvar library undefined) (defvar nativeDebug undefined)
-  (defconst signatures (js-object :read32 1 :write32 2 :grow 1 :notify 2 :spin 2))
-  (defconst capabilities (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+  (defconst signatures (js-object
+    :read32 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+    :write32 (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
+    :grow (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+    :notify (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "v64")
+    :spin (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")))
+  (defconst capabilities (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+    :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
+  (defconst nativeNodeMemorySource
+    "\n    (import \"eliscript:memory32\" load-u32 store-u32 memory-grow v64-literal)\n    (defun read32 (p) (load-u32 p))\n    (defun write32 (p v) (store-u32 p v))\n    (defun grow (n) (memory-grow n))\n    (defun notify (heap argv) (memory-sig v64 u32 v64) (v64-literal 0 0))\n    (defun spin (heap argv) (memory-sig u32 u32 v64) (while 1 (store-u32 64 1)) 0)\n    (export read32 write32 grow notify spin)")
   (defconst runner (fileURLToPath (new globalThis.URL "../tools/backends/native-node-runner.mjs" (js* "import.meta.url"))))
   (defconst host (fileURLToPath (new globalThis.URL "./fixtures/native-node-memory-host.mjs" (js* "import.meta.url"))))
   (defconst ownerHost (fileURLToPath (new globalThis.URL "./fixtures/native-node-owner-host.mjs" (js* "import.meta.url"))))
@@ -28,12 +36,12 @@
       (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-native-node-"))))
       (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
              (memory (await (funcall (js* "(specifier) => import(specifier)") (get (pathToFileURL (resolve (get backend :directory) "memory.mjs")) :href))))
-             (typed (js-call memory :lower_memory_program (js-call (get backend :compiler) :compile_ir_string "\n    (import \"eliscript:memory32\" load-u32 store-u32 memory-grow)\n    (defun read32 (p) (load-u32 p))\n    (defun write32 (p v) (store-u32 p v))\n    (defun grow (n) (memory-grow n))\n    (defun notify (heap argv) 0)\n    (defun spin (heap argv) (while t (store-u32 64 1)))\n    (export read32 write32 grow notify spin)" "native-node-memory.eli")))
+             (typed (js-call memory :lower_memory_program (js-call (get backend :compiler) :compile_ir_string nativeNodeMemorySource "native-node-memory.eli")))
              (notify (js-call (get typed :functions) :find (lambda (fn) (= (get fn :name) "notify"))))
              (spin (js-call (get typed :functions) :find (lambda (fn) (= (get fn :name) "spin")))))
         (assert notify)
-        (put notify :body (js-object :kind "host-call" :type "u32" :value "source-operation" :children
-          (js-array (js-object :kind "local" :type "u32" :value 0 :children (js-array)) (js-object :kind "local" :type "u32" :value 1 :children (js-array)))))
+        (put notify :body (js-object :kind "host-call" :type "v64" :value "source-operation" :children
+          (js-array (js-object :kind "local" :type "u32" :value 0 :children (js-array)) (js-object :kind "local" :type "v64" :value 1 :children (js-array)))))
         (assert spin) (put spin :body (js-object :kind "sequence" :type "u32" :value nil :children (js-array (globalThis.structuredClone (get notify :body)) (get spin :body))))
         (put typed :hostCapabilities capabilities)
         (setq library (resolve directory (if (= target "arm64-macos") "memory.dylib" "memory.so")))
@@ -101,7 +109,7 @@
            (result (runPackets input 30000)))
       (eqv (get result :error) undefined (get result :stderr)) (eqv (get result :status) 0 (get result :stderr))
       (same (js-call (js-call (js-call (get result :stdout) :trim) :split "\n") :map (lambda (line) (JSON/parse line)))
-        (js-array (js-object :ready t) (js-object :id 1 :result t) (js-object :id 2 :result nil) (js-object :id 3 :result 4275878552)
+        (js-array (js-object :ready t) (js-object :id 1 :result t) (js-object :id 2 :result 0) (js-object :id 3 :result 4275878552)
           (js-object :id 4 :result (js-call (Buffer/from (js-array 152 186 220 254)) :toString "base64")) (js-object :id 5 :result nil))))) 30000)
   (nativeTest "the real native loader rejects truncated frames, invalid UTF8 and a forbidden transport BOM before opening a library" (lambda ()
     (let* ((open (str (JSON/stringify (js-object :id 1 :method "open" :args (js-array library signatures

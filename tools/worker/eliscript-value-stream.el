@@ -15,7 +15,7 @@
 (define-error 'eliscript-value-stream-error "Eliscript value stream error"
   'eliscript-value-codec-error)
 
-(defconst eliscript-worker-value-framing "eliscript-value-chunks-v1"
+(defconst eliscript-worker-value-framing "eliscript-value-chunks"
   "Chunk framing negotiated by the worker protocol.")
 
 (defconst eliscript-worker-value-stream-limits

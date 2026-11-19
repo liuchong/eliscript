@@ -83,8 +83,8 @@
                     (eliscript-project-build-result-modules result))
                    2))
         (should (equal
-                 (eliscript-project-build-result-entry-output result)
-                 main-output))
+                 (eliscript-project-build-result-entry-outputs result)
+                 (list main-output)))
         (should (file-exists-p dependency-output))
         (should (string-match-p
                  (regexp-quote "from \"./lib/value.mjs\"")
@@ -127,11 +127,11 @@
               (let ((eliscript-project-use-cache nil))
                 (eliscript-project-build entry out-dir root))))
         (should (equal (alist-get 'format manifest) "eliscript-project"))
-        (should (= (alist-get 'version manifest) 1))
-        (should (equal (alist-get 'entry manifest) "src/main.mjs"))
+        (should-not (assq 'version manifest))
+        (should (equal (alist-get 'entries manifest) '("src/main.mjs")))
         (should (equal (alist-get 'format cache)
                        "eliscript-project-cache"))
-        (should (= (alist-get 'version cache) 2))
+        (should-not (assq 'version cache))
         (should (equal (alist-get 'mode cache) "standard"))
         (should (string-match-p
                  "\\`[[:xdigit:]]\\{64\\}\\'"
@@ -157,7 +157,7 @@
                        (eliscript-project-tests--read
                         (eliscript-project-build-result-manifest second))))))))
 
-(ert-deftest eliscript-project-migrates-ground-cache-on-successful-read ()
+(ert-deftest eliscript-project-rebuilds-invalid-cache-format ()
   (eliscript-project-tests--with-directory root
     (let* ((entry (expand-file-name "main.eli" root))
            (out-dir (expand-file-name "build" root))
@@ -171,18 +171,16 @@
                (eliscript-project-tests--read manifest-path)
                :object-type 'alist :array-type 'array))
              (cache (alist-get 'cache manifest))
-             (ground (assq-delete-all 'format cache)))
-        (setf (alist-get 'version ground) 1)
-        (setf (alist-get 'digest ground)
-              (eliscript-project--json-digest
-               (eliscript-project--cache-identity
-                ground (append (alist-get 'modules ground) nil) 'ground)))
-        (setf (alist-get 'cache manifest) ground)
+             (invalid (assq-delete-all 'format cache)))
+        (setf (alist-get 'cache manifest) invalid)
         (with-temp-file manifest-path
           (insert (json-serialize manifest) "\n")))
-      (let ((migrated (eliscript-project-build entry out-dir root)))
-        (should (= (eliscript-project-build-result-compiled-count migrated) 0))
-        (should (= (eliscript-project-build-result-reused-count migrated) 1)))
+      (let* ((rebuilt (eliscript-project-build entry out-dir root))
+             (report (eliscript-project-build-report rebuilt)))
+        (should (= (eliscript-project-build-result-compiled-count rebuilt) 1))
+        (should (= (eliscript-project-build-result-reused-count rebuilt) 0))
+        (should (equal (alist-get 'reason (alist-get 'cache report))
+                       "cache-format-invalid")))
       (let* ((manifest
               (json-parse-string
                (eliscript-project-tests--read manifest-path)
@@ -190,7 +188,7 @@
              (cache (alist-get 'cache manifest)))
         (should (equal (alist-get 'format cache)
                        "eliscript-project-cache"))
-        (should (= (alist-get 'version cache) 2))))))
+        (should-not (assq 'version cache))))))
 
 (ert-deftest eliscript-project-reuses-clean-modules-and-rebuilds-dirty-ones ()
   (eliscript-project-tests--with-directory root
@@ -330,7 +328,9 @@
              (counts (alist-get 'counts report)))
         (should (equal (alist-get 'format report)
                        "eliscript-build-report"))
-        (should (= (alist-get 'version report) 1))
+        (should-not (assq 'version report))
+        (should (equal (append (alist-get 'entries report) nil) '("main.eli")))
+        (should (equal (append (alist-get 'entryOutputs report) nil) '("main.mjs")))
         (should (equal (alist-get 'status cache) "miss"))
         (should (equal (alist-get 'reason cache) "manifest-missing"))
         (should (= (alist-get 'compiled counts) 2))
@@ -619,8 +619,8 @@
                   (eliscript-project-build-result-modules result))
                  3))
       (should (equal
-               (eliscript-project-build-result-entry-output result)
-               entry-output))
+               (eliscript-project-build-result-entry-outputs result)
+               (list entry-output)))
       (dolist (module (list entry-output data-output object-output))
         (should (file-exists-p module))
         (should (file-exists-p (concat module ".map"))))
@@ -640,14 +640,15 @@
       (eliscript-project-tests--write
        configuration
        (concat
-        "{\"schemaVersion\":1,\"sourceRoot\":\"src\","
-        "\"entry\":\"main.eli\",\"outDir\":\"build\","
+        "{\"sourceRoot\":\"src\","
+        "\"entries\":[\"main.eli\"],\"outDir\":\"build\","
         "\"portableEntries\":[],\"cache\":false}\n"))
       (let* ((request
               (eliscript-project-read-configuration configuration))
              (result (eliscript-project-execute request)))
-        (should (equal (eliscript-project-request-entry request)
-                       (file-truename source)))
+        (should (equal (mapcar #'file-truename
+                               (eliscript-project-request-entries request))
+                       (list (file-truename source))))
         (should (equal (eliscript-project-request-root request)
                        (file-truename (expand-file-name "src" project))))
         (should-not (eliscript-project-request-use-cache request))
@@ -661,17 +662,15 @@
     (let ((configuration (expand-file-name "eliscript.json" project)))
       (dolist
           (case
-           '(("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"undeclaredOption\":{}}"
+           '(("{\"entries\":[\"main.eli\"],\"outDir\":\"build\",\"undeclaredOption\":{}}"
              "unknown configuration key: undeclaredOption")
-             ("{\"schemaVersion\":3,\"entry\":\"main.eli\",\"outDir\":\"build\"}"
-              "unsupported schemaVersion: 3")
-             ("{\"schemaVersion\":1,\"entry\":\"first.eli\",\"entry\":\"second.eli\",\"outDir\":\"build\"}"
-              "duplicate configuration key: entry")
-             ("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\"} trailing"
+             ("{\"entries\":[\"first.eli\"],\"entries\":[\"second.eli\"],\"outDir\":\"build\"}"
+              "duplicate configuration key: entries")
+             ("{\"entries\":[\"main.eli\"],\"outDir\":\"build\"} trailing"
               "invalid JSON:")
-             ("{\"schemaVersion\":1,\"sourceRoot\":\"../src\",\"entry\":\"main.eli\",\"outDir\":\"build\"}"
+             ("{\"sourceRoot\":\"../src\",\"entries\":[\"main.eli\"],\"outDir\":\"build\"}"
               "sourceRoot must be a contained relative path")
-             ("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[\"work\",\"work\"]}"
+             ("{\"entries\":[\"main.eli\"],\"outDir\":\"build\",\"portableEntries\":[\"work\",\"work\"]}"
               "portableEntries must not contain duplicates")))
         (eliscript-project-tests--write configuration (concat (car case) "\n"))
         (let ((error-data
@@ -682,7 +681,7 @@
                    (regexp-quote (cadr case))
                    (error-message-string error-data))))))))
 
-(ert-deftest eliscript-project-builds-versioned-multi-entry-graph ()
+(ert-deftest eliscript-project-builds-multi-entry-graph ()
   (eliscript-project-tests--with-directory project
     (let* ((source-root (expand-file-name "src" project))
            (first (expand-file-name "first.eli" source-root))
@@ -698,7 +697,7 @@
       (eliscript-project-tests--write
        configuration
        (concat
-        "{\"schemaVersion\":2,\"sourceRoot\":\"src\","
+        "{\"sourceRoot\":\"src\","
         "\"entries\":[\"second.eli\",\"first.eli\"],"
         "\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"))
       (let* ((request
@@ -718,10 +717,10 @@
                                    (file-truename second))
                              #'string-lessp)))
         (should (= (length (eliscript-project-build-result-modules result)) 3))
-        (should (equal (alist-get 'version manifest) 2))
+        (should-not (assq 'version manifest))
         (should (equal (alist-get 'entries manifest)
                        '("first.mjs" "second.mjs")))
-        (should (equal (alist-get 'version report) 2))
+        (should-not (assq 'version report))
         (should (equal (append (alist-get 'entries report) nil)
                        '("first.eli" "second.eli")))
         (let* ((again (eliscript-project-execute request))
@@ -754,7 +753,7 @@
            (out-dir (expand-file-name "build" root))
            (request
             (eliscript-project-request-create
-             :entry entry
+             :entries (list entry)
              :out-dir out-dir
              :root root
              :portable-entries nil
@@ -799,7 +798,7 @@
                   (eliscript-project-module-output module)))))
       (let* ((duplicate-request
               (eliscript-project-request-create
-               :entry entry
+               :entries (list entry)
                :out-dir out-dir
                :root root
                :portable-entries nil
@@ -817,7 +816,7 @@
       (let* ((invalid (expand-file-name "invalid.txt" root))
              (invalid-request
               (eliscript-project-request-create
-               :entry entry
+               :entries (list entry)
                :out-dir out-dir
                :root root
                :portable-entries nil
@@ -857,8 +856,8 @@
              (helper-output (expand-file-name "sub/helper.mjs" out-dir))
              (bridge-output (expand-file-name "sub/bridge.mjs" out-dir)))
         (should (= (length (eliscript-project-build-result-modules result)) 3))
-        (should (equal (eliscript-project-build-result-entry-output result)
-                       (file-truename entry-output)))
+        (should (equal (eliscript-project-build-result-entry-outputs result)
+                       (list (file-truename entry-output))))
         (dolist (artifact (list entry-output helper-output bridge-output))
           (should (file-exists-p artifact))
           (should (file-exists-p (concat artifact ".map"))))

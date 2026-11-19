@@ -159,8 +159,10 @@
                   (put nodes index (js-array kind number (compile-node (aref value 2)) (compile-node (aref value 3))))))) index)))))
         (js-object :root (compile-node (aref (js-call funcs :get root-name) 3)) :nodes nodes :sourceSHA256 (get provenance :sourceSHA256)))))
   (defun validate-declaration (data)
-    (unless (and (not (nullish? data)) (= (get data :format) "eliscript-unicode-property-aliases")
-      (= (get data :version) 1) (= (get data :license) "Unicode-3.0")
+    (unless (and (not (nullish? data)) (= (value-type data) "object") (not (Array/isArray data))
+      (= (js-length (Object/keys data)) 7)
+      (= (get data :format) "eliscript-unicode-property-aliases")
+      (= (get data :license) "Unicode-3.0")
       (= (JSON/stringify (get data :unicodeVersions)) (JSON/stringify (js-array "15.1.0" "16.0.0" "17.0.0")))
       (js-call (new globalThis.RegExp "^[a-f0-9]{64}$") :test (get data :sourceSHA256 ""))
       (js-call (new globalThis.RegExp "^[a-f0-9]{64}$") :test (get data :runtimeSourceSHA256 ""))
@@ -252,7 +254,7 @@
                 (runtime (extractGroundPropertyAliases (aref sources 1) "heap-regexp-property-id-base" t)))
             (unless (= (JSON/stringify (get original :records)) (JSON/stringify (get runtime :records)))
               (throw (new globalThis.Error "static and dynamic Unicode alias dictionaries disagree")))
-            (setq data (js-object :format "eliscript-unicode-property-aliases" :version 1 :license "Unicode-3.0"
+            (setq data (js-object :format "eliscript-unicode-property-aliases" :license "Unicode-3.0"
               :unicodeVersions (js-array "15.1.0" "16.0.0" "17.0.0") :sourceSHA256 (get original :sourceSHA256)
               :runtimeSourceSHA256 (get runtime :sourceSHA256) :records (get original :records)
               :groundDecisions (compileGroundPropertyAliasDecisions (aref sources 0))))

@@ -8,7 +8,7 @@
 ## Summary
 
 Every successful project build records four non-negative elapsed-time
-measurements. The version 1 build report exposes them under `timings` so CI,
+measurements. The build report exposes them under `timings` so CI,
 editor integrations, and developers can compare cold, partial, and complete
 cache paths without parsing logs.
 

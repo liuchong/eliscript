@@ -62,17 +62,17 @@
              (js-object :kind (js-object :enumerable t :get (lambda () (setq kinds (1+ kinds)) "literal"))
                :children (js-object :enumerable t :get (lambda () (setq childReads (1+ childReads)) empty)))))))
       (put work :seen (trackedSet)) (put work :active (trackedSet))
-      ;; Two actual capability checks read kind, then the leaf's children are
+      ;; Three actual expression guards read kind, then the leaf's children are
       ;; checked and visited. Establish that contract independently of DAG memo.
       (js-call assert :strictEqual (js-call snapshot :validate_fresh_wasm_expression shared nil t work) shared)
-      (js-call assert :strictEqual kinds 2) (js-call assert :strictEqual childReads 2)
+      (js-call assert :strictEqual kinds 3) (js-call assert :strictEqual childReads 2)
       (setq kinds 0 childReads 0)
       (let* ((unique (Array/from (js-object :length 65543) (lambda (ignored index)
                (Object/freeze (js-object :kind "literal" :type "u32" :value index :children empty)))))
              (children (Object/freeze (js-call (js-array shared shared) :concat unique (js-array shared))))
              (node (Object/freeze (js-object :kind "sequence" :type "u32" :value nil :children children))))
         (js-call assert :strictEqual (js-call snapshot :validate_fresh_wasm_expression node nil t work) node)
-        (js-call assert :strictEqual kinds 6 "both actual capability guards run for all three incoming edges")
+        (js-call assert :strictEqual kinds 9 "all three actual expression guards run for all three incoming edges")
         (js-call assert :strictEqual childReads 5 "the late shared leaf is revisited after the finite memo forgets it")
         (js-call assert :ok (<= (get (get work :seen) :peak) 65536))
         (js-call assert :ok (>= (get (get work :seen) :clears) 2))

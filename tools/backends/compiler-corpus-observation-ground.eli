@@ -1,0 +1,799 @@
+(module tools.backends.compiler-corpus-observation-ground
+  (import "node:buffer" Buffer)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdir)
+  (import "node:path" resolve join relative isAbsolute sep)
+  (import "node:child_process" spawn)
+  (import "node:crypto" createHash)
+  (import "node:console" Console)
+  (import "node:stream" Writable)
+  (import "./compiler-build.mjs" buildIndependentCompiler)
+  (import "./compiler-bootstrap.mjs" openCompilerArtifact)
+  (import "./compiler-session.mjs" encodeCompilerMetadata)
+  (import "./compiler-corpus-program-ground.mjs"
+    typeof-str nullish? undefined? truthy? box-val unbox set-box! clone-obj merge-objs
+    valueRecord managedValue resolveOriginalCorpusRequest childOutput
+    javascriptEnvironment javascriptModule)
+  (import "./compiler-corpus-runner-ground.mjs"
+    executeOriginalProgram executeCompilerSessionProgram managedRuntime executeExports)
+
+  (defun
+    diagnostic
+    (error)
+    (merge-objs (js-object :kind "diagnostic" :name (if
+          (and (not (nullish? error)) (not (nullish? (get error :name))))
+          (get error :name)
+          "Error") :message (if
+          (and (not (nullish? error)) (not (nullish? (get error :message))))
+          (get error :message)
+          (globalThis.String error))) (if
+        (and (not (nullish? error)) (not (undefined? (get error :eliscriptDiagnostic))))
+        (js-object :diagnostic (globalThis.structuredClone (get error :eliscriptDiagnostic)))
+        (js-object))))
+  (defasync
+    executeSequence
+    (context)
+    (let*
+      ((record (get context :record)) (session (get context :session)) (target (get context :target)) (options (or (get context :options) (js-object))) (directory (get context :directory)) (signal (get context :signal)) (results (new globalThis.Map)) (products (new globalThis.Map)) (observations (js-array)) (expectedSatisfied-box (box-val t)))
+      (let*
+        ((__coll_85 (Array/from (get record :steps))) (__idx_86 0))
+        (while
+          (< __idx_86 (js-length __coll_85))
+          (let
+            ((step (aref __coll_85 __idx_86)))
+            (try
+              (let*
+                ((request (resolveOriginalCorpusRequest (get step :request) results)))
+                (when
+                  (and (not (undefined? (get step :backendTarget))) (not (js-call (js-array "wasm" "native" "javascript") :includes (get step :backendTarget))))
+                  (throw (new globalThis.TypeError "original backend diagnostic target is invalid")))
+                (let*
+                  ((emission (js-call (js-array "project" "project-ir" "emit-ir" "emit-memory-ir" "emit-typed-memory") :includes (get request :operation))) (default-native (if
+                        (= (get globalThis.process :platform) "linux")
+                        "arm64-linux"
+                        "arm64-macos")))
+                  (when
+                    emission
+                    (globalThis.Object.assign request (js-object :target (or (get step :backendTarget) (get request :target) target) :memory (or (get request :memory) (get record :memory) (get options :memory)) :nativeTarget (or (get request :nativeTarget) (get record :nativeTarget) (get options :nativeTarget) default-native) :nativeFormat (or (get request :nativeFormat) "library"))))
+                  (let*
+                    ((res (try
+                          (js-object :failed false :response (await (js-call session :request request (js-object :signal signal))))
+                          (catch
+                            failure
+                            (js-object :failed t :error failure)))))
+                    (if
+                      (truthy? (get step :error))
+                      (let*
+                        ((error (get res :error)) (step-err (get step :error)))
+                        (assert (get res :failed) (str "original request must fail: " (get step :id)))
+                        (when
+                          (not (undefined? (get step-err :message)))
+                          (js-call assert :equal (when
+                              (not (nullish? error))
+                              (get error :message)) (get step-err :message)))
+                        (when
+                          (not (undefined? (get step-err :contains)))
+                          (assert (js-call (globalThis.String (if
+                                  (and (not (nullish? error)) (not (nullish? (get error :message))))
+                                  (get error :message)
+                                  error)) :includes (get step-err :contains))))
+                        (when
+                          (not (undefined? (get step-err :code)))
+                          (js-call assert :equal (when
+                              (and (not (nullish? error)) (not (nullish? (get error :eliscriptDiagnostic))))
+                              (get (get error :eliscriptDiagnostic) :code)) (get step-err :code)))
+                        (when
+                          (not (undefined? (get step-err :phase)))
+                          (js-call assert :equal (when
+                              (and (not (nullish? error)) (not (nullish? (get error :eliscriptDiagnostic))))
+                              (get (get error :eliscriptDiagnostic) :phase)) (get step-err :phase)))
+                        (let*
+                          ((__coll_87 (Array/from (or (get step-err :expectFields) (js-array)))) (__idx_88 0))
+                          (while
+                            (< __idx_88 (js-length __coll_87))
+                            (let
+                              ((expected (aref __coll_87 __idx_88)))
+                              (let*
+                                ((val-box (box-val (when
+                                        (not (nullish? error))
+                                        (get error :eliscriptDiagnostic)))))
+                                (let*
+                                  ((__coll_89 (Array/from (get expected :path))) (__idx_90 0))
+                                  (while
+                                    (< __idx_90 (js-length __coll_89))
+                                    (let
+                                      ((key (aref __coll_89 __idx_90)))
+                                      (let*
+                                        ((cur (unbox val-box)))
+                                        (set-box! val-box (when
+                                            (not (nullish? cur))
+                                            (aref cur key)))))
+                                    (setq __idx_90 (1+ __idx_90))))
+                                (js-call assert :deepEqual (unbox val-box) (get expected :value))))
+                            (setq __idx_88 (1+ __idx_88))))
+                        (js-call observations :push (js-object :id (get step :id) :error (diagnostic error))))
+                      (progn
+                        (when
+                          (get res :failed)
+                          (throw (get res :error)))
+                        (let*
+                          ((response (get res :response)))
+                          (js-call results :set (get step :id) response)
+                          (when
+                            (globalThis.Object.hasOwn step "expected")
+                            (js-call assert :deepEqual response (get step :expected)))
+                          (let*
+                            ((__coll_91 (Array/from (or (get step :expectFields) (js-array)))) (__idx_92 0))
+                            (while
+                              (< __idx_92 (js-length __coll_91))
+                              (let
+                                ((expectation (aref __coll_91 __idx_92)))
+                                (let*
+                                  ((actual-box (box-val response)))
+                                  (let*
+                                    ((__coll_93 (Array/from (get expectation :path))) (__idx_94 0))
+                                    (while
+                                      (< __idx_94 (js-length __coll_93))
+                                      (let
+                                        ((key (aref __coll_93 __idx_94)))
+                                        (set-box! actual-box (aref (unbox actual-box) key)))
+                                      (setq __idx_94 (1+ __idx_94))))
+                                  (js-call assert :deepEqual (unbox actual-box) (get expectation :value))))
+                              (setq __idx_92 (1+ __idx_92))))
+                          (when
+                            (not (undefined? (get step :containsData)))
+                            (assert (js-call (globalThis.JSON.parse (get response :data)) :includes (get step :containsData))))
+                          (let*
+                            ((__coll_95 (Array/from (or (get step :includesJavascript) (js-array)))) (__idx_96 0))
+                            (while
+                              (< __idx_96 (js-length __coll_95))
+                              (let
+                                ((text (aref __coll_95 __idx_96)))
+                                (assert (js-call (get response :javascript) :includes text)))
+                              (setq __idx_96 (1+ __idx_96))))
+                          (let*
+                            ((__coll_97 (Array/from (or (get step :excludesJavascript) (js-array)))) (__idx_98 0))
+                            (while
+                              (< __idx_98 (js-length __coll_97))
+                              (let
+                                ((text (aref __coll_97 __idx_98)))
+                                (assert (not (js-call (get response :javascript) :includes text))))
+                              (setq __idx_98 (1+ __idx_98))))
+                          (when
+                            (truthy? (get step :containsField))
+                            (assert (js-call (aref response (get (get step :containsField) :field)) :includes (get (get step :containsField) :text))))
+                          (when
+                            (truthy? (get step :negativeZeroAt))
+                            (let*
+                              ((val-box (box-val (globalThis.JSON.parse (get response :ir)))))
+                              (let*
+                                ((__coll_99 (Array/from (get step :negativeZeroAt))) (__idx_100 0))
+                                (while
+                                  (< __idx_100 (js-length __coll_99))
+                                  (let
+                                    ((key (aref __coll_99 __idx_100)))
+                                    (set-box! val-box (aref (unbox val-box) key)))
+                                  (setq __idx_100 (1+ __idx_100))))
+                              (assert (globalThis.Object.is (unbox val-box) -0))))
+                          (when
+                            (truthy? (get step :canonicalEnvelope))
+                            (assert (js-call (get response :canonicalIR) :startsWith "{\"format\":\"eliscript-ir\",\"program\":{\"body\":"))
+                            (assert (js-call (get response :canonicalIR) :endsWith "}}"))
+                            (js-call assert :deepEqual (globalThis.Object.keys (globalThis.JSON.parse (get response :canonicalIR))) (js-array "format" "program")))
+                          (when
+                            (truthy? (get step :sameFieldsAs))
+                            (let*
+                              ((__coll_101 (Array/from (get (get step :sameFieldsAs) :fields))) (__idx_102 0))
+                              (while
+                                (< __idx_102 (js-length __coll_101))
+                                (let
+                                  ((field (aref __coll_101 __idx_102)))
+                                  (let*
+                                    ((prev-obj (js-call results :get (get (get step :sameFieldsAs) :step))) (previous (when
+                                          (not (nullish? prev-obj))
+                                          (aref prev-obj field))))
+                                    (if
+                                      (= field "ir")
+                                      (js-call assert :deepEqual (globalThis.JSON.parse (aref response field)) (globalThis.JSON.parse previous))
+                                      (js-call assert :deepEqual (aref response field) previous))))
+                                (setq __idx_102 (1+ __idx_102)))))
+                          (let*
+                            ((observation (if
+                                  emission
+                                  (let*
+                                    ((step-entry (or (get step :entry) "ir.mjs")) (product (if
+                                          (and (undefined? (when
+                                                (not (nullish? response))
+                                                (get response :target))) (= (typeof-str (when
+                                                  (not (nullish? response))
+                                                  (get response :javascript))) "string"))
+                                          (js-object :target "javascript" :entry step-entry :modules (js-array (merge-objs (js-object :id step-entry :javascript (get response :javascript)) (if
+                                                  (undefined? (get response :sourceMap))
+                                                  (js-object)
+                                                  (js-object :sourceMap (get response :sourceMap))))))
+                                          response)) (artifact (await (js-call context :archiveProduct product (str "sequence-" (get step :id)) (get product :target)))))
+                                    (js-call products :set (get step :id) artifact)
+                                    (when
+                                      (truthy? (get step :sameProductAs))
+                                      (let*
+                                        ((other (js-call products :get (get step :sameProductAs))))
+                                        (js-call assert :equal (get artifact :identitySha256) (when
+                                            (not (nullish? other))
+                                            (get other :identitySha256)))))
+                                    (let*
+                                      ((__coll_103 (Array/from (or (get step :sidecars) (js-array)))) (__idx_104 0))
+                                      (while
+                                        (< __idx_104 (js-length __coll_103))
+                                        (let
+                                          ((sidecar (aref __coll_103 __idx_104)))
+                                          (let*
+                                            ((sfile (get sidecar :file)))
+                                            (when
+                                              (or (not (= (typeof-str sfile) "string")) (js-call (js-call sfile :split "/") :some (lambda (part) (or (not (truthy? part)) (= part ".") (= part "..")))) (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test sfile))
+                                              (throw (new globalThis.Error "original sidecar path is not relative")))
+                                            (let*
+                                              ((path (join (resolve (get artifact :path) "..") sfile)))
+                                              (await (mkdir (resolve path "..") (js-object :recursive t)))
+                                              (await (writeFile path (get sidecar :source) (js-object :flag "wx"))))))
+                                        (setq __idx_104 (1+ __idx_104))))
+                                    (let*
+                                      ((art-kind (when
+                                            (not (nullish? (get step :artifact)))
+                                            (get (get step :artifact) :kind))))
+                                      (cond
+                                        ((= art-kind "exports") (await (executeExports (merge-objs context (js-object :artifact artifact :target (get artifact :target))) (get step :artifact))))
+                                        ((= art-kind "original-program") (await (executeOriginalProgram (merge-objs context (js-object :artifact artifact :target (get artifact :target) :record (merge-objs record (js-object :entry (get artifact :entry) :request request :execution (clone-obj (get step :artifact)))))))))
+                                        ((= art-kind "stdout") (let*
+                                            ((stdout (if
+                                                  (= (get artifact :target) "javascript")
+                                                  (progn
+                                                    (await (javascriptEnvironment artifact (get context :sourceRoot)))
+                                                    (await (childOutput (or (get options :node) (get (get globalThis.process :env) :NODE) "node") (js-array (get artifact :path)) (js-object :cwd directory :signal signal))))
+                                                  (let*
+                                                    ((chunks (js-array)) (output (new Writable (js-object :write (lambda (chunk _encoding complete) (js-call chunks :push (globalThis.Buffer.from chunk)) (complete))))) (logger (new Console (js-object :stdout output :stderr output :colorMode false))) (a (await (managedRuntime artifact (get artifact :target) (merge-objs options (js-object :allowHostCapabilities t :runtimeOptions (merge-objs (get options :runtimeOptions) (js-object :console logger))))))) (cleanup-box (box-val undefined)) (actions (js-array (lambda () (js-call a :closeModule)) (lambda () (js-call a :collect)) (lambda () (js-call assert :equal (js-call a :live) 0)) (lambda () (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)) (lambda () (when
+                                                              (= (typeof-str (get a :close)) "function")
+                                                              (js-call a :close))) (lambda () (js-call output :end)))))
+                                                    (let*
+                                                      ((__coll_105 (Array/from actions)) (__idx_106 0))
+                                                      (while
+                                                        (< __idx_106 (js-length __coll_105))
+                                                        (let
+                                                          ((action (aref __coll_105 __idx_106)))
+                                                          (try
+                                                            (action)
+                                                            (catch
+                                                              error
+                                                              (when
+                                                                (undefined? (unbox cleanup-box))
+                                                                (set-box! cleanup-box error)))))
+                                                        (setq __idx_106 (1+ __idx_106))))
+                                                    (when
+                                                      (not (undefined? (unbox cleanup-box)))
+                                                      (throw (unbox cleanup-box)))
+                                                    (js-call (globalThis.Buffer.concat chunks) :toString "utf8")))))
+                                            (js-call assert :equal stdout (get (get step :artifact) :expected))
+                                            (js-object :stdout stdout)))
+                                        (t (js-object :productIdentitySha256 (get artifact :identitySha256))))))
+                                  response)))
+                            (js-call observations :push (js-object :id (get step :id) :result (valueRecord observation))))))))))
+                (catch
+                  error
+                  (when
+                    (and (not (nullish? signal)) (truthy? (get signal :aborted)))
+                    (throw (if
+                        (undefined? (get signal :reason))
+                        error
+                        (get signal :reason))))
+                  (set-box! expectedSatisfied-box false)
+                  (js-call observations :push (js-object :id (get step :id) :status "failed" :error (diagnostic error)))))
+          (setq __idx_86 (1+ __idx_86))))
+      (js-object :kind "sequence" :expectedSatisfied (unbox expectedSatisfied-box) :identity observations))))
+  (defun
+    createOriginalSeedOracle
+      (&optional opts)
+      (let*
+        ((options (or opts (js-object))) (sourceRoot (get options :sourceRoot)) (emacs (or (get options :emacs) (get (get globalThis.process :env) :EMACS) "emacs")) (signal (get options :signal)) (directory (get options :directory)) (node (get options :node)) (bun (get options :bun)) (programHost (get options :programHost)) (profile (get options :profile)) (budget (get options :budget)) (memory (get options :memory)) (auto (get options :auto)) (nativeTarget (get options :nativeTarget)) (sessionOptions (get options :sessionOptions)) (suites (new globalThis.Map)))
+        (async (req) (let*
+            ((record (get req :record)))
+            (cond
+              ((= (when
+                    (not (nullish? (get record :expected)))
+                    (get (get record :expected) :kind)) "seed-program") (progn
+                  (when
+                    (not (= (typeof-str directory) "string"))
+                    (throw (new globalThis.TypeError "original program Seed oracle requires an explicit evidence directory")))
+                  (let*
+                    ((exec (or (get record :execution) (js-object))) (originalHost (or (get exec :hostRuntime) (if
+                            (or (= programHost "bun") (truthy? (get exec :requiresBun)))
+                            "bun"
+                            "node"))) (key (str "program:" (get record :id) ":" originalHost)))
+                    (when
+                      (not (js-call suites :has key))
+                      (js-call suites :set key ((async () (let*
+                              ((output (resolve directory (js-call (js-call (createHash "sha256") :update key) :digest "hex"))) (product (resolve output "product")) (modules (js-array)))
+                              (await (mkdir product (js-object :recursive t)))
+                              (let*
+                                ((__coll_107 (Array/from (get record :modules))) (__idx_108 0))
+                                (while
+                                  (< __idx_108 (js-length __coll_107))
+                                  (let
+                                    ((item (aref __coll_107 __idx_108)))
+                                    (let*
+                                      ((input (resolve output "sources" (get item :filename))) (path (resolve product (get item :id))))
+                                      (await (mkdir (resolve input "..") (js-object :recursive t)))
+                                      (await (writeFile input (get item :source)))
+                                      (await (mkdir (resolve path "..") (js-object :recursive t)))
+                                      (await (childOutput (resolve sourceRoot "bin/eliscript-seed") (js-array "--source-map" "--output" path input) (js-object :cwd sourceRoot :signal signal)))
+                                      (js-call modules :push (js-object :id (get item :id) :path path))))
+                                  (setq __idx_108 (1+ __idx_108))))
+                              (let*
+                                ((artifact (js-object :target "javascript" :entry (get record :entry) :path (resolve product (get record :entry)) :directory product :modules modules)) (prog-opts (js-object :programHost originalHost :node node :bun bun :profile profile :budget budget :memory memory :auto auto :nativeTarget nativeTarget :sessionOptions sessionOptions)) (matrix-mod (await (js* "import('./compiler-matrix.mjs')"))) (archiveProduct (get matrix-mod :archiveProduct)) (programContext (js-object :artifact artifact :record record :target "javascript" :sourceRoot sourceRoot :signal signal :options prog-opts :directory output :archiveProduct (async (value &optional name productTarget) (archiveProduct value (or productTarget "javascript") (resolve output (or name "product")))))))
+                                (cond
+                                  ((= (get exec :kind) "compiler-session-program") (await (executeCompilerSessionProgram programContext)))
+                                  ((not (truthy? (get exec :compilerGenerations))) (await (executeOriginalProgram programContext)))
+                                  (t (let*
+                                      ((seed (await (buildIndependentCompiler (js-object :host "javascript" :sourceRoot sourceRoot :outputRoot (resolve output "independent-seed-compiler") :profile (or profile "small") :budget budget :memory memory :auto auto :nativeTarget nativeTarget :retainIR t :debug t :signal signal)))) (session (await (openCompilerArtifact seed sessionOptions))) (failed-box (box-val false)))
+                                      (try
+                                        (await (executeOriginalProgram (merge-objs programContext (js-object :session session))))
+                                        (catch
+                                          error
+                                          (set-box! failed-box t)
+                                          (throw error))
+                                        (finally
+                                          (try
+                                            (await (js-call session :close))
+                                            (catch
+                                              error
+                                              (when
+                                                (not (unbox failed-box))
+                                                (throw error)))))))))))))))
+                    (await (js-call suites :get key)))))
+              ((or (not (= (get record :kind) "stage")) (and (not (= (when
+                          (not (nullish? (get record :original)))
+                          (get (get record :original) :manifest)) "compiler-parity")) (not (truthy? (when
+                          (not (nullish? (get record :original)))
+                          (get (get record :original) :oracleCase)))))) undefined)
+              (t (let*
+                  ((stage (get (get record :request) :stage)) (inline (get (get record :original) :oracleCase)))
+                  (when
+                    (truthy? inline)
+                    (when
+                      (or (not (= stage "emitter")) (not (= (typeof-str directory) "string")) (not (= (typeof-str (get inline :name)) "string")) (not (= (typeof-str (get inline :filename)) "string")) (not (= (get inline :source) (get (get record :request) :source))) (not (= (get inline :filename) (get (get record :request) :filename))) (not (= (typeof-str (get inline :source)) "string")) (not (= (typeof-str (get (get record :original) :suite)) "string")) (not (= (typeof-str (get (get record :original) :sourceSha256)) "string")))
+                      (throw (new globalThis.TypeError "inline original Seed case requires its exact source and bound original suite")))
+                    (let*
+                      ((path (resolve sourceRoot (get (get record :original) :suite))) (part (relative (resolve sourceRoot) path)))
+                      (when
+                        (or (isAbsolute part) (= part "..") (js-call part :startsWith (str ".." sep)) (not (= (js-call (js-call (createHash "sha256") :update (await (readFile path))) :digest "hex") (get (get record :original) :sourceSha256))))
+                        (throw (new globalThis.Error "inline original Seed suite bytes changed")))))
+                  (let*
+                    ((key (str stage ":" (if
+                            (truthy? inline)
+                            (js-call (js-call (createHash "sha256") :update (globalThis.JSON.stringify (js-object :inline inline :suite (get (get record :original) :suite) :sha256 (get (get record :original) :sourceSha256)))) :digest "hex")
+                            (get (get record :original) :fixture)))))
+                    (when
+                      (not (js-call suites :has key))
+                      (js-call suites :set key ((async () (let*
+                              ((fixture (if
+                                    (truthy? inline)
+                                    (resolve directory (str "inline-" (js-call key :slice (+ (get stage :length) 1)) ".json"))
+                                    (resolve sourceRoot (get (get record :original) :fixture)))))
+                              (when
+                                (truthy? inline)
+                                (await (mkdir directory (js-object :recursive t)))
+                                (await (writeFile fixture (str (encodeCompilerMetadata (js-object :valid (js-array inline) :invalid (js-array))) "\n") (js-object :flag "wx"))))
+                              (new globalThis.Promise (lambda (accept reject) (let*
+                                    ((script (str "tests/bootstrap-" stage "-oracle.el")) (env-key (str "ELISCRIPT_" (js-call stage :toUpperCase) "_FIXTURE")) (env (merge-objs (get globalThis.process :env) (js-object :LC_ALL "C" :LANG "C"))) (__ign_109 (put env env-key fixture)) (child (spawn emacs (js-array "--batch" "-Q" "-L" "compiler" "-L" "tests" "--script" script) (js-object :cwd sourceRoot :signal signal :env env :stdio (js-array "ignore" "pipe" "pipe")))) (stdout (js-array)) (stderr (js-array)))
+                                    (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call stdout :push chunk)))
+                                    (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call stderr :push chunk)))
+                                    (js-call child :once "error" reject)
+                                    (js-call child :once "close" (lambda (code) (if
+                                          (not (= code 0))
+                                          (let*
+                                            ((err-text (js-call (js-call (globalThis.Buffer.concat stderr) :toString "utf8") :trim)))
+                                            (reject (new globalThis.Error (if
+                                                  (> (get err-text :length) 0)
+                                                  err-text
+                                                  (str "original Seed oracle exited with " code)))))
+                                          (try
+                                            (let*
+                                              ((values (globalThis.JSON.parse (js-call (globalThis.Buffer.concat stdout) :toString "utf8"))))
+                                              (assert (globalThis.Array.isArray values))
+                                              (accept values))
+                                            (catch
+                                              error
+                                              (reject error))))))))))))))
+                    (let*
+                      ((values (await (js-call suites :get key))) (originalName (if
+                            (truthy? inline)
+                            (get inline :name)
+                            (get (get (get record :original) :case) :name))) (found (js-call values :filter (lambda (value) (= (get value :name) originalName)))))
+                      (when
+                        (not (= (get found :length) 1))
+                        (throw (new globalThis.Error (str "original Seed oracle case identity differs: " originalName))))
+                      (js-object :kind "original-seed" :stage stage :result (aref found 0)))))))))))
+    (defasync
+      executeBehavior
+      (ctx)
+      (let*
+        ((record (get ctx :record)) (artifact (get ctx :artifact)) (target (get ctx :target)) (sourceRoot (get ctx :sourceRoot)) (options (or (get ctx :options) (js-object))) (scenario (get (get record :execution) :scenario)))
+        (if
+          (= target "javascript")
+          (let*
+            ((mod (await (javascriptModule artifact sourceRoot))))
+            (if
+              (truthy? (get scenario :runtimeError))
+              (let*
+                ((thrown-box (box-val undefined)))
+                (try
+                  (js-call mod :run)
+                  (catch
+                    error
+                    (set-box! thrown-box error)))
+                (let*
+                  ((thrown (unbox thrown-box)))
+                  (assert thrown "original scenario must throw")
+                  (js-call assert :equal (get thrown :name) (get scenario :jsError))
+                  (when
+                    (= (get scenario :runtimeError) "ELI-RT0009")
+                    (js-call assert :equal (when
+                        (not (nullish? (get thrown :eliscriptDiagnostic)))
+                        (get (get thrown :eliscriptDiagnostic) :code)) (get scenario :runtimeError)))
+                  (when
+                    (globalThis.Object.hasOwn scenario "recover")
+                    (js-call assert :deepEqual (js-call mod :recover) (get scenario :recover)))
+                  (merge-objs (js-object :kind "managed-bdd" :expectedSatisfied t :error (diagnostic thrown)) (if
+                      (globalThis.Object.hasOwn scenario "recover")
+                      (js-object :recovery (valueRecord (get scenario :recover)))
+                      (js-object)))))
+              (let*
+                ((result (js-call mod :run)))
+                (js-call assert :deepEqual result (get scenario :expected))
+                (js-object :kind "managed-bdd" :expectedSatisfied t :value (valueRecord result)))))
+          (let*
+            ((a (await (managedRuntime artifact target options))) (failure-box (box-val undefined)))
+            (try
+              (js-call a :auto (get record :auto))
+              (if
+                (truthy? (get scenario :runtimeError))
+                (let*
+                  ((thrown-box (box-val undefined)))
+                  (try
+                    (let*
+                      ((value (js-call a :invoke "run")))
+                      (js-call a :release value))
+                    (catch
+                      error
+                      (set-box! thrown-box error)))
+                  (let*
+                    ((thrown (unbox thrown-box)))
+                    (assert thrown "original scenario must throw")
+                    (js-call assert :equal (when
+                        (not (nullish? (get thrown :eliscriptDiagnostic)))
+                        (get (get thrown :eliscriptDiagnostic) :code)) (get scenario :runtimeError))
+                    (when
+                      (truthy? (get scenario :wasmError))
+                      (js-call assert :equal (get thrown :name) (get scenario :wasmError)))
+                    (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)
+                    (when
+                      (globalThis.Object.hasOwn scenario "recover")
+                      (let*
+                        ((value (js-call a :invoke "recover")))
+                        (try
+                          (js-call assert :deepEqual (managedValue a value) (get scenario :recover))
+                          (finally
+                            (js-call a :release value)))))
+                    (merge-objs (js-object :kind "managed-bdd" :expectedSatisfied t :error (diagnostic thrown)) (if
+                        (globalThis.Object.hasOwn scenario "recover")
+                        (js-object :recovery (valueRecord (get scenario :recover)))
+                        (js-object)))))
+                (let*
+                  ((value (js-call a :invoke "run")) (result (try
+                        (let*
+                          ((r (managedValue a value)))
+                          (js-call assert :deepEqual r (get scenario :expected))
+                          r)
+                        (finally
+                          (js-call a :release value)))))
+                  (js-object :kind "managed-bdd" :expectedSatisfied t :value (valueRecord result))))
+              (catch
+                error
+                (set-box! failure-box error)
+                (throw error))
+              (finally
+                (let*
+                  ((cleanup-box (box-val undefined)) (actions (js-array (lambda () (js-call a :closeModule)) (lambda () (js-call a :collect)) (lambda () (js-call assert :equal (js-call a :live) 0)) (lambda () (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)) (lambda () (when
+                            (= (typeof-str (get a :close)) "function")
+                            (js-call a :close))))))
+                  (let*
+                    ((__coll_110 (Array/from actions)) (__idx_111 0))
+                    (while
+                      (< __idx_111 (js-length __coll_110))
+                      (let
+                        ((action (aref __coll_110 __idx_111)))
+                        (try
+                          (action)
+                          (catch
+                            error
+                            (when
+                              (undefined? (unbox cleanup-box))
+                              (set-box! cleanup-box error)))))
+                      (setq __idx_111 (1+ __idx_111))))
+                  (when
+                    (and (undefined? (unbox failure-box)) (not (undefined? (unbox cleanup-box))))
+                    (throw (unbox cleanup-box))))))))))
+    (defasync
+      executeUnicodeProfile
+      (context)
+      (let*
+        ((record (get context :record)) (artifact (get context :artifact)) (target (get context :target)) (sourceRoot (get context :sourceRoot)) (options (or (get context :options) (js-object))) (profile (get (get record :execution) :profile)) (a (if
+              (= target "javascript")
+              nil
+              (await (managedRuntime artifact target (merge-objs options (js-object :runtimeOptions (merge-objs (get options :runtimeOptions) (js-object :unicodeVersion (get profile :version))))))))) (failure-box (box-val undefined)))
+        (try
+          (let*
+            ((mod (if
+                  (truthy? a)
+                  (progn
+                    (js-call a :auto (get record :auto))
+                    nil)
+                  (await (javascriptModule artifact sourceRoot)))) (convert (lambda (name text) (if
+                    (not (truthy? a))
+                    ((aref mod name) text)
+                    (let*
+                      ((input (js-call a :string text)) (output-box (box-val undefined)))
+                      (try
+                        (let*
+                          ((out (js-call a :invoke name (js-array input))))
+                          (set-box! output-box out)
+                          (js-call a :readString out))
+                        (finally
+                          (js-call a :release (unbox output-box))
+                          (js-call a :release input))))))) (hashes (js-object :upper (createHash "sha256") :lower (createHash "sha256"))) (checked-box (box-val 0)))
+            (let*
+              ((start 0) (__loop_112 t))
+              (while
+                __loop_112
+                (setq __loop_112 false)
+                (when
+                  (< start 1114112)
+                  (let*
+                    ((points (js-array)) (limit (globalThis.Math.min (+ start 512) 1114112)))
+                    (let*
+                      ((point start) (__loop_113 t))
+                      (while
+                        __loop_113
+                        (setq __loop_113 false)
+                        (when
+                          (< point limit)
+                          (when
+                            (or (< point 55296) (> point 57343))
+                            (js-call points :push point))
+                          (progn
+                            (setq point (+ point 1))
+                            (setq __loop_113 t)))))
+                    (set-box! checked-box (+ (unbox checked-box) (get points :length)))
+                    (let*
+                      ((input (js-call globalThis.String.fromCodePoint :apply globalThis.String points)))
+                      (let*
+                        ((__coll_114 (Array/from (js-array "upper" "lower"))) (__idx_115 0))
+                        (while
+                          (< __idx_115 (js-length __coll_114))
+                          (let
+                            ((name (aref __coll_114 __idx_115)))
+                            (js-call (aref hashes name) :update (convert name input) "utf16le"))
+                          (setq __idx_115 (1+ __idx_115))))))
+                  (progn
+                    (setq start (+ start 512))
+                    (setq __loop_112 t)))))
+            (js-call assert :equal (unbox checked-box) (- 1114112 2048))
+            (let*
+              ((actual (js-object)))
+              (let*
+                ((__coll_116 (Array/from (js-array "upper" "lower"))) (__idx_117 0))
+                (while
+                  (< __idx_117 (js-length __coll_116))
+                  (let
+                    ((name (aref __coll_116 __idx_117)))
+                    (put actual name (js-call (aref hashes name) :digest "hex"))
+                    (js-call assert :equal (aref actual name) (aref profile name)))
+                  (setq __idx_117 (1+ __idx_117))))
+              (let*
+                ((__coll_118 (Array/from (get profile :sigma))) (__idx_119 0))
+                (while
+                  (< __idx_119 (js-length __coll_118))
+                  (let
+                    ((pair (aref __coll_118 __idx_119)))
+                    (js-call assert :equal (convert "lower" (aref pair 0)) (aref pair 1)))
+                  (setq __idx_119 (1+ __idx_119))))
+              (js-object :kind "unicode-profile" :expectedSatisfied t :version (get profile :version) :checked (unbox checked-box) :sigmaCases (get (get profile :sigma) :length) :hashes actual)))
+          (catch
+            error
+            (set-box! failure-box error)
+            (throw error))
+          (finally
+            (when
+              (truthy? a)
+              (let*
+                ((cleanup-box (box-val undefined)) (actions (js-array (lambda () (js-call a :closeModule)) (lambda () (js-call a :collect)) (lambda () (js-call assert :equal (js-call a :live) 0)) (lambda () (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)) (lambda () (when
+                          (= (typeof-str (get a :close)) "function")
+                          (js-call a :close))))))
+                (let*
+                  ((__coll_120 (Array/from actions)) (__idx_121 0))
+                  (while
+                    (< __idx_121 (js-length __coll_120))
+                    (let
+                      ((action (aref __coll_120 __idx_121)))
+                      (try
+                        (action)
+                        (catch
+                          error
+                          (when
+                            (undefined? (unbox cleanup-box))
+                            (set-box! cleanup-box error)))))
+                    (setq __idx_121 (1+ __idx_121))))
+                (when
+                  (and (undefined? (unbox failure-box)) (not (undefined? (unbox cleanup-box))))
+                  (throw (unbox cleanup-box)))))))))
+    (defasync
+      executeCompilerCorpusRecord
+      (context)
+      (let*
+        ((record (get context :record)) (response (get context :response)) (failure (get context :failure)) (target (get context :target)) (options (or (get context :options) (js-object))))
+        (cond
+          ((globalThis.Object.hasOwn context "failure") (diagnostic failure))
+          ((= (get record :kind) "stage") (progn
+              (when
+                (or (not (= (when
+                        (not (nullish? response))
+                        (get response :stage)) (get (get record :request) :stage))) (not (= (when
+                        (not (nullish? response))
+                        (get response :filename)) (get (get record :request) :filename))) (not (= (typeof-str (when
+                          (not (nullish? response))
+                          (get response :data))) "string")))
+                (throw (new globalThis.TypeError "compiler stage did not return its lossless data envelope")))
+              (globalThis.JSON.parse (get response :data))
+              (js-object :kind "stage" :stage (get response :stage) :filename (get response :filename) :data (get response :data))))
+          ((= (get record :kind) "sequence") (await (executeSequence context)))
+          ((= (get record :kind) "original-suite") (if
+              (not (= (typeof-str (get options :executeOriginalFixture)) "function"))
+              (js-object :kind "original-suite" :status "executor-required" :requiredLocatorIds (get (get record :expected) :requiredLocatorIds))
+              (let*
+                ((observation (await (js-call options :executeOriginalFixture context))))
+                (when
+                  (or (not (= (when
+                          (not (nullish? observation))
+                          (get observation :status)) "executed")) (not (globalThis.Array.isArray (get observation :executedLocatorIds))))
+                  (throw (new globalThis.TypeError "original-suite executor must report actual executed locator identities")))
+                (js-call assert :deepEqual (js-call (js-call (get observation :executedLocatorIds) :slice) :sort) (js-call (js-call (get (get record :expected) :requiredLocatorIds) :slice) :sort))
+                observation)))
+          (t (let*
+              ((exec-kind (when
+                    (not (nullish? (get record :execution)))
+                    (get (get record :execution) :kind))))
+              (cond
+                ((= exec-kind "managed-bdd") (await (executeBehavior (merge-objs context (js-object :target target :options options)))))
+                ((= exec-kind "unicode-profile") (await (executeUnicodeProfile (merge-objs context (js-object :options options)))))
+                ((= exec-kind "original-program") (await (executeOriginalProgram (merge-objs context (js-object :options options)))))
+                ((= exec-kind "compiler-session-program") (await (executeCompilerSessionProgram (merge-objs context (js-object :options options)))))
+                (t (js-object :kind "unsupported-execution" :status "executor-required"))))))))
+    (defasync
+      compareCompilerCorpusObservation
+      (ctx)
+      (let*
+        ((record (get ctx :record)) (observation (get ctx :observation)) (target (get ctx :target)) (options (or (get ctx :options) (js-object))) (expected (get record :expected)) (exp-kind (when
+              (not (nullish? expected))
+              (get expected :kind))) (obs-kind (when
+              (not (nullish? observation))
+              (get observation :kind))))
+        (cond
+          ((= exp-kind "seed-program") (cond
+              ((not (= obs-kind "original-program")) (js-object :status "different" :reason "original complete program did not execute"))
+              ((and (globalThis.Object.hasOwn expected "stdout") (not (= (get observation :stdout) (get expected :stdout)))) (js-object :status "different" :reason "original frozen stdout differs"))
+              ((and (globalThis.Object.hasOwn expected "stdoutJSON") (not (try
+                      (js-call assert :deepEqual (globalThis.JSON.parse (get observation :stdout)) (get expected :stdoutJSON))
+                      t
+                      (catch
+                        _
+                        false)))) (js-object :status "different" :reason "original inline host data assertion differs"))
+              ((not (= (typeof-str (get options :originalOracle)) "function")) (js-object :status "unverified" :reason "original program Seed oracle is required"))
+              (t (try
+                  (let*
+                    ((oracle (await (js-call options :originalOracle (js-object :record (globalThis.structuredClone record) :target target)))))
+                    (if
+                      (and (= (when
+                            (not (nullish? oracle))
+                            (get oracle :kind)) "original-program") (= (get oracle :stdout) (get observation :stdout)))
+                      (js-object :status "equivalent" :oracle (or (get (get record :original) :host) (get (get record :original) :fixture)))
+                      (js-object :status "different" :reason "original complete program or host observation differs")))
+                  (catch
+                    error
+                    (js-object :status "unverified" :reason "original complete program Seed oracle did not finish" :failure (diagnostic error)))))))
+          ((= exp-kind "unicode-profile") (if
+              (and (= obs-kind "unicode-profile") (= (get observation :expectedSatisfied) t))
+              (js-object :status "equivalent" :oracle (get (get record :original) :fixture))
+              (js-object :status "different" :reason "original complete Unicode profile observation differs")))
+          ((= exp-kind "sequence") (if
+              (and (= obs-kind "sequence") (= (get observation :expectedSatisfied) t))
+              (js-object :status "equivalent" :oracle (get (get record :original) :suite))
+              (js-object :status "different" :reason "original request sequence did not complete")))
+          ((= exp-kind "diagnostic") (if
+              (or (not (= obs-kind "diagnostic")) (not (= (get observation :message) (get expected :message))))
+              (js-object :status "different" :reason "original diagnostic message differs")
+              (if
+                (and (not (undefined? (get expected :diagnostic))) (not (try
+                      (js-call assert :deepEqual (get observation :diagnostic) (get expected :diagnostic))
+                      t
+                      (catch
+                        _
+                        false))))
+                (js-object :status "different" :reason "original structured diagnostic differs")
+                (js-object :status "equivalent" :oracle (get (get record :original) :fixture)))))
+          ((= exp-kind "managed-bdd") (let*
+              ((scenario (get expected :scenario)))
+              (if
+                (and (truthy? (get scenario :compileError)) (not (= target "javascript")))
+                (if
+                  (and (= obs-kind "diagnostic") (= (when
+                        (not (nullish? (get observation :diagnostic)))
+                        (get (get observation :diagnostic) :code)) (get scenario :compileError)) (= (when
+                        (and (not (nullish? (get observation :diagnostic))) (not (nullish? (get (get observation :diagnostic) :location))))
+                        (get (get (get observation :diagnostic) :location) :file)) (get (aref (get record :modules) 0) :filename)) (>= (or (when
+                          (and (not (nullish? (get observation :diagnostic))) (not (nullish? (get (get observation :diagnostic) :location))) (not (nullish? (get (get (get observation :diagnostic) :location) :start))))
+                          (get (get (get (get observation :diagnostic) :location) :start) :line)) 0) 2))
+                  (js-object :status "equivalent" :oracle (get (get record :original) :fixture))
+                  (js-object :status "different" :reason "original managed compile refusal differs"))
+                (if
+                  (and (= obs-kind "managed-bdd") (= (get observation :expectedSatisfied) t))
+                  (js-object :status "equivalent" :oracle (get (get record :original) :fixture))
+                  (js-object :status "different" :reason "original behavior scenario did not complete")))))
+          ((= exp-kind "original-suite") (if
+              (= obs-kind "diagnostic")
+              (js-object :status "different" :reason "original suite execution failed")
+              (if
+                (and (= (when
+                      (not (nullish? observation))
+                      (get observation :status)) "executed") (= (get observation :verification) "equivalent"))
+                (js-object :status "equivalent" :oracle "original-suite-executor")
+                (js-object :status "unverified" :reason "original suite execution and comparison are still required"))))
+          ((and (not (nullish? expected)) (truthy? (get expected :oracleRequired))) (if
+              (not (= obs-kind "stage"))
+              (js-object :status "different" :reason "original accepted stage failed")
+              (if
+                (not (= (typeof-str (get options :originalOracle)) "function"))
+                (js-object :status "unverified" :reason "original Seed observation is required")
+                (let*
+                  ((oracle-res (try
+                        (js-object :ok t :oracle (await (js-call options :originalOracle (js-object :record (globalThis.structuredClone record) :target target))))
+                        (catch
+                          error
+                          (js-object :ok false :error error)))))
+                  (if
+                    (not (get oracle-res :ok))
+                    (js-object :status "unverified" :reason "original Seed oracle could not complete" :failure (diagnostic (get oracle-res :error)))
+                    (let*
+                      ((oracle (get oracle-res :oracle)))
+                      (if
+                        (undefined? oracle)
+                        (js-object :status "unverified" :reason "original oracle did not supply this case")
+                        (try
+                          (if
+                            (= (get oracle :kind) "original-seed")
+                            (progn
+                              (js-call assert :equal (get oracle :stage) (get (get record :request) :stage))
+                              (js-call assert :equal (get (get oracle :result) :status) "ok")
+                              (js-call assert :equal (get observation :kind) "stage")
+                              (let*
+                                ((data (globalThis.JSON.parse (get observation :data))) (st (get oracle :stage)))
+                                (cond
+                                  ((or (= st "reader") (= st "expander")) (js-call assert :deepEqual data (get (get oracle :result) :forms)))
+                                  ((= st "ir") (js-call assert :deepEqual data (get (get oracle :result) :program)))
+                                  ((= st "emitter") (js-call assert :deepEqual data (js-object :javascript (get (get oracle :result) :javascript) :sourceMap (get (get oracle :result) :sourceMap))))
+                                  ((not (= st "analyzer")) (throw (new globalThis.Error "unrepresented original Seed stage"))))))
+                            (js-call assert :deepEqual observation oracle))
+                          (js-object :status "equivalent" :oracle "original-seed")
+                          (catch
+                            _
+                            (js-object :status "different" :reason "original Seed observation differs"))))))))))
+          (t (js-object :status "unverified" :reason "no original observation contract was supplied")))))
+  (export createOriginalSeedOracle executeCompilerCorpusRecord compareCompilerCorpusObservation)
+)

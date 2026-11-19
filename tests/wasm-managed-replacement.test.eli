@@ -64,6 +64,7 @@
         ((= ty "number") (js-call a :number x))
         (t x))))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
   (defun check-call (a c name inputs)
     (let* ((args (js-call inputs :map (lambda (x) (box-val a x))))
            (js-fn (aref (get c :js) (js-call name :replaceAll "-" "_")))
@@ -173,7 +174,10 @@
                   (let* ((k (js-call a :string (aref pair 0)))
                          (got (js-call a :objectGet trace k)))
                     (js-call assert :equal
-                      (if (= (get got :kind) 4) (js-call a :readNumber got) (js-call a :readString got))
+                      (cond
+                        ((= (funcall (js* "(v) => typeof v") got) "number") got)
+                        ((and (not (nullish? got)) (= (get got :kind) 4)) (js-call a :readNumber got))
+                        (t (js-call a :readString got)))
                       (aref pair 1))
                     (js-call a :release k)
                     (js-call a :release got))))
@@ -182,7 +186,7 @@
                      (key (js-call a :string "calls"))
                      (count (js-call a :objectGet trace key)))
                 (js-call assert :equal (js-call a :readString unchanged) "😀aba")
-                (js-call assert :equal (js-call a :readNumber count) 1)
+                (js-call assert :equal (funcall num-val a count) 1)
                 (js-call (js-array trace value fn input search out absent unchanged key count) :forEach (lambda (x) (js-call a :release x)))
                 (js-call a :collect)
                 (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
@@ -200,7 +204,7 @@
         (let* ((o (js-call a :invoke "factory"))
                (trace (js-call a :sourceObject (js-object)))
                (out (js-call a :invoke "f" (js-array o trace))))
-          (js-call assert :equal (js-call a :readNumber out) 11)
+          (js-call assert :equal (funcall num-val a out) 11)
           (js-call (js-array nil undefined t false 1 (js-object)) :forEach
             (lambda (value)
               (let ((v (if (and (not (nullish? value)) (= (funcall js-typeof value) "object"))
@@ -213,7 +217,7 @@
                 (let* ((key (js-call a :string "visited"))
                        (got (js-call a :objectGet seen key)))
                   (js-call assert :equal
-                    (if (undefined? got) undefined (js-call a :readNumber got))
+                    (if (undefined? got) undefined (funcall num-val a got))
                     (if (nullish? value) undefined 17))
                   (js-call (js-array v seen key got) :forEach (lambda (x) (js-call a :release x)))
                   (js-call assert :equal (get (js-call a :stats) :frameDepth) 0)))))
@@ -271,7 +275,7 @@
               (lambda (e) (diag-code? e "ELI-RT0002")))
             (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
             (js-call assert :equal (js-call small :readString s) "held😀\ud800")
-            (funcall assert (Object/is (js-call small :readNumber held) -0.0))
+            (funcall assert (Object/is (funcall num-val small held) -0.0))
             (js-call small :leaveFrame outer)
             (finish small (js-array s needle insert held)))))))
 
@@ -281,17 +285,18 @@
             (c (await (compile-case ordinary))))
         (js-call
           (js-array
-            (js-array "heap-text-search-unit" "data length index reverse")
-            (js-array "heap-replacement-write-range" "heap builder text first last"))
+            (js-array "heap-text-search-unit" "data length index reverse" "")
+            (js-array "heap-replacement-write-range" "heap builder text first last" "(memory-sig u32 u32 v64 v64 u32 u32) "))
           :forEach
           (lambda (pair)
             (let* ((name (aref pair 0))
                    (formals (aref pair 1))
+                   (signature (aref pair 2))
                    (start (js-call source :indexOf (str "  (defun " name " ")))
                    (end (js-call source :indexOf "  (defun " (+ start 3))))
               (funcall assert (and (>= start 0) (> end start)))
               (let* ((ir (js-call (get b :compiler) :compile_ir_string
-                           (str (js-call source :slice 0 start) "(defun " name " (" formals ") (load-u16 4294967295))\n" (js-call source :slice end))
+                           (str (js-call source :slice 0 start) "(defun " name " (" formals ") " signature "(load-u16 4294967295))\n" (js-call source :slice end))
                            "replacement-trap.eli"))
                      (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm (get c :p) ir)))))
                 (js-call a :auto 1)
@@ -313,7 +318,7 @@
                     globalThis.WebAssembly.RuntimeError)
                   (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
                   (js-call assert :equal (js-call a :readString text) "xxx")
-                  (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+                  (funcall assert (Object/is (funcall num-val a held) -0.0))
                   (js-call a :leaveFrame outer)
                   (finish a (js-array text search insert bad held))))))))))
 

@@ -47,8 +47,7 @@
     " (defconst results (js-array))"
     " (defvar certificate undefined)"
     " (defun read-value (runtime value)"
-    "  (cond ((or (nullish? value) (= (value-type value) \"boolean\")) value)"
-    "   ((= (get value :kind) 4) (js-call runtime :readNumber value))"
+    "  (cond ((or (nullish? value) (= (value-type value) \"boolean\") (= (value-type value) \"number\")) value)"
     "   ((= (get value :kind) 5) (js-call runtime :readString value))"
     "   ((= (get value :kind) 14)"
     "    (let ((out (js-array)) (index 0))"
@@ -245,11 +244,10 @@
           (let* ((certified (await (requirePreparedStage3 directory)))
                  (identity (get certified :reportIdentity)))
             (js-call assert :strictEqual (get identity :format) "eliscript-prepared-stage3")
-            (js-call assert :strictEqual (get identity :version) 2)
             (js-call assert :strictEqual (get identity :fixedPointFileCount)
               (get (JSON/parse (js-call manifest-bytes :toString "utf8")) :fixedPointFileCount))
             (js-call assert :deepStrictEqual (Object/keys identity)
-              (js-array "format" "version" "fixedPointFileCount" "sourceSha256" "productSha256"))
+              (js-array "format" "fixedPointFileCount" "sourceSha256" "productSha256"))
             (let ((source (js-object :preparedCompiler identity
                             :files (js-call (js-call (get metadata :modules) :filter
                                       (lambda (item) (js-call (get item :id) :startsWith "runtime/")))
@@ -269,9 +267,9 @@
               (let ((changed (JSON/parse (JSON/stringify source))))
                 (put (get changed :preparedCompiler) :productSha256 (js-call "0" :repeat 64))
                 (js-call assert :throws (lambda () (assertPreparedBenchmarkSource changed certified))))
-              (let ((downgraded (JSON/parse (JSON/stringify source))))
-                (put (get downgraded :preparedCompiler) :version 1)
-                (js-call assert :throws (lambda () (assertPreparedBenchmarkSource downgraded certified))))))
+              (let ((extended (JSON/parse (JSON/stringify source))))
+                (put (get extended :preparedCompiler) :unexpected t)
+                (js-call assert :throws (lambda () (assertPreparedBenchmarkSource extended certified))))))
           (let* ((file (resolve directory "runtime/prelude.mjs")) (bytes (await (readFile file))))
             (await (writeFile file "seed bytes are not final runtime bytes"))
             (await (js-call assert :rejects (requirePreparedStage3 directory)
@@ -326,7 +324,8 @@
             (await (js-call assert :rejects (requirePreparedStage3 directory)))
             (await (rm shadow-runtime-package (js-object :force t))))
           (let ((restored (await (requirePreparedStage3 directory))))
-            (js-call assert :strictEqual (get (get restored :reportIdentity) :version) 2))
+            (js-call assert :deepStrictEqual (Object/keys (get restored :reportIdentity))
+              (js-array "format" "fixedPointFileCount" "sourceSha256" "productSha256")))
           (let* ((prepared (get (await (requirePreparedStage3)) :reportIdentity))
                  (tracked-result (spawnSync "git" (js-array "ls-files" "-z")
                                    (js-object :cwd root :encoding "utf8")))
@@ -348,7 +347,7 @@
                 (js-call assert :deepStrictEqual (get identity :preparedCompiler) prepared)
                 (js-call assert :strictEqual
                   (await (validateBenchmarkSource root tracked "benchmarks/prepared-source-probe.json"
-                    (js-object :format "eliscript-prepared-source-probe" :version 1 :sourceDigest identity)))
+                    (js-object :format "eliscript-prepared-source-probe" :sourceDigest identity)))
                   (js-length (get identity :files)))
                 (when (= index 0)
                   (let ((inputs (js-array "bootstrap/runtime/memory.eli" "tools/runtime/unicode-case-runtime.el")) (input-index 0))
@@ -358,7 +357,7 @@
                         (put changed :files (js-call (get changed :files) :filter (lambda (file) (/= file removed))))
                         (await (js-call assert :rejects
                           (validateBenchmarkSource root tracked "benchmarks/prepared-source-probe.json"
-                            (js-object :format "eliscript-prepared-source-probe" :version 1 :sourceDigest changed))
+                            (js-object :format "eliscript-prepared-source-probe" :sourceDigest changed))
                           (pattern "not a tracked safe path: runtime/unicode-case-data[.]eli"))))
                       (setq input-index (1+ input-index)))))
                 (js-call compilerBenchmarkRuntimeInputs :forEach
@@ -372,7 +371,7 @@
               (js-call assert :deepStrictEqual (get core :preparedCompiler) prepared)
               (js-call assert :strictEqual
                 (await (validateBenchmarkSource root tracked "benchmarks/prepared-core-source-probe.json"
-                  (js-object :format "eliscript-prepared-core-source-probe" :version 1 :source core)))
+                  (js-object :format "eliscript-prepared-core-source-probe" :source core)))
                 (js-length (get core :files))))
             ;; Run the real Emacs bridges only after the final product exists.
             ;; The helper forces process notifications before JSON parsing and
@@ -388,7 +387,9 @@
               (js-call assert :strictEqual (get child :status) 0 diagnostic)
               (let ((report (JSON/parse (get child :stdout))))
                 (js-call assert :strictEqual (get report :format) "eliscript-prepared-worker-gates")
-                (js-call assert :strictEqual (get report :schemaVersion) 1)
+                (js-call assert :deepStrictEqual (Object/keys report)
+                  (js-array "format" "ok" "bridges" "identities" "identity"
+                    "failures" "liveProcesses" "bridgeBuffers"))
                 (js-call assert :strictEqual (get report :ok) t)
                 (js-call assert :strictEqual (get report :bridges) 4)
                 (js-call assert :strictEqual (get report :identities) 4)
@@ -409,7 +410,7 @@
              (_directory (await (mkdir base (js-object :recursive t))))
              (directory (await (mkdtemp (resolve base "attempt-"))))
              (receipt-path (resolve directory "receipt.json"))
-             (receipt (js-object :format "eliscript-release-package-install" :version 1 :status "pending"
+             (receipt (js-object :format "eliscript-release-package-install" :status "pending"
                :node (get globalThis.process :version) :nodeExecutable (get globalThis.process :execPath)
                :sourceSha256 (compilerDigest source) :commands (js-array))))
         (try

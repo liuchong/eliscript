@@ -501,4 +501,81 @@
                   (js-call assert :strictEqual (get (get out :error) :code) "ELISCRIPT_ORIGINAL_CASE_PROTOCOL"))
                 (js-call assert :strictEqual (get (get state :timers) :size) 0))))))
           (setq index (1+ index))))))
+
+  (defun lifecycle-alive (pid)
+    (if (and (js-call globalThis.Number :isInteger pid) (> pid 0))
+        (try (progn (js-call globalThis.process :kill pid 0) t) (catch ignored false))
+      false))
+  (defasync lifecycle-case (directory name code deadline)
+    (let* ((pidfile (resolve directory (str name ".pid")))
+           (settings (js-object :directory (resolve directory name) :caseId name :target "wasm"
+                     :sourceIdentity identity :cwd root
+                     :policy (js-object :mode "strict" :originalDeadlineMs deadline :effectiveDeadlineMs deadline)))
+           (started (js-call globalThis.Date :now))
+           (run (watch (runOriginalCorpusProcess "node" (js-array "-e" code pidfile) settings)))
+           (out (await (get run :result)))
+           (elapsed (- (js-call globalThis.Date :now) started))
+           (pid (try (funcall globalThis.Number (js-call (await (readFile pidfile "utf8")) :trim)) (catch ignored 0))))
+      (js-object :out out :pid pid :elapsed elapsed)))
+  (test "real process-group lifecycle reclaims deadline, normal-exit and ignored-TERM descendants"
+    (async ()
+      (let* ((grand "setInterval(()=>{},1000)")
+            (ignoring "process.on(`SIGTERM`,()=>{});setInterval(()=>{},1000)")
+            (prefix "const {spawn}=require('node:child_process');const fs=require('node:fs');")
+            (deadline-code (str prefix "const g=spawn(process.execPath,['-e','" grand "'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(g.pid));setInterval(()=>{},1000);"))
+            (exit-code (str prefix "const g=spawn(process.execPath,['-e','" grand "'],{stdio:'inherit'});fs.writeFileSync(process.argv[1],String(g.pid));process.exit(0);"))
+            (ignore-code (str prefix "const g=spawn(process.execPath,['-e','" ignoring "'],{stdio:'ignore'});fs.writeFileSync(process.argv[1],String(g.pid));setInterval(()=>{},1000);")))
+        (await (with-directory (async (directory)
+          (let* ((deadline (await (funcall lifecycle-case directory "deadline" deadline-code 600)))
+                 (normal (await (funcall lifecycle-case directory "normal" exit-code 1200)))
+                 (ignore (await (funcall lifecycle-case directory "ignored" ignore-code 600))))
+            (js-call assert :strictEqual (get (get deadline :out) :ok) false)
+            (js-call assert :strictEqual (get (get (get deadline :out) :error) :code) "ELISCRIPT_ORIGINAL_HOST_TIMEOUT")
+            (js-call assert :strictEqual (funcall lifecycle-alive (get deadline :pid)) false)
+            (js-call assert :strictEqual (get (get normal :out) :ok) t)
+            (js-call assert :strictEqual (get (get (get normal :out) :value) :status) "passed")
+            (js-call assert :strictEqual (get (get (get normal :out) :value) :exitCode) 0)
+            (js-call assert :ok (< (get normal :elapsed) 600)
+              (str "normal exit waited " (get normal :elapsed) " ms"))
+            (js-call assert :strictEqual (funcall lifecycle-alive (get normal :pid)) false)
+            (js-call assert :strictEqual (get (get ignore :out) :ok) false)
+            (js-call assert :strictEqual (get (get (get ignore :out) :error) :code) "ELISCRIPT_ORIGINAL_HOST_TIMEOUT")
+            (js-call assert :strictEqual (funcall lifecycle-alive (get ignore :pid)) false)
+            (js-call (js-array (get deadline :pid) (get normal :pid) (get ignore :pid)) :forEach
+              (lambda (pid) (when (funcall lifecycle-alive pid)
+                (try (js-call globalThis.process :kill pid "SIGKILL") (catch ignored nil))))))))))))
+
+
+  (defasync nested-case (directory)
+    (let* ((driver (resolve directory "nested-driver.mjs"))
+           (innerpid (resolve directory "nested-inner.pid"))
+           (innerdir (resolve directory "inner"))
+           (inner-code "const fs=require('node:fs');fs.writeFileSync(process.argv[1],String(process.pid));setInterval(()=>{},1000);")
+           (module-url (str "file://" (resolve root "tools/backends/compiler-corpus-process.mjs")))
+           (source (str "import { runOriginalCorpusProcess } from " (JSON/stringify module-url) ";\n"
+                        "const [pidfile, innerDir] = process.argv.slice(2);\n"
+                        "await runOriginalCorpusProcess(\"node\", [\"-e\", " (JSON/stringify inner-code) ", pidfile], {\n"
+                        "  directory: innerDir, caseId: \"nested-inner\", target: \"wasm\", sourceIdentity: \"repro\",\n"
+                        "  cwd: " (JSON/stringify (str root)) ", policy: { mode: \"strict\", originalDeadlineMs: 60000, effectiveDeadlineMs: 60000 },\n"
+                        "});\n")))
+      (await (writeFile driver source))
+      (let* ((settings (js-object :directory (resolve directory "outer") :caseId "nested-outer"
+                    :target "wasm" :sourceIdentity identity :cwd root
+                    :policy (js-object :mode "strict" :originalDeadlineMs 1500 :effectiveDeadlineMs 1500)))
+             (started (js-call globalThis.Date :now))
+             (run (watch (runOriginalCorpusProcess "node" (js-array driver innerpid innerdir) settings)))
+             (out (await (get run :result)))
+             (elapsed (- (js-call globalThis.Date :now) started))
+             (pid (try (funcall globalThis.Number (js-call (await (readFile innerpid "utf8")) :trim)) (catch ignored 0))))
+        (js-object :out out :pid pid :elapsed elapsed))))
+  (test "real nested runner deadline reclaims a detached inner process group"
+    (async ()
+      (await (with-directory (async (directory)
+        (let ((nested (await (funcall nested-case directory))))
+          (js-call assert :strictEqual (get (get nested :out) :ok) false)
+          (js-call assert :strictEqual (get (get (get nested :out) :error) :code) "ELISCRIPT_ORIGINAL_HOST_TIMEOUT")
+          (js-call assert :strictEqual (funcall lifecycle-alive (get nested :pid)) false)
+          (when (funcall lifecycle-alive (get nested :pid))
+            (try (js-call globalThis.process :kill (get nested :pid) "SIGKILL") (catch ignored nil)))))))))
+
 )

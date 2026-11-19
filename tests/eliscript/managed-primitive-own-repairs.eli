@@ -19,9 +19,14 @@
             (js-call assert :strictEqual (transformOriginalPrimitiveRuntimeSuite source relative) projected)
             (if (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs")
               (progn
-                (js-call assert :ok (js-call projected :includes "(when (= value 2) (load-u32 4294967295))"))
+                ;; The projection compares against a `v64` immediate, not a u32
+                ;; scalar, and rewrites the owned-value probe to a false-field
+                ;; call. The trap text survives as a source string literal, but
+                ;; the probe is emitted JavaScript, so it is asserted in its
+                ;; compiled form.
+                (js-call assert :ok (js-call projected :includes "(when (= value (v64-literal 2 0)) (load-u32 4294967295))"))
                 (js-call assert :strictEqual (js-call projected :includes "(store-u32 20 1)") false)
-                (js-call assert :ok (js-call projected :includes "[4294967295, 3, 1]"))
+                (js-call assert :ok (js-call projected :includes "(assert)[\"equal\"]((a)[\"invoke\"](\"own\", [false, field]), false)"))
                 (js-call assert :ok (js-call projected :includes "WebAssembly.RuntimeError")))
               (progn
                 (js-call assert :ok (js-call projected :includes "Symbol.split"))

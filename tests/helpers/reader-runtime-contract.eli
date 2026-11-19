@@ -2,7 +2,7 @@
   (import "node:assert/strict" :default assert)
   (defconst hostTypeof (js* "(value) => typeof value"))
   (defun box (a v) (cond ((= (funcall hostTypeof v) "number") (js-call a :number v)) ((= (funcall hostTypeof v) "string") (js-call a :string v)) (t v)))
-  (defun decode (a v) (cond ((and (not (nullish? v)) (= (get v :kind) 4)) (js-call a :readNumber v)) ((and (not (nullish? v)) (= (get v :kind) 5)) (js-call a :readString v)) (t v)))
+  (defun decode (a v) (cond ((= (value-type v) "number") v) ((and (not (nullish? v)) (= (get v :kind) 4)) (js-call a :readNumber v)) ((and (not (nullish? v)) (= (get v :kind) 5)) (js-call a :readString v)) (t v)))
   (defun state (a source &rest __host_default_arguments_1)
     (let* ((index (aref __host_default_arguments_1 0)) (offset (aref __host_default_arguments_1 1)) (line (aref __host_default_arguments_1 2)) (column (aref __host_default_arguments_1 3)))
     (when (= index undefined) (setq index 0)) (when (= offset undefined) (setq offset 11)) (when (= line undefined) (setq line 3)) (when (= column undefined) (setq column 7))

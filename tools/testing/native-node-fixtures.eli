@@ -9,8 +9,14 @@
   (defconst target (if (= (get globalThis.process :arch) "arm64")
     (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
       ((= (get globalThis.process :platform) "linux") "arm64-linux") (t undefined)) undefined))
-  (defconst signatures (js-object :read32 1 :write32 2 :grow 1 :notify 2 :spin 2))
-  (defconst capabilities (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+  (defconst signatures (js-object
+    :read32 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+    :write32 (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
+    :grow (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+    :notify (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "v64")
+    :spin (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")))
+  (defconst capabilities (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+    :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
   (defun libraryPath (directory) (resolve directory (if (= target "arm64-macos") "memory.dylib" "memory.so")))
   (defun runNativeBoundary (directory)
     (let* ((configuration (js-object :initialPages 1 :maximumPages 8 :nativeTarget target

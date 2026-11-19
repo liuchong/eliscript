@@ -13,7 +13,7 @@
   (defun compiler_session_request (state text)
     (let ((request (JSON/parse text)))
       (cond ((= (get request :operation) "runtime") (encodeCompilerIR (js-object :revision 1)))
-        ((= (get request :operation) "capabilities") (encodeCompilerIR (js-object :format "eliscript-compiler-capabilities" :version 1 :responseModes (js-array "events-v1" "graph-events-v1"))))
+        ((= (get request :operation) "capabilities") (encodeCompilerIR (js-object :format "eliscript-compiler-capabilities" :responseModes (js-array "events" "graph-events"))))
         ((= (get request :operation) "project")
           (put observations :wire (+ (get observations :wire) 1))
           (unless (= (get request :responseMode) undefined) (throw (new globalThis.Error "verified build incorrectly entered graph response transport")))
@@ -24,5 +24,5 @@
       (let ((request (JSON/parse text)))
         (if (or (not (= (get request :operation) "project")) (not (js-call (js-array "wasm" "native") :includes (get request :target))) (Object/hasOwn request "responseMode")) nil
           (progn (put observations :owned (+ (get observations :owned) 1))
-            (js-object :format "eliscript-compiler-owned-project" :version 1 :value (fresh (get request :target))))))))
+            (js-object :format "eliscript-compiler-owned-project" :value (fresh (get request :target))))))))
   (export observations compiler_session_new compiler_session_close compiler_session_request compiler_session_project_owned))

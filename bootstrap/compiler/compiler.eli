@@ -3,7 +3,6 @@
   (defconst typeof-value (lambda (value) (js* "typeof value")))
   (import "./formatter.mjs"
     formatter-format
-    formatter-version
     formatter-width
     formatter-indent
     format-source)
@@ -11,41 +10,30 @@
     expand-owned-module expand-owned-module-with-origins)
   (import "./analyzer.mjs" analyze-module select-portable-module)
   (import "./lower.mjs" lower-module lower-owned-module)
-  (import "./ir.mjs" ir-format ir-version serialize-program deserialize-program)
+  (import "./ir.mjs" ir-format serialize-program deserialize-program)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
   (import "./project.mjs"
     project-plan-format
-    project-plan-version
     project-plan
     portable-project-plan
     project-build-report-format
-    project-build-report-version
     project-build-report
     project-request-format
-    project-request-version
     project-request
     project-configuration
     build-operation-format
-    build-operation-version
     build-operation-request
     check-operation-format
-    check-operation-version
     check-operation-request
     project-check-report-format
-    project-check-report-version
     project-check-report
     project-cache-format
-    project-cache-version
     project-cache-lookup
     project-cache-decision)
   (defconst evaluation-operation-format "eliscript-evaluation-operation")
-  (defconst evaluation-operation-version 1)
   (defconst evaluation-input-format "eliscript-evaluation-input")
-  (defconst evaluation-input-version 1)
   (defconst evaluation-form-format "eliscript-evaluation-form")
-  (defconst evaluation-form-version 1)
   (defconst evaluation-module-format "eliscript-evaluation-module")
-  (defconst evaluation-module-version 1)
   (defconst evaluation-operation-keys
     (js-array "id" "operation" "source" "filename" "root" "line" "column"))
   (defconst evaluation-definition-heads
@@ -57,7 +45,7 @@
   (defconst evaluation-fail
     (lambda (message filename)
       (let* ((error (new globalThis.Error message))
-             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+             (diagnostic (js-object :format "eliscript-diagnostic"
                :code "ELI-E0001" :severity "error" :phase "evaluation-request" :message message)))
         (when (funcall globalThis.Boolean filename)
           (put diagnostic :location (js-object :file filename)))
@@ -109,8 +97,6 @@
       (js-object
         :format
         evaluation-input-format
-        :version
-        evaluation-input-version
         :status
         status
         :filename
@@ -194,8 +180,6 @@
             (js-object
               :format
               evaluation-operation-format
-              :version
-              evaluation-operation-version
               :id
               id
               :operation
@@ -228,8 +212,6 @@
             (js-object
               :format
               evaluation-operation-format
-              :version
-              evaluation-operation-version
               :id
               id
               :operation
@@ -277,8 +259,6 @@
           (js-object
             :format
             evaluation-form-format
-            :version
-            evaluation-form-version
             :kind
             (cond (definition "definition") (module-form "module") (t "expression"))
             :head
@@ -383,8 +363,6 @@
         (js-object
           :format
           evaluation-module-format
-          :version
-          evaluation-module-version
           :filename
           filename
           :bindings
@@ -453,45 +431,32 @@
     serialize-ir-program
     deserialize-ir-program
     evaluation-operation-format
-    evaluation-operation-version
     evaluation-operation-request
     evaluation-input-format
-    evaluation-input-version
     evaluation-input-description
     evaluation-form-format
-    evaluation-form-version
     evaluation-form-description
     evaluation-module-format
-    evaluation-module-version
     evaluation-module-description
     formatter-format
-    formatter-version
     formatter-width
     formatter-indent
     format-source
     ir-format
-    ir-version
     project-plan-format
-    project-plan-version
     project-plan
     portable-project-plan
     project-build-report-format
-    project-build-report-version
     project-build-report
     project-request-format
-    project-request-version
     project-request
     project-configuration
     build-operation-format
-    build-operation-version
     build-operation-request
     check-operation-format
-    check-operation-version
     check-operation-request
     project-check-report-format
-    project-check-report-version
     project-check-report
     project-cache-format
-    project-cache-version
     project-cache-lookup
     project-cache-decision))

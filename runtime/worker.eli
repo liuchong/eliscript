@@ -14,7 +14,6 @@
   (import "./source-mapping.mjs"
     decodeSourceMappings mapSourceFrames parseJavaScriptStack)
 
-  (defconst protocolVersion 1)
   (defconst runtimeDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst packageDirectories
     (new globalThis.Map
@@ -70,13 +69,39 @@
         "timeout"
         "shutdown"
         "module-cache"
-        "module-version"
-        "operation-capabilities-v1"
+        "module-digest"
+        "operation-capabilities"
         "project-manifest"
         "portable-manifest"
         "runtime-resolution"
-        "value-codec-v1"
-        "value-chunks-v1")))
+        "value-codec"
+        "value-chunks")))
+
+  (defconst manifest-keys
+    (js-array "format" "entries" "modules" "digest" "cache"))
+  (defconst cache-keys
+    (js-array "format" "compilerDigest" "mode" "portableEntries" "modules" "digest"))
+  (defconst module-keys
+    (js-array "source" "output" "sourceMap" "sourceDigest" "outputDigest" "sourceMapDigest" "macroDependencies"))
+  (defconst macro-dependency-keys
+    (js-array "path" "digest"))
+  (defconst request-keys
+    (js-array "type" "id" "module" "export" "operation" "arguments" "timeoutMs"
+      "projectManifest" "moduleDigest" "valueEncoding" "valueFraming"))
+  (defconst value-chunk-keys
+    (js-array "type" "id" "channel" "sequence" "final" "valueEncoding" "valueFraming" "events"))
+  (defconst cancel-keys (js-array "type" "id"))
+  (defconst shutdown-keys (js-array "type"))
+
+  (defun unknownField (value allowed)
+    (let ((keys (Object/keys value))
+          (index 0)
+          (found undefined))
+      (while (and (undefined? found) (< index (js-length keys)))
+        (unless (js-call allowed :includes (aref keys index))
+          (setq found (aref keys index)))
+        (setq index (1+ index)))
+      found))
 
   (defconst maximumLineBytes (* 16 1024 1024))
   (defconst maximumValueChunkLineBytes (+ (get workerValueStreamLimits :maxChunkBytes) 4096))
@@ -127,7 +152,6 @@
           (setq encoded
                 (JSON/stringify
                   (js-object
-                    :version protocolVersion
                     :type "protocol-error"
                     :error (errorPayload
                              "serialization"
@@ -158,7 +182,6 @@
 
   (defun requestError (id code message &optional error timing sourceMaps)
     (let ((response (js-object
-                      :version protocolVersion
                       :type "response"
                       :id id
                       :ok false
@@ -170,7 +193,6 @@
   (defun protocolError (code message &rest __opt)
     (let* ((id (aref __opt 0))
            (response (js-object
-                       :version protocolVersion
                        :type "protocol-error"
                        :error (errorPayload code message))))
       (when (not (undefined? id))
@@ -262,16 +284,29 @@
           (setq manifest (JSON/parse (await (readFile path "utf8"))))
           (catch error
             (throw (projectManifestError (str "could not read project manifest: " (get error :message))))))
+        (let ((unknown (unknownField manifest manifest-keys)))
+          (when (not (undefined? unknown))
+            (throw (projectManifestError (str "project manifest has an unsupported field: " unknown)))))
         (when (or (not (eq (get manifest :format) "eliscript-project"))
-                  (and (not (eq (get manifest :version) 1))
-                       (not (eq (get manifest :version) 2)))
                   (not (eq (value-type (get manifest :digest)) "string"))
                   (not (js-call hex-digest-pattern :test (get manifest :digest)))
                   (not (Array/isArray (get manifest :modules))))
           (throw (projectManifestError "project manifest has an unsupported shape")))
-        (let ((manifestEntries (if (eq (get manifest :version) 1)
-                                   (js-array (get manifest :entry))
-                                 (get manifest :entries))))
+        (let ((manifestCache (get manifest :cache)))
+          (when (not (undefined? manifestCache))
+            (when (or (nullish? manifestCache)
+                      (Array/isArray manifestCache)
+                      (not (eq (value-type manifestCache) "object"))
+                      (not (undefined? (unknownField manifestCache cache-keys)))
+                      (not (eq (get manifestCache :format) "eliscript-project-cache"))
+                      (not (js-call hex-digest-pattern :test (or (get manifestCache :compilerDigest) "")))
+                      (not (or (eq (get manifestCache :mode) "standard")
+                               (eq (get manifestCache :mode) "portable")))
+                      (not (Array/isArray (get manifestCache :portableEntries)))
+                      (not (Array/isArray (get manifestCache :modules)))
+                      (not (js-call hex-digest-pattern :test (or (get manifestCache :digest) ""))))
+              (throw (projectManifestError "project manifest cache has an unsupported shape")))))
+        (let ((manifestEntries (get manifest :entries)))
           (when (or (not (Array/isArray manifestEntries))
                     (eq (js-length manifestEntries) 0)
                     (not (eq (get (new globalThis.Set manifestEntries) :size)
@@ -300,7 +335,9 @@
                    (modules (js-call (get manifest :modules) :map
                               (lambda (mod index)
                                 (when (or (nullish? mod)
+                                          (Array/isArray mod)
                                           (not (eq (value-type mod) "object"))
+                                          (not (undefined? (unknownField mod module-keys)))
                                           (not (eq (value-type (get mod :source)) "string"))
                                           (eq (js-length (get mod :source)) 0)
                                           (isAbsolute (get mod :source))
@@ -309,14 +346,36 @@
                                           (not (js-call hex-digest-pattern :test (or (get mod :outputDigest) "")))
                                           (not (js-call hex-digest-pattern :test (or (get mod :sourceMapDigest) ""))))
                                   (throw (projectManifestError (str "manifest module " index " has an unsupported shape"))))
-                                (js-call identityModules :push
-                                  (js-object
-                                    :source (get mod :source)
-                                    :output (get mod :output)
-                                    :sourceMap (get mod :sourceMap)
-                                    :sourceDigest (get mod :sourceDigest)
-                                    :outputDigest (get mod :outputDigest)
-                                    :sourceMapDigest (get mod :sourceMapDigest)))
+                                (let ((rawMacroDeps (get mod :macroDependencies))
+                                      (identityModule
+                                        (js-object
+                                          :source (get mod :source)
+                                          :output (get mod :output)
+                                          :sourceMap (get mod :sourceMap)
+                                          :sourceDigest (get mod :sourceDigest)
+                                          :outputDigest (get mod :outputDigest)
+                                          :sourceMapDigest (get mod :sourceMapDigest))))
+                                  (when (not (undefined? rawMacroDeps))
+                                    (when (or (not (Array/isArray rawMacroDeps))
+                                              (eq (js-length rawMacroDeps) 0))
+                                      (throw (projectManifestError (str "manifest module " index " macroDependencies has an unsupported shape"))))
+                                    (put identityModule :macroDependencies
+                                         (js-call rawMacroDeps :map
+                                           (lambda (dep)
+                                             (when (or (nullish? dep)
+                                                       (Array/isArray dep)
+                                                       (not (eq (value-type dep) "object"))
+                                                       (not (undefined? (unknownField dep macro-dependency-keys)))
+                                                       (not (eq (value-type (get dep :path)) "string"))
+                                                       (eq (js-length (get dep :path)) 0)
+                                                       (isAbsolute (get dep :path))
+                                                       (js-call (js-call (get dep :path) :split path-split-pattern) :includes "..")
+                                                       (not (js-call hex-digest-pattern :test (or (get dep :digest) ""))))
+                                               (throw (projectManifestError (str "manifest module " index " macroDependencies has an unsupported shape"))))
+                                             (js-object
+                                               :path (get dep :path)
+                                               :digest (get dep :digest))))))
+                                  (js-call identityModules :push identityModule))
                                 (js-object
                                   :output (projectFile root (get mod :output) (str "manifest module " index " output"))
                                   :sourceMap (projectFile root (get mod :sourceMap) (str "manifest module " index " source map"))
@@ -326,17 +385,11 @@
                                       (js-call identityModules :map (lambda (mod) (get mod :output))))))
               (when (js-call manifestEntries :some (lambda (entry) (not (js-call declaredOutputs :has entry))))
                 (throw (projectManifestError "project manifest does not describe every entry artifact")))
-              (let ((graphIdentity (if (eq (get manifest :version) 1)
-                                       (js-object
-                                         :format (get manifest :format)
-                                         :version (get manifest :version)
-                                         :entry (get manifest :entry)
-                                         :modules identityModules)
-                                     (js-object
-                                       :format (get manifest :format)
-                                       :version (get manifest :version)
-                                       :entries (get manifest :entries)
-                                       :modules identityModules))))
+              (let ((graphIdentity
+                      (js-object
+                        :format (get manifest :format)
+                        :entries (get manifest :entries)
+                        :modules identityModules)))
                 (unless (eq (textDigest (JSON/stringify graphIdentity)) (get manifest :digest))
                   (throw (projectManifestError "project manifest graph digest does not match its records")))
                 (js-object :digest (get manifest :digest) :modules modules))))))))
@@ -364,42 +417,42 @@
                            (await (loadSourceMap (get (pathToFileURL (get mod :output)) :href))))))))))
       (js-call sourceMaps :filter (lambda (item) (funcall globalThis.Boolean item)))))
 
-  (defasync loadModule (identity requestedVersion projectManifest)
+  (defasync loadModule (identity requestedDigest projectManifest)
     (let* ((url (moduleUrl identity))
            (projectPromise (if (undefined? projectManifest)
                                (Promise/resolve undefined)
                              (readProjectManifest projectManifest url)))
            (discoveredProject (if (and (not (undefined? projectManifest))
-                                       (undefined? requestedVersion))
+                                       (undefined? requestedDigest))
                                   (await projectPromise)
                                 undefined))
-           (version (or (if discoveredProject (get discoveredProject :digest) undefined)
-                        requestedVersion
-                        (await (moduleFingerprint url))))
+           (moduleDigest (or (if discoveredProject (get discoveredProject :digest) undefined)
+                             requestedDigest
+                             (await (moduleFingerprint url))))
            (cacheKey (str url "\n" (if (undefined? projectManifest) "" (moduleUrl projectManifest))))
            (cached (js-call moduleCache :get cacheKey)))
-      (if (and cached (eq (get cached :version) version))
+      (if (and cached (eq (get cached :moduleDigest) moduleDigest))
           (let ((loaded (await (get cached :promise))))
-            (Object/assign (js-object) loaded (js-object :cacheHit t :version version)))
+            (Object/assign (js-object) loaded (js-object :cacheHit t :moduleDigest moduleDigest)))
         (progn
           (when cached
             (let ((error (new globalThis.Error
-                           (str "module version changed from " (get cached :version)
-                                " to " version "; restart the worker before loading it"))))
-              (put error :code "module-version-changed")
+                           (str "module digest changed from " (get cached :moduleDigest)
+                                " to " moduleDigest "; restart the worker before loading it"))))
+              (put error :code "module-digest-changed")
               (throw error)))
           (let ((importUrl (new globalThis.URL url)))
-            (js-call (get importUrl :searchParams) :set "__eliscript_worker_version" version)
+            (js-call (get importUrl :searchParams) :set "__eliscript_worker_digest" moduleDigest)
             (let ((entry (js-object
-                           :version version
+                           :moduleDigest moduleDigest
                            :promise (funcall
                                       (async ()
                                         (let ((project (or discoveredProject (await projectPromise))))
-                                          (when (and project (not (eq version (get project :digest))))
+                                          (when (and project (not (eq moduleDigest (get project :digest))))
                                             (let ((error (new globalThis.Error
-                                                           (str "requested module version " version
+                                                           (str "requested module digest " moduleDigest
                                                                 " does not match project manifest " (get project :digest)))))
-                                              (put error :code "module-version-mismatch")
+                                              (put error :code "module-digest-mismatch")
                                               (throw error)))
                                           (let ((pair (await (Promise/all
                                                                (js-array
@@ -412,7 +465,7 @@
               (js-call moduleCache :set cacheKey entry)
               (try
                 (let ((loaded (await (get entry :promise))))
-                  (Object/assign (js-object) loaded (js-object :cacheHit false :version version)))
+                  (Object/assign (js-object) loaded (js-object :cacheHit false :moduleDigest moduleDigest)))
                 (catch error
                   (when (eq (js-call moduleCache :get cacheKey) entry)
                     (js-call moduleCache :delete cacheKey))
@@ -448,12 +501,12 @@
     (when (and (not (undefined? (get message :valueEncoding)))
                (not (eq (get message :valueEncoding) workerValueEncoding)))
       (throw (new globalThis.Error (str "request valueEncoding must be " workerValueEncoding))))
-    (when (and (not (undefined? (get message :moduleVersion)))
-               (or (not (eq (value-type (get message :moduleVersion)) "string"))
-                   (eq (js-length (get message :moduleVersion)) 0)
-                   (> (js-length (get message :moduleVersion)) 512)))
+    (when (and (not (undefined? (get message :moduleDigest)))
+               (or (not (eq (value-type (get message :moduleDigest)) "string"))
+                   (eq (js-length (get message :moduleDigest)) 0)
+                   (> (js-length (get message :moduleDigest)) 512)))
       (throw (new globalThis.Error
-               "request moduleVersion must be a non-empty string up to 512 characters")))
+               "request moduleDigest must be a non-empty string up to 512 characters")))
     (when (and (not (undefined? (get message :projectManifest)))
                (or (not (eq (value-type (get message :projectManifest)) "string"))
                    (eq (js-length (get message :projectManifest)) 0)))
@@ -529,7 +582,6 @@
         (let* ((next (await (js-call iterator :next)))
                (final (funcall globalThis.Boolean (get next :done)))
                (message (js-object
-                          :version protocolVersion
                           :type "value-chunk"
                           :id id
                           :channel channel
@@ -574,19 +626,19 @@
           (executionMs 0)
           (serializationMs 0)
           (moduleCacheHit false)
-          (moduleVersion undefined)
+          (moduleDigest undefined)
           (sourceMaps (js-array))
           (executionStartedAt undefined))
       (put entry :phase "executing")
       (try
         (let* ((moduleLoadStartedAt (js-call globalThis.performance :now))
                (loaded (await (loadModule (get message :module)
-                                          (get message :moduleVersion)
+                                          (get message :moduleDigest)
                                           (get message :projectManifest))))
                (mod (get loaded :module)))
           (setq sourceMaps (get loaded :sourceMaps)
                 moduleCacheHit (get loaded :cacheHit)
-                moduleVersion (get loaded :version)
+                moduleDigest (get loaded :moduleDigest)
                 moduleLoadMs (- (js-call globalThis.performance :now) moduleLoadStartedAt))
           (let* ((manifest (get mod :__eliscript_portable__))
                  (operation (if (undefined? (get message :operation))
@@ -615,7 +667,6 @@
                                  (if usesValueChunks
                                      (queueProgress entry value)
                                    (let ((response (js-object
-                                                     :version protocolVersion
                                                      :type "progress"
                                                      :id (get message :id)
                                                      :value (if usesValueCodec
@@ -656,7 +707,7 @@
                                      (js-object
                                        :moduleLoadMs moduleLoadMs
                                        :moduleCacheHit moduleCacheHit
-                                       :moduleVersion moduleVersion
+                                       :moduleDigest moduleDigest
                                        :sourceMapLoaded (> (js-length sourceMaps) 0)
                                        :sourceMapCount (js-length sourceMaps)
                                        :executionMs executionMs
@@ -675,7 +726,6 @@
                                              (jsonValue value "response value"))))
                       (setq serializationMs (- (js-call globalThis.performance :now) serializationStartedAt))
                       (let ((response (js-object
-                                        :version protocolVersion
                                         :type "response"
                                         :id (get message :id)
                                         :ok t
@@ -683,7 +733,7 @@
                                         :timing (js-object
                                                   :moduleLoadMs moduleLoadMs
                                                   :moduleCacheHit moduleCacheHit
-                                                  :moduleVersion moduleVersion
+                                                  :moduleDigest moduleDigest
                                                   :sourceMapLoaded (> (js-length sourceMaps) 0)
                                                   :sourceMapCount (js-length sourceMaps)
                                                   :executionMs executionMs
@@ -706,7 +756,7 @@
               (js-object
                 :moduleLoadMs moduleLoadMs
                 :moduleCacheHit moduleCacheHit
-                :moduleVersion moduleVersion
+                :moduleDigest moduleDigest
                 :sourceMapLoaded (> (js-length sourceMaps) 0)
                 :sourceMapCount (js-length sourceMaps)
                 :executionMs executionMs
@@ -720,7 +770,6 @@
     (let ((final (aref __opt 0)))
       (writeMessage
         (js-object
-          :version protocolVersion
           :type "value-ack"
           :id id
           :channel "arguments"
@@ -807,7 +856,6 @@
           (js-call (get entry :controller) :abort))
         (writeMessage
           (js-object
-            :version protocolVersion
             :type "cancel"
             :id (get message :id)
             :accepted accepted))
@@ -824,7 +872,6 @@
         (js-call (get entry :controller) :abort)))
     (writeMessage
       (js-object
-        :version protocolVersion
         :type "shutdown"
         :ok t))
     (js-call lines :close)
@@ -835,29 +882,36 @@
             (not (eq (value-type message) "object"))
             (Array/isArray message))
         (protocolError "invalid-message" "protocol message must be an object")
-      (if (not (eq (get message :version) protocolVersion))
-          (protocolError
-            "version-mismatch"
-            (str "worker protocol version " protocolVersion " required")
-            (get message :id))
-        (let ((type (get message :type)))
-          (cond
-            ((eq type "request")
-             (try
-               (startRequest message)
-               (catch error
-                 (requestError (get message :id) "invalid-request" (get error :message) error))))
-            ((eq type "value-chunk")
-             (receiveValueChunk message lineBytes))
-            ((eq type "cancel")
-             (cancelRequest message))
-            ((eq type "shutdown")
-             (shutdown lines))
-            (t
-             (protocolError
-               "invalid-message"
-               (str "unknown protocol message type: " type)
-               (get message :id))))))))
+      (let* ((type (get message :type))
+             (allowed (cond
+                        ((eq type "request") request-keys)
+                        ((eq type "value-chunk") value-chunk-keys)
+                        ((eq type "cancel") cancel-keys)
+                        ((eq type "shutdown") shutdown-keys)
+                        (t undefined))))
+        (if (undefined? allowed)
+            (protocolError
+              "invalid-message"
+              (str "unknown protocol message type: " type)
+              (get message :id))
+          (let ((unknown (unknownField message allowed)))
+            (if (not (undefined? unknown))
+                (protocolError
+                  "invalid-message"
+                  (str "unknown protocol message field: " unknown)
+                  (get message :id))
+              (cond
+                ((eq type "request")
+                 (try
+                   (startRequest message)
+                   (catch error
+                     (requestError (get message :id) "invalid-request" (get error :message) error))))
+                ((eq type "value-chunk")
+                 (receiveValueChunk message lineBytes))
+                ((eq type "cancel")
+                 (cancelRequest message))
+                ((eq type "shutdown")
+                 (shutdown lines)))))))))
 
   (defasync runWorker ()
     (let ((lines (createInterface
@@ -865,7 +919,6 @@
                               :crlfDelay globalThis.Infinity))))
       (writeMessage
         (js-object
-          :version protocolVersion
           :type "ready"
           :capabilities capabilities
           :pid (get globalThis.process :pid)))
@@ -898,4 +951,4 @@
         (js-call globalThis.console :error (or (get error :stack) (get error :message)))
         (put globalThis.process :exitCode 1))))
 
-  (export protocolVersion capabilities loadSourceMap runWorker))
+  (export capabilities loadSourceMap runWorker))

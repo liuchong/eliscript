@@ -168,9 +168,9 @@
              "  return value;\n"
              "}\n"))
           (setq worker (eliscript-worker-start))
-          (should (member "value-codec-v1"
+          (should (member "value-codec"
                           (eliscript-worker-capabilities worker)))
-          (should (member "value-chunks-v1"
+          (should (member "value-chunks"
                           (eliscript-worker-capabilities worker)))
           (let* ((argument
                   (eliscript-value-map
@@ -386,7 +386,7 @@
                   (eliscript-project-build-portable
                    entry '(run) out-dir root))
                  (module
-                  (eliscript-project-build-result-entry-output first))
+                  (car (eliscript-project-build-result-entry-outputs first)))
                  (manifest
                   (eliscript-project-build-result-manifest first))
                  (entry-text

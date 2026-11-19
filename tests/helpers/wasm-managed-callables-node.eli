@@ -6,7 +6,7 @@
   (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
   (defconst dynamic-import (js* "(specifier) => import(specifier)"))
-  (defconst to-uint32 (js* "(x) => x >>> 0"))
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
 
   (defasync run-cli (mode arg1 arg2)
     (cond
@@ -26,14 +26,14 @@
            (js-call assert :equal (js-call tbl :dispatch 1 41) 41)
            (js-call assert :throws (lambda () (js-call tbl :dispatch 2 0)) globalThis.WebAssembly.RuntimeError)
            (js-call assert :throws (lambda () (js-call tbl :mismatch 0)) globalThis.WebAssembly.RuntimeError)
-           (let* ((h (funcall (get e "heap-new") 128 4096 32768))
+           (let* ((h (funcall (get e "heap-new") 128 5296 32768))
                   (c (lambda (name &rest args)
-                       (let ((r (funcall to-uint32
+                       (let ((r (funcall normalize-u64
                                   (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
                          (js-call assert :equal (funcall (get e "last-error")) 0 name)
                          r))))
              (funcall c "heap-auto" 1)
-             (let* ((cell (funcall c "value-cell-new" 2))
+             (let* ((cell (funcall c "value-cell-new" (funcall globalThis.BigInt 2)))
                         (_cell-root (funcall c "heap-pin" cell))
                    (f (funcall c "value-function-new" 7 1))
                    (keep (js-array))
@@ -42,8 +42,10 @@
                (funcall c "value-function-capture-set" f 0 cell)
                (funcall c "value-cell-set" cell f)
                (funcall c "heap-release" cell)
+               ;; 50 real four-ref blocks (64B each) force pool growth and a
+               ;; collecting cycle; inline numbers would occupy no slot.
                (while (< i 50)
-                 (let ((n (funcall c "value-number" i 0)))
+                 (let ((n (funcall c "value-refs" 7 4)))
                    (funcall c "heap-pin" n)
                    (js-call keep :push n))
                  (setq i (1+ i)))

@@ -1,0 +1,133 @@
+(module tests.transducer-completion-forward.test
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" mkdtemp readFile rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defconst options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+  (defconst memory (js-object :initialPages 4 :maximumPages 1024))
+  (defconst entry "tests/transducer-completion-forward-entry.mjs")
+  (defconst fixture "tests/fixtures/transducer-completion-forward.eli")
+  (defconst transducer-id "runtime/core/transducer.mjs")
+  (defconst export-marker "(export completing mapping")
+  (defconst instrumented-export "(export transformed-iterator completing mapping")
+
+  (defvar directory nil)
+  (defvar bytes nil)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-transducer-completion-"))))
+      (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
+             (compiler (get backend :compiler))
+             (loaded (await (js-call backend :loadLiteralModules)))
+             (literals (get loaded :literalModules))
+             (source-record (js-call (get loaded :literalSources) :find
+               (lambda (item) (= (get item :id) transducer-id))))
+             (transducer-source (get source-record :filename))
+             (source (get source-record :source))
+             (fixture-source (await (readFile fixture "utf8"))))
+        ;; transformed-iterator is private in the managed transducer module.
+        ;; This test-only in-memory projection adds it to the export list of
+        ;; the compiled literal module so the real private iterator and its
+        ;; return path execute. The maintained source on disk is not modified.
+        (js-call assert :ok (js-call source :includes export-marker)
+          "the maintained transducer module keeps its export list")
+        (js-call assert :ok (not (js-call source :includes "(export transformed-iterator"))
+          "the maintained transducer module does not export its private iterator")
+        (let* ((instrumented (js-call source :replace export-marker instrumented-export))
+               (replaced 0))
+          (js-call assert :notEqual instrumented source)
+          (js-call literals :forEach (lambda (item)
+            (when (= (get item :id) transducer-id)
+              (setq replaced (1+ replaced))
+              (put item :program
+                (js-call compiler :compile_ir_string instrumented transducer-source)))))
+          (js-call assert :equal replaced 1
+            "exactly one managed transducer literal module is instrumented"))
+        (let* ((modules
+                 (js-array
+                   (js-object :id entry
+                     :program (js-call compiler :compile_ir_string fixture-source fixture))))
+               (runtime-ir
+                 (js-call compiler :compile_ir_string
+                   (await (readFile "bootstrap/runtime/memory.eli" "utf8"))
+                   "runtime.eli"))
+               (lowered
+                 (js-call (get backend :managed) :lower_managed_project
+                   modules entry runtime-ir
+                   (Object/assign (js-object) memory (js-object :literalModules literals)))))
+          (setq bytes
+            (globalThis.Uint8Array.from
+              (js-call (get backend :wasm) :append_metadata_section
+                (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
+                "eliscript-managed-control"
+                (JSON/stringify (get lowered :descriptor)))))))
+      120000)
+
+  (afterAll
+    (async ()
+      (when directory
+        (await (rm directory (js-object :recursive t :force t)))))))
+
+  (defun invoke-report ()
+    (let* ((runtime (instantiateManagedRuntime bytes options))
+           (raw undefined)
+           (text undefined))
+      (js-call runtime :auto 1)
+      (try
+        (progn
+          (setq raw (js-call runtime :invoke "report" (js-array)))
+          (setq text (js-call runtime :toHostValue raw))
+          (js-call assert :equal (js* "typeof text") "string"
+            "the managed report must cross the boundary as text")
+          (JSON/parse text))
+        (finally
+          (unless (undefined? raw) (js-call runtime :release raw))
+          (js-call runtime :closeModule)
+          (js-call runtime :collect)))))
+
+  (test "managed transducer completion forwarding keeps completion output, tail flush, zero-input and iterator-return semantics"
+    (lambda ()
+      (let ((report (invoke-report)))
+        ;; 1. completion called once, its return value is the reduction result
+        (js-call assert :deepStrictEqual
+          (get report :mappingCompletion)
+          (js-array 112 1 (js-array 1 2 3)))
+        ;; 2. partitioningAll flushes the short tail in every path
+        (js-call assert :deepStrictEqual
+          (get report :partitioningAllTail)
+          (js-array
+            (js-array (js-array 1 2) (js-array 3 4) (js-array 5))
+            (js-array)
+            (js-array (js-array 1 2) (js-array 3 4) (js-array 5))))
+        ;; 3. taking 0 pulls and closes nothing
+        (js-call assert :deepStrictEqual
+          (get report :takingZero)
+          (js-array 7 0 0 0 0 (js-array)))
+        ;; 4. completion errors stay the same error, not a capacity error
+        (js-call assert :deepStrictEqual
+          (get report :completionError)
+          (js-array t "transducer completion marker" 1 "Error" t))
+        (js-call assert :deepStrictEqual
+          (get report :sequenceCompletionError)
+          (js-array t "sequence completion marker" 1 "Error" t))
+        ;; 5a. return before next delays initialization and prevents pulls and completion.
+        (js-call assert :deepStrictEqual
+          (get report :iteratorReturnBeforeNext)
+          (js-array
+            (js-array "first" t "second" t 0 0 0 0)
+            (js-array nil t 1 0 0 0)
+            (js-array t 1 0 0 0)))
+        ;; 5b. return after next and repeated return: no completion, one close
+        (js-call assert :deepStrictEqual
+          (get report :iteratorReturnAfterNext)
+          (js-array 10 "a" t "b" t t 0 1 1))
+        ;; 5c. a throwing return keeps raising the same error
+        (js-call assert :deepStrictEqual
+          (get report :iteratorReturnThrows)
+          (js-array 10 t t "iterator return marker" "iterator return marker" 0))))
+    120000))

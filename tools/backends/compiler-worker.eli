@@ -2,7 +2,6 @@
   (import "./compiler-sha256.mjs" createCompilerSha256)
   (import "./compiler-session.mjs" createCompilerSession)
 
-  (defconst compilerWorkerVersion 1)
   (defconst identity-pattern "^[0-9a-f]{64}$")
   (defconst frontend-operations
     (js-array "compile" "compile-ir" "stage" "format" "analyze" "query" "edit-preview"
@@ -73,7 +72,7 @@
     value)
 
   (defun metadata (message)
-    (js-object :version compilerWorkerVersion :id (get message :id)
+    (js-object :id (get message :id)
       :sourceIdentity (get message :sourceIdentity) :requestIdentity (get message :requestIdentity)
       :revision (get message :revision)))
 
@@ -360,7 +359,6 @@
               (objects (new globalThis.Map))
               (typed (new globalThis.Set typed-array-names)))
           (when (or (not (= (host-get graph "format") "eliscript-worker-error-value"))
-                    (not (= (get graph :version) 1))
                     (not (Array/isArray (host-get graph "nodes"))))
             (throw (funcall invalid "compiler worker exception graph has an invalid format")))
           (let ((restore (lambda (token)
@@ -510,7 +508,7 @@
           (throw (failure-at "$" "unknown exception transport")))
         (let* ((root (visit-error state error "$"))
                (nodes (get state :nodes))
-               (graph (js-object :format "eliscript-worker-error-value" :version 1 :root root :nodes nodes))
+               (graph (js-object :format "eliscript-worker-error-value" :root root :nodes nodes))
                (ground (fromErrorData (js-object :errorValue graph) t))
                (is-error (and (js-call globalThis.Object :hasOwn root "ref")
                               (= (get (aref nodes (get root :ref)) :type) "error")))
@@ -567,8 +565,7 @@
             (throw (transportError "stale-source" "edit or query belongs to an older source snapshot")))))))
 
   (defun same-reply (message request)
-    (and (= (get message :version) compilerWorkerVersion)
-         (= (get message :requestIdentity) (get request :requestIdentity))
+    (and (= (get message :requestIdentity) (get request :requestIdentity))
          (= (get message :sourceIdentity) (get request :sourceIdentity))
          (= (get message :revision) (get request :revision))))
 
@@ -654,7 +651,7 @@
                           (when (js-call (get state :posted) :has (get message :id))
                             (try
                               (js-call (get state :worker) :postMessage
-                                (js-object :version compilerWorkerVersion :type "cancel" :id (get message :id)))
+                                (js-object :type "cancel" :id (get message :id)))
                               (catch ignored))))))
           (let ((stop nil))
             (when (not (undefined? signal))
@@ -679,7 +676,7 @@
               (throw (transportError "closed" "compiler worker client is closed")))
             (when (or (= (get message :type) "request") (= (get message :type) "source"))
               (js-call (get state :posted) :set (get message :id)
-                (js-object :version (get message :version) :requestIdentity (get message :requestIdentity)
+                (js-object :requestIdentity (get message :requestIdentity)
                   :sourceIdentity (get message :sourceIdentity) :revision (get message :revision))))
             (js-call (get state :worker) :postMessage message)
             (catch error
@@ -691,7 +688,7 @@
   (defasync client-envelope (payload kind selected-revision)
     (let* ((request (encode payload))
            (parsed (decode request)))
-      (js-object :version compilerWorkerVersion :type kind :request request :revision selected-revision
+      (js-object :type kind :request request :revision selected-revision
         :requestIdentity (await (compilerRequestIdentity request))
         :sourceIdentity (await (compilerSourceIdentity parsed)))))
 
@@ -798,7 +795,7 @@
                                      (js-call (js-call globalThis.Promise :resolve) :then
                                        (lambda ()
                                          (client-send state
-                                           (js-object :version compilerWorkerVersion :type "shutdown") nil)))
+                                           (js-object :type "shutdown") nil)))
                                      :finally
                                      (lambda ()
                                        (js-call (get state :posted) :clear)
@@ -821,8 +818,6 @@
                       (js-call globalThis.Object :assign (js-object) (metadata message)
                         (js-object :host (if (nullish? session) undefined (get session :host)) :type "result") fields))))
       (setq validate (async (message)
-                       (unless (= (get message :version) compilerWorkerVersion)
-                         (throw (transportError "version-mismatch" "compiler worker protocol version 1 required")))
                        (unless (and (js-call identity :test (get message :requestIdentity ""))
                                     (js-call identity :test (get message :sourceIdentity ""))
                                     (= (host-type (get message :request)) "string"))
@@ -862,7 +857,7 @@
                                     (let ((options (js-object :signal signal)))
                                       (when (and (= (get request :target) "native")
                                                  (js-call (js-array "emit-ir" "project-ir") :includes (get request :operation)))
-                                        (put options :responseMode "graph-events-v1")
+                                        (put options :responseMode "graph-events")
                                         (put options :responseStringChunks t))
                                       (let* ((result (js-call session :request (get message :request) options))
                                              (fields (js-object :ok t :result result)))
@@ -906,19 +901,15 @@
                         (cond
                           ((= (get message :type) "cancel")
                            (let ((entry (js-call pending :get (get message :id))))
-                             (when (and entry (= (get message :version) compilerWorkerVersion))
+                             (when entry
                                (js-call (get entry :controller) :abort))
                              (js-call scope :postMessage
-                               (js-object :version compilerWorkerVersion :type "cancel" :id (get message :id)
+                               (js-object :type "cancel" :id (get message :id)
                                  :accepted (funcall globalThis.Boolean entry)))))
                           ((= (get message :type) "shutdown")
-                           (if (not (= (get message :version) compilerWorkerVersion))
-                             (funcall reply message
-                               (js-object :ok false :error (errorData
-                                                             (transportError "version-mismatch" "compiler worker protocol version 1 required"))))
-                             (js-call (funcall close) :then
+                           (js-call (funcall close) :then
                                (lambda () (funcall reply message (js-object :ok t)))
-                               (lambda (error) (funcall reply message (js-object :ok false :error (errorData error)))))))
+                               (lambda (error) (funcall reply message (js-object :ok false :error (errorData error))))))
                           (closed
                            (funcall reply message
                              (js-object :ok false :error (errorData (transportError "closed" "compiler worker is closed")))))
@@ -942,12 +933,12 @@
         (setq session (await opening))
         (unless closed
           (js-call scope :postMessage
-            (js-object :ready t :version compilerWorkerVersion :host (get session :host))))
+            (js-object :ready t :host (get session :host))))
         (catch error
           (js-call scope :removeEventListener "message" receive)
           (setq closed t)
           (throw error)))
       (js-call globalThis.Object :freeze (js-object :close close))))
 
-  (export compilerWorkerVersion compilerRequestIdentity compilerSourceIdentity errorData
+  (export compilerRequestIdentity compilerSourceIdentity errorData
     fromErrorData createCompilerWorkerClient installCompilerWorker))

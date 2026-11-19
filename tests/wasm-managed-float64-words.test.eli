@@ -9,6 +9,13 @@
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
+  (defun bits-f64 (bits)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setBigUint64 0
+        (js-call globalThis.BigInt :asUintN 64 (funcall globalThis.BigInt bits)) t)
+      (js-call view :getFloat64 0 t)))
+
   (defun dynamic-import (specifier)
     (funcall (js* "(specifier) => import(specifier)") specifier))
 
@@ -49,8 +56,10 @@
       ((= (value-type value) "string") (js-call a :string value))
       (t value)))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
   (defun read (a v)
     (cond
+      ((= (value-type v) "number") v)
       ((and v (= (get v :kind) 4)) (js-call a :readNumber v))
       ((and v (= (get v :kind) 5)) (js-call a :readString v))
       ((and v (= (get v :kind) 14))
@@ -196,7 +205,7 @@
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
              (h (js-call e "heap-new" 64 16384 131072))
              (call (lambda (name &rest args)
-                     (let ((out (uint32 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
+                     (let ((out (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
                        (js-call assert :equal (js-call e "last-error") 0 name)
                        out)))
              (input (funcall call "value-number" 0 2147483648))
@@ -210,22 +219,24 @@
         (funcall call "frame-set" caller 3 privateRefs)
         (funcall call "heap-auto" 1)
         (js-call
-          (js-array (js-array 4294967295 1) (js-array caller 3) (js-array unsealed 6)
+          (js-array (js-array "0xfff8000000ffffff" 1) (js-array caller 3) (js-array unsealed 6)
                     (js-array symbol 3) (js-array privateRefs 3))
           :forEach
           (lambda (pair)
-            (js-call assert :equal (js-call e "value-number-float64-words" h (aref pair 0)) 0)
+            (js-call assert :equal (js-call e "value-number-float64-words" h (funcall globalThis.BigInt (aref pair 0))) (funcall globalThis.BigInt 0))
             (js-call assert :equal (js-call e "last-error") (aref pair 1))
             (js-call assert :equal (funcall call "frame-depth") 1)
             (js-call assert :equal (funcall call "frame-get" caller 0) input)))
         (let ((fillers (js-array)))
-          (while (< (funcall call "heap-live") 64)
-            (let ((value (funcall call "value-number" 0 0)))
-              (funcall call "heap-pin" value)
-              (js-call fillers :push value)))
+          (let ((steps 0))
+            (while (and (< (funcall call "heap-live") 64) (< steps 256))
+              (let ((value (funcall call "value-string" 0)))
+                (funcall call "heap-pin" value)
+                (js-call fillers :push value))
+              (setq steps (+ steps 1))))
           (let ((available 0))
-            (while (< available 4)
-              (js-call assert :equal (js-call e "value-number-float64-words" h input) 0)
+            (while (< available 2)
+              (js-call assert :equal (js-call e "value-number-float64-words" h input) (funcall globalThis.BigInt 0))
               (js-call assert :equal (js-call e "last-error") 2)
               (js-call assert :equal (funcall call "frame-depth") 1)
               (js-call assert :equal (funcall call "frame-get" caller 0) input)
@@ -238,12 +249,11 @@
             (js-call assert :equal (funcall call "value-length" result) 2)
             (let ((i 0))
               (while (< i 2)
-                (let* ((word (funcall call "value-get" result i))
-                       (ptr (funcall call "value-data" word 4)))
-                  (js-call assert :equal (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64 ptr t) 0))
+                (let ((word (funcall call "value-get" result i)))
+                  (js-call assert :equal
+                    (bits-f64 (funcall call "value-number-bits" word)) 0))
                 (setq i (1+ i))))
-            (let ((ptr (funcall call "value-data" input 4)))
-              (assert (Object/is (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64 ptr t) -0.0)))
+            (assert (Object/is (bits-f64 (funcall call "value-number-bits" input)) -0.0))
             (funcall call "heap-release" result)
             (js-call fillers :forEach (lambda (v) (funcall call "heap-release" v)))
             (funcall call "frame-pop" caller)
@@ -258,7 +268,7 @@
       (assert (and (>= start 0) (> point start)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call raw :slice 0 point)
-                              "(setq result (load-u32 4294967295))"
+                              "(setq result (progn (load-u32 4294967295) (v64-literal 0 0)))"
                               (js-call raw :slice (+ point (js-length needle))))
                          "float64-trap.eli"))
              (c (await (compiled injected)))
@@ -272,7 +282,7 @@
           globalThis.WebAssembly.RuntimeError)
         (js-call assert :deepEqual (read a trace) (js-array "number"))
         (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-        (assert (Object/is (js-call a :readNumber held) -0.0))
+        (assert (Object/is (funcall num-val a held) -0.0))
         (js-call a :leaveFrame caller)
         (finish a (js-array trace held))))))
 

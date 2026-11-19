@@ -14,6 +14,8 @@
   (import "./helpers/wasm-managed-function-properties-node.mjs"
           standard-error-own-names error-stack-extensions standard-restricted-descriptors
           well-known-symbol-names reflection-keys constant-names integer-cases float-cases)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
 
   (defconst dynamic-import (js* "(specifier) => import(specifier)"))
   (defconst standard-error-shape
@@ -229,7 +231,7 @@
   (defun read-val (a v)
     (let ((kind (if (nullish? v) undefined (get v :kind))))
       (cond
-        ((= kind 4) (js-call a :readNumber v))
+        ((= kind 4) (decoded-number-value a v))
         ((= kind 5) (js-call a :readString v))
         ((= kind 14)
          (let ((out (js-array))
@@ -288,13 +290,13 @@
                     (setq incoming (js-call a :fromHostValue (get globalThis.Symbol name)))
                     (js-call assert :equal (js-call a :invoke "symbol-same" (js-array symbol incoming)) t name)
                     (setq out (js-call a :invoke "symbol-key" (js-array object incoming held)))
-                    (funcall assert (Object/is (js-call a :readNumber out) -0.0)))
+                    (funcall assert (Object/is (decoded-number-value a out) -0.0)))
                   (finally
                     (js-call (js-array position key symbol dynamic alias incoming out) :forEach
                       (lambda (root) (unless (undefined? root) (js-call a :release root))))))
                 (js-call a :collect)
                 (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-                (funcall assert (Object/is (js-call a :readNumber held) -0.0)))
+                (funcall assert (Object/is (decoded-number-value a held) -0.0)))
               (setq index (1+ index))))
           (let ((keys (js-call a :invoke "symbol-own-keys" (js-array object))))
             (try
@@ -428,7 +430,7 @@
           (try
             (progn
               (setq output (js-call a :invoke "static-constant" (js-array key)))
-              (funcall assert (Object/is (js-call a :readNumber output) (number-from-record (aref (get oracle :constants) index))))
+              (funcall assert (Object/is (decoded-number-value a output) (number-from-record (aref (get oracle :constants) index))))
               (setq snapshot (js-call a :invoke "reflection-snapshot" (js-array mode key)))
               (let ((descriptor (aref (JSON/parse (js-call a :readString snapshot)) 3)))
                 (js-call assert :equal (aref descriptor 0) "descriptor")
@@ -459,7 +461,7 @@
                                    (if (= (% index 2) 0) "static-number" "detached-number")
                                    (js-array n input radix)))
                     (funcall assert
-                      (Object/is (js-call a :readNumber output)
+                      (Object/is (decoded-number-value a output)
                                  (number-from-record (aref (if (= mode 0) (get oracle :ints) (get oracle :floats)) index)))
                       (str mode "/" index)))
                   (finally
@@ -604,7 +606,7 @@
 
   (test "manual initialization retains its capacity refusal and complete cleanup while the same bytes initialize under collecting GC"
     (lambda ()
-      (let ((unpressured (instantiateManagedRuntime bytes (js-object :initializeModule false))))
+      (let ((unpressured (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
         (try
           (progn
             (js-call unpressured :initializeModule)
@@ -619,12 +621,12 @@
       (let ((fill-garbage (lambda (a)
                             (let ((i 0))
                               (while (< i 1024)
-                                (let ((item (js-call a :number 7)))
+                                (let ((item (js-call a :array)))
                                   (js-call a :release item))
                                 (setq i (1+ i))))
                             (js-call assert :equal (js-call a :live) 1024)
                             (js-call assert :equal (get (js-call a :stats) :collections) 0))))
-        (let ((manual (instantiateManagedRuntime bytes (js-object :initializeModule false))))
+        (let ((manual (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
           (try
             (progn
               (funcall fill-garbage manual)
@@ -638,7 +640,7 @@
               (js-call assert :equal (js-call manual :live) 0)
               (js-call assert :equal (get (js-call manual :stats) :frameDepth) 0))
             (finally (finish manual))))
-        (let ((collecting (instantiateManagedRuntime bytes (js-object :initializeModule false))))
+        (let ((collecting (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
           (try
             (progn
               (funcall fill-garbage collecting)

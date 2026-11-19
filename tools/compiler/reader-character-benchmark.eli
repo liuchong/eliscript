@@ -9,7 +9,6 @@
     compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_READER_CHARACTER_FORMAT "eliscript-compiler-reader-character-benchmark")
-  (defconst COMPILER_READER_CHARACTER_VERSION 1)
   (defconst COMPILER_READER_CHARACTER_BASELINE "d6822134a187d4247611db56822ef47164a76a61")
 
   (defconst controlled-target "bootstrap/compiler/reader.eli")
@@ -154,7 +153,6 @@
   (defun validateCompilerReaderCharacterReport (report)
     (when (or (not report)
               (not (= (get report :format) COMPILER_READER_CHARACTER_FORMAT))
-              (not (= (get report :version) COMPILER_READER_CHARACTER_VERSION))
               (not (get report :baseline))
               (not (= (get (get report :baseline) :revision) COMPILER_READER_CHARACTER_BASELINE)))
       (throw (new globalThis.TypeError "invalid compiler reader character report identity")))
@@ -376,7 +374,6 @@
                   (validateCompilerReaderCharacterReport
                     (js-object
                       :format COMPILER_READER_CHARACTER_FORMAT
-                      :version COMPILER_READER_CHARACTER_VERSION
                       :generatedAt (js-call (new globalThis.Date) :toISOString)
                       :sourceDigest (await (compilerReaderCharacterSourceDigest))
                       :host (js-object
@@ -440,7 +437,6 @@
 
   (export
     COMPILER_READER_CHARACTER_FORMAT
-    COMPILER_READER_CHARACTER_VERSION
     COMPILER_READER_CHARACTER_BASELINE
     compilerReaderCharacterSourceDigest
     validateCompilerReaderCharacterReport

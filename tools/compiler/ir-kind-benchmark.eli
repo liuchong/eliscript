@@ -8,7 +8,6 @@
   (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_IR_KIND_FORMAT "eliscript-compiler-ir-kind-benchmark")
-  (defconst COMPILER_IR_KIND_VERSION 1)
 
   (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst project-directory (js-call path :resolve directory "../.."))
@@ -132,8 +131,7 @@
 
   (defun validateCompilerIrKindReport (report)
     (when (or (not report)
-              (not (= (get report :format) COMPILER_IR_KIND_FORMAT))
-              (not (= (get report :version) COMPILER_IR_KIND_VERSION)))
+              (not (= (get report :format) COMPILER_IR_KIND_FORMAT)))
       (throw (new globalThis.TypeError "invalid compiler IR kind report identity")))
     (let ((validation (get report :validation))
           (corpus (get report :corpus)))
@@ -267,7 +265,6 @@
                      (report
                        (js-object
                          :format COMPILER_IR_KIND_FORMAT
-                         :version COMPILER_IR_KIND_VERSION
                          :generatedAt (js-call (new globalThis.Date) :toISOString)
                          :sourceDigest (await (compilerIrKindSourceDigest))
                          :host (js-object
@@ -326,7 +323,6 @@
 
   (export
     COMPILER_IR_KIND_FORMAT
-    COMPILER_IR_KIND_VERSION
     compilerIrKindSourceDigest
     validateCompilerIrKindReport
     runCompilerIrKindBenchmark))

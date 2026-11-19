@@ -10,7 +10,7 @@
   (defun memory-instance? (value) (js* "value instanceof WebAssembly.Memory"))
   (defun fail (code)
     (let ((error (new globalThis.Error (get messages code))))
-      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
+      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic"
         :code (str "ELI-RT" (js-call (funcall globalThis.String code) :padStart 4 "0")) :severity "error" :phase "runtime"
         :message (get error :message))) (throw error)))
   (defun word (value max)

@@ -46,7 +46,7 @@ the complete values, and the projection must return a list.
 
 ## Worker Transport
 
-`eliscript-worker.el` keeps one Bun process alive and exchanges protocol v1
+`eliscript-worker.el` keeps one Bun process alive and exchanges worker protocol
 NDJSON messages with `runtime/worker.mjs`. Load it from Emacs with the compiler
 and worker directories on `load-path`. This lower-level API remains available
 for transport implementations and diagnostics:

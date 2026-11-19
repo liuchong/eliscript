@@ -43,7 +43,7 @@
                       metadata))
              (decoded (await (roundTrip value
                                (js-object :maxChunkBytes 256 :maxEventsPerChunk 5 :maxTextPartUnits 3)))))
-        (js-call (expect workerValueFraming) :toBe "eliscript-value-chunks-v1")
+        (js-call (expect workerValueFraming) :toBe "eliscript-value-chunks")
         (js-call (expect (equalValues
                            (apply persistentList (js-call (Array/from decoded) :slice 0 5))
                            (apply persistentList (js-call (Array/from value) :slice 0 5))))

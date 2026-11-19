@@ -1,0 +1,1400 @@
+(module tools.backends.compiler-corpus-request-ground
+  (import "../../dist/bootstrap/compiler.mjs" compile-string)
+  (import "node:fs/promises" readdir)
+  (import "./compiler-corpus-runtime-adapters.mjs" addOriginalStdlibRuntimeAdapters originalRuntimeHostArtifact isOriginalRuntimeHostOnly originalRuntimeHostCompletionSource originalRuntimeOnlyCase)
+  (import "./compiler-corpus-evaluation-adapters.mjs" addOriginalEvaluationPrograms)
+  (import "./compiler-corpus-project-adapters.mjs" addOriginalProjectPrograms)
+  (import "./compiler-corpus-cli-adapters.mjs" addOriginalCLIPrograms)
+  (import "./compiler-corpus-managed-adapters.mjs" addOriginalManagedLibraryAdapters)
+  (import "./compiler-corpus-managed-fixtures.mjs" addOriginalManagedFixtureAdapters)
+  (import "./compiler-corpus-tools-artifact-adapters.mjs" addOriginalToolsArtifactPrograms originalToolsHostGateCase)
+  (import "./compiler-corpus-identity-value-adapters.mjs" addOriginalIdentityValueAdapters)
+  (import "./compiler-corpus-managed-cases.mjs" originalSourceCaseLocators)
+  (import "./compiler-corpus-source-ground.mjs"
+    null? nullish-or digest stages originalReportOnlyLocators originalDataLiteral originalRegion
+    eli-head-p eli-symbol-p eli-binding-p eli-node-text eli-walk eli-one eli-module-members
+    eli-named-member eli-test-case eli-static-data stable-fixture-source maintained-fixture-proof
+    suite-case-region sourcePath createOriginalCorpusSourceReader
+    cloneCompilerCorpusData cloneCompilerCorpusModules cloneSourceProjectRequest)
+  (import "./compiler-corpus-migrated-ground.mjs"
+    addOriginalFormatterRecipes addOriginalGeneratedNamesRecipes addOriginalESMRecipes addOriginalCompilerModulePrograms)
+
+  (defasync loadOriginalCompilerCorpus (options)
+    (let* ((sourceRoot (get options :sourceRoot))
+           (originals (get options :originals)))
+      (when (or (not (and originals (get originals :manifests))) (/= (value-type sourceRoot) "string"))
+        (throw (new globalThis.TypeError "original compiler manifests and sourceRoot are required")))
+      (let* ((parity (js-call (get originals :manifests) :find (lambda (item) (= (get item :id) "compiler-parity"))))
+             (stable (js-call (get originals :manifests) :find (lambda (item) (= (get item :id) "stable-compatibility")))))
+        (when (or (not parity) (not stable))
+          (throw (new globalThis.Error "both original compiler corpora are required")))
+        (let* ((records (js-array))
+               (claimed (new globalThis.Set))
+               (irCases (js-array))
+               (fullyMappedSuites (new globalThis.Set))
+               (reader (createOriginalCorpusSourceReader (js-object :sourceRoot sourceRoot)))
+               (file (get reader :file))
+               (text (get reader :text))
+               (sourceEvidence (get reader :evidence))
+               (json (async (filename) (JSON/parse (await (funcall text filename)))))
+               (diagnostics (await (funcall json "contracts/diagnostic-corpus.json")))
+               (add (lambda (record)
+                      (js-call (get record :coverage) :forEach (lambda (id) (js-call claimed :add id)))
+                      (js-call records :push record)))
+               (bindCoverage
+                 (lambda (record ids)
+                   (when (or (not (js-call records :includes record))
+                             (not (Array/isArray ids))
+                             (js-call ids :some (lambda (id)
+                               (or (/= (value-type id) "string")
+                                   (not (js-call (get originals :requiredCoverage) :includes id))))))
+                     (throw (new globalThis.TypeError "original coverage must bind an existing recipe and retained identities")))
+                   (js-call ids :forEach (lambda (id)
+                     (unless (js-call (get record :coverage) :includes id)
+                       (js-call (get record :coverage) :push id))
+                     (js-call claimed :add id)))))
+               (stableFiles (new globalThis.Set (get (get stable :document) :fixtureFiles)))
+               (parity-fixtures (get (get parity :document) :fixtures))
+               (pf-idx 0))
+          (while (< pf-idx (js-length parity-fixtures))
+            (let ((fixture (aref parity-fixtures pf-idx)))
+              (unless (js-call stages :has (get fixture :id))
+                (throw (new globalThis.Error (str "unrepresented original compiler stage: " (get fixture :id)))))
+              (let ((suite (await (funcall json (get fixture :file))))
+                    (classifications (js-array "valid" "invalid"))
+                    (c-idx 0))
+                (while (< c-idx (js-length classifications))
+                  (let* ((classification (aref classifications c-idx))
+                         (cases (if (and (not (Object/hasOwn suite classification)) (= (get fixture classification) 0))
+                                  (js-array)
+                                  (get suite classification))))
+                    (when (or (not (Array/isArray cases)) (/= (js-length cases) (get fixture classification)))
+                      (throw (new globalThis.Error (str "original fixture case count changed: " (get fixture :file) ":" classification))))
+                    (let ((index 0))
+                      (while (< index (js-length cases))
+                        (let* ((item (aref cases index))
+                               (source (if (Object/hasOwn item "source")
+                                         (get item :source)
+                                         (await (funcall text (get item :file))))))
+                          (when (or (/= (value-type source) "string") (/= (value-type (get item :filename)) "string"))
+                            (throw (new globalThis.Error (str "unrepresented original source case: " (get fixture :file) ":" index))))
+                          (let* ((id (str "compiler-parity:" (get fixture :id) ":" classification ":" index))
+                                 (coverage (js-array id)))
+                            (await (funcall file (str "tests/bootstrap-" (get fixture :id) "-oracle.el")))
+                            (when (js-call stableFiles :has (get fixture :file))
+                              (js-call coverage :push (str "stable-compatibility:" (get fixture :file))))
+                            (let* ((diag-suite (and (get diagnostics :suites)
+                                                    (js-call (get diagnostics :suites) :find (lambda (s) (= (get s :id) (get fixture :id))))))
+                                   (diagnostic (and diag-suite (get diag-suite :cases)
+                                                    (js-call (get diag-suite :cases) :find (lambda (c) (= (get c :name) (get item :name))))))
+                                   (expected (if (= classification "invalid")
+                                               (let ((exp (js-object :kind "diagnostic" :message (get item :error))))
+                                                 (when diagnostic (put exp :diagnostic (get diagnostic :diagnostic)))
+                                                 exp)
+                                               (js-object :kind "stage" :oracleRequired t)))
+                                   (request (js-object :operation "stage" :stage (get fixture :id) :source source :filename (get item :filename)))
+                                   (rec (js-object :id id :kind "stage" :coverage coverage :request request :expected expected
+                                          :original (js-object :manifest (get parity :id) :fixture (get fixture :file)
+                                                      :classification classification :index index
+                                                      :case (globalThis.structuredClone item)))))
+                              (when (Object/hasOwn item "macroContext")
+                                (put request :macroContext (globalThis.structuredClone (get item :macroContext))))
+                              (when (get item :file)
+                                (put rec :dependencies (js-array (get item :file))))
+                              (funcall add rec)
+                              (when (and (= (get fixture :id) "ir") (= classification "valid"))
+                                (js-call irCases :push (js-object :source source :filename (get item :filename) :name (get item :name)))
+                                (await (funcall file "tests/bootstrap-emitter-oracle.el"))
+                                (funcall add
+                                  (js-object :id (str id ":emitter") :kind "stage" :coverage (js-call coverage :slice)
+                                    :request (Object/assign (js-object) request
+                                               (js-object :stage "emitter"
+                                                 :sourceMap (js-object :generatedFile "fixture.mjs" :sourceName (get item :filename))))
+                                    :expected (js-object :kind "stage" :oracleRequired t)
+                                    :original (js-object :manifest (get parity :id) :fixture (get fixture :file)
+                                                :classification classification :index index
+                                                :case (globalThis.structuredClone item)
+                                                :suite "tests/bootstrap-emitter.test.mjs")))))))
+                        (setq index (1+ index)))))
+                  (setq c-idx (1+ c-idx)))))
+            (setq pf-idx (1+ pf-idx)))
+          (let ((sf-list (get (get stable :document) :fixtureFiles))
+                (sf-idx 0))
+            (while (< sf-idx (js-length sf-list))
+              (let ((filename (aref sf-list sf-idx)))
+                (await (funcall file filename))
+                (when (js-call filename :endsWith ".json")
+                  (let ((document (JSON/parse (await (funcall text filename)))))
+                    (when (and document (= (get document :format) "eliscript-managed-bdd"))
+                      (when (not (Array/isArray (get document :features)))
+                        (throw (new globalThis.Error "unsupported original BDD catalog shape")))
+                      (let ((ids (new globalThis.Set))
+                            (features (get document :features))
+                            (f-idx 0))
+                        (while (< f-idx (js-length features))
+                          (let ((feature (aref features f-idx)))
+                            (unless (Array/isArray (get feature :scenarios))
+                              (throw (new globalThis.Error "original BDD feature has no scenarios")))
+                            (let ((scenarios (get feature :scenarios))
+                                  (s-idx 0))
+                              (while (< s-idx (js-length scenarios))
+                                (let ((scenario (aref scenarios s-idx)))
+                                  (when (or (/= (value-type (get scenario :id)) "string")
+                                            (js-call ids :has (get scenario :id))
+                                            (/= (value-type (get scenario :source)) "string"))
+                                    (throw (new globalThis.Error "invalid original BDD scenario")))
+                                  (js-call ids :add (get scenario :id))
+                                  (let* ((suffix (str "\n(export run" (if (Object/hasOwn scenario "recover") " recover" "") ")"))
+                                         (source (str ";中😀\n(defconst marker 1)\n" (get scenario :source) suffix))
+                                         (sourceFilename (str "bdd-" (get scenario :id) ".eli")))
+                                    (funcall add
+                                      (js-object :id (str "stable-compatibility:bdd:" (get scenario :id))
+                                        :kind "project" :coverage (js-array (str "stable-compatibility:" filename))
+                                        :modules (js-array (js-object :id "entry.mjs" :filename sourceFilename :source source))
+                                        :entry "entry.mjs" :request (js-object :operation "project") :auto 1
+                                        :execution (js-object :kind "managed-bdd" :export "run" :scenario (globalThis.structuredClone scenario))
+                                        :expected (js-object :kind "managed-bdd" :scenario (globalThis.structuredClone scenario))
+                                        :original (js-object :manifest (get stable :id) :fixture filename :feature (get feature :name)
+                                                    :case (globalThis.structuredClone scenario)
+                                                    :sourceRecipe (js-object :prefix ";中😀\n(defconst marker 1)\n" :suffix suffix)
+                                                    :suite "tests/wasm-managed-behavior.test.mjs")))))
+                                (setq s-idx (1+ s-idx)))))
+                          (setq f-idx (1+ f-idx))))))))
+              (setq sf-idx (1+ sf-idx))))
+          (let* ((conformance (await (funcall json "tests/conformance/manifest.json")))
+                 (features (new globalThis.Map (js-call (get conformance :features) :map (lambda (f) (js-array (get f :id) f)))))
+                 (locators (js-array))
+                 (stable-fids (get (get stable :document) :stableCoreFeatureIds))
+                 (fid-idx 0))
+            (while (< fid-idx (js-length stable-fids))
+              (let* ((featureId (aref stable-fids fid-idx))
+                     (feature (js-call features :get featureId)))
+                (when (or (not feature) (/= (get feature :status) "stable"))
+                  (throw (new globalThis.Error (str "original stable feature is unavailable: " featureId))))
+                (let ((ev-list (nullish-or (get feature :evidence) (js-array)))
+                      (index 0))
+                  (while (< index (js-length ev-list))
+                    (let ((locator (aref ev-list index)))
+                      (await (funcall file (get locator :file)))
+                      (js-call locators :push
+                        (Object/assign (js-object :id (str "stable-compatibility:evidence:" featureId ":" index) :featureId featureId)
+                          (globalThis.structuredClone locator))))
+                    (setq index (1+ index)))))
+              (setq fid-idx (1+ fid-idx)))
+            (unless (= (js-length locators) (get (get stable :document) :evidenceLocatorCount))
+              (throw (new globalThis.Error "original stable evidence inventory changed")))
+            (let ((dimensions (get (get parity :document) :dimensions))
+                  (d-idx 0))
+              (while (< d-idx (js-length dimensions))
+                (let* ((dimension (aref dimensions d-idx))
+                       (ev-list (get dimension :evidence))
+                       (index 0))
+                  (while (< index (js-length ev-list))
+                    (let ((locator (aref ev-list index)))
+                      (await (funcall file (get locator :file)))
+                      (js-call locators :push
+                        (Object/assign (js-object :id (str "compiler-parity:dimension:" (get dimension :id) ":" index) :dimension (get dimension :id))
+                          (globalThis.structuredClone locator))))
+                    (setq index (1+ index))))
+                (setq d-idx (1+ d-idx))))
+            (let ((add-locs (nullish-or (get originals :additionalLocators) (js-array)))
+                  (al-idx 0))
+              (while (< al-idx (js-length add-locs))
+                (let* ((locator (aref add-locs al-idx))
+                       (original (await (funcall file (get locator :file)))))
+                  (unless (= (get original :sha256) (and (get locator :originalCase) (get (get locator :originalCase) :sourceSha256)))
+                    (throw (new globalThis.Error "original managed case source changed while binding its corpus")))
+                  (js-call locators :push (globalThis.structuredClone locator)))
+                (setq al-idx (1+ al-idx))))
+            (let ((r-idx 0))
+              (while (< r-idx (js-length records))
+                (let* ((record (aref records r-idx))
+                       (orig (get record :original))
+                       (orig-case (and orig (get orig :case))))
+                  (when (and (= (get record :kind) "stage")
+                             orig (= (get orig :manifest) (get parity :id))
+                             (= (value-type (get orig :fixture)) "string")
+                             orig-case (= (value-type (get orig-case :name)) "string"))
+                    (let ((named (js-call locators :filter (lambda (locator)
+                                   (and (= (get locator :file) (get orig :fixture))
+                                        (= (get locator :contains) (get orig-case :name))
+                                        (not (js-call (get record :coverage) :includes (get locator :id))))))))
+                      (Reflect/apply (get (get record :coverage) :splice) (get record :coverage)
+                        (js-call (js-array 1 0) :concat (js-call named :map (lambda (locator) (get locator :id)))))
+                      (js-call named :forEach (lambda (locator) (js-call claimed :add (get locator :id)))))))
+                (setq r-idx (1+ r-idx))))
+            (let ((bs-list (get (get parity :document) :bootstrapSources))
+                  (bs-idx 0))
+              (while (< bs-idx (js-length bs-list))
+                (await (funcall file (aref bs-list bs-idx)))
+                (setq bs-idx (1+ bs-idx))))
+            (await (funcall file "tests/bootstrap-tests.el"))
+            (when (js-call stableFiles :has "tests/fixtures/bootstrap-symbols.json")
+              (let* ((symbolCases (await (funcall json "tests/fixtures/bootstrap-symbols.json")))
+                     (functions (js-object :segment (js-array "munge-segment" "munge_segment")
+                                  :binding (js-array "binding-name" "binding_name")
+                                  :reference (js-array "reference-name" "reference_name")))
+                     (calls (js-array))
+                     (entries (Object/entries symbolCases))
+                     (e-idx 0))
+                (while (< e-idx (js-length entries))
+                  (let* ((entry (aref entries e-idx))
+                         (operation (aref entry 0))
+                         (cases (aref entry 1))
+                         (fn-pair (get functions operation)))
+                    (when (or (not fn-pair) (not (Array/isArray cases)))
+                      (throw (new globalThis.Error "unrepresented original symbol fixture operation")))
+                    (js-call cases :forEach (lambda (item)
+                      (let ((call-obj (js-object :name (aref fn-pair 0) :javascriptName (aref fn-pair 1)
+                                        :args (js-array (get item :input)))))
+                        (if (Object/hasOwn item "error")
+                          (put call-obj :error (get item :error))
+                          (put call-obj :expected (get item :output)))
+                        (js-call calls :push call-obj)))))
+                  (setq e-idx (1+ e-idx)))
+                (let ((request (js-object :operation "project" :entry "symbol.mjs" :sourceMap t
+                                 :modules (js-array (js-object :id "symbol.mjs" :filename "bootstrap/compiler/symbol.eli"
+                                                      :source (await (funcall text "bootstrap/compiler/symbol.eli")))))))
+                  (funcall add
+                    (js-object :id "stable-compatibility:symbol-mapping" :kind "sequence"
+                      :coverage (js-call (js-array "stable-compatibility:tests/fixtures/bootstrap-symbols.json")
+                                  :concat (js-call (js-call locators :filter (lambda (item) (= (get item :file) "tests/bootstrap-symbol.test.mjs")))
+                                            :map (lambda (item) (get item :id))))
+                      :original (js-object :suite "tests/bootstrap-symbol.test.mjs" :fixture "tests/fixtures/bootstrap-symbols.json")
+                      :expected (js-object :kind "sequence")
+                      :steps (js-array
+                               (js-object :id "first" :request request :artifact (js-object :kind "exports" :auto 1 :calls calls))
+                               (js-object :id "repeat" :request (cloneSourceProjectRequest request)
+                                 :artifact (js-object :kind "exports" :auto 1 :calls (globalThis.structuredClone calls))
+                                 :sameProductAs "first"))))
+                  (await (funcall file "tests/bootstrap-symbol.test.mjs"))
+                  (js-call fullyMappedSuites :add "tests/bootstrap-symbol.test.mjs"))))
+            (let ((extra-suites (js-array "tests/bootstrap-project.test.mjs" "tests/macro-file-dependencies.test.mjs"
+                                  "tests/esm-imports.test.mjs" "tests/bootstrap-ir-serialization.test.mjs"))
+                  (es-idx 0))
+              (while (< es-idx (js-length extra-suites))
+                (await (funcall file (aref extra-suites es-idx)))
+                (setq es-idx (1+ es-idx))))
+            (let ((portableSources (js-object))
+                  (ps-names (js-array "sequence" "text" "object"))
+                  (ps-idx 0))
+              (while (< ps-idx (js-length ps-names))
+                (let ((name (aref ps-names ps-idx)))
+                  (put portableSources name (await (funcall text (str "stdlib/" name ".eli")))))
+                (setq ps-idx (1+ ps-idx)))
+              (addOriginalRequestRecipes (js-object :add add :locators locators :irCases irCases :portableSources portableSources)))
+            (let* ((formatterSuite (await (addOriginalFormatterRecipes (js-object :add add :locators locators :text text :file file :sourceRoot sourceRoot))))
+                   (generatedNamesSuite (await (addOriginalGeneratedNamesRecipes (js-object :add add :locators locators :text text :file file :sourceRoot sourceRoot))))
+                   (esmSuite (await (addOriginalESMRecipes (js-object :add add :locators locators :text text :file file))))
+                   (bs-sources (get (get parity :document) :bootstrapSources)))
+              (when generatedNamesSuite (js-call fullyMappedSuites :add generatedNamesSuite))
+              (when esmSuite (js-call fullyMappedSuites :add esmSuite))
+              (js-call (await (addOriginalCompilerModulePrograms (js-object :add add :locators locators :text text :file file :bootstrapSources bs-sources)))
+                :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+              (js-call (await (addOriginalEvaluationPrograms (js-object :add add :locators locators :text text :file file :bootstrapSources bs-sources :sourceRoot sourceRoot)))
+                :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+              (js-call (await (addOriginalProjectPrograms (js-object :add add :locators locators :text text :file file :stableFiles stableFiles :bootstrapSources bs-sources :sourceRoot sourceRoot)))
+                :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+              (js-call (await (addOriginalCLIPrograms (js-object :add add :locators locators :text text :file file :bootstrapSources bs-sources :sourceRoot sourceRoot)))
+                :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+              (when formatterSuite (js-call fullyMappedSuites :add formatterSuite)))
+            (let ((cliSource (await (funcall text "tests/cli-test.sh")))
+                  (diagnosticFilename "tests/fixtures/diagnostic-unbound.eli"))
+              (when (js-call stableFiles :has diagnosticFilename)
+                (let ((assertion (originalRegion cliSource "DIAGNOSTIC_FILE=\"$TEMP_DIR/diagnostic.json\" bun -e '" "\n'\n")))
+                  (funcall add
+                    (js-object :id "original-sequence:cli-unbound-diagnostic" :kind "sequence"
+                      :coverage (js-array (str "stable-compatibility:" diagnosticFilename))
+                      :expected (js-object :kind "sequence")
+                      :original (js-object :fixture diagnosticFilename :suite "tests/cli-test.sh"
+                                  :sourceSha256 (get (await (funcall file "tests/cli-test.sh")) :sha256)
+                                  :regions (js-array (js-object :start (get assertion :start) :end (get assertion :end)
+                                                       :byteStart (get assertion :byteStart) :byteEnd (get assertion :byteEnd)
+                                                       :sha256 (get assertion :sha256))))
+                      :steps (js-array
+                               (js-object :id "original-json-diagnostic"
+                                 :request (js-object :operation "compile" :source (await (funcall text diagnosticFilename)) :filename diagnosticFilename)
+                                 :error (js-object :code "ELI-A0001" :phase "analysis"
+                                          :expectFields (js-array
+                                                          (js-object :path (js-array "message") :value "unbound symbol: missing")
+                                                          (js-object :path (js-array "format") :value "eliscript-diagnostic")
+                                                          (js-object :path (js-array "severity") :value "error")
+                                                          (js-object :path (js-array "location" "file") :value diagnosticFilename)
+                                                          (js-object :path (js-array "location" "start" "offset") :value 19)
+                                                          (js-object :path (js-array "location" "start" "line") :value 2)
+                                                          (js-object :path (js-array "location" "start" "column") :value 3)))))))))
+              (let* ((runtimeSources nil)
+                     (originalRuntimeSources
+                       (async ()
+                         (if runtimeSources
+                           runtimeSources
+                           (let ((result (js-array))
+                                 (walk nil))
+                             (setq walk
+                               (async (directory)
+                                 (let ((entries (await (readdir (sourcePath sourceRoot directory) (js-object :withFileTypes t))))
+                                       (e-idx 0))
+                                   (js-call entries :sort (lambda (left right)
+                                     (if (< (get left :name) (get right :name)) -1
+                                       (if (> (get left :name) (get right :name)) 1 0))))
+                                   (while (< e-idx (js-length entries))
+                                     (let* ((item (aref entries e-idx))
+                                            (filename (str directory "/" (get item :name))))
+                                       (if (js-call item :isDirectory)
+                                         (await (funcall walk filename))
+                                         (when (and (js-call item :isFile) (js-call filename :endsWith ".mjs"))
+                                           (js-call result :push (js-object :id filename :filename filename :source (await (funcall text filename)))))))
+                                     (setq e-idx (1+ e-idx))))))
+                             (await (funcall walk "runtime"))
+                             (js-call result :push (js-object :id "stdlib/bit.mjs" :filename "stdlib/bit.mjs"
+                               :source (await (funcall text "stdlib/bit.mjs"))))
+                             (setq runtimeSources result)
+                             result))))
+                     (originalInlineHost
+                       (lambda (marker)
+                         (let* ((block (js-call cliSource :indexOf marker))
+                                (begin (if (< block 0) -1 (js-call cliSource :indexOf "bun --eval '\n" block)))
+                                (end (if (< begin 0) -1 (js-call cliSource :indexOf "\n')" begin))))
+                           (when (or (< block 0) (< begin 0) (< end 0))
+                             (throw (new globalThis.Error (str "original inline host oracle is unavailable: " marker))))
+                           (str (js-call cliSource :slice (+ begin (js-length "bun --eval '\n")) end) "\n"))))
+                     (coreSetSuite (await (funcall text "tests/core-set.test.mjs")))
+                     (coreStdlibSuite (await (funcall text "tests/core-stdlib.test.mjs")))
+                     (coreSetEli (await (funcall text "tests/core-set.test.eli")))
+                     (coreSetUsageHostEli (await (funcall text "tests/fixtures/core-set-usage-host.eli")))
+                     (coreStdlibEli (await (funcall text "tests/core-stdlib.test.eli")))
+                     (coreStdlibApiHostEli (await (funcall text "tests/fixtures/core-stdlib-api-host.eli")))
+                     (coreSetTitle "Eliscript-authored set algebra compiles and agrees across local hosts")
+                     (coreStdlibTitle "Eliscript core modules compile and execute against runtime protocols")
+                     (coreSetCase (eli-test-case (eli-module-members coreSetEli "tests/core-set.test.eli") coreSetTitle))
+                     (coreSetExpectedLet (eli-one (eli-walk coreSetCase (lambda (node) (eli-binding-p node "expected"))) "core-set expected"))
+                     (coreSetExpectedValue (eli-static-data (aref (get (aref (get (aref (get coreSetExpectedLet :items) 1) :items) 0) :items) 1)))
+                     (coreSetHostMembers (eli-module-members coreSetUsageHostEli "tests/fixtures/core-set-usage-host.eli"))
+                     (coreSetHostRunIndex (js-call coreSetHostMembers :findIndex
+                       (lambda (node) (and (eli-head-p node "defasync") (eli-symbol-p (aref (get node :items) 1) "run-host-main")))))
+                     (_checkCoreSetHost (unless (> coreSetHostRunIndex 0) (throw (new globalThis.TypeError "core-set-usage-host run-host-main missing"))))
+                     (coreSetHostDefs (js-call (js-call coreSetHostMembers :slice 2 (1+ coreSetHostRunIndex))
+                                        :map (lambda (node) (eli-node-text coreSetUsageHostEli node))))
+                     (coreSetGeneratedHost
+                       (compile-string
+                         (str "(module original.inline-core-set-host\n"
+                           (js-call coreSetHostDefs :join "\n") "\n"
+                           "(defasync run-original-literal-host () (await (run-host-main)))\n"
+                           originalRuntimeHostCompletionSource "\n)\n")
+                         "original-inline-core-set-host.eli"))
+                     (coreLibraryNames (js-array "protocol" "identifier" "data-text" "metadata" "collection" "transient" "transducer" "seq" "data"))
+                     (coreLibraryModules (js-call coreLibraryNames :map (lambda (name) (js-object :id (str "stdlib/core/" name ".mjs") :filename (str "stdlib/core/" name ".eli")))))
+                     (coreModuleBindings
+                       (Object/assign (js-object :usageModule "core-stdlib-usage.mjs" :apiUsageModule "core-language-api-usage.mjs")
+                         (Object/fromEntries (js-call coreLibraryNames :map (lambda (name)
+                           (js-array (str (if (= name "data-text") "dataText" name) "Module") (str "stdlib/core/" name ".mjs")))))))
+                     (coreBindingEli
+                       (js-call (js-call (Object/entries coreModuleBindings) :map (lambda (pair)
+                         (str "(defconst " (aref pair 0) " (resolve directory " (JSON/stringify (aref pair 1)) "))")))
+                         :join "\n"))
+                     (coreStdlibMembers (eli-module-members coreStdlibEli "tests/core-stdlib.test.eli"))
+                     (coreRuntimeImports
+                       (js-call (js-call (js-call coreStdlibMembers :filter (lambda (form)
+                         (and (eli-head-p form "import")
+                              (js-call (get (aref (get form :items) 1) :value) :startsWith "../runtime/"))))
+                         :map (lambda (node) (eli-node-text coreStdlibEli node))) :join "\n"))
+                     (coreStdlibHelpers
+                       (js-call (js-call (js-array
+                         (eli-named-member coreStdlibMembers "defun" "arr")
+                         (eli-named-member coreStdlibMembers "defun" "rows")
+                         (eli-named-member coreStdlibMembers "defun" "be")
+                         (eli-named-member coreStdlibMembers "defun" "same")
+                         (eli-named-member coreStdlibMembers "defun" "refuses")
+                         (eli-named-member coreStdlibMembers "defasync" "load")
+                         (eli-named-member coreStdlibMembers "defun" "rangeType")
+                         (eli-named-member coreStdlibMembers "defun" "extendRange"))
+                         :map (lambda (node) (eli-node-text coreStdlibEli node))) :join "\n"))
+                     (coreStdlibCase (eli-test-case coreStdlibMembers coreStdlibTitle))
+                     (coreStdlibTry (eli-one (eli-walk coreStdlibCase (lambda (node) (eli-head-p node "try"))) "core-stdlib try"))
+                     (coreStdlibTryItems (get coreStdlibTry :items))
+                     (coreUsageIndex (js-call coreStdlibTryItems :findIndex (lambda (node) (eli-binding-p node "usage"))))
+                     (coreBodyNodes (js-call coreStdlibTryItems :slice coreUsageIndex (1- (js-length coreStdlibTryItems))))
+                     (_checkCoreBody
+                       (unless (and (> coreUsageIndex 0) (= (js-length coreBodyNodes) 14))
+                         (throw (new globalThis.TypeError "original inline core-stdlib body boundaries changed"))))
+                     (coreStdlibGeneratedHost
+                       (compile-string
+                         (str "(module original.inline-core-stdlib-host\n"
+                           "(import \"bun:test\" expect)\n"
+                           "(import \"node:process\" :default process)\n"
+                           "(import \"node:fs/promises\" readFile)\n"
+                           "(import \"node:path\" resolve dirname)\n"
+                           "(import \"node:url\" pathToFileURL)\n"
+                           coreRuntimeImports "\n"
+                           "(defconst directory (dirname (aref (get process :argv) 2)))\n"
+                           coreBindingEli "\n"
+                           coreStdlibHelpers "\n"
+                           "(defasync run-original-literal-host ()\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 0)) "\n"
+                           "(when (= (get (get process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\")\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 1)) "\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 2)) ")\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 3)) "\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 4)) "\n"
+                           (eli-node-text coreStdlibEli (aref coreBodyNodes 5)) "\n"
+                           "(when (= (get (get process :env) :ELISCRIPT_ORIGINAL_TARGET) \"javascript\")\n"
+                           (js-call (js-call (js-call coreBodyNodes :slice 7) :map (lambda (node) (eli-node-text coreStdlibEli node))) :join "\n") "))\n"
+                           originalRuntimeHostCompletionSource "\n)\n")
+                         "original-inline-core-stdlib-host.eli"))
+                     (coreApiMembers (eli-module-members coreStdlibApiHostEli "tests/fixtures/core-stdlib-api-host.eli"))
+                     (coreApiBodyDefs
+                       (js-call (js-call (js-array
+                         (eli-named-member coreApiMembers "defasync" "load")
+                         (eli-named-member coreApiMembers "defun" "check")
+                         (eli-named-member coreApiMembers "defun" "jsonEqual")
+                         (eli-named-member coreApiMembers "defun" "arr")
+                         (eli-named-member coreApiMembers "defun" "rows")
+                         (eli-named-member coreApiMembers "defasync" "main"))
+                         :map (lambda (node) (eli-node-text coreStdlibApiHostEli node))) :join "\n"))
+                     (coreApiGeneratedHost
+                       (compile-string
+                         (str "(module original.inline-core-stdlib-node-host\n"
+                           "(import \"node:process\" :default process)\n"
+                           "(import \"node:path\" resolve dirname)\n"
+                           "(import \"node:url\" pathToFileURL)\n"
+                           "(import \"../runtime/core/queue.mjs\" persistentQueue)\n"
+                           coreApiBodyDefs "\n"
+                           "(defasync run-original-literal-host ()\n"
+                           "  (put (get process :argv) 2 (dirname (aref (get process :argv) 2)))\n"
+                           "  (await (main)))\n"
+                           originalRuntimeHostCompletionSource "\n)\n")
+                         "original-inline-core-stdlib-node-host.eli"))
+                     (coreSetCaseRegion (suite-case-region "tests/core-set.test.mjs" coreSetSuite coreSetTitle))
+                     (coreStdlibCaseRegion (suite-case-region "tests/core-stdlib.test.mjs" coreStdlibSuite coreStdlibTitle))
+                     (inlinePlans
+                       (js-array
+                         (js-object :source "tests/fixtures/core-set-usage.eli" :entry "core-set-usage.mjs" :layout "source" :runtime t
+                           :extraModules (js-array (js-object :id "stdlib/core/set.mjs" :filename "stdlib/core/set.eli"))
+                           :hostOrigin "tests/core-set.test.mjs"
+                           :generatedHost (js-object :id "tests/__eliscript_original_core_set.mjs" :source coreSetGeneratedHost)
+                           :stdoutJSON coreSetExpectedValue
+                           :originalRegions (js-array coreSetCaseRegion))
+                         (js-object :source "tests/fixtures/core-stdlib-usage.eli" :entry "core-stdlib-usage.mjs" :layout "source" :runtime t
+                           :extraModules (js-call coreLibraryModules :concat (js-array (js-object :id "core-language-api-usage.mjs" :filename "tests/fixtures/core-language-api-usage.eli")))
+                           :hostOrigin "tests/core-stdlib.test.mjs" :requiresBun t
+                           :extraEntries (js-call (js-array "core-language-api-usage.mjs") :concat (js-call coreLibraryModules :map (lambda (item) (get item :id))))
+                           :generatedHost (js-object :id "tests/__eliscript_original_core_stdlib.mjs" :source coreStdlibGeneratedHost)
+                           :originalRegions (js-array coreStdlibCaseRegion)
+                           :targetSpecificAssertions (js-object :javascript (js-array "generatedUsage/seqMap/dataMap" "protocolMap/identifierMap/dataTextMap/metadataMap/collectionMap/transientMap/transducerMap")))
+                         (js-object :source "tests/fixtures/core-language-api-usage.eli" :entry "core-language-api-usage.mjs" :layout "source" :runtime t
+                           :extraModules coreLibraryModules :hostOrigin "tests/core-stdlib.test.mjs"
+                           :originalRegions (js-array coreStdlibCaseRegion)
+                           :generatedHost (js-object :id "tests/__eliscript_original_core_stdlib_node.mjs" :source coreApiGeneratedHost))))
+                     (programPlans
+                       (js-call inlinePlans :concat
+                         (js-array
+                           (js-object :source "tests/fixtures/core.eli")
+                           (js-object :source "tests/fixtures/compatibility/stable-core-values.eli" :stdout "tests/fixtures/compatibility/stable-core-values.stdout")
+                           (js-object :source "tests/fixtures/compatibility/native-containers-v2.eli" :stdout "tests/fixtures/compatibility/native-containers-v2.stdout"))
+                         (js-call
+                           (js-array
+                             (js-array "async" "ASYNC_OUTPUT=$(" "ELISCRIPT_ASYNC_MODULE" "[21,42,20,2,3,false,\"yes\",5]\n")
+                             (js-array "exceptions" "EXCEPTIONS_OUTPUT=$(" "ELISCRIPT_EXCEPTIONS_MODULE" "[4,\"caught:zero\",9,7,\"async:bad\",\"inner:outer\",3]\n")
+                             (js-array "vector-patterns" "PATTERNS_OUTPUT=$(" "ELISCRIPT_PATTERNS_MODULE" "[[1,2,4,[5,6],9,5,[6],9],[1,2,4,[],null,null,[],null],8,7,42,[7,\"caught\"]]\n")
+                             (js-array "map-patterns" "MAP_PATTERNS_OUTPUT=$(" "ELISCRIPT_MAP_PATTERNS_MODULE" "[[\"Ada\",18,\"missing\"],[\"Ada\",null,null],\"anonymous\",[\"Ada\",\"London\"],[\"Ada\",5,\"text\",\"symbol\"],[\"Ada\",7,\"text\",\"symbol\"],[\"persistent\",9,\"text\",\"symbol\"],[\"Ada\",18,{\"name\":\"Ada\"}],0,[7,\"caught\"],\"portable\",[\"Eliscript\",18]]\n"))
+                           :map (lambda (row)
+                             (js-object :source (str "tests/fixtures/" (aref row 0) ".eli")
+                               :hostEval (funcall originalInlineHost (aref row 1))
+                               :environment (aref row 2) :stdoutText (aref row 3) :hostOrigin "tests/cli-test.sh")))
+                         (js-call (js-array "deferred-usage" "function-usage" "sequence-usage" "text-usage" "object-usage")
+                           :map (lambda (name)
+                             (js-object :source (str "tests/fixtures/" name ".eli")
+                               :stdlib (if (js-call (js-array "sequence-usage" "text-usage" "object-usage") :includes name) "flat" "nested"))))
+                         (js-call (js-array "core-expression-forms" "language-equality" "local-recursive-functions" "multi-arity" "value-dispatch")
+                           :map (lambda (name)
+                             (js-object :source (str "tests/fixtures/" name ".eli")
+                               :host (str "tests/fixtures/" name "-host.mjs")
+                               :argument (if (= name "core-expression-forms") "url" "path"))))
+                         (js-array
+                           (js-object :source "tests/fixtures/bit-usage.eli" :host "tests/fixtures/bit-host.mjs"
+                             :extraModules (js-array (js-object :id "tests/fixtures/bit.mjs" :filename "stdlib/bit.eli"))
+                             :argumentModules (js-array "tests/fixtures/bit-usage.mjs" "tests/fixtures/bit.mjs"))
+                           (js-object :source "stdlib/persistent-queue.eli" :host "tests/fixtures/persistent-queue-library-host.mjs"
+                             :layout "source" :runtime t))
+                         (js-call (js-array "vector" "map" "set") :map (lambda (collection)
+                           (js-object :id (str "persistent-core-exit-" collection)
+                             :source "stdlib/value.eli" :host "tests/fixtures/persistent-core-exit-host.mjs" :stdlib "flat"
+                             :dependencies (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
+                             :hostImports (js-array "persistent-vector" "persistent-map" "persistent-set")
+                             :arguments (js-array (js-object :directory t) (js-object :literal collection)))))
+                         (js-array
+                           (js-object :source "stdlib/state/atom.eli" :entry "state/atom.mjs" :host "tests/fixtures/atom-host.mjs" :stdlib "flat"
+                             :dependencies (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value")
+                             :hostImports (js-array "persistent-vector"))
+                           (js-object :source "stdlib/interop/js.eli" :host "tests/fixtures/interop-js-host.mjs" :layout "source" :stdlib t :runtime t
+                             :dependencies (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value")
+                             :hostImports (js-array "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value")))
+                         (js-call
+                           (js-array
+                             (js-array "lazy-sequence" (js-array "lazy-sequence" "transducer"))
+                             (js-array "persistent-sorted" (js-array "sorted"))
+                             (js-array "persistent-tree-walk" (js-array "walk"))
+                             (js-array "persistent-zipper" (js-array "zipper"))
+                             (js-array "declarative-protocol" (js-array "protocol"))
+                             (js-array "declarative-record" (js-array "protocol" "record"))
+                             (js-array "declarative-type" (js-array "protocol" "type"))
+                             (js-array "regex" (js-array "regex"))
+                             (js-array "literal-runtime" (js-array)))
+                           :map (lambda (pair)
+                             (js-object :source (str "tests/fixtures/" (aref pair 0) ".eli")
+                               :host (str "tests/fixtures/" (aref pair 0) "-host.mjs") :layout "source" :runtime t
+                               :extraModules (js-call (aref pair 1) :map (lambda (dependency)
+                                 (js-object :id (str "stdlib/core/" dependency ".mjs") :filename (str "stdlib/core/" dependency ".eli")))))))
+                         (js-array
+                           (js-object :source "tests/fixtures/wire.eli" :host "tests/fixtures/wire-host.mjs" :layout "source" :runtime t
+                             :extraModules (js-call (js-array "mdp" "mds" "gepo") :map (lambda (name)
+                               (js-object :id (str "stdlib/" name ".mjs") :filename (str "stdlib/" name ".eli")))))
+                           (js-object :source "stdlib/core/text.eli" :host "tests/fixtures/core-text-object-host.mjs" :layout "source" :runtime t
+                             :extraModules (js-array (js-object :id "stdlib/core/object.mjs" :filename "stdlib/core/object.eli"))
+                             :argumentModules (js-array "stdlib/core/text.mjs" "stdlib/core/object.mjs"))
+                           (js-object :source "stdlib/core/protocol.eli" :entry "stdlib/core/protocol-impl.mjs"
+                             :host "tests/fixtures/eliscript-protocol-host.mjs" :layout "source" :runtime t)
+                           (js-object :source "stdlib/multimethod.eli" :host "tests/fixtures/multimethod-host.mjs" :stdlib "flat"
+                             :extraModules (js-array (js-object :id "declarative-multimethod.mjs" :filename "tests/fixtures/declarative-multimethod.eli"))
+                             :argumentModules (js-array "multimethod.mjs" "declarative-multimethod.mjs")
+                             :hostImports (js-array "hierarchy" "persistent-map" "persistent-set" "persistent-vector")))
+                         (let ((host-map (js-object :identifier "identifier" :persistent-list "list" :persistent-vector "vector" :persistent-map "map" :persistent-set "set"))
+                               (imports-map (js-object :json (js-array "result" "persistent-vector" "persistent-map" "value" "identifier" "persistent-list" "persistent-set")
+                                              :result (js-array "persistent-vector" "persistent-map" "value" "data-text")
+                                              :metadata (js-array "value" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
+                                              :data-text (js-array "identifier" "persistent-list" "persistent-map" "metadata" "persistent-set" "value" "persistent-vector")
+                                              :value (js-array "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set"))))
+                           (js-call (js-array "json" "numeric" "result" "metadata" "data-text" "value" "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
+                             :map (lambda (name)
+                               (let ((p (js-object :source (str "stdlib/" name ".eli") :stdlib "flat"
+                                          :host (str "tests/fixtures/portable-" (nullish-or (get host-map name) name) "-host.mjs")
+                                          :argument "path"
+                                          :hostImports (nullish-or (get imports-map name) (js-array)))))
+                                 (when (= name "value")
+                                   (put p :extraModules (js-array (js-object :id "host-identity-token.mjs" :filename "tests/fixtures/host-identity-token.eli")))
+                                   (put p :extraEntries (js-array "host-identity-token.mjs")))
+                                 p))))))
+                     (topLevelStdlib
+                       (js-call (js-call (await (readdir (sourcePath sourceRoot "stdlib")))
+                                  :filter (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z-]*[.]eli$") :test name)))
+                         :sort))
+                     (pp-idx 0))
+                (while (< pp-idx (js-length programPlans))
+                  (let ((plan (aref programPlans pp-idx)))
+                    (unless (or (and (get plan :host) (not (stable-fixture-source stableFiles (get plan :host))))
+                                (and (js-call (get plan :source) :startsWith "tests/fixtures/") (not (js-call stableFiles :has (get plan :source)))))
+                      (let* ((prefix (if (= (get plan :layout) "source")
+                                       "stdlib/"
+                                       (if (= (get plan :stdlib) "flat")
+                                         (if (js-call (get plan :source) :startsWith "stdlib/") "" "tests/fixtures/")
+                                         "tests/fixtures/stdlib/")))
+                             (entry (nullish-or (get plan :entry)
+                                      (if (= (get plan :layout) "source")
+                                        (str (js-call (get plan :source) :slice 0 -4) ".mjs")
+                                        (if (js-call (get plan :source) :startsWith "stdlib/")
+                                          (str (js-call (get plan :source) :slice (js-length "stdlib/") -4) ".mjs")
+                                          (str (js-call (get plan :source) :slice 0 -4) ".mjs")))))
+                             (modules (js-array (js-object :id entry :filename (get plan :source) :source (await (funcall text (get plan :source))))))
+                             (extra-mods (nullish-or (get plan :extraModules) (js-array)))
+                             (em-idx 0))
+                        (while (< em-idx (js-length extra-mods))
+                          (let ((item (aref extra-mods em-idx)))
+                            (js-call modules :push (Object/assign (js-object) item (js-object :source (await (funcall text (get item :filename)))))))
+                          (setq em-idx (1+ em-idx)))
+                        (when (get plan :stdlib)
+                          (let ((dep-names (if (get plan :dependencies)
+                                             (js-call (get plan :dependencies) :map (lambda (name) (str name ".eli")))
+                                             topLevelStdlib))
+                                (dn-idx 0))
+                            (while (< dn-idx (js-length dep-names))
+                              (let* ((name (aref dep-names dn-idx))
+                                     (filename (str "stdlib/" name)))
+                                (unless (= filename (get plan :source))
+                                  (js-call modules :push
+                                    (js-object :id (str prefix (js-call name :slice 0 -4) ".mjs")
+                                      :filename filename :source (await (funcall text filename))))))
+                              (setq dn-idx (1+ dn-idx)))))
+                        (let ((coverage (js-array (str "stable-compatibility:" (get plan :source)))))
+                          (js-call extra-mods :forEach (lambda (item)
+                            (when (js-call stableFiles :has (get item :filename))
+                              (js-call coverage :push (str "stable-compatibility:" (get item :filename))))))
+                          (when (get plan :host)
+                            (await (funcall file (get plan :host)))
+                            (js-call coverage :push (str "stable-compatibility:" (stable-fixture-source stableFiles (get plan :host)))))
+                          (when (get plan :stdout)
+                            (await (funcall file (get plan :stdout)))
+                            (js-call coverage :push (str "stable-compatibility:" (get plan :stdout))))
+                          (let ((bound (js-call coverage :filter (lambda (id) (js-call (get originals :requiredCoverage) :includes id)))))
+                            (when (> (js-length bound) 0)
+                              (await (funcall file "tests/fixtures/compiled-eli-node-loader.mjs"))
+                              (let* ((req-entries
+                                       (Array/from
+                                         (new globalThis.Set
+                                           (js-call (js-array entry)
+                                             :concat (nullish-or (get plan :argumentModules) (js-array))
+                                             (nullish-or (get plan :extraEntries) (js-array))
+                                             (js-call (nullish-or (get plan :hostImports) (js-array)) :map (lambda (name) (str prefix name ".mjs")))))))
+                                     (request (js-object :operation "project" :resolveImports t :phased t :sourceMap t :entries req-entries))
+                                     (gen-host (get plan :generatedHost))
+                                     (execution
+                                       (js-object :kind "original-program"
+                                         :host (nullish-or (and gen-host (get gen-host :id)) (nullish-or (get plan :host) nil))
+                                         :hostSource (nullish-or (and gen-host (get gen-host :source))
+                                                       (if (get plan :host) (await (funcall text (get plan :host))) nil))
+                                         :hostEval (nullish-or (get plan :hostEval) nil)
+                                         :environment (nullish-or (get plan :environment) nil)
+                                         :argument (nullish-or (get plan :argument) "path")
+                                         :argumentModules (nullish-or (get plan :argumentModules) (js-array entry))
+                                         :aliases t :requiresBun (= (get plan :requiresBun) t)))
+                                     (expected (js-object :kind "seed-program" :oracleRequired t))
+                                     (original-meta
+                                       (js-object :manifest (get stable :id) :fixture (get plan :source)
+                                         :host (nullish-or (get plan :host) (nullish-or (get plan :hostOrigin) nil))
+                                         :stdout (nullish-or (get plan :stdout) nil))))
+                                (when (get plan :host)
+                                  (let ((source (stable-fixture-source stableFiles (get plan :host))))
+                                    (unless (= source (get plan :host))
+                                      (put original-meta :maintainedHost
+                                        (await (maintained-fixture-proof source (get plan :host) text file))))))
+                                (when (get plan :runtime)
+                                  (let ((emitted-bit (js-call modules :some (lambda (module)
+                                          (and (= (get module :id) "stdlib/bit.mjs")
+                                               (= (get module :filename) "stdlib/bit.eli"))))))
+                                    (put request :hostSources
+                                      (js-call (await (funcall originalRuntimeSources)) :filter
+                                        (lambda (provider)
+                                          (not (and emitted-bit (= (get provider :id) "stdlib/bit.mjs"))))))))
+                                (when (js-call (js-array "tests/fixtures/portable-vector-host.mjs"
+                                                        "tests/fixtures/portable-map-host.mjs"
+                                                        "tests/fixtures/portable-set-host.mjs"
+                                                        "tests/fixtures/persistent-core-exit-host.mjs")
+                                        :includes (get plan :host))
+                                  (let* ((maintained "tests/helpers/portable-structure.eli")
+                                         (artifact "tests/helpers/portable-structure.mjs")
+                                         (maintained-proof (await (funcall file maintained)))
+                                         (artifact-proof (await (funcall file artifact))))
+                                    (put request :hostSources
+                                      (js-call (get request :hostSources (js-array)) :concat
+                                        (js-array (js-object :id artifact :filename artifact
+                                          :source (await (funcall text artifact))))))
+                                    (put original-meta :sourceAssets
+                                      (js-call (get original-meta :sourceAssets (js-array)) :concat
+                                        (js-array
+                                          (js-object :file maintained :sourceSha256 (get maintained-proof :sha256))
+                                          (js-object :file artifact :sourceSha256 (get artifact-proof :sha256)))))))
+                                (when (get plan :arguments)
+                                  (put execution :arguments (globalThis.structuredClone (get plan :arguments))))
+                                (when (get plan :stdout)
+                                  (put expected :stdout (await (funcall text (get plan :stdout)))))
+                                (when (get plan :stdoutText)
+                                  (put expected :stdout (get plan :stdoutText)))
+                                (when (get plan :stdoutJSON)
+                                  (put expected :stdoutJSON (get plan :stdoutJSON)))
+                                (when (get plan :originalRegions)
+                                  (put original-meta :sourceSha256 (get (await (funcall file (get plan :hostOrigin))) :sha256))
+                                  (put original-meta :locators
+                                    (js-call (js-call locators :filter (lambda (item) (= (get item :file) (get plan :hostOrigin))))
+                                      :map (lambda (item) (get item :id))))
+                                  (put original-meta :regions (get plan :originalRegions))
+                                  (put original-meta :targetSpecificAssertions (nullish-or (get plan :targetSpecificAssertions) nil)))
+                                (funcall add
+                                  (js-object :id (str "stable-compatibility:program:" (nullish-or (get plan :id) (get plan :source)))
+                                    :kind "project" :coverage bound :modules modules :entry entry
+                                    :request request :execution execution :expected expected :original original-meta)))))))))
+                  (setq pp-idx (1+ pp-idx)))))
+            (js-call (await (addOriginalStdlibRuntimeAdapters
+                              (js-object :add add :records records :locators locators :text text :file file :sourceRoot sourceRoot
+                                :region originalRegion :data originalDataLiteral
+                                :bootstrapSources (get (get parity :document) :bootstrapSources))))
+              :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+            (js-call (await (addOriginalManagedLibraryAdapters
+                              (js-object :add add :locators locators :text text :file file :stableFiles stableFiles :sourceRoot sourceRoot)))
+              :forEach (lambda (suite) (js-call fullyMappedSuites :add suite)))
+            (await (addOriginalManagedFixtureAdapters
+                     (js-object :add add :records records :bindCoverage bindCoverage :locators locators
+                       :text text :file file :stableFiles stableFiles :sourceRoot sourceRoot)))
+            (await (addOriginalIdentityValueAdapters
+                     (js-object :add add :locators locators :text text :file file :stableFiles stableFiles :sourceRoot sourceRoot)))
+            (await (addOriginalToolsArtifactPrograms
+                     (js-object :add add :locators locators :text text :file file :sourceRoot sourceRoot)))
+            (when (js-call stableFiles :has "tests/fixtures/unicode-case-profiles.json")
+              (let ((reference (await (funcall json "tests/fixtures/unicode-case-profiles.json"))))
+                (when (or (/= (get reference :format) "eliscript-unicode-case-reference")
+                          (not (Array/isArray (get reference :versions))))
+                  (throw (new globalThis.Error "unrepresented Unicode reference")))
+                (let ((source "(defconst marker 1) (defun upper (value) (js-call value :toUpperCase)) (defun lower (value) (js-call value :toLowerCase)) (export upper lower)")
+                      (versions (get reference :versions))
+                      (v-idx 0))
+                  (while (< v-idx (js-length versions))
+                    (let ((profile (aref versions v-idx)))
+                      (funcall add
+                        (js-object :id (str "stable-compatibility:unicode-profile:" (get profile :version)) :kind "project"
+                          :coverage (js-array "stable-compatibility:tests/fixtures/unicode-case-profiles.json")
+                          :entry "entry.mjs" :modules (js-array (js-object :id "entry.mjs" :filename "text-format.eli" :source source))
+                          :request (js-object :operation "project") :auto 1
+                          :execution (js-object :kind "unicode-profile" :profile (globalThis.structuredClone profile))
+                          :expected (js-object :kind "unicode-profile")
+                          :original (js-object :fixture "tests/fixtures/unicode-case-profiles.json"
+                                      :suite "tests/wasm-managed-text-format.test.mjs"))))
+                    (setq v-idx (1+ v-idx))))))
+            (let* ((unadapted (js-call (get originals :requiredCoverage) :filter (lambda (id) (not (js-call claimed :has id)))))
+                   (missingCaseAdapters (js-array))
+                   (originalGateCoverage (js-array))
+                   (hostOnlyDependencies (js-array))
+                   (semanticFeature (new globalThis.RegExp "^(?:language|portable|compiler|project|macro|bootstrap|stdlib|runtime)[.]"))
+                   (byLocator (new globalThis.Map (js-call locators :map (lambda (item) (js-array (get item :id) item)))))
+                   (u-idx 0))
+              (while (< u-idx (js-length unadapted))
+                (let* ((id (aref unadapted u-idx))
+                       (locator (js-call byLocator :get id))
+                       (originalFile (nullish-or (and locator (get locator :file))
+                                       (if (js-call id :startsWith "stable-compatibility:")
+                                         (js-call id :slice (js-length "stable-compatibility:"))
+                                         nil)))
+                       (handled false))
+                  (when (or (= originalFile "tests/fixtures/collection-adapter-isolation.mjs")
+                            (= originalFile "tests/fixtures/collection-adapter-isolation.eli"))
+                    (let* ((suite "tests/collection-protocol.test.mjs")
+                           (title "native adapters are exact, realm-explicit, and prototype preserving")
+                           (suiteSource (await (funcall text suite)))
+                           (fixtureSource (await (funcall text "tests/fixtures/collection-adapter-isolation.mjs")))
+                           (maintained (when (js-call originalFile :endsWith ".eli")
+                             (await (maintained-fixture-proof originalFile "tests/fixtures/collection-adapter-isolation.mjs" text file))))
+                           (case-proof (suite-case-region suite suiteSource title))
+                           (region (Object/assign (js-object) case-proof
+                             (js-object :text (js-call suiteSource :slice (get case-proof :start) (get case-proof :end)))))
+                           (assertions (js-array "new (globalThis.URL)(\"./fixtures/collection-adapter-isolation.mjs\", import.meta.url)"
+                                         "runHost((process)[\"execPath\"], fixture)"
+                                         "runHost(\"node\", fixture)"
+                                         "same(bun, node)"
+                                         "\"unchanged\": [true, true, true]"
+                                         "\"protocolSlotsAbsent\": [true, true, true]")))
+                      (js-call assertions :forEach (lambda (assertion)
+                        (unless (js-call (get region :text) :includes assertion)
+                          (throw (new globalThis.TypeError "original collection isolation execution changed")))))
+                      (when (or (not (js-call fixtureSource :includes "\"../../runtime/core/collection.mjs\""))
+                                (not (js-call fixtureSource :includes "\"../../runtime/core/protocol.mjs\""))
+                                (js-call (new globalThis.RegExp "(?:bin\\/eliscript|buildBackends|buildProject|checkProject|compile_ir_string|compile_string|\\.eli[\"'`]|process\\.argv|ELISCRIPT_.*(?:MODULE|COMPILER))") :test fixtureSource))
+                        (throw (new globalThis.TypeError "collection isolation fixture requires a selected compiler adapter")))
+                      (let ((caseRegion (js-object :start (get region :start) :end (get region :end)
+                                          :byteStart (get region :byteStart) :byteEnd (get region :byteEnd) :sha256 (get region :sha256))))
+                        (js-call originalGateCoverage :push id)
+                        (js-call hostOnlyDependencies :push
+                          (js-object :coverageId id :file originalFile
+                            :sourceSha256 (get (await (funcall file originalFile)) :sha256)
+                            :kind "host-only-runtime-case-fixture" :maintainedHost maintained :originalAssertion title
+                            :engines (js-array "bun" "node")
+                            :originalCase (js-object :file suite :sourceSha256 (get (await (funcall file suite)) :sha256) :region caseRegion)
+                            :dependencies (await (Promise/all
+                                                   (js-call (js-array "runtime/core/collection.mjs" "runtime/core/protocol.mjs")
+                                                     :map (async (filename)
+                                                       (js-object :file filename :sourceSha256 (get (await (funcall file filename)) :sha256))))))
+                            :reason "original Bun and Node fixture checks runtime protocol adapter isolation without a compiler or language-product injection"))
+                        (setq handled t))))
+                  (when (and (not handled) locator)
+                    (let ((bound (await (originalToolsHostGateCase (js-object :locator locator :source (await (funcall text (get locator :file))) :file file)))))
+                      (when bound
+                        (js-call originalGateCoverage :push id)
+                        (js-call hostOnlyDependencies :push
+                          (Object/assign (js-object) bound
+                            (js-object :coverageId id :file (get locator :file)
+                              :sourceSha256 (get (await (funcall file (get locator :file))) :sha256)
+                              :locator (globalThis.structuredClone locator))))
+                        (setq handled t))))
+                  (when (and (not handled)
+                             originalFile (js-call originalFile :startsWith "tests/")
+                             (originalRuntimeHostArtifact originalFile)
+                             (isOriginalRuntimeHostOnly (originalRuntimeHostArtifact originalFile)
+                               (await (funcall text (originalRuntimeHostArtifact originalFile)))))
+                    (js-call originalGateCoverage :push id)
+                    (js-call hostOnlyDependencies :push
+                      (js-object :coverageId id :file originalFile
+                        :sourceSha256 (get (await (funcall file originalFile)) :sha256)
+                        :maintainedHost (when (/= originalFile (originalRuntimeHostArtifact originalFile))
+                          (await (maintained-fixture-proof originalFile (originalRuntimeHostArtifact originalFile) text file)))
+                        :kind "host-only-runtime"
+                        :reason "unchanged original host runtime; no selected compiler or language-product injection"))
+                    (setq handled t))
+                  (when (and (not handled) locator
+                             (js-call (js-array "tests/persistent-queue.test.mjs" "tests/lazy-sequence.test.mjs"
+                                        "tests/persistent-sorted.test.mjs" "tests/regex.test.mjs"
+                                        "tests/core-text-object.test.mjs" "tests/core-set.test.mjs" "tests/core-stdlib.test.mjs")
+                               :includes (get locator :file)))
+                    (let* ((originalSource (await (funcall text (get locator :file))))
+                           (runtimeCase (originalRuntimeOnlyCase (get locator :file) originalSource (get locator :contains))))
+                      (when runtimeCase
+                        (js-call originalGateCoverage :push id)
+                        (js-call hostOnlyDependencies :push
+                          (js-object :coverageId id :file (get locator :file)
+                            :sourceSha256 (get (await (funcall file (get locator :file))) :sha256)
+                            :kind "host-only-runtime-case" :region runtimeCase
+                            :reason "unchanged original runtime-only case; the separate compiled-language case remains selected-session evidence"))
+                        (setq handled t))))
+                  (when (and (not handled) locator (= (get locator :file) "tests/diagnostic-corpus.test.mjs")
+                             (js-call (js-array "complete negative diagnostic corpus is frozen and source-derived"
+                                        "diagnostic corpus rejects missing cases and fixture drift"
+                                        "diagnostic corpus rejects structured and human diagnostic drift")
+                               :includes (get locator :contains)))
+                    (let* ((originalSource (await (funcall text (get locator :file))))
+                           (matches (js-call (originalSourceCaseLocators (get locator :file) originalSource) :filter
+                             (lambda (item) (= (get (get item :originalCase) :title) (get locator :contains)))))
+                           (actual (when (= (js-length matches) 1) (get (aref matches 0) :originalCase))))
+                      (unless actual
+                        (throw (new globalThis.TypeError "original diagnostic manifest case boundary changed")))
+                      (let* ((start (get (get actual :span) :start)) (end (get (get actual :span) :end))
+                             (caseSource (js-call originalSource :slice start end)))
+                        (when (and (not (js-call caseSource :includes "checkDiagnosticCorpus("))
+                                   (not (js-call caseSource :includes "validationErrors(")))
+                          (throw (new globalThis.TypeError "original diagnostic manifest case lost its validator")))
+                        (let ((dependencies (js-array))
+                              (dep-files (js-array "tools/diagnostics/check.mjs" "contracts/diagnostic-corpus.json"
+                                           "tests/fixtures/bootstrap-reader.json" "tests/fixtures/bootstrap-expander.json"
+                                           "tests/fixtures/bootstrap-analyzer.json"))
+                              (df-idx 0))
+                          (while (< df-idx (js-length dep-files))
+                            (let ((filename (aref dep-files df-idx)))
+                              (js-call dependencies :push (js-object :file filename :sourceSha256 (get (await (funcall file filename)) :sha256))))
+                            (setq df-idx (1+ df-idx)))
+                          (js-call originalGateCoverage :push id)
+                          (js-call hostOnlyDependencies :push
+                            (js-object :coverageId id :file (get locator :file)
+                              :sourceSha256 (get (await (funcall file (get locator :file))) :sha256)
+                              :kind "frozen-diagnostic-manifest-case" :originalAssertion (get locator :contains)
+                              :locator (globalThis.structuredClone locator) :dependencies dependencies
+                              :region (js-object :start start :end end
+                                        :byteStart (js-call globalThis.Buffer :byteLength (js-call originalSource :slice 0 start))
+                                        :byteEnd (js-call globalThis.Buffer :byteLength (js-call originalSource :slice 0 end))
+                                        :sha256 (digest (js-call globalThis.Buffer :from caseSource)))
+                              :reason "original validator checks frozen diagnostic inventory and mutation rejection; every compiler negative input remains an independent selected-session stage record"))
+                          (setq handled t)))))
+                  (when (and (not handled) locator (= (get locator :file) "tests/literal-runtime.test.mjs")
+                             (= (get locator :contains) "maintained Eliscript sources use explicit host constructors"))
+                    (let* ((originalSource (await (funcall text (get locator :file))))
+                           (title "maintained Eliscript sources use explicit host constructors")
+                           (prefix (str "test(" (JSON/stringify title) ", async () => {"))
+                           (start (js-call originalSource :indexOf prefix)))
+                      (when (or (< start 0) (>= (js-call originalSource :indexOf prefix (+ start (js-length prefix))) 0))
+                        (throw (new globalThis.TypeError "original source-only audit case boundary changed")))
+                      (let ((region (originalRegion originalSource prefix "\ntest(" start)))
+                        (unless (js-call (get region :text) :includes "expect(violations).toEqual([]);")
+                          (throw (new globalThis.TypeError "original source-only audit assertion changed")))
+                        (js-call originalGateCoverage :push id)
+                        (js-call hostOnlyDependencies :push
+                          (js-object :coverageId id :file (get locator :file)
+                            :sourceSha256 (get (await (funcall file (get locator :file))) :sha256)
+                            :kind "source-only-case" :originalAssertion title
+                            :locator (globalThis.structuredClone locator)
+                            :region (js-object :start (get region :start) :end (get region :end)
+                                      :byteStart (get region :byteStart) :byteEnd (get region :byteEnd) :sha256 (get region :sha256))
+                            :reason "unchanged original source constructor audit; all compiled-language cases retain selected-session execution"))
+                        (setq handled t))))
+                  (when (and (not handled) locator (= (js-call originalReportOnlyLocators :get (get locator :file)) (get locator :contains)))
+                    (js-call originalGateCoverage :push id)
+                    (setq handled t))
+                  (unless handled
+                    (if (and locator (/= (get locator :kind) "ert") (/= (get locator :kind) "shell")
+                             (or (not (get locator :featureId)) (js-call semanticFeature :test (get locator :featureId))))
+                      (js-call missingCaseAdapters :push
+                        (js-object :coverageId id :file (get locator :file) :contains (get locator :contains)
+                          :featureId (get locator :featureId)
+                          :reason "original semantic suite still needs its complete selected-session adapter"))
+                      (if (js-call id :startsWith "stable-compatibility:tests/fixtures/")
+                        (let* ((filename (js-call id :slice (js-length "stable-compatibility:")))
+                               (transport (js-call (new globalThis.RegExp "\\/(?:compiled-eli-(?:bun-preload|node-loader)|platform-capabilities|worker-value-stream-probe)[.](?:mjs|eli)$") :test filename))
+                               (auxiliary (or (js-call filename :endsWith ".stdout")
+                                              (js-call filename :endsWith ".el")
+                                              (js-call filename :endsWith "/package.json")
+                                              (js-call filename :endsWith "/.gitkeep")
+                                              transport)))
+                          (if auxiliary
+                            (js-call originalGateCoverage :push id)
+                            (js-call missingCaseAdapters :push
+                              (js-object :coverageId id :file filename
+                                :reason "original language fixture or host oracle has not yet been mapped to complete selected-session requests"))))
+                        (js-call originalGateCoverage :push id)))))
+                (setq u-idx (1+ u-idx)))
+              (let ((partialSuites
+                      (new globalThis.Set
+                        (js-call (js-call (js-call records :filter (lambda (record)
+                                            (and (= (get record :kind) "sequence")
+                                                 (/= (and (get record :original) (get (get record :original) :completeLocatorCoverage)) t))))
+                                   :map (lambda (record) (and (get record :original) (get (get record :original) :suite))))
+                          :filter (lambda (suite) (and suite (not (js-call fullyMappedSuites :has suite)))))))
+                    (completeReplayCoverage (new globalThis.Set))
+                    (rec-idx 0))
+                (while (< rec-idx (js-length records))
+                  (let* ((record (aref records rec-idx))
+                         (exec (get record :execution))
+                         (orig (get record :original)))
+                    (when (and (= (get record :kind) "project")
+                               exec (= (get exec :kind) "compiler-session-program")
+                               orig (= (get orig :completeLocatorCoverage) t)
+                               (= (get orig :coverageScope) "complete-source-mapping-worker-case-only"))
+                      (let* ((suite (get orig :suite))
+                             (source (await (funcall text suite))))
+                        (when (= (get orig :sourceSha256) (get (await (funcall file suite)) :sha256))
+                          (let ((cases (originalSourceCaseLocators suite source))
+                                (orig-cases (nullish-or (get orig :cases) (js-array)))
+                                (oc-idx 0))
+                            (while (< oc-idx (js-length orig-cases))
+                              (let* ((original (aref orig-cases oc-idx))
+                                     (locator (js-call byLocator :get (get original :id)))
+                                     (exact (js-call cases :find (lambda (item)
+                                              (let ((oc (get item :originalCase)))
+                                                (and (= (get oc :sha256) (get original :sha256))
+                                                     (= (get (get oc :span) :start) (and (get original :span) (get (get original :span) :start)))
+                                                     (= (get (get oc :span) :end) (and (get original :span) (get (get original :span) :end)))
+                                                     (= (get oc :sourceSha256) (get original :sourceSha256))
+                                                     (= (get oc :timeoutMs) (get original :timeoutMs))))))))
+                                (when (and locator (= (get locator :file) suite)
+                                           (= (value-type (get locator :contains)) "string")
+                                           (> (js-length (get locator :contains)) 0)
+                                           (js-call (get record :coverage) :includes (get original :id))
+                                           exact
+                                           (js-call (js-call source :slice (get (get (get exact :originalCase) :span) :start)
+                                                      (get (get (get exact :originalCase) :span) :end))
+                                             :includes (get locator :contains)))
+                                  (js-call completeReplayCoverage :add (get original :id))))
+                              (setq oc-idx (1+ oc-idx)))))))
+                    (when (and (= (get record :kind) "project")
+                               exec (= (get exec :kind) "original-program")
+                               orig (= (get orig :semanticCoverage) "complete-original-suite-with-selected-compiler-namespaces"))
+                      (let ((coverage (new globalThis.Set (get record :coverage)))
+                            (suites (nullish-or (get orig :suites) (js-array)))
+                            (s-idx 0))
+                        (while (< s-idx (js-length suites))
+                          (let ((suite (aref suites s-idx)))
+                            (when (= (get suite :sourceSha256) (get (await (funcall file (get suite :file))) :sha256))
+                              (js-call (nullish-or (get suite :coverage) (js-array)) :forEach (lambda (id)
+                                (when (and (js-call coverage :has id)
+                                           (= (and (js-call byLocator :get id) (get (js-call byLocator :get id) :file)) (get suite :file)))
+                                  (js-call completeReplayCoverage :add id))))))
+                          (setq s-idx (1+ s-idx))))))
+                  (setq rec-idx (1+ rec-idx)))
+                (js-call locators :forEach (lambda (locator)
+                  (when (and (js-call partialSuites :has (get locator :file))
+                             (/= (get locator :kind) "ert")
+                             (/= (get locator :kind) "shell")
+                             (not (js-call completeReplayCoverage :has (get locator :id)))
+                             (not (js-call missingCaseAdapters :some (lambda (item) (= (get item :coverageId) (get locator :id))))))
+                    (js-call missingCaseAdapters :push
+                      (js-object :coverageId (get locator :id) :file (get locator :file)
+                        :contains (get locator :contains) :featureId (get locator :featureId)
+                        :reason "request recipes exist; remaining original suite assertions are not yet fully mapped")))))
+                (let ((originalGateEvidence
+                        (js-object :required t :verification "not-executed"
+                          :execution (globalThis.structuredClone (get (get stable :document) :execution))
+                          :coverageIds originalGateCoverage :hostOnlyDependencies hostOnlyDependencies
+                          :locators locators :fixtures (js-call (get (get stable :document) :fixtureFiles) :slice)
+                          :bootstrapSources (js-call (get (get parity :document) :bootstrapSources) :slice)
+                          :dimensions (js-call (get (get parity :document) :dimensions) :map (lambda (item) (get item :id)))))
+                      (evidence (funcall sourceEvidence)))
+                  (js-object :format "eliscript-compiler-matrix-corpus"
+                    :manifests (Object/fromEntries (js-call (get originals :manifests) :map (lambda (item)
+                                 (js-array (get item :id) (js-object :sha256 (get item :sha256) :identity (get item :identity))))))
+                    :coverageIds (js-call (get originals :requiredCoverage) :slice)
+                    :expectedIds (js-call records :map (lambda (record) (get record :id)))
+                    :records records :evidence evidence :originalGateEvidence originalGateEvidence
+                    :missingCaseAdapters missingCaseAdapters)))))))))
+
+  (defun compilerCorpusRequest (record target &rest __opt)
+    (let* ((options-opt (aref __opt 0))
+           (options (if (undefined? options-opt) (js-object) options-opt)))
+      (cond
+        ((= (get record :kind) "stage") (cloneCompilerCorpusData (get record :request)))
+        ((or (= (get record :kind) "original-suite") (= (get record :kind) "sequence")) nil)
+        (t
+         (Object/assign (js-object) (get record :request)
+           (js-object :operation "project"
+             :modules (cloneCompilerCorpusModules (get record :modules))
+             :entry (get record :entry)
+             :target target
+             :memory (nullish-or (get record :memory) (get options :memory))
+             :nativeTarget (nullish-or (get record :nativeTarget)
+                             (nullish-or (get options :nativeTarget)
+                               (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos")))
+             :nativeFormat (nullish-or (get record :nativeFormat) (nullish-or (get options :nativeFormat) "library"))))))))
+
+  (defun addOriginalRequestRecipes (options)
+    (let* ((add (get options :add))
+           (locators (get options :locators))
+           (irCases (get options :irCases))
+           (portableSources (get options :portableSources))
+           (locatorIds
+             (lambda (file)
+               (let ((ids (js-call (js-call locators :filter (lambda (item) (= (get item :file) file)))
+                            :map (lambda (item) (get item :id)))))
+                 (when (= (js-length ids) 0)
+                   (throw (new globalThis.Error (str "original recipe has no retained suite locator: " file))))
+                 ids)))
+           (addSequence
+             (lambda (id suite steps)
+               (funcall add
+                 (js-object :id (str "original-sequence:" id) :kind "sequence"
+                   :coverage (funcall locatorIds suite)
+                   :original (js-object :suite suite)
+                   :steps steps :expected (js-object :kind "sequence")))))
+           (project
+             (lambda (source &rest __opt)
+               (let ((helper (aref __opt 0))
+                     (modules (js-array (js-object :id "main.mjs" :filename "main.eli" :source source))))
+                 (unless (undefined? helper)
+                   (js-call modules :push (js-object :id "helper.mjs" :filename "helper.eli" :source helper)))
+                 (js-object :operation "project" :resolveImports t :sourceMap t :entry "main.mjs" :modules modules))))
+           (diskSource "(import \"./helper.eli\" answer)\n(print answer)\n")
+           (virtualSource "(import \"./helper.eli\" answer)\n(print (+ answer 1))\n")
+           (helper "(defconst answer 42)\n(export answer)\n"))
+      (funcall addSequence "project-source-edits" "tests/bootstrap-project.test.mjs"
+        (js-array
+          (js-object :id "initial" :request (funcall project diskSource helper) :artifact (js-object :kind "stdout" :expected "42\n"))
+          (js-object :id "identical" :request (funcall project diskSource helper) :artifact (js-object :kind "stdout" :expected "42\n") :sameProductAs "initial")
+          (js-object :id "override" :request (funcall project virtualSource helper) :artifact (js-object :kind "stdout" :expected "43\n"))
+          (js-object :id "restore-disk" :request (funcall project diskSource helper) :artifact (js-object :kind "stdout" :expected "42\n") :sameProductAs "initial")
+          (js-object :id "invalid-edit" :request (funcall project "(print missing)\n" helper) :error (js-object :code "ELI-A0001" :phase "analysis"))
+          (js-object :id "after-failed-edit" :request (funcall project diskSource helper) :artifact (js-object :kind "stdout" :expected "42\n") :sameProductAs "initial")))
+      (let* ((macro "(defmacro configured-value ()\n  (macro-read-file \"build-value.txt\"))\n(defconst value (configured-value))\n(export value)")
+             (macroProject
+               (lambda (value)
+                 (Object/assign (js-object) (funcall project macro)
+                   (js-object :macroContext
+                     (js-object :capabilities (js-array "read-file")
+                       :files (js-array (js-object :specifier "unused.txt" :content "declared-but-unused")
+                                        (js-object :specifier "build-value.txt" :content value))))))))
+        (funcall addSequence "macro-file-edits" "tests/macro-file-dependencies.test.mjs"
+          (js-array
+            (js-object :id "initial" :request (funcall macroProject "first-value") :artifact (js-object :kind "exports" :values (js-object :value "first-value")))
+            (js-object :id "cache-hit" :request (funcall macroProject "first-value") :artifact (js-object :kind "exports" :values (js-object :value "first-value")) :sameProductAs "initial")
+            (js-object :id "changed-file" :request (funcall macroProject "second-value") :artifact (js-object :kind "exports" :values (js-object :value "second-value")))
+            (js-object :id "no-capability" :request (js-object :operation "stage" :stage "ir" :source macro :filename "macro-context.eli")
+              :error (js-object :contains "macro capability is not enabled: read-file"))
+            (js-object :id "undeclared-file"
+              :request (js-object :operation "stage" :stage "ir" :source macro :filename "macro-context.eli"
+                         :macroContext (js-object :capabilities (js-array "read-file") :files (js-array)))
+              :error (js-object :contains "macro file dependency is not declared: build-value.txt"))
+            (js-object :id "direct-context"
+              :request (js-object :operation "stage" :stage "emitter" :source macro :filename "macro-context.eli"
+                         :macroContext (js-object :capabilities (js-array "read-file")
+                                         :files (js-array (js-object :specifier "build-value.txt" :content "forty-two"))))
+              :containsData "const value = \"forty-two\";"))))
+      (let ((provider (js-call (js-array
+                                 "globalThis.__eliscript_import_effects ="
+                                 "  (globalThis.__eliscript_import_effects ?? 0) + 1;"
+                                 "export default 11;"
+                                 "export const named_value = 22;"
+                                 "export const namespace_value = 33;"
+                                 "export const effect_count = () => globalThis.__eliscript_import_effects;"
+                                 "")
+                        :join "\n"))
+            (imports (js-call (js-array
+                                "(import \"./provider.mjs\")"
+                                "(import \"./provider.mjs\" :default default-value effect-count named-value)"
+                                "(import \"./provider.mjs\" :default namespace-default :as Provider)"
+                                "(defun report ()"
+                                "  (js-array default-value"
+                                "            named-value"
+                                "            namespace-default"
+                                "            (get Provider \"namespace_value\")"
+                                "            (effect-count)))"
+                                "(export report)"
+                                "")
+                       :join "\n")))
+        (funcall addSequence "esm-imports" "tests/esm-imports.test.mjs"
+          (js-array
+            (js-object :id "imports"
+              :request (Object/assign (js-object) (funcall project imports)
+                         (js-object :resolveImports false
+                           :hostModules (js-array (js-object :id "provider.mjs" :specifier "./provider.mjs" :referrer "main.mjs"
+                                                    :allowedExports (js-array "default" "effect_count" "named_value") :namespace t))
+                           :hostSources (js-array (js-object :id "provider.mjs" :filename "provider.mjs" :source provider))))
+              :sidecars (js-array (js-object :file "provider.mjs" :source provider))
+              :artifact (js-object :kind "exports" :isolated t
+                          :calls (js-array (js-object :name "report" :args (js-array) :expected (js-array 11 22 11 33 1))))))))
+      (let ((protocolCases
+              (js-array
+                (js-array "single-defaults" "build-operation-request"
+                  (js-object :mode "single" :input "src/defaults.eli")
+                  (js-object :format "eliscript-build-operation" :mode "single" :input "src/defaults.eli" :output nil :sourceMap false :portableEntries (js-array)))
+                (js-array "single-portable-order" "build-operation-request"
+                  (js-object :mode "single" :input "src/main.eli" :output nil :sourceMap false :portableEntries (js-array "zeta" "alpha" "zeta"))
+                  (js-object :format "eliscript-build-operation" :mode "single" :input "src/main.eli" :output nil :sourceMap false :portableEntries (js-array "alpha" "zeta")))
+                (js-array "project-request" "project-request"
+                  (js-object :entries (js-array "src/main.eli") :outDir "dist" :root nil :portableEntries (js-array "zeta" "alpha" "zeta") :useCache t)
+                  (js-object :format "eliscript-project-request" :entries (js-array "src/main.eli") :outDir "dist" :root nil
+                    :portableEntries (js-array "alpha" "zeta") :macroCapabilities (js-array) :macroFileDependencies (js-array) :useCache t))
+                (js-array "check-report" "project-check-report"
+                  (js-object :mode "standard" :root "root" :entries (js-array "src/z.eli" "src/a.eli") :portableEntries (js-array)
+                    :modules (js-array (js-object :source "src/z.eli" :dependencies (js-array) :portableEntries (js-array))
+                                       (js-object :source "src/a.eli" :dependencies (js-array "src/z.eli") :portableEntries (js-array))))
+                  (js-object :format "eliscript-check-report" :status "ok" :mode "standard" :root "root"
+                    :entries (js-array "src/a.eli" "src/z.eli") :portableEntries (js-array)
+                    :counts (js-object :modules 2)
+                    :modules (js-array (js-object :source "src/a.eli" :dependencies (js-array "src/z.eli") :portableEntries (js-array))
+                                       (js-object :source "src/z.eli" :dependencies (js-array) :portableEntries (js-array))))))))
+        (funcall addSequence "project-protocols" "tests/bootstrap-project.test.mjs"
+          (js-call protocolCases :map (lambda (row)
+            (js-object :id (aref row 0) :request (js-object :operation "protocol" :name (aref row 1) :input (aref row 2)) :expected (aref row 3))))))
+      (let ((portableSource "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))\n(defportable unused () 99)\n(defun ordinary () 1)")
+            (p-entry-map (js-object :sequence "map" :text "blank?" :object "omit"))
+            (p-inc-map (js-object :sequence (js-array "function reverse(values)" "function map(function$, values)")
+                         :text (js-array "function slice(start, end, text)" "function whitespace" "function trim(text)" "function blank")
+                         :object (js-array "function keys(object)" "function key_in_QMARK_" "function omit(object, omitted_keys)")))
+            (p-exc-map (js-object :sequence (js-array "function filter" "function range")
+                         :text (js-array "function join" "function repeat")
+                         :object (js-array "function map_values" "function update"))))
+        (funcall addSequence "portable-transitive-closure" "tests/eliscript-tests.el"
+          (js-call
+            (js-array
+              (js-object :id "selection" :request (js-object :operation "stage" :stage "portable" :source portableSource :filename "portable.eli" :entries (js-array "work") :allowProjectImports false))
+              (js-object :id "emission" :request (js-object :operation "compile" :source portableSource :filename "portable.eli" :portableEntries (js-array "work"))
+                :includesJavascript (js-array "const step = 2;" "function helper(value)" "function work(value)")
+                :excludesJavascript (js-array "function unused" "function ordinary"))
+              (js-object :id "import-requires-project"
+                :request (js-object :operation "stage" :stage "portable"
+                           :source "(import-portable \"./math.eli\" increment)\n(defportable work (value) (increment value))"
+                           :filename "portable.eli" :entries (js-array "work") :allowProjectImports false)
+                :error (js-object :contains "portable import increment requires a project build")))
+            :concat
+            (js-call (Object/entries portableSources) :map (lambda (pair)
+              (let ((name (aref pair 0))
+                    (source (aref pair 1)))
+                (js-object :id (str "stdlib-" name)
+                  :request (js-object :operation "compile" :source source :filename (str "stdlib/" name ".eli")
+                             :portableEntries (js-array (get p-entry-map name)))
+                  :includesJavascript (get p-inc-map name)
+                  :excludesJavascript (get p-exc-map name))))))))
+      (let* ((cacheModules (js-array (js-object :source "src/main.eli" :output "src/main.mjs" :sourceMap "src/main.mjs.map"
+                                       :sourceDigest "source" :outputDigest "output" :sourceMapDigest "map")))
+             (metadataModules (js-array (js-object :source "src/main.eli" :dependencies (js-array) :portableEntries (js-array))))
+             (cacheLookupInput (js-object :enabled t :manifestStatus "readable" :expectedEntries (js-array "src/main.mjs")
+                                 :graphDigestValid t :cacheDigestValid t :compilerDigest "compiler" :mode "standard" :portableEntries (js-array)))
+             (cacheManifest
+               (lambda (manifestExtra cacheExtra)
+                 (let* ((cache-obj (js-object :format "eliscript-project-cache" :compilerDigest "compiler" :mode "standard"
+                                    :portableEntries (js-array) :modules metadataModules))
+                        (manifest (js-object :format "eliscript-project" :entries (js-array "src/main.mjs") :digest "manifest"
+                                   :modules cacheModules :cache cache-obj)))
+                   (when manifestExtra (put manifest :mystery manifestExtra))
+                   (when cacheExtra (put cache-obj :mystery cacheExtra))
+                   manifest)))
+             (reportInput
+               (js-object :mode "standard" :root "root" :outDir "root/dist" :entries (js-array "src/main.eli") :entryOutputs (js-array "src/main.mjs")
+                 :manifest "eliscript-project.json" :digest "abc123" :portableEntries (js-array)
+                 :cache (js-object :enabled t :reason "verified")
+                 :timings (js-object :cacheReadMs 0.1236 :workMs 1.2344 :manifestWriteMs 0.3456 :totalMs 1.7036)
+                 :modules (js-array
+                            (js-object :source "src/value.eli" :output "src/value.mjs" :sourceMap "src/value.mjs.map"
+                              :status "compiled" :reason "source-changed" :dependencies (js-array) :portableEntries (js-array))
+                            (js-object :source "src/main.eli" :output "src/main.mjs" :sourceMap "src/main.mjs.map"
+                              :status "reused" :reason "verified" :dependencies (js-array "src/value.eli" "src/value.eli") :portableEntries (js-array))))))
+        (funcall addSequence "project-cache-reports" "tests/bootstrap-project.test.mjs"
+          (js-array
+            (js-object :id "current-cache"
+              :request (js-object :operation "protocol" :name "project-cache-lookup"
+                         :input (Object/assign (js-object) cacheLookupInput (js-object :manifest (funcall cacheManifest undefined undefined))))
+              :expectFields (js-array (js-object :path (js-array "reason") :value "verified")))
+            (js-object :id "manifest-extra-invalid"
+              :request (js-object :operation "protocol" :name "project-cache-lookup"
+                         :input (Object/assign (js-object) cacheLookupInput (js-object :manifest (funcall cacheManifest t undefined))))
+              :expectFields (js-array (js-object :path (js-array "reason") :value "manifest-format-invalid")))
+            (js-object :id "cache-extra-invalid"
+              :request (js-object :operation "protocol" :name "project-cache-lookup"
+                         :input (Object/assign (js-object) cacheLookupInput (js-object :manifest (funcall cacheManifest undefined t))))
+              :expectFields (js-array (js-object :path (js-array "reason") :value "cache-format-invalid")))
+            (js-object :id "unreadable-artifact"
+              :request (js-object :operation "protocol" :name "project-cache-decision"
+                         :input (js-object :record (js-object :$compilerCorpusRef "current-cache.cache.records.0")
+                                  :output "src/main.mjs" :sourceMap "src/main.mjs.map" :expectedPortableEntries (js-array)
+                                  :sourceDigest "changed" :outputExists t :sourceMapExists t :outputDigest "output"
+                                  :sourceMapDigest "map" :dependenciesValid t :artifactFailure "artifact-unreadable"))
+              :expected (js-object :reused false :reason "artifact-unreadable"))
+            (js-object :id "report"
+              :request (js-object :operation "protocol" :name "project-build-report" :input reportInput)
+              :expectFields (js-array
+                              (js-object :path (js-array "cache") :value (js-object :enabled t :status "partial" :reason "dirty-modules"))
+                              (js-object :path (js-array "counts") :value (js-object :modules 2 :compiled 1 :reused 1))
+                              (js-object :path (js-array "timings") :value (js-object :cacheReadMs 0.124 :workMs 1.234 :manifestWriteMs 0.346 :totalMs 1.704))
+                              (js-object :path (js-array "modules" 0 "source") :value "src/main.eli")
+                              (js-object :path (js-array "modules" 0 "dependencies") :value (js-array "src/value.eli"))
+                              (js-object :path (js-array "modules" 1 "source") :value "src/value.eli")))
+            (js-object :id "bad-report"
+              :request (js-object :operation "protocol" :name "project-build-report"
+                         :input (Object/assign (js-object) reportInput (js-object :cache (js-object :enabled "yes" :reason "verified"))))
+              :error (js-object :contains "build report cache enabled must be a boolean"))
+            (js-object :id "empty-entries"
+              :request (js-object :operation "protocol" :name "project-request"
+                         :input (js-object :entries (js-array) :outDir "dist" :root "root" :portableEntries (js-array) :useCache t))
+              :error (js-object :code "ELI-B0001" :phase "project-build"))
+            (js-object :id "invalid-portable-entry"
+              :request (js-object :operation "protocol" :name "project-request"
+                         :input (js-object :entries (js-array "main.eli") :outDir "dist" :root nil :portableEntries (js-array 42) :useCache t))
+              :error (js-object :code "ELI-B0001" :phase "project-build"))
+            (js-object :id "missing-source-map-output"
+              :request (js-object :operation "protocol" :name "build-operation-request"
+                         :input (js-object :mode "single" :input "main.eli" :output nil :sourceMap t :portableEntries (js-array)))
+              :error (js-object :code "ELI-B0001" :phase "project-build"))
+            (js-object :id "graph"
+              :request (js-object :operation "protocol" :name "project-plan"
+                         :input (js-object :entries (js-array "b" "a" "a") :dependencies (js-object :a (js-array "b") :b (js-array "a"))))
+              :expected (js-object :format "eliscript-project-plan" :mode "standard"
+                          :entries (js-array "a" "b")
+                          :modules (js-array (js-object :id "a" :dependencies (js-array "b"))
+                                             (js-object :id "b" :dependencies (js-array "a")))))
+            (js-object :id "portable-graph"
+              :request (js-object :operation "protocol" :name "portable-project-plan"
+                         :input (js-object :entries (js-array (js-object :id "a" :entries (js-array "x")))
+                                  :resolutions (js-array
+                                                 (js-object :id "a" :includes "z" :dependencies (js-array (js-object :id "c" :entries (js-array "q"))))
+                                                 (js-object :id "a" :dependencies (js-array (js-object :id "b" :entries (js-array "y"))))
+                                                 (js-object :id "b" :dependencies (js-array (js-object :id "a" :entries (js-array "z")))))))
+              :expectFields (js-array
+                              (js-object :path (js-array "calls")
+                                :value (js-array (js-object :id "a" :entries (js-array "x"))
+                                                 (js-object :id "b" :entries (js-array "y"))
+                                                 (js-object :id "a" :entries (js-array "x" "z"))
+                                                 (js-object :id "c" :entries (js-array "q"))))
+                              (js-object :path (js-array "plan" "modules" 0 "entries") :value (js-array "x" "z"))
+                              (js-object :path (js-array "plan" "modules" 0 "dependencies")
+                                :value (js-array (js-object :id "b" :entries (js-array "y"))
+                                                 (js-object :id "c" :entries (js-array "q")))))))))
+      (let* ((configuration (js-object :entries (js-array "src/main.eli") :outDir "dist"))
+             (configurationRequest (lambda (input) (js-object :operation "protocol" :name "project-configuration" :input input :filename "eliscript.json")))
+             (invalidConfigurations
+               (js-array
+                 (Object/assign (js-object) configuration (js-object :undeclared t))
+                 (Object/assign (js-object) configuration (js-object :entries (js-array "../main.eli")))
+                 (Object/assign (js-object) configuration (js-object :cache "yes"))
+                 (js-object :entries (js-array) :outDir "dist")
+                 (Object/assign (js-object) configuration (js-object :macroCapabilities (js-array "network")))
+                 (Object/assign (js-object) configuration (js-object :macroFileDependencies (js-array "build.txt")))
+                 (Object/assign (js-object) configuration (js-object :macroCapabilities (js-array "read-file") :macroFileDependencies (js-array "../build.txt"))))))
+        (funcall addSequence "project-configuration" "tests/bootstrap-project.test.mjs"
+          (js-call
+            (js-array
+              (js-object :id "defaults" :request (funcall configurationRequest configuration)
+                :expected (js-object :format "eliscript-project-request" :sourceRoot "." :entries (js-array "src/main.eli") :outDir "dist"
+                            :portableEntries (js-array) :macroCapabilities (js-array) :macroFileDependencies (js-array) :cache t))
+              (js-object :id "multiple-entries"
+                :request (funcall configurationRequest (js-object :sourceRoot "src" :entries (js-array "z.eli" "a.eli") :outDir "dist"))
+                :expected (js-object :format "eliscript-project-request" :sourceRoot "src" :entries (js-array "a.eli" "z.eli") :outDir "dist"
+                            :portableEntries (js-array) :macroCapabilities (js-array) :macroFileDependencies (js-array) :cache t))
+              (js-object :id "macro-files"
+                :request (funcall configurationRequest (js-object :sourceRoot "src" :entries (js-array "main.eli") :outDir "dist"
+                                                         :macroCapabilities (js-array "read-file") :macroFileDependencies (js-array "z.txt" "a.txt")))
+                :expectFields (js-array
+                                (js-object :path (js-array "macroCapabilities") :value (js-array "read-file"))
+                                (js-object :path (js-array "macroFileDependencies") :value (js-array "a.txt" "z.txt")))))
+            :concat
+            (js-call invalidConfigurations :map (lambda (input index)
+              (js-object :id (str "invalid-" index) :request (funcall configurationRequest input)
+                :error (js-object :code "ELI-B0002" :phase "project-config")))))))
+      (let ((evaluationSuite "tests/bootstrap-evaluation.test.mjs"))
+        (when (js-call locators :some (lambda (item) (= (get item :file) evaluationSuite)))
+          (funcall addSequence "evaluation-descriptions" evaluationSuite
+            (js-call
+              (js-array
+                (js-object :id "operation"
+                  :request (js-object :operation "protocol" :name "evaluation-operation-request"
+                             :input (js-object :id 7 :operation "evaluate" :source "(+ 1 2)" :filename "repl.eli"))
+                  :expected (js-object :format "eliscript-evaluation-operation" :id 7 :operation "evaluate"
+                              :source "(+ 1 2)" :filename "repl.eli" :root nil :line 1 :column 1))
+                (js-object :id "reset-source-refusal"
+                  :request (js-object :operation "protocol" :name "evaluation-operation-request"
+                             :input (js-object :operation "reset" :source "(+ 1 2)"))
+                  :error (js-object :contains "reset evaluation operation does not accept source fields"))
+                (js-object :id "unknown-option"
+                  :request (js-object :operation "protocol" :name "evaluation-operation-request"
+                             :input (js-object :operation "describe" :framework "anything"))
+                  :error (js-object :contains "unknown evaluation operation key: framework"))
+                (js-object :id "incomplete"
+                  :request (js-object :operation "protocol" :name "evaluation-input-description" :source "(+ 1" :filename "repl.eli")
+                  :expected (js-object :format "eliscript-evaluation-input" :status "incomplete" :filename "repl.eli"))
+                (js-object :id "function"
+                  :request (js-object :operation "protocol" :name "evaluation-form-description" :source "(defun value () 42)" :filename "repl.eli")
+                  :expected (js-object :format "eliscript-evaluation-form" :kind "definition" :head "defun" :name "value" :runtimeBinding t :filename "repl.eli"))
+                (js-object :id "macro"
+                  :request (js-object :operation "protocol" :name "evaluation-form-description" :source "(defmacro twice (value) `(+ ,value ,value))" :filename "repl.eli")
+                  :expectFields (js-array (js-object :path (js-array "runtimeBinding") :value false)))
+                (js-object :id "method"
+                  :request (js-object :operation "protocol" :name "evaluation-form-description" :source "(defmethod render :text (value) value)" :filename "repl.eli")
+                  :expectFields (js-array (js-object :path (js-array "kind") :value "expression")))
+                (js-object :id "protocol"
+                  :request (js-object :operation "protocol" :name "evaluation-form-description" :source "(defprotocol IDescribe describe)" :filename "repl.eli")
+                  :expectFields (js-array (js-object :path (js-array "kind") :value "definition")
+                                          (js-object :path (js-array "name") :value "IDescribe")
+                                          (js-object :path (js-array "runtimeBinding") :value t))))
+              :concat
+              (js-call (js-array "(extend-type Box IDescribe (describe (value) value))"
+                         "(extend-category \"number\" IDescribe (describe (value) value))"
+                         "(extend-default IDescribe (describe (value) value))"
+                         "(jsx 1)" "(fragment 1)" "(defcomponent 1)")
+                :map (lambda (source index)
+                  (js-object :id (str "expression-" index)
+                    :request (js-object :operation "protocol" :name "evaluation-form-description" :source source :filename "repl.eli")
+                    :expectFields (js-array (js-object :path (js-array "kind") :value "expression")))))
+              (js-array
+                (js-object :id "import"
+                  :request (js-object :operation "protocol" :name "evaluation-form-description" :source "(import \"./value.mjs\" value)" :filename "repl.eli")
+                  :expectFields (js-array (js-object :path (js-array "kind") :value "module"))))))))
+      (let ((ref (lambda (path) (js-object :$compilerCorpusRef path)))
+            (schemaError (lambda (contains) (js-object :contains contains :code "ELI-I0001" :phase "ir-schema")))
+            (index 0))
+        (while (< index (js-length irCases))
+          (let ((input (aref irCases index)))
+            (funcall addSequence (str "canonical-ir-roundtrip-" index) "tests/bootstrap-ir-serialization.test.mjs"
+              (js-array
+                (js-object :id "program" :request (js-object :operation "compile-ir" :source (get input :source) :filename (get input :filename)))
+                (js-object :id "canonical" :request (js-object :operation "serialize-ir" :ir (funcall ref "program.ir")) :canonicalEnvelope t)
+                (js-object :id "roundtrip" :request (js-object :operation "deserialize-ir" :canonicalIR (funcall ref "canonical.canonicalIR"))
+                  :sameFieldsAs (js-object :step "program" :fields (js-array "ir")))
+                (js-object :id "reserialize" :request (js-object :operation "serialize-ir" :ir (funcall ref "roundtrip.ir"))
+                  :sameFieldsAs (js-object :step "canonical" :fields (js-array "canonicalIR"))))))
+          (setq index (1+ index)))
+        (funcall addSequence "canonical-ir-refusals" "tests/bootstrap-ir-serialization.test.mjs"
+          (js-array
+            (js-object :id "duplicate-fields"
+              :request (js-object :operation "deserialize-ir" :canonicalIR "{\"format\":\"eliscript-ir\",\"format\":\"eliscript-ir\",\"program\":{\"body\":[],\"filename\":\"x.eli\"}}")
+              :error (funcall schemaError "not canonical"))
+            (js-object :id "invalid-json"
+              :request (js-object :operation "deserialize-ir" :canonicalIR "{")
+              :error (funcall schemaError "invalid canonical IR JSON"))
+            (js-object :id "wrong-input-type"
+              :request (js-object :operation "protocol" :name "deserialize-ir" :input (js-object :text 42))
+              :error (funcall schemaError "must be a string"))
+            (js-object :id "program" :request (js-object :operation "compile-ir" :source (get (aref irCases 0) :source) :filename (get (aref irCases 0) :filename)))
+            (js-object :id "canonical" :request (js-object :operation "serialize-ir" :ir (funcall ref "program.ir")) :canonicalEnvelope t)
+            (js-object :id "roundtrip" :request (js-object :operation "deserialize-ir" :canonicalIR (funcall ref "canonical.canonicalIR"))
+              :sameFieldsAs (js-object :step "program" :fields (js-array "ir")))
+            (js-object :id "reserialize" :request (js-object :operation "serialize-ir" :ir (funcall ref "roundtrip.ir"))
+              :sameFieldsAs (js-object :step "canonical" :fields (js-array "canonicalIR")))
+            (js-object :id "leading-space"
+              :request (js-object :operation "deserialize-ir" :canonicalIR (js-object :$compilerCorpusConcat (js-array " " (funcall ref "canonical.canonicalIR"))))
+              :error (funcall schemaError "not canonical"))
+            (js-object :id "unknown-version-field"
+              :request (js-object :operation "deserialize-ir"
+                         :canonicalIR (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "canonical.canonicalIR") (js-array (js-object :path (js-array "version") :value 1)))))
+              :error (funcall schemaError "unknown or missing fields"))
+            (js-object :id "extra-field"
+              :request (js-object :operation "deserialize-ir"
+                         :canonicalIR (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "canonical.canonicalIR") (js-array (js-object :path (js-array "extra") :value t)))))
+              :error (funcall schemaError "unknown or missing fields"))
+            (js-object :id "unknown-kind"
+              :request (js-object :operation "serialize-ir"
+                         :ir (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "program.ir") (js-array (js-object :path (js-array "body" 0 "kind") :value "future-node")))))
+              :error (funcall schemaError "unknown Eliscript IR node kind"))
+            (js-object :id "bad-span"
+              :request (js-object :operation "serialize-ir"
+                         :ir (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "program.ir") (js-array (js-object :path (js-array "body" 0 "span" "start") :value -1)))))
+              :error (funcall schemaError "must be a non-negative integer"))
+            (js-object :id "null-child"
+              :request (js-object :operation "serialize-ir"
+                         :ir (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "program.ir") (js-array (js-object :path (js-array "body" 0 "children") :append nil)))))
+              :error (funcall schemaError "plain data object"))
+            (js-object :id "negative-zero"
+              :request (js-object :operation "serialize-ir"
+                         :ir (js-object :$compilerCorpusJsonPatch (js-array (funcall ref "program.ir") (js-array (js-object :path (js-array "body" 0 "value") :negativeZero t)))))
+              :containsField (js-object :field "canonicalIR" :text "\"value\":-0"))
+            (js-object :id "negative-zero-read"
+              :request (js-object :operation "deserialize-ir" :canonicalIR (funcall ref "negative-zero.canonicalIR"))
+              :negativeZeroAt (js-array "body" 0 "value")))))))
+  (export loadOriginalCompilerCorpus compilerCorpusRequest)
+)

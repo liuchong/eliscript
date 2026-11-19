@@ -12,7 +12,7 @@
 
 Eliscript project builds now enter the seed toolchain through one explicit
 `ProjectRequest` operation. The request can be assembled by an Emacs caller,
-by ground command-line flags, or from a versioned `eliscript.json` file. Both
+by ground command-line flags, or from an `eliscript.json` file. Both
 ordinary and portable builds pass through `eliscript-project-execute` before
 the existing graph compiler is selected.
 
@@ -20,10 +20,10 @@ This specification introduced the first M9 configuration and service
 convergence slice. Version 1 intentionally describes one graph root and one
 entry because the public build artifact at that slice had one entry identity.
 Multi-entry graph identity, source-map policy, build profiles, namespaced host
-options, and self-hosted parsing require separate versioned specifications;
-they are not accepted as ignored version 1 fields. Specification 0124
+options, and self-hosted parsing require separate specifications; they are
+not accepted as ignored fields. Specification 0124
 subsequently adds optional,
-closed macro capability and file-input fields without changing version 1
+closed macro capability and file-input fields without changing this contract
 single-entry meaning.
 
 Application frameworks, bundlers, publishing tools, sites, hosting systems,
@@ -55,13 +55,12 @@ Eliscript.
 
 The conventional filename is `eliscript.json`. Configuration is activated
 explicitly with `eliscript-build --config FILE`; automatic upward discovery is
-not part of version 1.
+not part of this configuration.
 
 ```json
 {
-  "schemaVersion": 1,
   "sourceRoot": "src",
-  "entry": "main.eli",
+  "entries": ["main.eli"],
   "outDir": "dist",
   "portableEntries": [],
   "macroCapabilities": [],
@@ -70,7 +69,7 @@ not part of version 1.
 }
 ```
 
-`schemaVersion`, `entry`, and `outDir` are required. `sourceRoot` defaults to
+`entries` and `outDir` are required. `sourceRoot` defaults to
 `.` relative to the configuration directory. `portableEntries` defaults to an
 empty array and must contain unique non-empty strings. `cache` defaults to
 true and must be a JSON boolean. `macroCapabilities` and
@@ -106,7 +105,7 @@ semantics. More than one `--config` option is an error.
 
 ## M9 Boundary
 
-This specification completed the first usable versioned request contract and
+This specification completed the first usable request contract and
 shared seed project operation. At that point, filesystem graph discovery was
 still seed-owned, the self-hosted compiler did not execute the request, Node
 parity was pending, and single-file compilation had not become a one-module
@@ -114,14 +113,13 @@ project internally.
 
 Specifications 0107 through 0111 subsequently moved graph planning, reports,
 incremental policy, request normalization, and the public multi-file project
-command into the self-hosted service without changing this version 1 external
+command into the self-hosted service without changing this external
 configuration contract. Specifications 0112 and 0113 subsequently implement
-single-file convergence and version 2 multi-entry identity, closing M9 without
-changing configuration version 1.
+single-file convergence and multi-entry identity, closing M9.
 
 ## Compatibility Freeze
 
-The closed version 1 configuration schema, path semantics, defaults,
+The closed configuration schema, path semantics, defaults,
 command-line precedence, structured configuration diagnostics, and shared
 project-request entry operation are stable. Compatible additions require a
 new schema version or an already-declared extension contract; unknown version
@@ -130,7 +128,7 @@ core request implicitly.
 
 ## Acceptance Criteria
 
-- **VPR-01:** Direct flags and version 1 configuration both execute through
+- **VPR-01:** Direct flags and configuration both execute through
   `eliscript-project-execute`.
 - **VPR-02:** Required fields, defaults, booleans, portable names, and path
   containment are validated before project traversal.

@@ -96,11 +96,9 @@
            (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
            (errors (js-array)))
       (unless (and (plain-object? contract)
-                   (= (get contract :schemaVersion) 1)
-                   (= (get contract :format) "eliscript-source-debugging-corpus")
-                   (= (get contract :version) 1))
+                   (= (get contract :format) "eliscript-source-debugging-corpus"))
         (throw (new SourceDebuggingCorpusError
-                 (js-array "contract must use eliscript-source-debugging-corpus version 1"))))
+                 (js-array "contract must use eliscript-source-debugging-corpus"))))
       (let ((cases (if (Array/isArray (get contract :cases)) (get contract :cases) (js-array)))
             (tracked (new globalThis.Set)))
         (unless (json-equal (case-ids cases) expected-cases)

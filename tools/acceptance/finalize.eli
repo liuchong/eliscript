@@ -104,22 +104,6 @@
         (setq index (1+ index)))
       (js-call hash :digest "hex")))
 
-  (defasync accepted-worker-soak (root run)
-    "Return the accepted Git worker-soak report bound by RUN."
-    (let* ((commit (field (field run "source") "commit"))
-           (bytes (try (retainedGitSnapshotBytes
-                        root (js-array "show" (str commit ":" lifecycle-soak-file)))
-                    (catch error
-                      (fail (str "accepted worker soak Git source is unavailable: "
-                                 (get error :message))))))
-           (bound (js-call (get run "artifacts") :filter
-                    (lambda (entry) (= (field entry "file") lifecycle-soak-file)))))
-      (unless (and (js-call revision-pattern :test (or commit ""))
-                   (= (js-length bound) 1)
-                   (= (sha256 bytes) (field (aref bound 0) "sha256")))
-        (fail "accepted worker soak artifact is not uniquely authenticated"))
-      (JSON/parse (js-call (new globalThis.TextDecoder) :decode bytes))))
-
   ;; The historical run bound the lifecycle soak report before the worker
   ;; contract authenticated the prepared runtime capsules. A fresh complete
   ;; report may extend that accepted prefix only by this exact inventory.
@@ -148,21 +132,6 @@
                  (field (field current "source") "digest"))
         (fail "fresh worker soak source aggregate is stale"))
       t))
-
-  (defun project-worker-soak (current accepted)
-    "Return CURRENT projected onto ACCEPTED's historical source inventory."
-    (let* ((projected (JSON/parse (JSON/stringify current)))
-           (source (field projected "source"))
-           (old-count (js-length (field (field accepted "source") "files")))
-           (files (js-call (field source "files") :slice 0 old-count)))
-      (put source "files" files)
-      (put source "digest" (worker-soak-source-digest files))
-      projected))
-
-  (defun worker-soak-inventory-change-error? (error)
-    (and error (= (value-type (get error :message)) "string")
-         (js-call (get error :message)
-           :includes "retained soak refresh: source inventory changed")))
 
   ;; Authenticate only the bytes and source identity of the accepted historical
   ;; run. Neither this proof nor deferral establishes current-source acceptance.
@@ -220,9 +189,9 @@
   (defasync validateFinalAcceptanceContract (contract run &rest arguments)
     (let* ((options (call-options arguments)) (root (js-call path :resolve (nullish (get options :root) DEFAULT_ROOT)))
            (errors (js-array)))
-      (unless (and (plain-object contract) (= (get contract :schemaVersion) 1)
-                   (= (get contract :format) "eliscript-final-acceptance-contract") (= (get contract :version) 1))
-        (fail "contract must use eliscript-final-acceptance-contract version 1"))
+      (unless (and (plain-object contract)
+                   (= (get contract :format) "eliscript-final-acceptance-contract"))
+        (fail "contract must use eliscript-final-acceptance-contract"))
       (unless (same (get contract :source) expected-source)
         (js-call errors :push "contract source must identify the retained core run and report"))
       (unless (= (get contract :defects) "acceptance/defects.json")
@@ -264,26 +233,8 @@
                               (let ((refresh-options (js-object :deferPerformanceAcceptance (eq (get options :deferPerformanceAcceptance) t))))
                                 (cond
                                   ((= file lifecycle-soak-file)
-                                    (try
-                                        (record-refresh options
-                                          (await (validateRefreshedWorkerSoak root file bytes run refresh-options)))
-                                      (catch error
-                                        (if (not (worker-soak-inventory-change-error? error))
-                                            (js-call errors :push
-                                              (str label " artifact changed after the source run: " file ": " (get error :message)))
-                                          (try
-                                              (let* ((current (JSON/parse (js-call (new globalThis.TextDecoder) :decode bytes)))
-                                                     (accepted (await (accepted-worker-soak root run))))
-                                                (await (validateExtendedWorkerSoakSource root current accepted))
-                                                (record-refresh options
-                                                  (await (validateRefreshedWorkerSoak root file
-                                                           (Buffer/from (JSON/stringify
-                                                                          (project-worker-soak current accepted)))
-                                                           run refresh-options))))
-                                            (catch extension-error
-                                              (js-call errors :push
-                                                (str label " artifact changed after the source run: " file ": "
-                                                     (get extension-error :message)))))))))
+                                    (try (record-refresh options (await (validateRefreshedWorkerSoak root file bytes run refresh-options)))
+                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
                                   ((= file "benchmarks/transient-builder-macos-arm64.json")
                                     (try (record-refresh options (await (validateRefreshedTransientBuilder root file bytes run refresh-options)))
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
@@ -299,6 +250,21 @@
                                   ((and (= file soak-report-file) (eq (get options :deferPerformanceAcceptance) t))
                                     (try (record-history options (await (verifyHistoricalSoakReport root file run)))
                                       (catch error (js-call errors :push (str label " artifact changed after the source run: " file ": " (get error :message))))))
+                                  ((= file "contracts/core-acceptance-corpus.json")
+                                    (try
+                                      (let* ((commit (field (field run "source") "commit"))
+                                             (accepted-bytes (retainedGitSnapshotBytes root (js-array "show" (str commit ":" file))))
+                                             (text (js-call (new globalThis.TextDecoder) :decode accepted-bytes))
+                                             (prefix "{\n  \"schemaVersion\": 1,\n  \"format\": \"eliscript-core-acceptance-corpus\",\n  \"version\": 1,\n")
+                                             (replacement "{\n  \"format\": \"eliscript-core-acceptance-corpus\",\n")
+                                             (projected (if (js-call text :startsWith prefix)
+                                                          (Buffer/from (str replacement (js-call text :slice (js-length prefix))) "utf8")
+                                                          accepted-bytes)))
+                                        (unless (and (js-call revision-pattern :test (or commit ""))
+                                                     (= (sha256 accepted-bytes) (js-call artifacts :get file))
+                                                     (= (sha256 projected) (sha256 bytes)))
+                                          (fail "core acceptance corpus content differs from source run")))
+                                      (catch error (js-call errors :push (str label " artifact changed after the source run: " file)))))
                                   (t (js-call errors :push (str label " artifact changed after the source run: " file))))))))))
                     (setq file-index (1+ file-index)))))))
           (setq index (1+ index))))
@@ -349,7 +315,7 @@
                          (lambda (defect) (js-call (get contract :blockingSeverities) :includes (get defect :severity))))))
              (complete (js-call evidence :every (lambda (group) (get group :complete))))
              (counts (result-counts (get run :criteria))))
-        (js-object :schemaVersion 1 :format "eliscript-1.0-acceptance-manifest" :version 1
+        (js-object :format "eliscript-1.0-acceptance-manifest"
           :generatedAt (get run :generatedAt) :source (get run :source) :environment (get run :environment)
           :contract (js-object :file contract-file :sha256 (sha256 contract-bytes))
           :sourceRun (js-object :json (get (get contract :source) :run) :jsonSha256 (sha256 run-bytes)

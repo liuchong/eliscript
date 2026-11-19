@@ -69,11 +69,9 @@
   (defun validateIntegrityContract (contract)
     (let ((errors (js-array)))
       (when (or (not (is-plain-object contract))
-                (/= (get contract :schemaVersion) 1)
-                (/= (get contract :format) "eliscript-repository-integrity")
-                (/= (get contract :version) 1))
+                (/= (get contract :format) "eliscript-repository-integrity"))
         (throw (new RepositoryIntegrityError
-                    (js-array "contract must use eliscript-repository-integrity version 1"))))
+                    (js-array "contract must use eliscript-repository-integrity"))))
       (unless (and (safe-relative-path (get contract :packageManifest))
                    (safe-relative-path (get contract :lockfile)))
         (js-call errors :push "package manifest and lockfile must be safe relative paths"))
@@ -473,8 +471,7 @@
     (let ((tracked-set (new globalThis.Set tracked-files)))
       (when (or (not (is-plain-object report))
                 (/= (value-type (get report :format)) "string")
-                (not (js-call (get report :format) :startsWith "eliscript-"))
-                (not (Number/isSafeInteger (get report :version))))
+                (not (js-call (get report :format) :startsWith "eliscript-")))
         (throw (new RepositoryIntegrityError (js-array (+ filename " has invalid report identity")))))
       (if (is-plain-object (get report :sourceDigest))
           (let ((binding (get report :sourceDigest)))
@@ -665,9 +662,7 @@
                                   (js-object :root root :contract contract :trackedFiles tracked-files :compiler compiler)))
            (dependency (if (get options :artifactsOnly) undefined (await (checkDependencyBoundaries merged))))
            (artifacts (if (get options :dependenciesOnly) undefined (await (checkGeneratedArtifacts merged)))))
-      (js-object :schemaVersion 1
-                 :format "eliscript-repository-integrity-report"
-                 :version 1
+      (js-object :format "eliscript-repository-integrity-report"
                  :dependency dependency
                  :artifacts artifacts)))
 

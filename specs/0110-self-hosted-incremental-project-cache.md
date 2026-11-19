@@ -11,7 +11,7 @@
 
 ## Summary
 
-The self-hosted project service now reads, validates, migrates, and writes the
+The self-hosted project service reads, validates, and writes the
 same private incremental project-cache family as the seed compiler. Cache
 identity and module-reuse policy are implemented in Eliscript. A small
 standards-based host supplies filesystem facts, SHA-256 digests, canonical
@@ -22,15 +22,14 @@ bundlers, publishing systems, blog and site generators, hosting, and
 development servers remain replaceable application validation. They are not
 dependencies, design inputs, core goals, or maturity evidence for this cache.
 
-## Version 2 Identity
+## Cache Identity
 
-New manifests write a private cache object with an explicit family identity:
+Manifests write a private cache object with an explicit family identity:
 
 ```json
 {
   "cache": {
     "format": "eliscript-project-cache",
-    "version": 2,
     "compilerDigest": "<sha256>",
     "mode": "standard",
     "portableEntries": [],
@@ -49,25 +48,20 @@ New manifests write a private cache object with an explicit family identity:
 }
 ```
 
-The cache digest covers `format`, `version`, compiler identity, mode,
+The cache digest covers `format`, compiler identity, mode,
 normalized portable roots, and canonical module metadata before `digest` is
 added. When present, canonical module metadata includes the ordered declared
-macro input paths and digests. Public graph identity remains versioned
+macro input paths and digests. Public graph identity remains stable
 independently and does not expose private cache mechanics, but specification
 0124 places the same macro input records in public module identity.
 
-Version 1 cache records without `format` remain readable. They are never
-written. A successful standard reuse rewrites the manifest as version 2. A
-portable version 1 hit bypasses the complete-hit shortcut, repeats closure
-validation, reuses valid artifacts, and then writes version 2. Unsupported
-families or versions produce `cache-version-changed`.
+Cache records require `format: "eliscript-project-cache"` and closed allowed keys. Any record carrying an unknown field, a different format, or an unsupported shape produces `cache-format-invalid`.
 
 ## Compiler-owned Policy
 
 The generated compiler exports:
 
 - `project-cache-format`, equal to `eliscript-project-cache`
-- `project-cache-version`, equal to `2`
 - `project-cache-lookup`, which validates host-supplied manifest facts and
   returns canonical records or a stable miss reason
 - `project-cache-decision`, which decides whether one module is reusable
@@ -96,7 +90,7 @@ strings remain compatible with specification 0032.
 - computes public and private identity digests
 - supplies source and generated-artifact facts to compiler-owned policy
 - reconstructs verified modules without emission
-- writes a canonical version 2 cache after every completed build
+- writes a canonical cache after every completed build
 
 The same generated compiler directory has one compiler digest under Bun and
 Node. A cache written by either host is therefore reusable by the other.
@@ -124,9 +118,9 @@ specific reason while clean modules report `verified`.
 
 ## Acceptance Evidence
 
-- Pure Eliscript policy accepts current v2 and ground v1 records and rejects
+- Pure Eliscript policy validates canonical cache records and rejects
   incompatible or damaged identity facts.
-- Seed ERT proves v1 read compatibility and automatic v2 rewrite.
+- Seed ERT proves invalid cache format rejection and clean rebuild.
 - Cache-free seed, Bun, and Node builds remain byte-identical for ordinary and
   portable graphs.
 - Node fully reuses a standard and portable cache written by Bun.
@@ -137,19 +131,18 @@ specific reason while clean modules report `verified`.
 
 ## Compatibility Freeze
 
-The private cache version 2 identity, read-only version 1 migration, verified
+The private cache identity, verified
 artifact reuse, dependency-edge reuse, portable-closure revalidation,
 cross-host Bun/Node compatibility, and selective repair behavior are stable.
-Future cache layouts require explicit migration and must preserve public
+Future cache layouts must preserve public
 manifest, report, diagnostic, and generated-artifact semantics.
 
 ## Acceptance Criteria
 
-- **SIC-01:** New private cache metadata has format
-  `eliscript-project-cache`, version `2`, and a digest over its complete
-  canonical identity.
-- **SIC-02:** Version 1 metadata remains read-only compatible and migrates to
-  version 2 after a successful build.
+- **SIC-01:** Private cache metadata has format
+  `eliscript-project-cache` and a digest over its complete canonical identity.
+- **SIC-02:** Cache lookup rejects a record with an unknown field or a
+  different format with `cache-format-invalid`.
 - **SIC-03:** Cache lookup and module-reuse decisions are implemented in `.eli`;
   host code supplies effects and completed facts only.
 - **SIC-04:** Standard builds traverse verified cached dependency edges without

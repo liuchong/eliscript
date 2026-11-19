@@ -112,8 +112,14 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Install Chromium
         run: bun node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Build the prepared stage3
+        run: make bootstrap-release
+      - name: Prepare the release package
+        run: make prepare-release-package
       - name: Run test file shard 1/1 (performance reacceptance deferred)
         id: test-suite
+        env:
+          ELISCRIPT_PREPARED_STAGE3: "1"
         run: bun run test
       - name: Strict byte compilation
         if: "!cancelled() && steps.test-suite.outcome != 'skipped'"

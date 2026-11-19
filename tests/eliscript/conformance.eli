@@ -16,8 +16,7 @@
   (test "repository specifications have complete conformance evidence"
     (async ()
       (js-call (expect (await (checkContracts (js-object :root root)))) :toEqual
-        (js-object :schemaVersion 1
-          :specifications (js-object :total 181
+        (js-object :specifications (js-object :total 181
             :statuses (js-object :draft 2 :accepted 3 :stable 175 :superseded 1)
             :implementations (js-object "in-progress" 3 :implemented 176 :pending 1 :superseded 1)
             :coveredImplemented 176)

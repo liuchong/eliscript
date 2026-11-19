@@ -26,7 +26,6 @@
                 (js-call assert :strictEqual (get child :status) 1)
                 (js-call assert :strictEqual (get child :stdout) "")
                 (js-call assert :strictEqual (get record :format) "eliscript-compiler-cli-error")
-                (js-call assert :strictEqual (get record :version) 1)
                 (js-call assert :strictEqual (get (get record :error) :code) "ERR_PARSE_ARGS_UNKNOWN_OPTION")))
             (setq index (1+ index)))
           (finally (funcall restore))))) 30000))

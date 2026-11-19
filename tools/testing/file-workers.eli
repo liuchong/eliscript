@@ -1,11 +1,12 @@
 (module tools.testing.file-workers
   (import "node:path" basename dirname resolve isAbsolute)
+  (import "node:url" pathToFileURL)
   (import "node:fs" existsSync)
   (import "node:fs/promises" mkdir writeFile readFile rm stat)
   (import "node:crypto" createHash)
   (import "node:child_process" spawn)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
-  (import "./fixture-environment.mjs" fixtureChildArguments)
+  (import "./fixture-environment.mjs" fixtureChildArguments prepareFixtureEnvironment)
   (import "./final-functional-scope.mjs" runFinalFunctionalScope)
 
   ;; Compiler-heavy files keep a normal JSC heap under the same real RSS
@@ -306,31 +307,60 @@
                 :commandArgs (js-call arguments :slice (1+ sep-index))))))
         (t (throw (new globalThis.TypeError (str "Unsupported suite flag: " flag)))))))
 
+  (defun node-test-command? (arguments)
+    (and (js-call arguments :includes "--test")
+      (not (js-call arguments :some (lambda (argument)
+        (and (= (value-type argument) "string")
+          (or (js-call argument :endsWith "file-workers.mjs")
+              (js-call argument :endsWith "final-functional-scope.mjs"))))))))
+
+  (defun node-fixture-arguments (arguments source-root environment)
+    (let* ((preload (get environment :ELISCRIPT_TEST_FIXTURE_PRELOAD_PATH))
+           (url (get (pathToFileURL preload) :href))
+           (present (js-call arguments :some (lambda (argument index)
+             (or (= argument (str "--import=" preload)) (= argument (str "--import=" url))
+               (and (> index 0) (= (aref arguments (1- index)) "--import")
+                 (or (= argument url) (= (resolve source-root argument) preload))))))))
+      (if present arguments (js-call (js-array "--import" preload) :concat arguments))))
+
   (defasync spawn-suite-child (command args source-root environment)
-    (new globalThis.Promise (lambda (resolve-promise)
-      (let ((started-at (Date/now))
-            (settled false)
-            (child undefined))
-        (let ((finish (lambda (outcome)
-                        (when (not settled)
-                          (setq settled t)
-                          (funcall resolve-promise
-                            (Object/assign (js-object :elapsedMs (Math/max 0 (- (Date/now) started-at))) outcome))))))
-          (try
-            (progn
-              (setq child (spawn command args (js-object :cwd source-root :env environment :stdio "inherit")))
-              (js-call child :on "error" (lambda (error)
-                (funcall finish (js-object :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message)))))
-              (js-call child :on "close" (lambda (code signal)
-                (let ((exit-code (if (Number/isInteger code) code 1)))
+    (let ((fixture undefined))
+      (try
+        (await (new globalThis.Promise (lambda (resolve-promise)
+          (let ((started-at (Date/now)) (settled false) (child undefined))
+            (let ((finish (lambda (outcome)
+                    (unless settled
+                      (setq settled t)
+                      (funcall resolve-promise
+                        (Object/assign
+                          (js-object :elapsedMs (Math/max 0 (- (Date/now) started-at))) outcome))))))
+              (try
+                (progn
+                  ;; Makefile supplies the real package root. Each Node file
+                  ;; owns its scratch until its child closes. Do not mutate
+                  ;; the caller environment or generic suite commands.
+                  (when (and (node-test-command? args)
+                             (worker-optional environment "ELISCRIPT_TEST_FIXTURE_ROOT"))
+                    (setq fixture (prepareFixtureEnvironment
+                      (get environment :ELISCRIPT_TEST_FIXTURE_ROOT) environment))
+                    (setq environment (get fixture :environment))
+                    (setq args (node-fixture-arguments args source-root environment)))
+                  (setq child (spawn command args
+                    (js-object :cwd source-root :env environment :stdio "inherit")))
+                  (js-call child :on "error" (lambda (error)
+                    (funcall finish (js-object
+                      :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message)))))
+                  (js-call child :on "close" (lambda (code signal)
+                    (let ((exit-code (if (Number/isInteger code) code 1)))
+                      (funcall finish (js-object
+                        :exitCode exit-code
+                        :signal (if (nullish? signal) nil signal)
+                        :failure (if (/= exit-code 0)
+                          (if (worker-truth signal) (str "signal-" signal) "command-failed") nil)))))))
+                (catch error
                   (funcall finish (js-object
-                    :exitCode exit-code
-                    :signal (if (nullish? signal) nil signal)
-                    :failure (if (/= exit-code 0)
-                               (if (worker-truth signal) (str "signal-" signal) "command-failed")
-                               nil)))))))
-            (catch error
-              (funcall finish (js-object :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message))))))))))
+                    :exitCode 1 :signal nil :failure "spawn-error" :message (get error :message))))))))))
+        (finally (when fixture (js-call fixture :close))))))
 
   (defasync collectCommandArgDigests (source-root command-args)
     (let ((digests (js-object))
@@ -393,8 +423,7 @@
         (if (= mode "finalize")
           (let ((ledger-error (cond
                                 ((not (and saved (= (value-type saved) "object"))) "ledger-missing")
-                                ((or (/= (get saved :format) "eliscript-test-suite-ledger")
-                                     (/= (get saved :version) 1)) "invalid-ledger-format")
+                                ((/= (get saved :format) "eliscript-test-suite-ledger") "invalid-ledger-format")
                                 ((/= (get saved :suite) suite) "suite-mismatch")
                                 ((/= (get saved :runId) run-id) "run-id-mismatch")
                                 ((or (not (Array/isArray (get saved :steps)))
@@ -405,7 +434,6 @@
                 (console/error (str "Suite [" suite "] finalize rejected (" ledger-error "); ledger: " ledger-path))
                 (js-object
                   :format "eliscript-test-suite-ledger"
-                  :version 1
                   :suite suite
                   :runId run-id
                   :finalized false
@@ -464,7 +492,6 @@
                            :elapsedMs elapsed-ms))
                          (final-ledger (js-object
                            :format "eliscript-test-suite-ledger"
-                           :version 1
                            :suite suite
                            :runId (get saved :runId)
                            :finalized t
@@ -494,7 +521,6 @@
                            saved
                            (js-object
                              :format "eliscript-test-suite-ledger"
-                             :version 1
                              :suite suite
                              :runId run-id
                              :finalized false
@@ -530,10 +556,7 @@
                 (let* ((cmd (aref command-args 0))
                        (rest-args (js-call command-args :slice 1))
                        (test-mjs-args (js-call rest-args :filter (lambda (a) (and (= (value-type a) "string") (js-call a :endsWith ".test.mjs")))))
-                       (is-multi-node-test (and (js-call rest-args :includes "--test")
-                                                (not (js-call rest-args :some (lambda (a) (and (= (value-type a) "string")
-                                                  (or (js-call a :endsWith "file-workers.mjs")
-                                                      (js-call a :endsWith "final-functional-scope.mjs"))))))
+                       (is-multi-node-test (and (node-test-command? rest-args)
                                                 (> (js-length test-mjs-args) 1)))
                        (step-started-at (Date/now))
                        (step-row nil))

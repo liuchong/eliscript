@@ -324,7 +324,7 @@
                 (try
                   (js-call adapter :collect)
                   (try (while (< (js-length fillers) 2048)
-                         (js-call fillers :push (js-call adapter :number (js-length fillers))))
+                         (js-call fillers :push (js-call adapter :array)))
                     (catch error (setq failed t failure error)))
                   (js-call assert :strictEqual failed t "the unchanged slot limit must still reject exhaustion")
                   (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-RT0002")

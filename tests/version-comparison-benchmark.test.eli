@@ -28,7 +28,7 @@
       (js-object :metricsMs values :samplesMs samples :calibration calibrations)))
 
   (test "version dimension transport retains the measured latest compiler identity" (async ()
-    (let* ((identity (js-object :format "eliscript-prepared-stage3" :version 1
+    (let* ((identity (js-object :format "eliscript-prepared-stage3"
                        :fixedPointFileCount 338 :sourceSha256 (js-call "a" :repeat 64)
                        :productSha256 (js-call "b" :repeat 64)))
            (report (await (runVersionComparisonBenchmark (js-object :currentVersion "0.1.3"

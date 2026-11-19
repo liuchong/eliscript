@@ -227,7 +227,7 @@ by [Project configuration](project-configuration.md).
 
 Reader, macro, analysis, lowering, emission, project, and runtime failures have
 source locations where available. Public commands accept
-`--diagnostic-format human|json`; JSON diagnostics use the versioned
+`--diagnostic-format human|json`; JSON diagnostics use the
 `eliscript-diagnostic` schema. `--source-map` writes Source Map v3 output for a
 named output file.
 

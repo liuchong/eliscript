@@ -30,7 +30,7 @@
       (js-object :id (js-call (js-call command :replaceAll (new globalThis.RegExp "[^a-z0-9]+" "giu") "-") :replaceAll (new globalThis.RegExp "^-|-$" "gu") "")
         :command command :timeoutMs (get (get (get matrix :localEvidence) :timeoutsMs) command) :status "pass" :exitCode 0 :timedOut false :durationMs 1
         :stdoutSha256 EMPTY_SHA256 :stderrSha256 EMPTY_SHA256 :summary "passed")))))
-      (js-object :schemaVersion 1 :format "eliscript-local-compatibility-cell" :version 1 :generatedAt "2026-09-09T00:00:00.000Z" :matrixSha256 matrixSha256
+      (js-object :format "eliscript-local-compatibility-cell" :generatedAt "2026-09-09T00:00:00.000Z" :matrixSha256 matrixSha256
         :source (js-object :commit (js-call "1" :repeat 40) :tree (js-call "2" :repeat 40) :cleanBefore t :cleanAfter t)
         :execution (js-object :provider "local" :cell (get cell :id)) :cell cell
         :environment (js-object :provider "local" :operatingSystem (get cell :operatingSystem) :operatingSystemRelease "test" :architecture (get cell :architecture)
@@ -87,7 +87,7 @@
     (let ((value (report (aref (requiredMatrixCells matrix) 0))))
       (same (await (validateLocalMatrixReport value validationOptions)) (js-object :cell (get value :cell) :source (get value :source) :commands 3))
       (same (await (checkLocalMatrixEvidence (Object/assign (js-object) validationOptions (js-object :reports (js-array value) :sourceMatches (async () t)))))
-        (js-object :schemaVersion 1 :targeted 3 :required 1 :retained 1 :completed 1 :missing (js-array)
+        (js-object :targeted 3 :required 1 :retained 1 :completed 1 :missing (js-array)
           :optionalMissing (linuxIds) :stale (js-array) :currentSource t :complete t :sourceIdentity (js-call "3" :repeat 64))))))
   (test "historical reports do not count for changed source" (async ()
     (let ((value (report (aref (requiredMatrixCells matrix) 0))))

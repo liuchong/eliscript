@@ -28,7 +28,7 @@
       :exec (get proof :recordId))))
   (defconst runtime-file "runtime/unicode-case.mjs")
   (defconst runtime-path (resolve root runtime-file))
-  (unless (and (= (get proof :kind) "original-tools-data-reference") (= (get proof :version) 1)
+  (unless (and (= (get proof :kind) "original-tools-data-reference")
                record-match (= (aref record-match 1) (if globalThis.Bun "bun" "node"))
                (= (get configuration :target) "javascript")
                (= (realpathSync root) (realpathSync (get configuration :sourceRoot)))

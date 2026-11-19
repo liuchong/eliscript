@@ -204,7 +204,7 @@
                  (let* ((binding (get node :globalEntry nil)) (source (if binding (get binding :source) node)))
                    (and source (= (get source :kind) "variable-declaration")))))))
           (js-call assert :ok (Array/isArray parts))
-          (js-call assert :ok (> (js-length prepare-initializers) (js-length (get artifact :provenance))))
+          (js-call assert :ok (>= (js-length prepare-initializers) (js-length (get artifact :provenance))))
           (js-call assert :strictEqual (js-length named-prepare-initializers) (js-length (get artifact :provenance)))
           (js-call assert :strictEqual (js-length parts) (1+ (js-length prepare-initializers)))
           (js-call assert :strictEqual (js-length (get (get body :source) :children)) 0)

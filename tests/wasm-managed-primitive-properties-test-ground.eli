@@ -164,8 +164,11 @@
              (a (instantiateManagedRuntime bytes))
              (other (instantiateManagedRuntime bytes))
              (key (js-call a :string "missing"))
-             (foreign (js-call other :number 3))
-             (stale (js-call a :number 9)))
+             ;; Inline numbers own no slot and are heap-independent, so they can
+             ;; never be stale or foreign. Real dynamic string blocks carry a
+             ;; slot and a generation, which is what these refusals must observe.
+             (foreign (js-call other :string "foreign"))
+             (stale (js-call a :string "stale")))
         (js-call assert :throws
           (lambda () (js-call a :invoke "member" (js-array foreign key)))
           (lambda (err) (diag-code? err "ELI-RT0001")))
@@ -178,9 +181,9 @@
                (e (get inst :exports))
                (heap (funcall (aref e "heap-new") 64 8192 65536))
                (num (funcall (aref e "value-number") heap 0 0)))
-          (funcall (aref e "value-property-get") heap 4294967295 3 0)
+          (funcall (aref e "value-property-get") heap (globalThis.BigInt 4294967295) (globalThis.BigInt 3) 0)
           (js-call assert :equal (funcall (aref e "last-error")) 1)
-          (funcall (aref e "value-array-get") heap num 3 0)
+          (funcall (aref e "value-array-get") heap num (globalThis.BigInt 3) 0)
           (js-call assert :equal (funcall (aref e "last-error")) 1)
           (finish a (js-array key))
           (finish other (js-array foreign))))))
@@ -194,8 +197,12 @@
               (frame (js-call a :frame 1))
               (fillers (js-array)))
           (js-call a :frameSet frame 0 held)
-          (while (< (js-call a :live) 64)
-            (js-call fillers :push (js-call a :number 7)))
+          ;; A real one-slot value per iteration, with a finite bound: an inline
+          ;; number takes no dynamic slot and would never raise `live`.
+          (let ((steps 0))
+            (while (and (< (js-call a :live) 64) (< steps 256))
+              (js-call fillers :push (js-call a :array))
+              (setq steps (+ steps 1))))
           (js-call assert :throws
             (lambda () (js-call a :invoke "member" (js-array t key)))
             (lambda (err) (diag-code? err "ELI-RT0002")))
@@ -214,7 +221,11 @@
              (h (funcall (aref e "heap-new") 128 16384 131072)))
         (funcall (aref e "heap-auto") h 1)
         (let* ((raw-call (lambda (name &rest args)
-                           (let ((result (unsigned-bit-shift-right (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)) 0)))
+                           ;; Two-domain normalization: `u32` -> Number, `v64` -> BigInt.
+                           (let* ((raw (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)))
+                                  (result (if (= (value-type raw) "bigint")
+                                            (globalThis.BigInt.asUintN 64 raw)
+                                            (unsigned-bit-shift-right raw 0))))
                              (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                              result)))
                (make-text (lambda (value)
@@ -231,26 +242,26 @@
                (standard (funcall make-text "hasOwnProperty"))
                (num (funcall raw-call "value-number" 0 0)))
           (funcall raw-call "heap-pin" num)
-          (js-call assert :equal (funcall raw-call "value-standard-prototype-existing" 0) 0)
+          (js-call assert :equal (funcall raw-call "value-standard-prototype-existing" 0) (globalThis.BigInt 0))
           (let ((root (funcall raw-call "value-standard-prototype" 0))
-                (obj (funcall raw-call "value-object-new" 3)))
+                (obj (funcall raw-call "value-object-new" (globalThis.BigInt 3))))
             (funcall raw-call "heap-pin" obj)
-            (funcall raw-call "value-object-put" root key 2 2)
-            (js-call assert :equal (funcall raw-call "value-property-get" 1 key 0) 2)
-            (js-call assert :equal (funcall raw-call "value-property-get" num key 0) 2)
-            (js-call assert :equal (funcall raw-call "value-property-get" 2 missing 0) 3)
-            (funcall raw-call "value-object-put" root standard 1 2)
-            (js-call assert :equal (funcall raw-call "value-property-get" 2 standard 0) 1)
+            (funcall raw-call "value-object-put" root key (globalThis.BigInt 2) 2)
+            (js-call assert :equal (funcall raw-call "value-property-get" (globalThis.BigInt 1) key 0) (globalThis.BigInt 2))
+            (js-call assert :equal (funcall raw-call "value-property-get" num key 0) (globalThis.BigInt 2))
+            (js-call assert :equal (funcall raw-call "value-property-get" (globalThis.BigInt 2) missing 0) (globalThis.BigInt 3))
+            (funcall raw-call "value-object-put" root standard (globalThis.BigInt 1) 2)
+            (js-call assert :equal (funcall raw-call "value-property-get" (globalThis.BigInt 2) standard 0) (globalThis.BigInt 1))
             (funcall raw-call "heap-collect")
-            (js-call assert :equal (funcall raw-call "value-property-get" 1 key 0) 2)
+            (js-call assert :equal (funcall raw-call "value-property-get" (globalThis.BigInt 1) key 0) (globalThis.BigInt 2))
             (funcall raw-call "value-standard-prototypes-close")
             (funcall raw-call "heap-collect")
             (js-call assert :equal (funcall raw-call "value-standard-prototype-existing" 0) root)
-            (js-call assert :equal (funcall raw-call "value-property-get" num key 0) 2)
+            (js-call assert :equal (funcall raw-call "value-property-get" num key 0) (globalThis.BigInt 2))
             (funcall raw-call "heap-release" obj)
             (funcall raw-call "heap-collect")
-            (js-call assert :equal (funcall raw-call "value-standard-prototype-existing" 0) 0)
-            (js-call assert :equal (funcall raw-call "value-property-get" 1 key 0) 3)
+            (js-call assert :equal (funcall raw-call "value-standard-prototype-existing" 0) (globalThis.BigInt 0))
+            (js-call assert :equal (funcall raw-call "value-property-get" (globalThis.BigInt 1) key 0) (globalThis.BigInt 3))
             (js-call (js-array key missing standard num) :forEach (lambda (value) (funcall raw-call "heap-release" value)))
             (funcall raw-call "heap-collect")
             (js-call assert :equal (funcall raw-call "heap-live") 0)
@@ -264,7 +275,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((rt (js-call (get b :compiler) :compile_ir_string
                      (str (js-call text :slice 0 start)
-                          "  (defun heap-primitive-property-get (heap receiver key nullish) (load-u32 4294967295))\n"
+                          "  (defun heap-primitive-property-get (heap receiver key nullish) (memory-sig v64 u32 v64 v64 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                           (js-call text :slice end))
                      "primitive-trap.eli"))
                (a (instantiateManagedRuntime (make-artifact rt))))
@@ -461,10 +472,15 @@
              (e (get inst :exports))
              (h (funcall (aref e "heap-new") 64 16384 131072))
              (raw-call (lambda (name &rest args)
-                         (let ((value (unsigned-bit-shift-right (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)) 0)))
+                         ;; `u32` results stay host Numbers; `v64` results are
+                         ;; unsigned BigInt and cannot be folded with `>>>`.
+                         (let* ((raw (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)))
+                                (value (if (= (value-type raw) "bigint")
+                                         (globalThis.BigInt.asUintN 64 raw)
+                                         (unsigned-bit-shift-right raw 0))))
                            (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                            value)))
-             (receiver (funcall raw-call "value-object-new" 0))
+             (receiver (funcall raw-call "value-object-new" (globalThis.BigInt 0)))
              (text (funcall raw-call "value-string" 21))
              (sym (funcall raw-call "value-symbol-well-known" 0))
              (held (funcall raw-call "value-number" 0 2147483648))
@@ -487,7 +503,7 @@
                              (funcall raw-call "frame-depth"))))
                (check (lambda ()
                         (let ((before (funcall snapshot)))
-                          (js-call (js-array 1 2 receiver held) :forEach
+                          (js-call (js-array (globalThis.BigInt 1) (globalThis.BigInt 2) receiver held) :forEach
                             (lambda (owner)
                               (js-call (js-array text sym) :forEach
                                 (lambda (key)
@@ -496,10 +512,17 @@
                           (js-call assert :equal (funcall raw-call "frame-get" frame 0) held))))
                (fillers (js-array)))
           (funcall check)
-          (while (< (funcall raw-call "heap-live") 64)
-            (let ((value (funcall raw-call "value-number" 0 0)))
-              (funcall raw-call "heap-pin" value)
-              (js-call fillers :push value)))
+          ;; `value-number` with finite words is inline and takes no dynamic slot,
+          ;; so a real one-slot value is created per iteration under a finite bound.
+          (let ((steps 0))
+            (while (and (< (funcall raw-call "heap-live") 64) (< steps 256))
+              ;; `raw-call` folds results with `>>> 0`, which cannot accept a
+              ;; `v64`, so the allocating export is called directly.
+              (let ((value (funcall (aref e "value-array-new") h 0)))
+                (js-call assert :equal (funcall (aref e "last-error")) 0)
+                (funcall raw-call "heap-pin" value)
+                (js-call fillers :push value))
+              (setq steps (+ steps 1))))
           (funcall check)
           (js-call (js-call (js-array text sym receiver) :concat fillers) :forEach
             (lambda (value) (funcall raw-call "heap-release" value)))
@@ -514,10 +537,15 @@
              (e (get inst :exports))
              (h (funcall (aref e "heap-new") 64 16384 131072))
              (raw-call (lambda (name &rest args)
-                         (let ((value (unsigned-bit-shift-right (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)) 0)))
+                         ;; `u32` results stay host Numbers; `v64` results are
+                         ;; unsigned BigInt and cannot be folded with `>>>`.
+                         (let* ((raw (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)))
+                                (value (if (= (value-type raw) "bigint")
+                                         (globalThis.BigInt.asUintN 64 raw)
+                                         (unsigned-bit-shift-right raw 0))))
                            (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                            value)))
-             (receiver (funcall raw-call "value-object-new" 0))
+             (receiver (funcall raw-call "value-object-new" (globalThis.BigInt 0)))
              (good (funcall raw-call "value-string" 1))
              (unsealed (funcall raw-call "value-string" 1))
              (stale (funcall raw-call "value-string" 1))
@@ -531,22 +559,27 @@
         (funcall raw-call "heap-collect")
         (funcall raw-call "frame-set" frame 0 receiver)
         (funcall raw-call "heap-auto" 1)
-        (while (< (funcall raw-call "heap-live") 64)
-          (let ((value (funcall raw-call "value-number" 0 0)))
-            (funcall raw-call "heap-pin" value)
-            (js-call fillers :push value)))
+        ;; A real one-slot value per iteration under a finite bound.
+        (let ((steps 0))
+          (while (and (< (funcall raw-call "heap-live") 64) (< steps 256))
+            ;; Same reason: the `v64` result bypasses the `>>> 0` wrapper.
+            (let ((value (funcall (aref e "value-array-new") h 0)))
+              (js-call assert :equal (funcall (aref e "last-error")) 0)
+              (funcall raw-call "heap-pin" value)
+              (js-call fillers :push value))
+            (setq steps (+ steps 1))))
         (let ((before (js-array (funcall raw-call "heap-used") (funcall raw-call "heap-live") (funcall raw-call "heap-collections"))))
           (js-call
             (js-array
               (js-array receiver unsealed 6)
               (js-array receiver stale 1)
-              (js-array receiver 4294967295 1)
+              (js-array receiver (globalThis.BigInt 4294967295) 1)
               (js-array receiver frame 3)
-              (js-array 4294967295 good 1)
+              (js-array (globalThis.BigInt 4294967295) good 1)
               (js-array frame good 3))
             :forEach
             (lambda (item)
-              (js-call assert :equal (funcall (aref e "value-source-access-key") h (aref item 0) (aref item 1)) 0)
+              (js-call assert :equal (funcall (aref e "value-source-access-key") h (aref item 0) (aref item 1)) (globalThis.BigInt 0))
               (js-call assert :equal (funcall (aref e "last-error")) (aref item 2))
               (js-call assert :deepEqual
                 (js-array (funcall raw-call "heap-used") (funcall raw-call "heap-live") (funcall raw-call "heap-collections"))

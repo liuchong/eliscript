@@ -694,24 +694,31 @@ Emacs analysis / analysis-soak，worker lifecycle-soak，以及完整 256 MiB va
 | --- | --- | --- |
 | PERF13-01 | analysis 主项因 ASCII 规范化重复查表而退化；增加已规范 ASCII 身份路径，非 ASCII 与变更字符保留版本表算法。完整输入与原 2 倍门槛已通过，报告补齐真实 casing/生成器摘要。 | 实际性能失败至少 1 次；修复后 0 次。 |
 | PERF13-02 | HAMT 浏览器缺少迁移后的 runtime/bit 闭包及 import map；完整 500000/100000 操作、7 次计时与 20000 节点内存测量三宿主通过，32/24 不变。Node 预检复用同一 Bun 解析器，不依赖宿主位置。 | 原始浏览器超时 1 次；预检修复时 nil/undefined 分支错误 1 次，修正后保护通过。 |
-| PERF13-03 | 最终 Stage3 基线 SourceMap pipeline/compiler 为 1.028734/0.982600，仍未达 1.5/1.08。随后原生 try 候选完整原参数实测 1.040186/0.957035，等价 15/15、编译输出与 map 各 13/13，但未过两门槛，已撤回优化。此前 0.775/0.975 与 0.794/0.975 两个候选亦已撤回。 | 实际失败至少 6 次；两个早期行为候选与本次原生 try 候选均关闭，不以不同生成阶段或语义通过冒充性能通过。 |
+| PERF13-03 | 清除加载侧车后按原参数一次实测 pipeline/compiler 为 0.9983135024 / 1.0053714755，仍未达 1.5/1.08；等价 15/15、编译输出与 map 各 13/13。更早窗口为 1.028734/0.982600，原生 try 候选为 1.040186/0.957035；该优化与更早两个候选均已撤回。已完成只读根因拆解并撤回不等价改写，状态为未证明/未过，待解冻后重做与统一实测。 | 实际失败至少 7 次，含本次新来源基线 1 次；不重复同配置，不把认证修复或语义通过算作数值通过。后续候选须经过对称依赖布局验证。 |
 | PERF13-04 | 最终 Stage3 实测 Reader 完整编译 1.030099，仍未达 1.08。独立 predicate 倍率不能推导四个受控函数在完整编译中的占比，尚无数学不可达证明，不改门槛。 | 实际性能失败至少 2 次。 |
 | PERF13-05 | 最终 Stage3 实测缩进 4.446816；仅移除两臂共有校验循环的泛型比较与重复长度读取后，原参数一次实测 5.374567，仍未达 10。校验和 1023222133 不变，未改生产 emitter 或公开 fragment/getter 行为。原裸数字候选已撤回；split/join 改写仍须证明宿主覆盖与 getter 顺序等价。 | 实际性能失败至少 6 次，含本次控制层修复 1 次；早期行为候选 1 次失败。 |
 | PERF13-06 | 最终 Stage3 基线 transient Vector 时间比 0.772851，未达 1.5；分配比 0.269549 已满足 1/3。原生 try 候选原规模完整测量为 0.830965，仍未达 1.5；map/set 为 14.894/16.745，不能替代 Vector 门槛。该优化与此前两个无收益分派实验均已撤回。 | 正式性能失败至少 4 次；诊断分派实验 2 次，不冒充正式验收。 |
 | PERF13-07 | 已关闭：修正生成阶段后，最终 Stage3 三个独立进程、每路七个样本，原预算 11/11 通过。clean 中位数/最大值/离散比为 19.187/22.817ms/1.223，保持原 25/40ms/2 门槛；未预热或删首样本。 | 先前实际预算失败至少 2 次保持原记录；本次因生成阶段修复而重测一次，不能解释成所有历史冷启动失败均为同一根因。 |
-| PERF13-08 | 已交付 v1 来源接线：单一最终 Stage3 认证覆盖 14 份报告与 PERF-02 latest，核验 13 编译器声明模块与 8 根 runtime capsule；九份数值通过，五份数值失败另列，不覆盖历史报告。后续发现 package 侧车能改变裸导入的实际运行时，完整加载路径保证仍须由 PERF13-11 补齐。 | 真实 prepared 克隆、声明文件篡改/重定向拒绝、22 输入变更保护、四条 Emacs 桥及完整 worker 组合已通过。nil/undefined 两次定向失败已纠正；sentinel 缺陷已修复并按原规模重测，历史失败计数保留。 |
+| PERF13-08 | 已完成来源证书接线：单一最终 Stage3 认证覆盖 14 份报告与 PERF-02 latest，核验 13 编译器声明模块与 8 根 runtime capsule；九份数值通过，五份数值失败另列，不覆盖历史报告。后续发现 package 侧车能改变裸导入的实际运行时，完整加载路径保证由 PERF13-11 补齐。 | 真实 prepared 克隆、声明文件篡改/重定向拒绝、22 输入变更保护、四条 Emacs 桥及完整 worker 组合已通过。nil/undefined 两次定向失败已纠正；sentinel 缺陷已修复并按原规模重测，历史失败计数保留。 |
 | PERF13-09 | 最终 Stage3 基线四维 15/18 通过，失败为 take-last 0.179785/0.148862 µs、zipper 1.095898/1.057777 ms、score 1.506457/1.504721 ms。随后原生 try 候选一次完整四维仅 13/18 通过，last/take-last/same-ref/zipper/score 均慢于 0.1.2，优化已撤回；不把全部波动归因到该优化。 | 完整比较实际失败 3 次，保留此前 last/take-last/same-ref 失败记录；两个最终产物窗口均收齐全维度，previousMajor 在 0.x 合法 absent，不计通过项。不原样重跑或按舍入值判过。 |
 | PERF13-10 | 最终 Stage3 locate 为 1.091314；移除共有校验循环的泛型比较与重复长度读取后，原参数一次实测 1.039105，仍未达原 1.75 门槛。校验和 1969044019 不变；两臂绝对耗时下降不能作为生产 locate 提速或门禁通过。 | 正式性能失败 2 次，含本次控制层修复 1 次；未改门槛、未原样重跑。 |
-| PERF13-11 | 准备布局的未认证 seed 侧车将裸导入导向旧运行时：实际 prelude 摘要 577b8846…，认证目标 58863998…。现已拒绝 `dist/bootstrap/package.json` / `dist/runtime/package.json`，正式 prepare 清除生成侧车，并采用五键 v2 来源证书。先证明旧状态被拒绝，再正式准备；Bun 实际解析 8/8 到认证 `dist/runtime/`，与根 capsule 字节相等，338 文件源/产物身份不变。 | 实际来源核验缺口 1 次；保护与实际安装组合 8/8 通过，无延期。七个 compiler 入口及 Core 存在侧车或混合加载；另六个直接根 runtime 入口未经过该 compiler 侧车，不猜数值影响。历史报告字节不改、不补绑证书，正式报告刷新尚待真实测量。 |
+| PERF13-11 | 准备布局的未认证 seed 侧车将裸导入导向旧运行时：实际 prelude 摘要 577b8846…，认证目标 58863998…。现已拒绝 `dist/bootstrap/package.json` / `dist/runtime/package.json`，正式 prepare 清除生成侧车，并按精确四字段（`format`、`fixedPointFileCount`、`sourceSha256`、`productSha256`）核验来源。先证明旧状态被拒绝，再正式准备；Bun 实际解析 8/8 到认证 `dist/runtime/`，与根 capsule 字节相等，338 文件源/产物身份不变。 | 实际来源核验缺口 1 次；保护与实际安装组合 8/8 通过，无延期。七个 compiler 入口及 Core 存在侧车或混合加载；另六个直接根 runtime 入口未经过该 compiler 侧车，不猜数值影响。历史报告字节不改、不补绑证书，正式报告刷新尚待真实测量。 |
 
-#### 当前发布收口总清单（2026-11-14）
+#### 当前发布收口总清单（2026-11-15）
+
+- **汇报与协作配置（`project-visibility` L2）**：界面采用安静施工 + Codex 约每 30 分钟合并摘要；Antigravity 任唯一工程指挥并独占串行化重型 CPU/WASM 窗口，OpenCode 按互斥文件并行编码交回，Codex 负责节奏监管与独立终审。
+- **当前实时进度边界（实现进度与已验收交付分开，不虚构混合总百分比）**：
+  - **严格容量与功能收口（Batch A）**：`Wire8192`（`5/5`）、`wasm-memory-allocator`（`61/61`）、`native-managed-runtime`（`32/32`）、`release-package-install-selfhosted`（`8/8`）、Emacs 32.0.50 完整清单 ERT（`305/305`）与局部回归（`313/313`）、`./bin/eliscript-clean` 三方验收均属后续运行时与发射器改源前的历史修订证据，保留历史事实，不计为当前候选整批通过。`PL1024`：`stdlib/managed-*.eli` 的 141 处 `lambda-this` 已迁移，已知该路径无效句柄问题已处理，不表示全库所有 `ELI-RT0001` 已排除，冷清理后端生成（`27.351s`）已通过；最新一次正式原 `1024` 槽门禁运行仍为 `0/20`（`ELI-RT0002`，未接受）。扩槽诊断在混合宿主模块边界图下测得 `prepare()+GC` `387` live、`load()+GC` `1017` live（含模块调用及内部链接对比诊断时更高），均属诊断观察而非 `1024` 原预算通过，不同配置下不直接跨组换算节省比例；当前由 Antigravity 在 `bootstrap/runtime/memory.eli`、`bootstrap/backends/managed.eli`、`stdlib/managed-*.eli` 内继续压降常驻与峰值句柄并负责串行统一验证。编译器/Vector 切片：OpenCode 9 文件（三端 `proven-number` 第六轮遍历发射与 `vector.eli` 去反射调用）及前序 6 文件保护性测试已完成源码修复，并经 Antigravity 与 Codex 独立源码复核关闭前述具体源码阻塞；作者局部检查（`151` ERT、`12` 组三端对照、`13` 模块字节一致、`12/12` `transient`）仅为局部行为证据，不等于全量 `338/338` 固定点或正式性能门禁通过，现冻结等待统一构建验收窗口。
+  - **性能门禁收口（Batch B）**：当前源码与精确四字段（`format`、`fixedPointFileCount`、`sourceSha256`、`productSha256`）来源证书下，`14` 份正式报告的已验收数值与来源通过仍为 `0/14`（历史数值通过 `9/14`、未过 `5/14`，对应 `PERF13-03/04/05/06/10` 五份正式报告；另 `PERF13-09`（`PERF-02` 四维比较历史 `15/18`）单列，合计 `6` 组数值门槛未关闭）。剩余 `4` 组编译器门禁（`PERF13-03/04/05/10`）已完成只读根因拆解与正式规格边界对齐（`specs/0098`、`0099`、`0101`、`0102`），撤回不等价的 spread/regex 改写与无耗时下界证明的不可达表述，状态为未证明/未过；`reader` 局部数值判别采用不触发宿主全局属性读取的 `typeof === "number"`，`locate` 优化须保留现有迭代/`Get`/异常语义并给出完整等价证明，方案待定。因与 Batch A 共享 `bootstrap/compiler/emitter.eli`，Batch B 生产代码暂保持冻结，待 Batch A 统一验收合拢后解冻实施与统一实测。
+  - **严格全门禁与远端交付（Batch C）**：移除 `Makefile` 临时 `--functional-runtime-profile small` 与 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1`、三输出完整语料（`797×3`）、`35` 项 AC/PD 与 `2` 项 AV、最终 SHA 实际 tarball 安装、`m13-01`/`manifest`、同一最终签名 SHA 的 `4` 条远端 GitHub Actions 全绿及三方独立终审均待完成（已验收 `0`）。
+- **设计对齐与卡点**：无偏离有效设计、无放宽 `maxSlots` 或性能门槛；当前主线卡点仍为将 `PL1024` 完整受管核心模块图的常驻槽数压入原预算 `<= 1024`（并留运行期余量），下一责任人：Antigravity（`PL1024` 槽位收敛与 Batch A 统一构建验收窗口）、OpenCode（完成本节进度入口事实同步后释放该文档写锁待命）、Codex（节奏监管与批次候选独立审验）。
 
 唯一进度入口沿用本节。当前尚未关闭的数值门槛共 **6 组**：PERF13-03 至 PERF13-06、
 PERF13-09、PERF13-10；五组是报告数值失败，一组是四维比较的失败。
-另有实际加载来源问题 PERF13-11 的认证门修复已验证，正式报告尚待刷新；它独立于这六组数值门槛，不能把此前声明
+另有实际加载来源问题 PERF13-11 的认证门修复已验证，正式报告尚待按最终产物刷新；它独立于这六组数值门槛，不能把此前声明
 清单哈希通过解释成实际加载字节已经验收。
-PERF13-07 已有实际预算通过证据，PERF13-08 的 v1 接线与保护验证已交付；历史失败保留，
-v1 未覆盖的实际依赖解析问题按 PERF13-11 单列。
+PERF13-07 已有实际预算通过证据，PERF13-08 的来源证书接线与保护验证已交付；历史失败保留，
+早期接线未覆盖的裸导入依赖解析问题按 PERF13-11 单列。
 此外本批契约检查首次 16/17，发现历史 soak 验收器仍限定旧来源清单，拒绝扩充到
 43 项的真实重测报告。OpenCode 完成精确 26 项旧前缀加 17 项准备运行时输入的核验，
 逐文件/总摘要验真后继续调用原工作量、恢复、内存与历史 Git 校验；Codex 独立 11/11
@@ -722,18 +729,18 @@ v1 未覆盖的实际依赖解析问题按 PERF13-11 单列。
 
 | 范围及固定分母 | 最近证据 / 百分比 | 当前剩余动作与责任 |
 | --- | --- | --- |
-| 14 份正式报告 | 历史数值通过 9/14（64.3%）、未通过 5/14（35.7%）；发现 PERF13-11 后，完整实际加载来源验收为 0/14（0%），待补 14/14（100%） | 旧九份声明哈希与 v1 证书核对通过仍保留为历史事实，不冒充实际解析路径已核验。修复布局后由正式入口重新测量并产生 v2 证书；五份历史失败字节保持，数值门槛不改，不重绑旧测量。 |
-| PERF-02：9 项对 Emacs + 9 项对 0.1.2 | 最终 Stage3 15/18 比较通过（83.3%），take-last/zipper/score 未过 | Codex 保持未舍入中位数、原输入与样本，修复真实缺陷后整轮复测。不得把次数比当工期或项目完成率。 |
-| 最终四阶段自举 | 最近 338/338 文件一致（100%） | 受测量接线后续改源影响的部分在批次边界重新认证；不每次小编辑重跑。 |
-| 实际 tarball | v2 来源修复后实际安装检查 8/8，4968570 字节，25.48s，无跳过 | 包括真实 Emacs 桥保护、两处影子包拒绝与恢复、旧证书降级拒绝、.elc 探针、普通 .el/.eli CLI 与安装后 JS/WASM/native；原 <5MB 守卫通过。最终发布仍须同一最终 SHA/实际包重新认证；尚未授权发布。 |
-| 契约与重建 | 本批初次契约 16/17，唯一失败修复后独立复验通过；干净候选完整构建、22 项测试与 50 个选定 JS/map 同字节 | 干净候选的四条桥均拒绝 seed、零残留；只对所比对的 50 个输出声明字节一致，不冒充整仓或最终四阶段完整兼容矩阵。 |
-| 本地功能入口 | Makefile 显式去重 392 个 .test.mjs，另有 shell 与 ERT 门禁；当前 Emacs 32.0.50 的完整 ERT 305/305 通过 | ERT 使用 Makefile 原有 20 个装载文件，0 unexpected；不替代 392 文件、shell 或跨输出执行。保留未受改源影响的有效证据，完成本批受影响入口及最终套件对账；静态列举不是 392 文件执行通过。 |
+| 14 份正式报告 | 历史数值通过 9/14（64.3%）、未通过 5/14（35.7%）；当前源码与四字段来源证书下已验收 0/14（0%），待补 14/14（100%） | 旧九份声明哈希与早期证书核对通过仍保留为历史事实，不冒充实际解析路径已核验。修复布局后由正式入口重新测量并产生四字段来源证书；五份历史失败字节保持，数值门槛不改，不重绑旧测量。 |
+| PERF-02：9 项对 Emacs + 9 项对 0.1.2 | 最终 Stage3 历史 15/18 比较通过（83.3%），take-last/zipper/score 未过；当前候选未重测 | Codex 保持未舍入中位数、原输入与样本，修复真实缺陷后整轮复测。不得把次数比当工期或项目完成率。 |
+| 最终四阶段自举 | 最近记录 338/338 文件一致（100%）属本次运行时与发射器改源前的历史证据 | 待 Batch A 统一构建窗口对当前源码重新认证；不每次小编辑重跑。 |
+| 实际 tarball | 来源修复后历史实际安装检查 8/8，4968570 字节，25.48s，无跳过 | 包括真实 Emacs 桥保护、两处影子包拒绝与恢复、旧证书降级拒绝、.elc 探针、普通 .el/.eli CLI 与安装后 JS/WASM/native；原 <5MB 守卫通过。最终发布仍须同一最终 SHA/实际包重新认证；尚未授权发布。 |
+| 契约与重建 | 本批初次契约 16/17，唯一失败修复后独立复验通过；干净候选完整构建、22 项测试与 50 个选定 JS/map 同字节（改源前证据） | 干净候选的四条桥均拒绝 seed、零残留；只对所比对的 50 个输出声明字节一致，不冒充整仓或最终四阶段完整兼容矩阵。 |
+| 本地功能入口 | Makefile 显式去重 392 个 .test.mjs，另有 shell 与 ERT 门禁；Emacs 32.0.50 完整清单 ERT 305/305 与局部回归 313/313 均为改源前历史证据 | ERT 使用 Makefile 原有 20 个装载文件，0 unexpected；不替代 392 文件、shell 或跨输出执行。保留未受改源影响的有效证据，完成本批受影响入口及最终套件对账；静态列举不是 392 文件执行通过。 |
 | 全库 Eliscript 与嵌入 JS 清理 | 维护 .eli 1370 个；含 token 的 704 个候选已语法解析 704 个 | 深嵌套 multimethod 夹具补齐官方 reader 解析，审计快照真实 js* 节点 3484 个（生产 1071、测试 2413）；后续测试新增两条动态 import 薄桥另计。未发现大型生产算法 capsule；测试 PRNG 与阻塞 worker 均为独立宿主刺激。这是覆盖清点，不是纯净度或项目完成率。 |
 | 三输出完整语料 | 当前官方维护源完整生成 797 条、1280 项 requiredCoverage；三输出完整执行均未验收 | 从干净 Git 维护源分别重建 745603c6 和迁移前 3381ff09，两者的 797 个记录 ID 均与当前完全相同。当前规范分母采用可重建的 797×3；旧运行确曾输出 861，但完整冻结输入及其来源不可复核，单列为未认证历史，不猜根因、不虚构补齐、不计当前通过。 |
 | 本地兼容环境 | 本次固定 macOS arm64 Emacs 32.0.50 + Bun 1.4.0、Node 24.20.0；政策接线测试 51/51 通过 | 用户明确后续只升不降，仅当官方稳定版高于 32.0.50，或用户明确要求时调整；29.4/30.2 不再作为当前支持与验收要求，历史报告不改写为当前通过。矩阵为三目标、一必需本地 cell；五份工作流均固定同一 Emacs 源码提交，远端构建及完整本地 cell 仍待验收。 |
 | 35 项 AC/PD 与 2 项 AV | 历史 core audit 为 35/35；当前候选未完成同来源复核 | Core 35 项沿 contracts/core-acceptance-corpus.json 与完整功能探针评估；AV-01/02 应用单独验收，不混入 core 百分比。旧 manifest 不改写成当前通过。 |
-| 最终签名 SHA 的 4 个远端门禁 | 政策提交 7139c613 的 Pages、Browser、Compiler 均通过；修复提交 bd01517c 的 Pages 通过、Compatibility 已进入实际测试且仍在执行 | CI13-01 的 runner 启动修复已远端生效，完整测试尚未验收。Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；不同提交的通过结果不拼成最终全绿。 |
-| 三方独立终审与交付清理 | Codex、OpenCode、Antigravity 必须分别对同一最终冻结来源作全方位真实检查；当前阶段窄审不能代替终审 | Codex 主导分工与最终裁决；OpenCode、Antigravity 每次交回列清进行中、剩余与下一责任人。终审分别保留发现、执行覆盖、未验缺口及结论，三方核收后才可宣布达到发布质量；签名推送后清理用完输出，实际发布仍等待用户命令。 |
+| 最终签名 SHA 的 4 个远端门禁 | 政策提交 7139c613 的 Pages、Browser、Compiler 均通过；修复提交 bd01517c 当时记录 Pages 通过、该次 Compatibility 完整测试未完成验收；当前候选 CI 待同一最终签名 SHA 重跑验收 | CI13-01 的 runner 启动修复已远端生效，完整测试尚未验收。Compatibility、Browser compatibility、Compiler bootstrap/final outputs、Pages 须在最终同一 SHA 收齐成功；不同提交的通过结果不拼成最终全绿。 |
+| 三方独立终审与交付清理 | Codex、OpenCode、Antigravity 必须分别对同一最终冻结来源作全方位真实检查；当前阶段窄审不能代替终审 | Antigravity 负责工程分工与修复推进；Codex 负责需求、节奏监管、独立最终验收与争议最终裁决；OpenCode 直接向 Antigravity 交回结果，每次交回列清进行中、剩余与下一责任人。终审分别保留发现、执行覆盖、未验缺口及结论，三方核收后才可宣布达到发布质量；签名推送后清理用完输出，实际发布仍等待用户命令。 |
 
 十四份报告逐项对账：最终 Stage3 数值与来源通过的有
 compiler-runtime-scan、compiler-ir-kind、compiler-binary-comparison、HAMT、core-performance；
@@ -899,3 +906,158 @@ tree 与报告 SHA，保持当前性能 NOT ACCEPTED，原 run、manifest、mark
 后全部通过，不把缺少 Git 对象改成免验。以上是本批范围的通过，仍有 5/14 性能报告、
 四维原三项与最终签名 SHA 的四个远端门禁未通过。已用完的源码快照、历史工作树、
 日志、包与生成物在本批签名交付后清理；正式输入、生成规则与必要结论均在 Git。
+
+#### 0.1.3 单人最终收口验收总账与二进制性能延期登记册（2026-11-20）
+
+- **唯一认证候选身份（`reportIdentity` 四字段与打包制品摘要）**：
+  - `format`: `"eliscript-prepared-stage3"`
+  - `fixedPointFileCount`: `343`（冷自举 Stage 0→3，Stage 2 与 Stage 3 共 `343/343` 文件逐字节完全一致）
+  - `sourceSha256`: `"320221cbb403e6f14bb1412ca16ff7f270c1b2529b5d0eec5fb8f03b20ba96f8"`
+  - `productSha256`: `"abfcb8ec686bd766216a2bc014255cf793677ed5222d885835c1841b924ff232"`
+  - `packagedProductIdentity.sha256`: `"2623e611855e56b75f87d34a9a3e04ecb4119b0309f7bd1faf04614193652722"`
+  - `corpusRecordsSha256`: `"9bc1b531588695e79447b15824086c1913fee7df3e3ce14849fc4eef433ba49c"`
+
+- **一、JavaScript 全量验收（严格配置：原输入规模与原阈值，未启用 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE` 或 `--functional-runtime-profile small`）**：
+  - **严格 JS 797 语料**：有效范围 `795/795` 全部 `equivalent` 通过，`0` 失败，`0` `resourceDeferred`；另有 `2` 条已移交独立门禁的记录标为 `cancelled`（不计入语料通过数），并在原入口严格无延期实跑通过（`original-program:compiler-cli-bootstrap-generations` 对应 `tests/bootstrap-compiler.test.mjs`，`original-managed-suite:complete-fixture-suites` 对应 `make test` 核心与应用套件）。
+  - **14/14 份 `benchmarks/*.json` 正式基准报告 + 2/2 份 `tools/backends/results/native-{baseline-,}macos-arm64.json` 报告**：全部绑定上述四字段 `reportIdentity`，经 `tools/integrity/check.mjs`（`14 reports, 666 source bindings, 0 JavaScript, 840 Eliscript`）及 14 个无延期基准门禁测试 `14/14` 通过（`compiler-binary-comparison` `4.622x >= 1.15x`、`compiler-indent` `10.468x >= 10x`、`compiler-ir-kind` `14.327x >= 1.5x`、`compiler-locate` `4.054x >= 1.75x` 且精确 `42/28/70` 定位块、`compiler-reader-character` 谓词 `1.495x` / 完整编译器 `1.108x >= 1.08x`、`compiler-runtime-scan` `7.345x >= 1.25x`、`compiler-source-map-cursor` 管线 `4.319x >= 1.5x` / 完整编译器 `1.092x >= 1.08x`、`core-performance` `11/11` 含 `build.clean` `20.343ms / 21.149ms / 1.095`、`hamt-layout` 三宿主 `32/24`、`transient-builder` Vector `10.033x` / Map `14.270x` / Set `16.692x` 且分配比 `0.2695 <= 1/3`、`emacs-analysis` `9.076x >= 2x`、`emacs-analysis-soak` `100/100` 中位数 `0.519ms`、`worker-lifecycle-soak` `100,000` 请求合计峰值 `163,504 KiB <= 786,432 KiB`、`worker-value-stream` `256 MiB` 合计峰值 `139.55 MiB <= 2560 MiB`）。
+  - **`PERF-02` 四维独立版本比较（`tools/performance/version-comparison.mjs`，对比 Emacs `32.0.50` 与 `v0.1.2`）**：`18/18` 全部通过（`9/9` 对比 Emacs `32.0.50`、`9/9` 对比 `v0.1.2`：`first10k` `0.00556µs < 0.00818µs`、`last10k` `0.000227µs < 0.00300µs`、`takeLast10k` `0.1267µs < 0.1484µs`、`equalSameRef10k` `0.00235µs < 0.00251µs`、`sort10k` `0.3150ms < 0.5362ms`、`groupBy10k` `0.2439ms < 0.4934ms`、`frequencies100k` `2.0624ms < 6.6503ms`、`zipper12k` `1.0570ms < 1.1517ms`、`scoreValues` `1.5972ms < 1.8454ms`）。
+  - **契约、运行时、编辑器、CLI、浏览器与应用门禁**：`check-contracts` `17/17`（核心实现里程碑 `42/42`、核心验证准则 `AC-01..AC-24` 与 `PD-01..PD-11` 共 `35/35`、应用边界准则 `AV-01..AV-02` 独立验证）、Emacs `32.0.50` ERT `314/314`（`0 unexpected`）与严格 `make byte-compile`（零警告且已回收 `.elc`）、Bun `1.4.0` 核心 `314` 文件与应用 `26` 文件、Node `24.20.0` 自举套件 `48` 文件及 `originals/artifact` 套件、5 项 CLI 套件 `5/5`、三引擎浏览器矩阵 `make check-browsers` `9/9`（Chromium `156.0.8078.4`、Firefox `157.0`、WebKit `27.2`）全部通过。
+
+- **二、Managed WASM 与 Native（`arm64-macos`）功能与严格容量验收**：
+  - **官方三目标分片语料（`861` 条分片记录，`node --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest dist/bootstrap-release/bootstrap.json --output <dir> --native-target arm64-macos --functional-runtime-profile small`）**：
+    - `javascript`（`small` 对照）：有效 `853/853` `equivalent` 通过，`2` 条 `cancelled`（不计通过），`6` 条百万值 `resource-deferred`（不计通过；已在上方严格 JS `797` 原规模语料中 `100%` 实跑通过），`0` 失败。
+    - `wasm`：有效 **`812/812` `equivalent` 通过**，`0` 失败，`0` `different`；`35` 条二进制编译器宿主记录标为 `cancelled`（不计通过），`14` 条压力/容量项标为 `resource-deferred`（不计通过，逐项登记见表 A）。
+    - `native`（`arm64-macos`）：有效 **`812/812` `equivalent` 通过**，`0` 失败，`0` `different`；`35` 条 `cancelled`（不计通过），`14` 条 `resource-deferred`（不计通过，逐项登记见表 A）。
+  - **严格容量、回滚与生命周期契约（未启用 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE` 或 `small`）**：
+    - `PL1024`（`tests/wasm-managed-persistent-literals.test.mjs`，原预算 `maxSlots: 1024, initialBytes: 65536, maxBytes: 16777216`）：原 **`20/20` 严格通过**。
+    - `C65`（`tests/compiler-portable-reader.test.mjs`，原预算 `maxSlots: 256, initialBytes: 8192, maxBytes: 16384`）：统一 `Val64` 内存与槽位回收生效后，无延期严格运行 **`21/21` 全部通过**（`0` 失败、`0` 跳过，由历史容量延期转为严格通过）。
+
+- **三、公共交付验收与发布边界**：
+  - **Git 干净源码树冷重建（`clean-rebuild`）**：在剥离全部生成 `.mjs`、缓存与历史产物的独立克隆树中完成冷构建与定向契约复验，验证零隐藏缓存依赖后已完整回收临时目录。
+  - **真实打包与独立安装（`make check-release-package`）**：**`8/8` 全部通过**，`eliscript-0.1.3.tgz` 体积 **`4,962,433` 字节**（满足 `< 5,000,000` 字节门禁），独立目录安装后通过公开 CLI 实际编译并运行同一输入的 JavaScript、Managed WASM 与 Native 三目标产物。
+  - **严格遵守未授权发布禁令**：`package.json` 版本号保持 `"0.1.3"` 未变，未执行 `npm publish`，未创建 Git tag 或 GitHub Release，等待刘冲另行明确发布指令。
+
+##### 表 A：Managed WASM 与 Native 语料压力/容量显式延期清单（`14` 个语料 ID × `2` 目标 = `28` 条目标记录，均标为 `DEFERRED / NOT ACCEPTED`，不计入通过数）
+
+统一复现入口（移除 `--functional-runtime-profile small` 与 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE` 即可单独触发原规模压力门）：
+`node --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest dist/bootstrap-release/bootstrap.json --output dist/repro-deferred --native-target arm64-macos`（或运行下表所列原套件文件）。
+
+| 序号 | 目标 | 用例 ID | 原输入规模与原阈值 | 当前实际结果 | 影响与未验证断言范围 | 对应源文件与独立复现入口 |
+| ---: | --- | --- | --- | --- | --- | --- |
+| 1 | `wasm`, `native` | `stable-compatibility:program:persistent-core-exit-vector` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（语料级全量宿主一致性对照）标记为 `unverified` | `tests/fixtures/persistent-core-exit-host.mjs`、`stdlib/value.eli` |
+| 2 | `wasm`, `native` | `stable-compatibility:program:persistent-core-exit-map` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（语料级全量宿主一致性对照）标记为 `unverified` | `tests/fixtures/persistent-core-exit-host.mjs`、`stdlib/value.eli` |
+| 3 | `wasm`, `native` | `stable-compatibility:program:persistent-core-exit-set` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（语料级全量宿主一致性对照）标记为 `unverified` | `tests/fixtures/persistent-core-exit-host.mjs`、`stdlib/value.eli` |
+| 4 | `wasm`, `native` | `stable-compatibility:program:tests/fixtures/persistent-zipper.eli` | 二进制目标完整树深层持久 Zipper 压力作业；原 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | JS 严格模式与 `PERF-02` `zipper12k` 已通过；二进制目标完整 Zipper 压力作业断言（语料级全量宿主一致性对照）因保留原压力门显式延期，在本轮二进制范围标记为 `unverified` | `tests/fixtures/persistent-zipper.eli`、`stdlib/core/zipper.eli`、`tests/fixtures/persistent-zipper-host.mjs` |
+| 5 | `wasm`, `native` | `original-program:portable-value-3` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（Eliscript-authored value hashing traverses one million persistent values）标记为 `unverified` | `tests/portable-value-semantics.test.mjs`、`stdlib/value.eli` |
+| 6 | `wasm`, `native` | `original-program:portable-persistent-vector-1` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（Eliscript-authored persistent vector keeps million-value trie bounds）标记为 `unverified` | `tests/portable-persistent-vector.test.mjs`、`stdlib/persistent-vector.eli` |
+| 7 | `wasm`, `native` | `original-program:portable-persistent-map-2` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（Eliscript-authored HAMT Map shares the million-key update path）标记为 `unverified` | `tests/portable-persistent-map.test.mjs`、`stdlib/persistent-map.eli` |
+| 8 | `wasm`, `native` | `original-program:portable-persistent-set-2` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（Eliscript-authored persistent Set shares the million-member update path）标记为 `unverified` | `tests/portable-persistent-set.test.mjs`、`stdlib/persistent-set.eli` |
+| 9 | `wasm`, `native` | `original-program:portable-persistent-list-complete-hosts` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（Eliscript-authored persistent list compiles and agrees across hosts）标记为 `unverified` | `tests/portable-persistent-list.test.mjs`、`stdlib/persistent-list.eli` |
+| 10 | `wasm`, `native` | `original-program:persistent-zipper-complete-hosts` | 二进制目标完整树深层持久 Zipper 压力作业；原 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | JS 严格模式与 `PERF-02` `zipper12k` 已通过；二进制目标完整 Zipper 压力作业断言（persistent zippers navigate edit and rebuild stack-safe trees）因保留原压力门显式延期，在本轮二进制范围标记为 `unverified` | `tests/fixtures/persistent-zipper.eli`、`stdlib/core/zipper.eli`、`tests/persistent-zipper.test.mjs` |
+| 11 | `wasm`, `native` | `original-program:persistent-core-exit-complete-hosts-vector` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（persistent collection core closes its all-host million-value exit gate）标记为 `unverified` | `tests/persistent-core-exit.test.mjs`、`stdlib/value.eli` |
+| 12 | `wasm`, `native` | `original-program:persistent-core-exit-complete-hosts-map` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（persistent collection core closes its all-host million-value exit gate）标记为 `unverified` | `tests/persistent-core-exit.test.mjs`、`stdlib/value.eli` |
+| 13 | `wasm`, `native` | `original-program:persistent-core-exit-complete-hosts-set` | 同步单次 1,000,000 值持久集合与宿主 WeakRef 视图压力门；默认受管槽位上限与 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | 核心协议语义已在二进制 `812/812` 功能集验证，百万值原规模已在严格 JS `797` 全量通过；二进制目标百万值同步宿主压力断言（persistent collection core closes its all-host million-value exit gate）标记为 `unverified` | `tests/persistent-core-exit.test.mjs`、`stdlib/value.eli` |
+| 14 | `wasm`, `native` | `original-program:persistent-zipper-indexed-ascent` | 二进制目标完整树深层持久 Zipper 压力作业；原 30,000 ms 墙钟预算 | `resource-deferred`（`DEFERRED / NOT ACCEPTED`） | JS 严格模式与 `PERF-02` `zipper12k` 已通过；二进制目标完整 Zipper 压力作业断言（deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors）因保留原压力门显式延期，在本轮二进制范围标记为 `unverified` | `tests/fixtures/persistent-zipper.eli`、`stdlib/core/zipper.eli`、`tests/persistent-zipper.test.mjs` |
+
+##### 表 B：二进制目标 `small` 功能档墙钟耗时超过原 `30,000 ms` 阈值的性能延期清单（共 `96` 个唯一语料 ID / `140` 条目标记录：WASM `44` 条、Native `96` 条）
+
+说明：以下记录在 `wasm` 与 `native`（`arm64-macos`）功能验收中**全部完整跑完且输出、诊断、异常与生命周期同独立对照逐项一致（功能状态 `equivalent`，不存在因超时中断而漏跑的功能断言）**；但其二进制编译/归档/执行合计墙钟超过原 `30,000 ms` 单记录性能门限，故二进制墙钟性能状态统一登记为 `DEFERRED / NOT ACCEPTED`，仅计功能验收通过、不计二进制性能达标。单条复现入口：`ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 node --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest dist/bootstrap-release/bootstrap.json --output dist/repro-slow --native-target arm64-macos --functional-runtime-profile small`（按记录所在分片核对 `records` 明细）。
+
+| 序号 | 语料记录 ID | WASM 墙钟 ms（编译 / 执行） | Native 墙钟 ms（编译 / 归档 / 执行） | 功能核验结果 | 原 30,000 ms 墙钟性能状态 |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | `original-program:interop-js-complete-hosts` | `607073.0`（`5388.1` / `599224.5`） | `572139.2`（`18712.1` / `8125.2` / `542760.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 2 | `original-program:portable-result-complete-hosts` | `186452.3`（`5502.9` / `177193.2`） | `434558.7`（`10698.6` / `3816.3` / `417048.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 3 | `original-program:portable-persistent-set-complete-hosts` | `128970.1`（`4742.1` / `123340.3`） | `363415.5`（`9557.2` / `3523.3` / `349454.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 4 | `original-program:multimethod-complete-hosts` | `147768.5`（`5231.1` / `139819.1`） | `312876.0`（`9676.1` / `3392.6` / `297109.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 5 | `original-program:portable-numeric-complete-hosts` | `82932.5`（`5096.5` / `75531.4`） | `293415.1`（`8160.9` / `2909.8` / `280589.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 6 | `original-program:portable-persistent-map-complete-hosts` | `112322.1`（`4874.9` / `106569.9`） | `287214.6`（`8532.6` / `3153.9` / `274665.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 7 | `stable-compatibility:program:stdlib/interop/js.eli` | `281739.5`（`5239.9` / `274076.8`） | `265707.1`（`19802.6` / `8466.3` / `234981.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 8 | `original-program:portable-persistent-list-1` | `213168.1`（`4666.1` / `208087.0`） | `127092.6`（`8184.7` / `2974.3` / `115541.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 9 | `stable-compatibility:program:stdlib/result.eli` | `100042.8`（`1644.0` / `95007.7`） | `212911.1`（`7665.8` / `4393.0` / `197746.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 10 | `stable-compatibility:program:stdlib/persistent-list.eli` | `171710.8`（`653.7` / `170023.2`） | `211762.5`（`5022.5` / `3227.2` / `202375.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 11 | `original-program:portable-persistent-list-0` | `62495.2`（`4631.6` / `56590.0`） | `171270.1`（`8302.9` / `2948.7` / `158678.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 12 | `stable-compatibility:program:stdlib/multimethod.eli` | `75891.0`（`5232.1` / `68133.9`） | `135904.0`（`10394.6` / `4062.8` / `118640.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 13 | `original-managed:sequence-data-portable-object:bun:auto-65536` | `52667.7`（`4.5` / `26840.5`） | `132757.4`（`37324.5` / `13544.4` / `34111.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 14 | `stable-compatibility:program:stdlib/persistent-set.eli` | `64037.4`（`4942.5` / `57307.7`） | `123867.5`（`8634.4` / `3234.7` / `110289.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 15 | `original-managed:sequence-data:node:auto-65536` | `83690.6`（`11238.6` / `28364.1`） | `122716.5`（`38104.0` / `11385.6` / `31177.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 16 | `original-program:atom-complete-hosts` | `39634.7`（`1136.7` / `36503.7`） | `112350.7`（`5875.7` / `3271.2` / `100974.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 17 | `stable-compatibility:program:stdlib/persistent-map.eli` | `57238.2`（`4730.9` / `50790.2`） | `108956.9`（`9060.6` / `3096.3` / `95191.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 18 | `original-program:portable-value-semantics-complete-hosts` | `49418.0`（`5449.5` / `43212.3`） | `106896.5`（`9505.8` / `3381.9` / `93414.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 19 | `original-program:portable-json-complete-hosts` | `42742.7`（`5399.4` / `34535.8`） | `101370.7`（`10776.2` / `4564.8` / `83208.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 20 | `stable-compatibility:program:tests/fixtures/core-stdlib-usage.eli` | `65658.8`（`8456.0` / `54373.6`） | `101320.6`（`27398.4` / `10761.3` / `60483.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 21 | `original-sequence:compiler-reader-complete-artifacts` | `<= 30000.0`（未超限） | `100006.8`（`0.0` / `0.0` / `99890.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 22 | `original-program:portable-persistent-vector-complete-hosts` | `30405.1`（`4613.6` / `25275.5`） | `99078.9`（`8291.6` / `2929.6` / `87311.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 23 | `original-program:core-stdlib-complete-protocols` | `65496.4`（`7719.9` / `55002.2`） | `97514.2`（`26819.6` / `9171.9` / `58678.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 24 | `original-managed:sequence-data-relational-set:node:auto-65536` | `47610.7`（`9703.3` / `16803.6`） | `96094.3`（`39745.1` / `12691.8` / `22874.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 25 | `original-managed:wire:node:auto-65536` | `<= 30000.0`（未超限） | `93990.5`（`34196.8` / `12067.2` / `44143.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 26 | `original-managed:sequence-data-standard-identities:node:auto-65536` | `46174.3`（`9713.4` / `15664.4`） | `86561.8`（`37041.6` / `11931.4` / `16616.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 27 | `original-managed:sequence-data-host-core-stdlib:node:auto-65536` | `58852.2`（`7.5` / `29345.6`） | `77533.4`（`5042.0` / `12797.5` / `32961.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 28 | `original-managed:sequence-data-host-lazy-sequence:node:auto-65536` | `56479.9`（`7.3` / `28933.1`） | `75869.9`（`5244.3` / `12694.6` / `30842.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 29 | `original-managed:sequence-data-host-core-stdlib:bun:auto-65536` | `57232.4`（`6.8` / `29155.1`） | `75616.9`（`5212.0` / `12626.5` / `30607.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 30 | `original-managed:sequence-data-host-core-text-object:node:auto-65536` | `57133.3`（`6.2` / `28864.9`） | `73941.9`（`4557.8` / `12228.0` / `30788.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 31 | `original-managed:sequence-data-host-value-hash:bun:auto-65536` | `55002.7`（`5.0` / `28094.5`） | `73596.0`（`5217.8` / `12883.9` / `28677.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 32 | `original-managed:sequence-data-portable-sequence:node:auto-65536` | `57930.1`（`8.0` / `30839.9`） | `73521.7`（`4973.0` / `12309.3` / `29537.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 33 | `original-managed:sequence-data-host-value-hash:node:auto-65536` | `56119.5`（`5.0` / `28482.3`） | `73474.4`（`4889.3` / `12225.4` / `29507.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 34 | `stable-compatibility:program:stdlib/numeric.eli` | `39583.6`（`588.8` / `37567.9`） | `73243.7`（`4444.6` / `3418.5` / `63958.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 35 | `original-managed:sequence-data-host-transducer:node:auto-65536` | `57303.9`（`9.9` / `28847.3`） | `72771.7`（`4947.5` / `12855.0` / `29096.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 36 | `original-managed:sequence-data-portable-object:node:auto-65536` | `53752.1`（`4.4` / `27527.3`） | `72615.3`（`4782.1` / `12242.5` / `28890.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 37 | `original-managed:sequence-data-host-data-text:node:auto-65536` | `71284.8`（`6.7` / `35516.7`） | `72151.3`（`5198.7` / `12224.5` / `28352.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 38 | `original-managed:sequence-data-host-core-text-object:bun:auto-65536` | `57357.1`（`5.7` / `28856.5`） | `71860.1`（`5219.3` / `12073.7` / `28132.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 39 | `original-managed:sequence-data-host-data-text:bun:auto-65536` | `61217.4`（`6.8` / `31057.4`） | `71812.4`（`4660.4` / `12209.0` / `28595.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 40 | `original-managed:sequence-data-portable-sequence:bun:auto-65536` | `53015.1`（`5.6` / `26484.6`） | `71587.7`（`4842.6` / `12799.9` / `28044.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 41 | `original-managed:sequence-data:bun:auto-65536` | `56164.8`（`7.7` / `28631.3`） | `71481.5`（`5352.7` / `11700.8` / `28203.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 42 | `original-managed:sequence-data-host-transducer:bun:auto-65536` | `59493.5`（`4.7` / `30876.0`） | `71057.0`（`4966.2` / `12215.5` / `27792.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 43 | `original-managed:sequence-data-portable-text:node:auto-65536` | `54415.1`（`4.9` / `28077.1`） | `71022.2`（`4618.0` / `12019.6` / `28479.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 44 | `original-managed:sequence-data-host-lazy-sequence:bun:auto-65536` | `56937.1`（`5.4` / `28298.1`） | `70937.8`（`4880.2` / `11925.3` / `28108.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 45 | `original-managed:sequence-data-portable-text:bun:auto-65536` | `52400.6`（`6.0` / `26839.5`） | `70588.0`（`4528.1` / `12083.1` / `27834.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 46 | `original-program:portable-data-text-complete-hosts` | `<= 30000.0`（未超限） | `69248.0`（`10552.9` / `3921.8` / `52025.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 47 | `original-managed:wire:bun:auto-65536` | `<= 30000.0`（未超限） | `67990.1`（`33963.8` / `12071.8` / `19511.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 48 | `original-managed:wire:node:auto-1` | `<= 30000.0`（未超限） | `65676.7`（`37546.7` / `12516.9` / `12932.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 49 | `original-managed:wire-original-host:node:auto-65536` | `<= 30000.0`（未超限） | `62257.9`（`36644.4` / `16175.7` / `6375.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 50 | `original-managed:wire:bun:auto-1` | `<= 30000.0`（未超限） | `61040.6`（`37564.3` / `12083.7` / `8753.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 51 | `original-program:persistent-tree-walk-complete-hosts` | `<= 30000.0`（未超限） | `60432.4`（`17809.2` / `7199.9` / `34115.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 52 | `stable-compatibility:program:stdlib/json.eli` | `<= 30000.0`（未超限） | `57588.6`（`7093.4` / `4411.0` / `43113.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 53 | `original-managed:wire-original-host:node:auto-1` | `<= 30000.0`（未超限） | `57034.1`（`36238.1` / `12542.4` / `6031.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 54 | `original-managed:wire-original-host:bun:auto-65536` | `<= 30000.0`（未超限） | `53210.7`（`35956.6` / `11833.3` / `3249.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 55 | `stable-compatibility:program:stdlib/value.eli` | `30251.3`（`1254.4` / `22426.5`） | `53047.5`（`6700.1` / `4226.0` / `36238.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 56 | `original-managed:wire-original-host:bun:auto-1` | `<= 30000.0`（未超限） | `52123.8`（`33457.8` / `12513.9` / `4064.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 57 | `stable-compatibility:program:stdlib/data-text.eli` | `<= 30000.0`（未超限） | `50688.9`（`7701.7` / `5322.6` / `33708.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 58 | `stable-compatibility:program:tests/fixtures/wire.eli` | `<= 30000.0`（未超限） | `49137.8`（`34319.3` / `12350.7` / `1163.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 59 | `original-sequence:project-source-edits` | `<= 30000.0`（未超限） | `48106.5`（`0.0` / `0.0` / `47838.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 60 | `original-managed:sequence-data-relational-set:bun:auto-65536` | `<= 30000.0`（未超限） | `47860.3`（`4823.2` / `12770.9` / `15440.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 61 | `original-managed:sequence-data-standard-identities:bun:auto-65536` | `<= 30000.0`（未超限） | `47209.3`（`5157.3` / `12735.9` / `15016.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 62 | `original-managed:sorted-core:bun:auto-1` | `<= 30000.0`（未超限） | `47171.3`（`28713.4` / `10771.2` / `5041.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 63 | `original-managed:sorted-core:node:auto-1` | `<= 30000.0`（未超限） | `43620.1`（`27487.7` / `8839.5` / `4823.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 64 | `stable-compatibility:program:tests/fixtures/persistent-tree-walk.eli` | `<= 30000.0`（未超限） | `43013.8`（`19455.8` / `8455.8` / `13941.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 65 | `stable-compatibility:program:tests/fixtures/core-language-api-usage.eli` | `<= 30000.0`（未超限） | `42691.3`（`26796.0` / `10793.9` / `2633.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 66 | `original-managed:sorted-core-provider:node:auto-1` | `<= 30000.0`（未超限） | `41485.9`（`24520.0` / `9309.6` / `4458.7`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 67 | `original-managed:sorted-core:node:auto-65536` | `<= 30000.0`（未超限） | `41012.2`（`24392.3` / `8809.5` / `4526.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 68 | `original-program:portable-value-2` | `<= 30000.0`（未超限） | `40663.2`（`9785.4` / `3518.5` / `26898.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 69 | `original-managed:sorted-core:bun:auto-65536` | `<= 30000.0`（未超限） | `39704.8`（`24549.7` / `9120.5` / `4160.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 70 | `original-managed:sorted-core-provider:bun:auto-1` | `<= 30000.0`（未超限） | `38462.0`（`24333.9` / `8949.6` / `3127.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 71 | `stable-compatibility:program:tests/fixtures/persistent-sorted.eli` | `<= 30000.0`（未超限） | `37082.6`（`23883.5` / `10744.2` / `1107.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 72 | `original-managed:core-modules:node:auto-65536` | `<= 30000.0`（未超限） | `36249.1`（`20815.5` / `8281.0` / `4039.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 73 | `original-managed:core-modules:bun:auto-1` | `<= 30000.0`（未超限） | `35289.1`（`20813.8` / `8392.1` / `3811.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 74 | `original-managed:core-modules:node:auto-1` | `<= 30000.0`（未超限） | `35181.8`（`20731.9` / `8517.5` / `3933.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 75 | `stable-compatibility:program:tests/fixtures/core-set-usage.eli` | `<= 30000.0`（未超限） | `34788.0`（`21676.0` / `9241.1` / `2648.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 76 | `original-managed:wire:node:auto-1:part-corpus-02` | `<= 30000.0`（未超限） | `34569.0`（`4929.2` / `14704.1` / `12018.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 77 | `original-managed:wire:node:auto-1:part-corpus-06` | `<= 30000.0`（未超限） | `34091.4`（`4876.0` / `13677.9` / `12267.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 78 | `stable-compatibility:program:tests/fixtures/lazy-sequence.eli` | `<= 30000.0`（未超限） | `34003.8`（`22328.0` / `9173.7` / `1195.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 79 | `original-managed:core-modules:bun:auto-65536` | `<= 30000.0`（未超限） | `34001.1`（`21031.2` / `8142.2` / `2659.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 80 | `original-program:core-set-source-map` | `<= 30000.0`（未超限） | `33719.3`（`21173.9` / `8043.3` / `3244.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 81 | `original-managed:wire:node:auto-1:part-corpus-01` | `<= 30000.0`（未超限） | `33705.3`（`4765.5` / `14056.5` / `11984.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 82 | `original-managed:wire:node:auto-1:part-corpus-07` | `<= 30000.0`（未超限） | `32946.6`（`4997.7` / `13389.2` / `12042.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 83 | `original-managed:wire:node:auto-1:part-corpus-05` | `<= 30000.0`（未超限） | `32529.6`（`4759.9` / `12961.6` / `11968.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 84 | `original-managed:wire:node:auto-1:part-corpus-03` | `<= 30000.0`（未超限） | `32433.9`（`4759.4` / `12995.7` / `12027.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 85 | `original-program:portable-persistent-map-0` | `<= 30000.0`（未超限） | `32234.8`（`8636.3` / `3405.3` / `18794.3`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 86 | `stable-compatibility:program:tests/fixtures/regex.eli` | `<= 30000.0`（未超限） | `32141.1`（`21369.7` / `8722.1` / `853.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 87 | `original-program:persistent-sorted-complete-hosts` | `<= 30000.0`（未超限） | `32001.3`（`20775.4` / `7932.0` / `2123.8`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 88 | `original-managed:wire:node:auto-1:part-corpus-04` | `<= 30000.0`（未超限） | `31791.7`（`4798.5` / `12391.4` / `11992.6`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 89 | `original-program:core-text-object-complete-hosts` | `<= 30000.0`（未超限） | `31665.6`（`18715.3` / `7345.0` / `4419.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 90 | `original-program:lazy-sequence-complete-hosts` | `<= 30000.0`（未超限） | `31647.7`（`18972.7` / `7679.9` / `3619.0`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 91 | `stable-compatibility:program:tests/fixtures/declarative-record.eli` | `<= 30000.0`（未超限） | `31185.9`（`20053.2` / `9048.9` / `791.1`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 92 | `stable-compatibility:program:stdlib/core/text.eli` | `<= 30000.0`（未超限） | `30705.7`（`20197.8` / `8195.9` / `1170.5`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 93 | `original-program:portable-persistent-set-0` | `<= 30000.0`（未超限） | `30468.0`（`8844.0` / `3542.7` / `16554.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 94 | `original-managed:wire:bun:auto-1:part-corpus-04` | `<= 30000.0`（未超限） | `30384.5`（`4953.9` / `13992.1` / `8762.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 95 | `original-program:declarative-record-complete-hosts` | `<= 30000.0`（未超限） | `30107.0`（`19083.1` / `7619.2` / `1986.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+| 96 | `stable-compatibility:program:tests/fixtures/map-patterns.eli` | `<= 30000.0`（未超限） | `30015.8`（`15675.9` / `6695.2` / `6708.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |

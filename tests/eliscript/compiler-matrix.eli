@@ -83,9 +83,9 @@
                  :compiler_session_request (lambda (state text)
                    (let ((request (JSON/parse text)))
                      (js-call wire-requests :push request)
-                     (js-call assert :strictEqual (get request :responseMode) "graph-events-v1")
+                     (js-call assert :strictEqual (get request :responseMode) "graph-events")
                      (put state :token (1+ (get state :token)))
-                     (encodeCompilerIR (js-object :format "eliscript-compiler-response-events" :version 2
+                     (encodeCompilerIR (js-object :format "eliscript-compiler-response-events" :mode "graph-events"
                        :token (get state :token) :done t :events (js-array
                          (js-array "object" 1) (js-array "key" "ir") (js-array "value" ir)
                          (js-array "key" "bytes") (js-array "array" 2)
@@ -99,7 +99,7 @@
                  (let ((value (await (js-call actual :request request options))))
                    (js-call received :push value) value)))))
           (try
-            (let* ((result (await (sequence-transport-case directory session "graph-events-v1" (js-object))))
+            (let* ((result (await (sequence-transport-case directory session "graph-events" (js-object))))
                    (outcome (aref (get (get result :cell) :records) 0))
                    (value (aref received 0))
                    (evidence (await (readCompilerMetadata (join (get result :directory) "execution.json"))))
@@ -137,9 +137,9 @@
                    (await (js-call traced :request (js-object :operation "capabilities")
                      (js-object :signal (get controller :signal) :responseMode undefined)))
                    (await (js-call traced :request (js-object :operation "capabilities")
-                     (js-object :signal (get controller :signal) :responseMode "graph-events-v1")))
+                     (js-object :signal (get controller :signal) :responseMode "graph-events")))
                    (await (js-call traced :request
-                     (js-object :operation "capabilities" :responseMode "events-v1")
+                     (js-object :operation "capabilities" :responseMode "events")
                      (js-object :signal (get controller :signal))))
                    (await (js-call traced :request
                      (js-object :operation "response-next" :token 1)
@@ -163,24 +163,24 @@
           (js-call (js-array "responseMode" "responseStringChunks") :forEach (lambda (key)
             (Object/defineProperty request-options key (js-object :enumerable t :get (lambda ()
               (js-call events :push key)
-              (if (= key "responseMode") "events-v1" false))))))
+              (if (= key "responseMode") "events" false))))))
           (Object/defineProperty request-options "unused" (js-object :enumerable t :get (lambda () (throw "unrelated getter"))))
-          (let* ((result (await (sequence-transport-case directory session "graph-events-v1" execution-options)))
+          (let* ((result (await (sequence-transport-case directory session "graph-events" execution-options)))
                  (trace (await (readCompilerMetadata (join (get result :directory) "suite-request-trace.json")))))
             (js-call assert :strictEqual (get (aref (get (get result :cell) :records) 0) :verification) "equivalent")
             (js-call assert :deepStrictEqual events (js-array "responseMode" "responseStringChunks"))
             (js-call assert :strictEqual (get (aref calls 0) :chunks) false)
             (js-call assert :deepStrictEqual (js-call calls :map (lambda (call) (get call :mode)))
-              (js-array "events-v1" undefined "graph-events-v1" undefined undefined "graph-events-v1" "graph-events-v1" "graph-events-v1"))
+              (js-array "events" undefined "graph-events" undefined undefined "graph-events" "graph-events" "graph-events"))
             (js-call calls :forEach (lambda (call) (js-call assert :strictEqual (get call :signal) (get controller :signal))))
             (js-call assert :deepStrictEqual (js-call trace :map (lambda (entry) (get entry :status)))
               (js-array "returned" "returned" "returned" "returned" "returned" "failed" "failed" "failed")))))))))
 
   (test "binary matrix negotiation prefers advertised graph events with tree and ground fallbacks"
     (lambda ()
-      (js-call assert :strictEqual (matrix-response-mode (js-array "events-v1" "graph-events-v1")) "graph-events-v1")
-      (js-call assert :strictEqual (matrix-response-mode (js-array "graph-events-v1" "events-v1")) "graph-events-v1")
-      (js-call assert :strictEqual (matrix-response-mode (js-array "events-v1")) "events-v1")
+      (js-call assert :strictEqual (matrix-response-mode (js-array "events" "graph-events")) "graph-events")
+      (js-call assert :strictEqual (matrix-response-mode (js-array "graph-events" "events")) "graph-events")
+      (js-call assert :strictEqual (matrix-response-mode (js-array "events")) "events")
       (js-call assert :strictEqual (matrix-response-mode (js-array)) undefined)
       (js-call assert :strictEqual (matrix-response-mode undefined) undefined)))
 
@@ -199,7 +199,7 @@
                (selection (js-object :cancelled (js-array) :resourceDeferred (js-array)))
                (cell (js-object :compilerIdentity producer :runtimeSourceSha256 "runtime"
                        :literalSourceIdentity (js-array) :records (js-array)))
-               (metadata (js-object :format "eliscript-independent-compiler-matrix-cell" :version 1
+               (metadata (js-object :format "eliscript-independent-compiler-matrix-cell"
                  :acceptanceScope "javascript-stage3-output-targets" :host "javascript" :target "native"
                  :nativeTarget "arm64-macos"
                  :sourceIdentity source :producerIdentity producer :corpusIdentity (js-object :sha256 "corpus")
@@ -242,7 +242,7 @@
                    (cell-folder (join resume-root "native" "compiler-matrix-cell-javascript-native-0"))
                    (cell-manifest (join cell-folder "matrix.json"))
                    (summary-path (join resume-root "stage3-targets.json"))
-                   (summary (js-object :format "eliscript-stage3-targets" :version 1
+                   (summary (js-object :format "eliscript-stage3-targets"
                      :sourceIdentity source :producerIdentity producer
                      :corpusRecordsSha256 corpus-sha :corpusRecordsPath "corpus/records.json"
                      :nativeTarget "arm64-macos"))
@@ -293,7 +293,7 @@
   (defun fixture-records (originals)
     ;; This is only the loader's adversarial data fixture. It never certifies
     ;; the original corpus or supplies a replacement execution oracle.
-    (js-object :format "eliscript-compiler-matrix-corpus" :version 1
+    (js-object :format "eliscript-compiler-matrix-corpus"
       :manifests (Object/fromEntries (js-call (get originals :manifests) :map
         (lambda (item) (js-array (get item :id) (js-object :sha256 (get item :sha256) :identity (get item :identity))))))
       :coverageIds (Array/from (get originals :requiredCoverage)) :expectedIds (js-array "snapshot-case")
@@ -573,7 +573,7 @@
               :identities (js-array (+ "claimed-" target) (+ "claimed-" target) (+ "claimed-" target))))))
           (await (mkdir grid-directory (js-object :recursive t)))
           (await (writeFile (join grid-directory "grid.json") (JSON/stringify
-            (js-object :format "eliscript-independent-compiler-grid" :version 1 :sourceIdentity identity
+            (js-object :format "eliscript-independent-compiler-grid" :sourceIdentity identity
               :cells cells :comparisons comparisons :identityVerification "identical"))))
           (let ((result (await (buildCompilerMatrix (js-object :outputRoot directory :corpusRecords (fixture-records originals)
                         :compilerGrid (js-object :directory grid-directory :canonicalArtifacts (js-array)))))))
@@ -612,7 +612,7 @@
               :identities (js-array (+ "claimed-" target) (+ "claimed-" target) (+ "claimed-" target))))))
           (await (mkdir grid-directory (js-object :recursive t)))
           (await (writeFile (join grid-directory "grid.json") (JSON/stringify
-            (js-object :format "eliscript-independent-compiler-grid" :version 1 :sourceIdentity identity
+            (js-object :format "eliscript-independent-compiler-grid" :sourceIdentity identity
               :cells cells :comparisons comparisons :identityVerification "identical"))))
           (let ((modes (js-array "throw" "wrong-host")) (mode-index 0))
             (while (< mode-index (js-length modes))
@@ -680,7 +680,6 @@
           ;; Only the producer is absent; the source/corpus hashes come from
           ;; the actual retained repository inputs, with no reduced recipe.
           (js-call assert :strictEqual (get metadata :format) "eliscript-independent-compiler-matrix-cell")
-          (js-call assert :strictEqual (get metadata :version) 1)
           (js-call assert :strictEqual (get metadata :scope) "single-cell")
           (js-call assert :deepStrictEqual (get metadata :sourceIdentity) identity)
           (js-call assert :deepStrictEqual (get metadata :corpusIdentity)

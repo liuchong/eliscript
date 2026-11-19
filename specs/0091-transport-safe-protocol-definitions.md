@@ -16,7 +16,7 @@ JSON, worker, process, or realm boundary.
 
 This specification introduces a separate declarative protocol-definition
 format. `protocol-definition` extracts only the protocol name and ordered
-operation names into versioned immutable data. `define-protocol-from-definition`
+operation names into immutable data. `define-protocol-from-definition`
 validates that data and creates a fresh local protocol with fresh operation
 slots and an empty extension registry.
 
@@ -41,12 +41,11 @@ query APIs remain unchanged.
 
 ## Definition Format
 
-The v1 definition is an ordinary data object:
+The definition is an ordinary data object:
 
 ```json
 {
   "format": "eliscript-protocol-definition",
-  "version": 1,
   "name": "Readable",
   "operations": ["read", "close"]
 }
@@ -55,7 +54,6 @@ The v1 definition is an ordinary data object:
 Fields have these meanings:
 
 - `format` identifies the schema independently of the outer transport.
-- `version` freezes the interpretation of every field.
 - `name` is the non-empty diagnostic and definition name.
 - `operations` is the non-empty ordered list of unique non-empty operation
   names.
@@ -63,8 +61,7 @@ Fields have these meanings:
 `protocol-definition` accepts only a genuine local Eliscript protocol. Its
 result object and operation Array are frozen. The object contains no function,
 Symbol, constructor, prototype, implementation, metadata hook, or registry
-reference. It therefore passes through JSON and the versioned worker value
-codec as ordinary data.
+reference. It therefore passes through JSON and the worker value codec as ordinary data.
 
 ## Import Semantics
 

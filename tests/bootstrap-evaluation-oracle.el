@@ -7,6 +7,12 @@
   (add-to-list 'load-path tests-directory)
   (add-to-list 'load-path (expand-file-name "compiler" project-directory)))
 
+(set-language-environment "UTF-8")
+(prefer-coding-system 'utf-8-unix)
+(setq coding-system-for-read 'utf-8-unix
+      coding-system-for-write 'utf-8-unix)
+(set-terminal-coding-system 'utf-8-unix)
+
 (require 'json)
 (require 'eliscript)
 
@@ -39,7 +45,7 @@
 (let* ((input-file (getenv "ELISCRIPT_EVALUATION_ORACLE_INPUT"))
        (input
         (with-temp-buffer
-          (insert-file-contents-literally input-file)
+          (insert-file-contents input-file)
           (json-parse-buffer
            :object-type 'alist
            :array-type 'list
@@ -48,9 +54,11 @@
        (results
         (mapcar #'eliscript-bootstrap-evaluation-oracle--case input)))
   (princ
-   (json-serialize
-    (vconcat results)
-    :null-object nil
-    :false-object :false)))
+   (decode-coding-string
+    (json-serialize
+     (vconcat results)
+     :null-object nil
+     :false-object :false)
+    'utf-8)))
 
 ;;; bootstrap-evaluation-oracle.el ends here

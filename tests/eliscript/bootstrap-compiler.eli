@@ -148,7 +148,7 @@
                 (js-call (expect (get failure :exitCode)) :toBe 1)
                 (js-call (expect (get failure :stdout)) :toBe "")
                 (js-call (expect (JSON/parse (get failure :stderr))) :toEqual
-                  (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-A0001" :severity "error"
+                  (js-object :format "eliscript-diagnostic" :code "ELI-A0001" :severity "error"
                     :phase "analysis" :message "unbound symbol: missing"
                     :location (js-object :file path :start (js-object :offset 19 :line 2 :column 3)
                       :end (js-object :offset 26 :line 2 :column 10))))

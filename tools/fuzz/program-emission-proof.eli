@@ -57,7 +57,7 @@
            (historical-valid t)
            (record-difference (async (record)
              (unless difference-file
-               (let ((evidence (resolve root "_worktree/evidence/goal-0.0.2")))
+               (let ((evidence (resolve root ".eliscript-cache/fuzz-emission")))
                  (await (mkdir evidence (js-object :recursive t)))
                  (setq difference-path (resolve (await (mkdtemp (resolve evidence "full-emission-differences-"))) "differences.ndjson"))
                  (setq difference-file (await (open difference-path "wx")))))

@@ -12,7 +12,7 @@
 
 ## Summary
 
-Eliscript adds a versioned, self-hosted evaluation boundary for one-form
+Eliscript adds a self-hosted evaluation boundary for one-form
 evaluation, complete-source loading, session reset, and capability discovery.
 A long-lived host process owns filesystem and module-loader effects, while the
 generated compiler owns request normalization, form classification, namespace
@@ -31,7 +31,7 @@ maturity credit.
 
 ## Compiler-owned Contracts
 
-The generated compiler exports three version 1 descriptors:
+The generated compiler exports three descriptors:
 
 - `eliscript-evaluation-operation` normalizes `describe`, `evaluate`, `load`,
   and `reset` requests
@@ -87,7 +87,7 @@ Standard output written while a request is executing is captured in the
 structured response. It never shares the NDJSON transport channel as an
 unframed byte stream.
 
-Compiler failures retain `eliscript-diagnostic` version 1. Runtime failures are
+Compiler failures retain an `eliscript-diagnostic`. Runtime failures are
 normalized to the same diagnostic envelope with an evaluation-runtime phase
 and a best available `.eli` file, line, and column derived from the generated
 Source Map. A failed request never emits a partial success response and never
@@ -120,7 +120,7 @@ AC-13 remain separate final matrix criteria.
 
 ## Compatibility Freeze
 
-The three version 1 evaluation descriptors, immutable namespace revision
+The three evaluation descriptors, immutable namespace revision
 semantics, live expression identity, atomic load and definition replacement,
 canonical value printing, captured output framing, source-mapped diagnostics,
 acknowledged-state Emacs recovery, and explicit session shutdown are stable.
@@ -129,7 +129,7 @@ or replay behavior.
 
 ## Acceptance Criteria
 
-- **SPE-01:** Generated compiler code owns and exports all three version 1
+- **SPE-01:** Generated compiler code owns and exports all three
   evaluation descriptors and rejects malformed, unknown, and ambiguous input.
 - **SPE-02:** Seed and self-hosted classifiers agree on definitions, macros,
   module forms, expressions, malformed input, bindings, exports, and macro

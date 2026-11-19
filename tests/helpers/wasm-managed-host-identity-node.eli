@@ -3,6 +3,8 @@
   (import "node:fs" readFileSync)
   (import "node:process" :default process)
   (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
 
   (defconst js-typeof (js* "(v) => typeof v"))
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
@@ -11,7 +13,7 @@
     (if (and (not (nullish? v)) (= (funcall js-typeof v) "object"))
       (let ((k (get v :kind)))
         (cond
-          ((= k 4) (js-call a :readNumber v))
+          ((= k 4) (decoded-number-value a v))
           ((= k 5) (js-call a :readString v))
           ((= k 14)
            (let ((out (js-array))

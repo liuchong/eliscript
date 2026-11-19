@@ -2,7 +2,8 @@
   (import "./managed-module-graph-ground.mjs" :as ground)
   (import "./managed-source-view.mjs"
     bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
-    registerManagedSourceDecodeRuntime)
+    registerManagedSourceDecodeRuntime closeManagedSourceDecodeRuntime managedSourceIdentity managedSourceIdentityOwner
+    registerManagedSourceIdentityOwner)
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
 
   ;; Keep the unchanged ESM emission/loading implementation. Namespace name
@@ -11,6 +12,7 @@
   (defconst managedHostModuleEdges (get ground :managedHostModuleEdges))
   (defconst project-boundaries (new globalThis.WeakMap))
   (defconst prepared-load-results (new globalThis.WeakMap))
+  (defconst facade-binding-predicates (new globalThis.WeakMap))
 
   ;; Prepared globals are initialized by the real prepare export, not by a
   ;; fabricated lexical step. Keep the ordinary emitter and loader unchanged;
@@ -239,7 +241,27 @@
                     (observed-project-method value runtime name state)))))))
           (Object/defineProperties facade descriptors)
           (registerManagedSourceDecodeRuntime facade runtime)
+          (let ((owner (managedSourceIdentityOwner runtime)))
+            (unless (undefined? owner) (registerManagedSourceIdentityOwner facade owner)))
           (Object/freeze facade)))))
+
+  (defun flush-watched (base watched observer state)
+    (let ((changed t))
+      (while (and changed (not (get base :closed)) (not (get state :stopped)))
+        (setq changed false)
+        (js-call watched :forEach (lambda (entry key)
+          (let* ((value (bindManagedSourceBoundary
+                          (withManagedSourceBindingPoll observer (lambda ()
+                            (js-call base :read (get entry :kind) (get entry :index)))) observer))
+                 (identity (managedSourceIdentity value (get state :sourceOwner)))
+                 (same-cell (and (not (undefined? identity))
+                                 (not (undefined? (get entry :identity)))
+                                 (= identity (get entry :identity)))))
+            (unless (or same-cell (Object/is value (get entry :value)))
+              (put entry :value value)
+              (when (not (undefined? identity)) (put entry :identity identity))
+              (setq changed t)
+              (js-call base :bindingChanged (get entry :kind) (get entry :index) value))))))))
 
   (defun createManagedModuleGraph (descriptor &rest arguments)
     ;; The host API defaults only omitted/undefined options. Eliscript's
@@ -258,22 +280,7 @@
         (setq observer (lambda ()
           (when (and prepared (not (get base :closed)) (not (get state :stopped)) (not (get state :syncing)))
             (put state :syncing t)
-            (try
-              ;; Only cells already read successfully and watched by an ESM
-              ;; facade participate. No poll can force an uninitialized cell.
-              ;; A listener can re-enter a source function and change an earlier
-              ;; cell. Continue until values are stable, without re-entering the
-              ;; same flush from the source Proxy or transport wrappers.
-              (let ((changed t))
-                (while (and changed (not (get base :closed)) (not (get state :stopped)))
-                  (setq changed false)
-                  (js-call watched :forEach (lambda (entry key)
-                    (let ((value (bindManagedSourceBoundary
-                                   (withManagedSourceBindingPoll observer (lambda ()
-                                     (js-call base :read (get entry :kind) (get entry :index)))) observer)))
-                      (unless (Object/is value (get entry :value))
-                        (put entry :value value) (setq changed t)
-                        (js-call base :bindingChanged (get entry :kind) (get entry :index) value)))))))
+            (try (flush-watched base watched observer state)
               (finally (put state :syncing false))))))
         (put state :observer observer)
         (js-call project-boundaries :set facade state))
@@ -282,7 +289,9 @@
       (put (get descriptors :attachRuntime) :value
         (lambda (runtime)
           (js-call base :attachRuntime runtime)
-          (registerManagedSourceDecodeRuntime facade runtime) facade))
+          (registerManagedSourceDecodeRuntime facade runtime)
+          (put state :sourceOwner (managedSourceIdentityOwner runtime))
+          facade))
       (put (get descriptors :prepare) :value
         (lambda ()
           ;; Actual prepare-owned declarations can notify before the ground
@@ -328,8 +337,9 @@
                  (entry (js-call watched :get key)))
             (when (and (not entry) (js-call known :has key) (not (js-call immutable :has key)))
               (try
-                (setq entry (js-object :kind kind :index index :listeners (new globalThis.Set)
-                  :value (withManagedSourceBoundary observer (lambda () (js-call base :read kind index)))))
+                (let ((initial (withManagedSourceBoundary observer (lambda () (js-call base :read kind index)))))
+                  (setq entry (js-object :kind kind :index index :listeners (new globalThis.Set)
+                    :value initial :identity (managedSourceIdentity initial (get state :sourceOwner)))))
                 (catch error (funcall stop) (throw error)))
               (js-call watched :set key entry))
             (when entry (js-call (get entry :listeners) :add listener))
@@ -337,10 +347,19 @@
               (funcall stop)
               (when entry
                 (js-call (get entry :listeners) :delete listener)
-                (when (= (get (get entry :listeners) :size) 0) (js-call watched :delete key)))))))
-        (graph-method descriptors "close" (lambda ()
-          (try (js-call base :close)
-            (finally (put state :stopped t) (js-call watched :clear) (js-call known :clear))))))
+                (when (= (get (get entry :listeners) :size) 0) (js-call watched :delete key))))))))
+      (graph-method descriptors "close" (lambda ()
+        (try (js-call base :close)
+          (finally
+            (put state :stopped t)
+            (put state :sourceOwner undefined)
+            (put state :observer undefined)
+            (setq observer undefined)
+            (js-call watched :clear)
+            (js-call known :clear)
+            (js-call declarations :clear)
+            (closeManagedSourceDecodeRuntime facade)
+            (js-call ground :notifyManagedGraphClosed facade)))))
       (put (get descriptors :namespace) :value
         (lambda (id resolver)
           (when (get base :closed) (throw (new globalThis.Error "managed module graph is closed")))
@@ -372,7 +391,20 @@
             (graph-method descriptors name (lambda (&rest arguments)
               (withManagedSourceDecode (lambda () (Reflect/apply method facade arguments)) facade)))))))
       (Object/defineProperties facade descriptors)
+      (js-call facade-binding-predicates :set facade (lambda (kind index)
+        (if preparing
+          (progn
+            (unless (and (or (= kind 0) (= kind 1)) (Number/isSafeInteger index) (>= index 0))
+              (throw (new globalThis.TypeError "invalid managed project cell")))
+            false)
+          (js-call ground :hasManagedBindingListeners base kind index))))
       (Object/freeze facade)))
 
+  (defun hasManagedBindingListeners (graph kind index)
+    (let ((predicate (when (and (not (nullish? graph)) (or (= (value-type graph) "object") (= (value-type graph) "function")))
+                       (js-call facade-binding-predicates :get graph))))
+      (if (= (value-type predicate) "function") (funcall predicate kind index)
+        (js-call ground :hasManagedBindingListeners graph kind index))))
+
   (export managedHostModuleEdges createManagedProjectFacades loadManagedProjectGraph createManagedModuleGraph
-    observeManagedProjectRuntime observeManagedProjectExports))
+    observeManagedProjectRuntime observeManagedProjectExports hasManagedBindingListeners))

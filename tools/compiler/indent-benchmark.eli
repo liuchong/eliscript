@@ -8,7 +8,6 @@
   (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_INDENT_FORMAT "eliscript-compiler-indent-benchmark")
-  (defconst COMPILER_INDENT_VERSION 1)
 
   (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst project-directory (js-call path :resolve directory "../.."))
@@ -209,8 +208,7 @@
 
   (defun validateCompilerIndentReport (report)
     (when (or (not report)
-              (not (= (get report :format) COMPILER_INDENT_FORMAT))
-              (not (= (get report :version) COMPILER_INDENT_VERSION)))
+              (not (= (get report :format) COMPILER_INDENT_FORMAT)))
       (throw (new globalThis.TypeError "invalid compiler indent report identity")))
     (let ((validation (get report :validation))
           (corpus (get report :corpus)))
@@ -343,7 +341,6 @@
                      (report
                        (js-object
                          :format COMPILER_INDENT_FORMAT
-                         :version COMPILER_INDENT_VERSION
                          :generatedAt (js-call (new globalThis.Date) :toISOString)
                          :sourceDigest (await (compilerIndentSourceDigest))
                          :host (js-object
@@ -409,7 +406,6 @@
 
   (export
     COMPILER_INDENT_FORMAT
-    COMPILER_INDENT_VERSION
     compilerIndentSourceDigest
     validateCompilerIndentReport
     runCompilerIndentBenchmark))

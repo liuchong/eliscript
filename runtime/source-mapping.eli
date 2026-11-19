@@ -28,6 +28,7 @@
       (while (< index (js-length segment))
         (let ((value 0)
               (shift 0)
+              (scale 1)
               (continuation t))
           (while continuation
             (when (>= index (js-length segment))
@@ -36,13 +37,14 @@
               (when (eq digit -1)
                 (fail "invalid-vlq" "invalid Base64 VLQ digit"))
               (setq index (1+ index)
-                    value (+ value (* (bit-and digit 31) (Math/pow 2 shift)))
+                    value (+ value (* (bit-and digit 31) scale))
+                    scale (* scale 32)
                     continuation (not (eq (bit-and digit 32) 0))
                     shift (+ shift 5))
               (when (> shift 50)
                 (fail "invalid-vlq" "Base64 VLQ value exceeds safe bounds"))))
           (let ((negative (eq (bit-and value 1) 1))
-                (magnitude (Math/floor (/ value 2))))
+                (magnitude (/ (- value (bit-and value 1)) 2)))
             (js-call values :push (if negative (- magnitude) magnitude)))))
       values))
 
@@ -161,7 +163,6 @@
                       :column (funcall globalThis.Number (aref match 4)))))))
             (setq i (1+ i)))
           (Object/freeze frames)))))
-  (Object/defineProperty parseJavaScriptStack "length" (js-object :value 1 :configurable t))
 
   (defun cleanIdentity (value)
     (try
@@ -206,7 +207,8 @@
                               undefined)))
               (if (not mapping)
                   frame
-                (let ((generatedColumn (Math/max 0 (1- (get frame :column))))
+                (let ((generatedColumn (let ((column (1- (get frame :column))))
+                                         (if (<= column 0) 0 column)))
                       (segment undefined)
                       (k 0)
                       (done false))
@@ -257,7 +259,6 @@
       (when location
         (put result :location location))
       (Object/freeze result)))
-  (Object/defineProperty sourceMappedFailure "length" (js-object :value 2 :configurable t))
 
   (export SourceMappingError
           decodeSourceMappings

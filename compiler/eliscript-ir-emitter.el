@@ -1007,6 +1007,196 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                (eliscript-ir-emitter-emit-expression node)
                ";")))))
 
+(defvar eliscript-ir-emitter--proven-number-locals nil)
+
+(defun eliscript-ir-emitter--proven-number-node-p (node &optional proven)
+  "Return non-nil when NODE normally returns a JavaScript Number."
+  (when node
+    (let ((set (or proven eliscript-ir-emitter--proven-number-locals))
+          (kind (eliscript-ir-node-kind node))
+          (name (eliscript-ir-node-value node))
+          (children (eliscript-ir-emitter--children node)))
+      (cond
+       ((eq kind 'literal) (numberp name))
+       ((eq kind 'reference) (and set (gethash name set)))
+       ((eq kind 'intrinsic)
+        (cond
+         ((eq name '1+) (and (= (length children) 1)
+                             (eliscript-ir-emitter--proven-number-node-p (car children) set)))
+         ((eq name '1-) (= (length children) 1))
+         ((eq name '+)
+          (and children
+               (cl-every (lambda (child)
+                           (eliscript-ir-emitter--proven-number-node-p child set))
+                         children)))
+         ((memq name '(- * / % mod & | ^ << >> >>>
+                        bit-and bit-or bit-xor bit-shift-left
+                        bit-shift-right unsigned-bit-shift-right))
+          (cl-some (lambda (child)
+                     (eliscript-ir-emitter--proven-number-node-p child set))
+                   children))
+         (t nil)))
+       (t nil)))))
+
+(defun eliscript-ir-emitter--contains-assignment-node-p (node)
+  (when node
+    (or (eq (eliscript-ir-node-kind node) 'assignment)
+        (cl-some #'eliscript-ir-emitter--contains-assignment-node-p
+                 (eliscript-ir-emitter--children node)))))
+
+(defun eliscript-ir-emitter--proven-number-eligible-p (body)
+  (let ((pending (copy-sequence body)) (loop nil) (valid t))
+    (while (and valid pending)
+      (let ((node (pop pending)))
+        (when node
+          (let ((kind (eliscript-ir-node-kind node)))
+            (cond
+             ((memq kind '(loop binding-loop))
+              (setq loop t)
+              (setq pending (append (eliscript-ir-emitter--children node) pending)))
+             ((memq kind '(function-expression function-declaration
+                           variable-declaration await-expression raw-javascript))
+              (setq valid nil))
+             (t (setq pending (append (eliscript-ir-emitter--children node) pending))))))))
+    (and valid loop (not (eliscript-ir-emitter--contains-await-p body)))))
+
+(defun eliscript-ir-emitter--proven-number-shadow-target (binding)
+  "Return the plain identifier BINDING introduces, or nil."
+  (when (and binding
+             (symbolp (eliscript-ir-node-value binding))
+             (not (eliscript-ir-property binding :pattern)))
+    (eliscript-ir-node-value binding)))
+
+(defun eliscript-ir-emitter--proven-number-shadow-name
+    (binding parameters candidates state)
+  "Block the shadowing binding BINDING, invalidating on any collision."
+  (let ((name (eliscript-ir-emitter--proven-number-shadow-target binding)))
+    (if (or (null name) (gethash name parameters) (gethash name candidates))
+        (setcar state t)
+      (puthash name t parameters))))
+
+(defun eliscript-ir-emitter--collect-number-bindings (nodes parameters candidates state)
+  (dolist (node nodes)
+    (when node
+      (let ((kind (eliscript-ir-node-kind node)))
+        (cond
+         ((eq kind 'function-expression) nil)
+         ((eq kind 'lexical-bindings)
+          (let* ((split (eliscript-ir-emitter--split-counted-children node :binding-count))
+                 (bindings (car split)))
+            (dolist (binding bindings)
+              (let ((name (eliscript-ir-node-value binding)))
+                (if (or (not (eq (eliscript-ir-node-kind binding) 'lexical-binding))
+                        (eliscript-ir-property binding :pattern)
+                        (gethash name parameters)
+                        (gethash name candidates))
+                    (setcar state t)
+                  (puthash name binding candidates)))
+              (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
+                (when initializer
+                  (eliscript-ir-emitter--collect-number-bindings
+                   (list initializer) parameters candidates state))))
+            (eliscript-ir-emitter--collect-number-bindings
+             (cadr split) parameters candidates state)))
+         ((eq kind 'catch-clause)
+          (eliscript-ir-emitter--proven-number-shadow-name
+           (car (eliscript-ir-emitter--children node)) parameters candidates state)
+          (eliscript-ir-emitter--collect-number-bindings
+           (cdr (eliscript-ir-emitter--children node)) parameters candidates state))
+         ((eq kind 'binding-loop)
+          (let* ((split (eliscript-ir-emitter--split-counted-children node :binding-count))
+                 (bindings (car split)))
+            (dolist (binding bindings)
+              (eliscript-ir-emitter--proven-number-shadow-name
+               binding parameters candidates state)
+              (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
+                (when initializer
+                  (eliscript-ir-emitter--collect-number-bindings
+                   (list initializer) parameters candidates state))))
+            (eliscript-ir-emitter--collect-number-bindings
+             (cadr split) parameters candidates state)))
+         (t (eliscript-ir-emitter--collect-number-bindings
+             (eliscript-ir-emitter--children node) parameters candidates state)))))))
+
+(defun eliscript-ir-emitter--number-scope-valid-p (node scope candidates state)
+  (when node
+    (let ((kind (eliscript-ir-node-kind node)))
+      (cond
+       ((eq kind 'reference)
+        (when (and (gethash (eliscript-ir-node-value node) candidates)
+                   (not (memq (eliscript-ir-node-value node) scope)))
+          (setcar state t)))
+       ((memq kind '(function-expression)) nil)
+       ((eq kind 'lexical-bindings)
+        (let* ((split (eliscript-ir-emitter--split-counted-children node :binding-count))
+               (bindings (car split))
+               (inner (append (mapcar #'eliscript-ir-node-value bindings) scope)))
+          (dolist (binding bindings)
+            (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
+              (eliscript-ir-emitter--number-scope-valid-p
+               initializer scope candidates state)))
+          (dolist (child (cadr split))
+            (eliscript-ir-emitter--number-scope-valid-p
+             child inner candidates state))))
+       ((eq kind 'assignment-pair)
+        (let ((children (eliscript-ir-emitter--children node)))
+          (eliscript-ir-emitter--number-scope-valid-p
+           (car children) scope candidates state)))
+       (t (dolist (child (eliscript-ir-emitter--children node))
+            (eliscript-ir-emitter--number-scope-valid-p
+             child scope candidates state)))))))
+
+(defun eliscript-ir-emitter--number-assignments-valid-p (node candidates proven)
+  (if (not node) t
+    (if (eq (eliscript-ir-node-kind node) 'assignment-pair)
+        (let ((name (eliscript-ir-node-value node))
+              (children (eliscript-ir-emitter--children node)))
+          (and (or (not (gethash name candidates))
+                   (eliscript-ir-emitter--proven-number-node-p (car children) proven))
+               (cl-every (lambda (child)
+                           (eliscript-ir-emitter--number-assignments-valid-p
+                            child candidates proven))
+                         children)))
+      (cl-every (lambda (child)
+                  (eliscript-ir-emitter--number-assignments-valid-p
+                   child candidates proven))
+                (eliscript-ir-emitter--children node)))))
+
+(defun eliscript-ir-emitter--proven-number-locals-for (parameters body)
+  (let ((parameter-names (make-hash-table :test #'eq)))
+    (dolist (parameter parameters)
+      (puthash (eliscript-ir-node-value parameter) t parameter-names))
+    (when (eliscript-ir-emitter--proven-number-eligible-p body)
+      (let ((candidates (make-hash-table :test #'eq))
+            (state (list nil))
+            ;; Empty proof sets are successful, unlike failed admission (nil).
+            (proven (make-hash-table :test #'eq))
+            (changed t))
+        (eliscript-ir-emitter--collect-number-bindings
+         body parameter-names candidates state)
+        (when (not (car state))
+          (dolist (node body)
+            (eliscript-ir-emitter--number-scope-valid-p
+             node nil candidates state)))
+        (while changed
+          (setq changed nil)
+          (maphash (lambda (name binding)
+                     (unless (gethash name proven)
+                       (let ((eliscript-ir-emitter--proven-number-locals proven))
+                         (when (eliscript-ir-emitter--proven-number-node-p
+                                (eliscript-ir-emitter--binding-initializer binding) proven)
+                           (puthash name t proven) (setq changed t)))))
+                   candidates))
+        (when (and (not (car state))
+                   (= (hash-table-count proven) (hash-table-count candidates)))
+          (let ((valid t)
+                (eliscript-ir-emitter--proven-number-locals proven))
+            (dolist (node body)
+              (unless (eliscript-ir-emitter--number-assignments-valid-p
+                       node candidates proven)
+                (setq valid nil)))
+            (and valid proven)))))))
+
 (defun eliscript-ir-emitter--closed-scalar-loop-p (names body)
   "Prove the original scalar IR subset with explicit scope continuations."
   (when names
@@ -1018,6 +1208,15 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
 
 (defun eliscript-ir-emitter--emit-function-body (parameters body)
   "Emit a guarded Number version only for proved closed scalar loops."
+  (let ((previous eliscript-ir-emitter--proven-number-locals))
+    (setq eliscript-ir-emitter--proven-number-locals
+          (eliscript-ir-emitter--proven-number-locals-for parameters body))
+    (unwind-protect
+        (eliscript-ir-emitter--emit-function-body-proved parameters body)
+      (setq eliscript-ir-emitter--proven-number-locals previous))))
+
+(defun eliscript-ir-emitter--emit-function-body-proved (parameters body)
+  "Emit function PARAMETERS and BODY honoring the active Number local proof."
   (let ((names (mapcar #'eliscript-ir-node-value parameters)))
     (if (and (not eliscript-emitter--numeric-profile)
              (cl-every (lambda (p) (and (eq (eliscript-ir-property p :parameter-kind) 'required)
@@ -1320,21 +1519,44 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
 (defun eliscript-ir-emitter--emit-infix (name nodes operator &optional minimum)
   "Emit NODES joined by OPERATOR for intrinsic NAME."
   (eliscript-emitter--require-arity name nodes (or minimum 2))
-  (eliscript-emitter--numeric-fold operator (mapcar #'eliscript-ir-emitter-emit-expression nodes)))
+  ;; Emit every operand under the ambient profile first: only this level may
+  ;; drop its own conversions, never an operand that is not itself proved.
+  (let ((expressions (mapcar #'eliscript-ir-emitter-emit-expression nodes)))
+    (if (and (not eliscript-emitter--numeric-profile)
+             (eliscript-emitter--numeric-tag operator)
+             (cdr nodes)
+             eliscript-ir-emitter--proven-number-locals
+             (cl-every #'eliscript-ir-emitter--proven-number-node-p nodes))
+        (format "(%s)" (string-join expressions (format " %s " operator)))
+      (eliscript-emitter--numeric-fold operator expressions))))
 
 (defun eliscript-ir-emitter--emit-binary-infix (node operator)
   "Emit exact binary intrinsic NODE using JavaScript OPERATOR."
   (eliscript-ir-emitter--require-arity node 2 2)
-  (let ((nodes (eliscript-ir-emitter--children node)))
-    (eliscript-emitter--numeric-binary operator
-      (eliscript-ir-emitter-emit-expression (nth 0 nodes)) (eliscript-ir-emitter-emit-expression (nth 1 nodes)))))
+  (let* ((nodes (eliscript-ir-emitter--children node))
+         (left (eliscript-ir-emitter-emit-expression (nth 0 nodes)))
+         (right (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+    (if (and (not eliscript-emitter--numeric-profile)
+             eliscript-ir-emitter--proven-number-locals
+             (eliscript-ir-emitter--proven-number-node-p (nth 0 nodes))
+             (eliscript-ir-emitter--proven-number-node-p (nth 1 nodes)))
+        (format "(%s %s %s)" left operator right)
+      (eliscript-emitter--numeric-binary operator left right))))
 
 (defun eliscript-ir-emitter--emit-comparison (name nodes operator)
   "Emit one-evaluation n-ary comparison NAME over NODES using OPERATOR."
   (eliscript-emitter--require-arity name nodes 2)
   (if (= (length nodes) 2)
-      (eliscript-emitter--numeric-binary operator
-        (eliscript-ir-emitter-emit-expression (nth 0 nodes)) (eliscript-ir-emitter-emit-expression (nth 1 nodes)))
+      (let ((left (eliscript-ir-emitter-emit-expression (nth 0 nodes)))
+            (right (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+        (if (and (not eliscript-emitter--numeric-profile)
+                 (eliscript-emitter--relational-p operator)
+                 eliscript-ir-emitter--proven-number-locals
+                 (eliscript-ir-emitter--proven-number-node-p (nth 0 nodes))
+                 (eliscript-ir-emitter--proven-number-node-p (nth 1 nodes))
+                 (not (eliscript-ir-emitter--contains-assignment-node-p (nth 1 nodes))))
+            (format "(%s %s %s)" left operator right)
+          (eliscript-emitter--numeric-binary operator left right)))
     (let ((parameters
            (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
           comparisons)
@@ -1511,6 +1733,13 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
        (format "__eliscript_array_build(%s, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('__eliscript_array_copy_assoc
+       (eliscript-ir-emitter--require-arity node 4 4)
+       (format "__eliscript_array_copy_assoc(%s, %s, %s, %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 2 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 3 nodes))))
       ('js-cons
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "[%s, ...((%s) ?? [])]"
@@ -2048,7 +2277,7 @@ JavaScript property or tag string rather than an Eliscript value."
          (setq uses-number-conversion t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node)
-                        '(string-to-bigint number-float64-words __eliscript_array_build __eliscript_arity_error)))
+                        '(string-to-bigint number-float64-words __eliscript_array_build __eliscript_array_copy_assoc __eliscript_arity_error)))
          (setq uses-primitive-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'value-type))

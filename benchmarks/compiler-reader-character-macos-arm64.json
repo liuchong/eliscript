@@ -1,7 +1,6 @@
 {
   "format": "eliscript-compiler-reader-character-benchmark",
-  "version": 1,
-  "generatedAt": "2026-10-15T10:37:17.952Z",
+  "generatedAt": "2026-11-19T17:23:46.532Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
@@ -18,10 +17,38 @@
       "bootstrap/compiler/emitter.eli",
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli",
+      "tools/compiler/reader-character-benchmark.eli",
       "tools/compiler/reader-character-benchmark.mjs",
-      "tools/compiler/controlled-baseline.mjs"
+      "tools/compiler/controlled-baseline.mjs",
+      "runtime/array-text.eli",
+      "runtime/array-text.mjs",
+      "runtime/binding.eli",
+      "runtime/binding.mjs",
+      "runtime/errors.eli",
+      "runtime/errors.mjs",
+      "runtime/math.eli",
+      "runtime/math.mjs",
+      "runtime/number-radix.eli",
+      "runtime/number-radix.mjs",
+      "runtime/prelude.eli",
+      "runtime/prelude.mjs",
+      "runtime/primitives.eli",
+      "runtime/primitives.mjs",
+      "runtime/unicode-case.eli",
+      "runtime/unicode-case.mjs",
+      "runtime/unicode-case-data.eli",
+      "runtime/unicode-case-data.mjs",
+      "bootstrap/runtime/memory.eli",
+      "tools/runtime/unicode-case-runtime.el",
+      "tools/compiler/controlled-baseline.eli"
     ],
-    "value": "b81a02b6842824081815a287d2e576047eab193187ef910f0d529d9af555ff8a"
+    "value": "4ee1fdcdbf2e68ac4df65d3be1de44dc2120b30aa023bc0a3573d31934b4605c",
+    "preparedCompiler": {
+      "format": "eliscript-prepared-stage3",
+      "fixedPointFileCount": 343,
+      "sourceSha256": "320221cbb403e6f14bb1412ca16ff7f270c1b2529b5d0eec5fb8f03b20ba96f8",
+      "productSha256": "abfcb8ec686bd766216a2bc014255cf793677ed5222d885835c1841b924ff232"
+    }
   },
   "host": {
     "runtime": "bun",
@@ -29,11 +56,11 @@
     "engine": "JavaScriptCore",
     "platform": "darwin",
     "architecture": "arm64",
-    "operatingSystem": "Darwin 25.6.0"
+    "operatingSystem": "Darwin 27.2.0"
   },
   "baseline": {
     "revision": "d6822134a187d4247611db56822ef47164a76a61",
-    "root": "eliscript-primitive-reader-baseline",
+    "root": "reader",
     "control": {
       "mode": "current-compiler-with-historical-functions",
       "target": "bootstrap/compiler/reader.eli",
@@ -56,126 +83,126 @@
           "sha256": "1956b2643658bc22b11f943ce94a0694f8a629b080b8854605a3b34051efa44e"
         }
       ],
-      "controlSourceSha256": "4623b88678a15d36420501bf45b42c95a258f4f21bb46edaaebd59e37fc621d3",
+      "controlSourceSha256": "6e4cb86d2f271798a60ef87468721151f2bbfcb0368122f27618944ffcb66734",
       "inputs": [
         {
           "path": "bootstrap/compiler/symbol.eli",
-          "sha256": "cf43e027a44fa419f8934255b3847263585c3d3b9651f983c738666abdefcf38"
+          "sha256": "837615796ffabc7aaf97b42133ab4c3afaa747593e646aaa66af856bb9fe9c3c"
         },
         {
           "path": "bootstrap/compiler/syntax.eli",
-          "sha256": "b64225ce5ac44c20aa190594906fc242c5c192aa4d64bf5dad80a9cfcb48a0f0"
+          "sha256": "a75ef5facca5236bb511bb63ebf5d4737536b2928017ac578a5f244fa59dae40"
         },
         {
           "path": "bootstrap/compiler/reader.eli",
-          "sha256": "5d1de9578c621c4ae1c5f99691645e02046084e4134b0d4284316940f40ba2d1"
+          "sha256": "517c71ffbc82f8acb6237b0adf01fdc4b174d04f63c9c889e5fd3accf41731dc"
         },
         {
           "path": "bootstrap/compiler/formatter.eli",
-          "sha256": "80f52ffe33c0e3fd6153034a578474972168e0740a0947f149c0f1dfa47c5ef4"
+          "sha256": "41a720c6b560cabca83df9075b14bfa69f158b5af9229bd18031a5b5364625d4"
         },
         {
           "path": "bootstrap/compiler/expander.eli",
-          "sha256": "03e58a0bc33f315b4b3fc2291b8bffeb718fbc606945ae567dd19147e46c79ee"
+          "sha256": "8b1580b979a719e2fd6326adda3faca7ba4fc2f317f0a1e95880f472b09f27ae"
         },
         {
           "path": "bootstrap/compiler/transient-analysis.eli",
-          "sha256": "f91891f4259ea1f0764e03aabb3b8b280c5ab49bb01630e697bc89ad20b268c1"
+          "sha256": "e7b1b3a7368c001813eb04194a07597ce14f69963d2b1c00b91ec7a15d19bf97"
         },
         {
           "path": "bootstrap/compiler/analyzer.eli",
-          "sha256": "7bb84e17d5d2e622a2a8d801b5b6da79eb9f67b275f3d1a3df2aab31e2df4f86"
+          "sha256": "85c2e9f56c4df09835e26ff6235331f90593eda71c23c3d207d7b9bbec4c9418"
         },
         {
           "path": "bootstrap/compiler/ir.eli",
-          "sha256": "08dee85f0839058d3f78b1e180fca400b345cfc1425d639b77a26c59df7d7ef8"
+          "sha256": "ae71c2749af2036e2059134b966e232f5f7f86553a7f51687a7c960f78d83743"
         },
         {
           "path": "bootstrap/compiler/lower.eli",
-          "sha256": "8be512725b39ba00dd77bc9e435b549cc47cd503fe862ab4f571dc6de1037f3a"
+          "sha256": "1751d87d273ac3d7ae8b748b0c54ecd7c8cfd75885e087d3a08b60f3ed50d223"
         },
         {
           "path": "bootstrap/compiler/source-map.eli",
-          "sha256": "8ac85cbf38b0f2b0bab3512fc02991c89945a70e240bc6d7a1de61744579afa9"
+          "sha256": "bbacca32b14ebf4bad25809dfd62fd26293fb8688ee5b18900e128710c37dd5d"
         },
         {
           "path": "bootstrap/compiler/emitter.eli",
-          "sha256": "bac95dc1f886e359266dc48e36e5361f3e676aeb2c399620e2d68deaec43b774"
+          "sha256": "741226d77b48f83061275587cd52d34c32c2622521d1bab02df24b2f635e604b"
         },
         {
           "path": "bootstrap/compiler/project.eli",
-          "sha256": "068f8c7836947853b11b2813becf385522f092e1cccfe97e487996e4b8132797"
+          "sha256": "9b93d947da90097c7d2e181d680ae495f1e78892607c411dfe52c669048db27b"
         },
         {
           "path": "bootstrap/compiler/compiler.eli",
-          "sha256": "e7971722e7af65aca6a42e0b9880d8e828c765aa640744d04cffd2ad123ea0f3"
+          "sha256": "f9022632ec5046f449893576fb4d984f7e7ac46d2222518275c5d041247e0d48"
         }
       ],
       "artifacts": [
         {
           "file": "symbol.mjs",
-          "treatment": "3ff92196cfc476cbc26c80c53d1342080995493b9129cb71099687fdf87141c0",
-          "control": "3ff92196cfc476cbc26c80c53d1342080995493b9129cb71099687fdf87141c0"
+          "treatment": "5c956b9389999ef334b40875fa81dfaefa8533a1059604d0200718fe82e4703f",
+          "control": "5c956b9389999ef334b40875fa81dfaefa8533a1059604d0200718fe82e4703f"
         },
         {
           "file": "syntax.mjs",
-          "treatment": "b34259819fc28506a5b318e07a3cbb8d314c42387a1ce57593a25cd91a549f58",
-          "control": "b34259819fc28506a5b318e07a3cbb8d314c42387a1ce57593a25cd91a549f58"
+          "treatment": "005740f986cf97bba5f3907d6cf44054c94e9beb146598b751c49ed8654eec90",
+          "control": "005740f986cf97bba5f3907d6cf44054c94e9beb146598b751c49ed8654eec90"
         },
         {
           "file": "reader.mjs",
-          "treatment": "f7c7418500c8ba0f72b1ea59d10f1651021dda9f74292e34a351a70e4deff7b6",
-          "control": "6b967cb056cd4b064ea65aa7126532eeb903def6b5f34348d9a1e8b2f92f31e6"
+          "treatment": "c39393ae52cea92e024b39b354b37f47131eae5598aef3c97337c5a432e9ee7f",
+          "control": "3527a645892f1afcf36b4e5435c04129168e1c4e5abf547739d759507abdf2bf"
         },
         {
           "file": "formatter.mjs",
-          "treatment": "d93d3d05f82061ffc6836f604ef098ab828b193aec04c21c9461ee5d4cd33d21",
-          "control": "d93d3d05f82061ffc6836f604ef098ab828b193aec04c21c9461ee5d4cd33d21"
+          "treatment": "4ccec24c2bef3507b369b446c82a39318a1467ecee1ad50ead5da61662f1c1a9",
+          "control": "4ccec24c2bef3507b369b446c82a39318a1467ecee1ad50ead5da61662f1c1a9"
         },
         {
           "file": "expander.mjs",
-          "treatment": "4df43e638eec9ccef8f922b496ec6a6f2cbfb99bc485340fd46f926a08bcbab7",
-          "control": "4df43e638eec9ccef8f922b496ec6a6f2cbfb99bc485340fd46f926a08bcbab7"
+          "treatment": "41137c04e8c209b892952b3157a0db1a4a49b65ec19adc7809dff13b205b528c",
+          "control": "41137c04e8c209b892952b3157a0db1a4a49b65ec19adc7809dff13b205b528c"
         },
         {
           "file": "transient-analysis.mjs",
-          "treatment": "9f3fb5a1bd31fd213ebbbbc7a7da1fc9675d3cbd8c9351135308643fa390255a",
-          "control": "9f3fb5a1bd31fd213ebbbbc7a7da1fc9675d3cbd8c9351135308643fa390255a"
+          "treatment": "3493883562cc29e3221ace08365e704fe6cf956141aeb7306dee615721b62350",
+          "control": "3493883562cc29e3221ace08365e704fe6cf956141aeb7306dee615721b62350"
         },
         {
           "file": "analyzer.mjs",
-          "treatment": "fb32820d40f13551f62d47081f228f7d5d5c505518595ad5913d3b5f8e9b7f07",
-          "control": "fb32820d40f13551f62d47081f228f7d5d5c505518595ad5913d3b5f8e9b7f07"
+          "treatment": "98bfad41ab52cbd68236423bdbf0f7dcefdce0c9d747b95964e3cb528cfd62fa",
+          "control": "98bfad41ab52cbd68236423bdbf0f7dcefdce0c9d747b95964e3cb528cfd62fa"
         },
         {
           "file": "ir.mjs",
-          "treatment": "76a935d14fd217e979300de06285ee7f73b97a52615d90d7f7cdaa872d84fc8a",
-          "control": "76a935d14fd217e979300de06285ee7f73b97a52615d90d7f7cdaa872d84fc8a"
+          "treatment": "0c353dd7ee13b3cf7b3a542112712ba02301b8d7f995be8a1cae31e18a787452",
+          "control": "0c353dd7ee13b3cf7b3a542112712ba02301b8d7f995be8a1cae31e18a787452"
         },
         {
           "file": "lower.mjs",
-          "treatment": "e90d51fe1ef4dfbb353cb0ac97b5517439512677cd0bd1364285cdda232c40c6",
-          "control": "e90d51fe1ef4dfbb353cb0ac97b5517439512677cd0bd1364285cdda232c40c6"
+          "treatment": "a3b88450c7ca0c08a887806fe20e70dd1cc34d237870c0056f990b5906208899",
+          "control": "a3b88450c7ca0c08a887806fe20e70dd1cc34d237870c0056f990b5906208899"
         },
         {
           "file": "source-map.mjs",
-          "treatment": "344c65354f671a24748ce330821b3cb0ede15a7907a9e30d515482de5e004b8b",
-          "control": "344c65354f671a24748ce330821b3cb0ede15a7907a9e30d515482de5e004b8b"
+          "treatment": "ab1a03aa3383e2849fb7e829c2d10ce73d683d4efb76ab6f30a86f26b83fb3b5",
+          "control": "ab1a03aa3383e2849fb7e829c2d10ce73d683d4efb76ab6f30a86f26b83fb3b5"
         },
         {
           "file": "emitter.mjs",
-          "treatment": "40b7eb07aefae6cf0e5b446031bdc93657fa62301da82cb33f41371a82a06246",
-          "control": "40b7eb07aefae6cf0e5b446031bdc93657fa62301da82cb33f41371a82a06246"
+          "treatment": "34974693b9b8c14ea4c218f650d8455797c46ff9bdbe4d4fb3c02c7c8d4cdeef",
+          "control": "34974693b9b8c14ea4c218f650d8455797c46ff9bdbe4d4fb3c02c7c8d4cdeef"
         },
         {
           "file": "project.mjs",
-          "treatment": "43f3505886f7fc5f4125c8bc269f60cb4174fb5b5303a85e02a7ca0c085d1400",
-          "control": "43f3505886f7fc5f4125c8bc269f60cb4174fb5b5303a85e02a7ca0c085d1400"
+          "treatment": "a6861cabde3917a3d5c20cf7ad23d2474932ef4edfb5337eb496af53fc8cdae0",
+          "control": "a6861cabde3917a3d5c20cf7ad23d2474932ef4edfb5337eb496af53fc8cdae0"
         },
         {
           "file": "compiler.mjs",
-          "treatment": "e9a0342f3603fb3305bc81d524157b33ca5bb08e051775c15cf696fc53b81843",
-          "control": "e9a0342f3603fb3305bc81d524157b33ca5bb08e051775c15cf696fc53b81843"
+          "treatment": "6a4b5e07914e73e81785f144f95d1ecc5cecfd120f78d37592be90b579481e6c",
+          "control": "6a4b5e07914e73e81785f144f95d1ecc5cecfd120f78d37592be90b579481e6c"
         }
       ]
     }
@@ -196,9 +223,9 @@
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli"
     ],
-    "sourceBytes": 439751,
-    "generatedBytes": 681034,
-    "predicateCodePoints": 439752
+    "sourceBytes": 582239,
+    "generatedBytes": 763094,
+    "predicateCodePoints": 582240
   },
   "parameters": {
     "warmupRounds": 2,
@@ -207,96 +234,96 @@
     "timingSamples": 15
   },
   "validation": {
-    "equivalentCodePoints": 439752,
+    "equivalentCodePoints": 582240,
     "identicalCompilerOutputs": 13,
     "validSourceMaps": 13,
-    "predicateChecksum": 6579500,
-    "baselineCompilerChecksum": 10651464,
-    "optimizedCompilerChecksum": 10651464
+    "predicateChecksum": 8602140,
+    "baselineCompilerChecksum": 12980192,
+    "optimizedCompilerChecksum": 12980192
   },
   "measurements": {
     "referencePredicates": {
       "samplesMs": [
-        110.9828750000006,
-        116.18012499999986,
-        124.30441700000029,
-        129.7750419999993,
-        126.47629199999938,
-        121.60499999999956,
-        114.94870900000024,
-        128.55429200000071,
-        120.35462499999994,
-        114.97750000000087,
-        120.90962500000023,
-        108.34104200000002,
-        117.14170899999954,
-        123.27574999999706,
-        127.15229100000215
+        141.95495800000003,
+        138.72916600000008,
+        140.16699999999992,
+        140.22525000000041,
+        141.51858300000004,
+        145.75083300000006,
+        139.36008399999992,
+        137.28362500000003,
+        147.6194579999992,
+        138.21604200000002,
+        139.6986250000009,
+        138.56666699999914,
+        140.2127079999991,
+        140.83095799999865,
+        140.56325000000106
       ],
-      "medianMs": 120.90962500000023
+      "medianMs": 140.2127079999991
     },
     "optimizedPredicates": {
       "samplesMs": [
-        55.92454100000032,
-        55.86787499999991,
-        62.39441699999952,
-        59.593292000001384,
-        65.15637500000048,
-        82.76245800000106,
-        86.51445899999999,
-        82.69183300000077,
-        88.28204200000255,
-        79.87254200000098,
-        85.16191700000127,
-        81.28179199999795,
-        83.94516600000134,
-        81.93808400000125,
-        88.19845899999927
+        93.46979199999987,
+        93.60683300000028,
+        93.79954099999986,
+        94.7529169999998,
+        93.19262500000059,
+        94.60683300000073,
+        93.40804200000002,
+        93.81624999999985,
+        93.26950000000033,
+        93.82283400000051,
+        95.21737500000017,
+        103.06704200000058,
+        93.62625000000116,
+        94.71154200000092,
+        93.84904099999949
       ],
-      "medianMs": 81.93808400000125
+      "medianMs": 93.81624999999985
     },
-    "predicateSpeedup": 1.4756218244009511,
+    "predicateSpeedup": 1.4945460727752318,
     "baselineCompiler": {
       "samplesMs": [
-        763.1755830000002,
-        713.9575420000001,
-        799.1030410000003,
-        789.7451660000006,
-        756.3599999999988,
-        728.1748329999991,
-        720.1138329999994,
-        703.9767919999977,
-        697.8866249999992,
-        751.1731670000008,
-        752.9617079999989,
-        747.6790000000001,
-        751.966292000001,
-        738.6755420000009,
-        726.661417000003
+        489.98745899999994,
+        440.40495899999996,
+        461.1751669999999,
+        451.2654159999993,
+        423.1879590000008,
+        441.1214579999996,
+        451.68262499999946,
+        424.27508399999897,
+        427.81674999999996,
+        409.713749999999,
+        433.828207999999,
+        410.42012500000055,
+        418.07787500000086,
+        427.44766700000037,
+        425.1674579999999
       ],
-      "medianMs": 747.6790000000001
+      "medianMs": 427.81674999999996
     },
     "optimizedCompiler": {
       "samplesMs": [
-        691.1934169999995,
-        663.6605,
-        809.1276670000007,
-        746.2287079999987,
-        683.2810840000002,
-        655.6891669999986,
-        647.704083999999,
-        668.2837909999998,
-        757.4106670000001,
-        706.6952500000007,
-        695.3248749999984,
-        692.4415829999998,
-        687.5293329999986,
-        676.4290419999998,
-        683.9833330000001
+        417.19375000000014,
+        402.19379100000015,
+        385.9955420000001,
+        401.3767080000007,
+        391.3078750000004,
+        403.39695800000027,
+        369.8552499999987,
+        377.04754200000025,
+        372.4067500000001,
+        373.1235830000005,
+        395.78541700000096,
+        368.1509580000002,
+        403.4285,
+        370.0936249999995,
+        385.4757500000014
       ],
-      "medianMs": 687.5293329999986
+      "medianMs": 385.9955420000001
     },
-    "completeCompilerSpeedup": 1.0874866920041675
+    "completeCompilerSpeedup": 1.108346349761728
   },
   "decision": {
     "minimumCompleteCompilerSpeedup": 1.08,

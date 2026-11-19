@@ -8,7 +8,6 @@
   (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_BINARY_COMPARISON_FORMAT "eliscript-compiler-binary-comparison-benchmark")
-  (defconst COMPILER_BINARY_COMPARISON_VERSION 1)
   (defconst COMPILER_BINARY_COMPARISON_BASELINE "a123937b275d89e833434e84064e4e120cf5495b")
 
   (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
@@ -118,7 +117,6 @@
                       (throw err)))))
       (when (or (not report)
                 (not (= (get report :format) COMPILER_BINARY_COMPARISON_FORMAT))
-                (not (= (get report :version) COMPILER_BINARY_COMPARISON_VERSION))
                 (not (get report :baseline))
                 (not (= (get (get report :baseline) :revision) COMPILER_BINARY_COMPARISON_BASELINE)))
         (funcall reject "invalid compiler binary comparison report identity"))
@@ -263,7 +261,6 @@
                 (validateCompilerBinaryComparisonReport
                   (js-object
                     :format COMPILER_BINARY_COMPARISON_FORMAT
-                    :version COMPILER_BINARY_COMPARISON_VERSION
                     :generatedAt (js-call (new globalThis.Date) :toISOString)
                     :sourceDigest (await (compilerBinaryComparisonSourceDigest))
                     :host (js-object
@@ -320,7 +317,6 @@
 
   (export
     COMPILER_BINARY_COMPARISON_FORMAT
-    COMPILER_BINARY_COMPARISON_VERSION
     COMPILER_BINARY_COMPARISON_BASELINE
     compilerBinaryComparisonSourceDigest
     validateCompilerBinaryComparisonReport

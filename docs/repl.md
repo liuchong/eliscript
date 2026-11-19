@@ -8,7 +8,7 @@
 Run `./bin/eliscript-eval --repl --root /path/to/project`. Interactive terminals
 show a banner and prompts automatically; scripts should pass `--no-prompt`.
 `--eval SOURCE` and `--file FILE` provide one-shot operation, while `--stdio`
-exposes versioned NDJSON requests for editor clients.
+exposes NDJSON requests for editor clients.
 
 <!-- eliscript-snippet:persistent-repl -->
 ```text

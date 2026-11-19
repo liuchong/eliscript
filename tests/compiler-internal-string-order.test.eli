@@ -17,7 +17,7 @@
   (defvar directory undefined) (defvar b undefined) (defvar project undefined)
   (defun reportInput ()
     (js-object :mode "standard" :root (resolve directory "report-root") :outDir (resolve directory "report-root/dist")
-      :entry "src/main.eli" :entryOutput "src/main.mjs" :manifest "eliscript-project.json" :digest "supplied-identity-unchanged"
+      :entries (js-array "src/main.eli") :entryOutputs (js-array "src/main.mjs") :manifest "eliscript-project.json" :digest "supplied-identity-unchanged"
       :portableEntries (js-array) :cache (js-object :enabled false :reason "disabled")
       :timings (js-object :cacheReadMs 0 :workMs 0 :manifestWriteMs 0 :totalMs 0)
       :modules (js-call names :map (lambda (name)

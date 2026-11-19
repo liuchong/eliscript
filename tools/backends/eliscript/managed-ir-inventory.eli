@@ -194,7 +194,7 @@
         (js-call kinds :sort (lambda (left right) (js-call (get left :kind) :localeCompare (get right :kind))))
         (js-call pairs :sort (lambda (left right) (js-call (get left :sortKey) :localeCompare (get right :sortKey))))
         (js-call pairs :forEach (lambda (record) (Reflect/deleteProperty record "sortKey")))
-        (js-object :format "eliscript-managed-ir-inventory" :version 1
+        (js-object :format "eliscript-managed-ir-inventory"
           :compilerPath (resolve root "dist/bootstrap/compiler.mjs")
           :literalCount (js-length sources) :projectCount (get project :size)
           :traversal "unique-node-per-program/body-and-children"

@@ -98,7 +98,7 @@
       (Object/fromEntries (js-call (Object/entries result) :sort (lambda (left right) (js-call (aref left 0) :localeCompare (aref right 0)))))))
   (defun sourceSetDigest (sources) (digest (JSON/stringify sources)))
   (defun verifyReportGraph (report graph phase)
-    (invariant (eq (get report :format) "eliscript-build-report") (str phase " report format changed")) (invariant (eq (get report :version) 1) (str phase " report version changed"))
+    (invariant (eq (get report :format) "eliscript-build-report") (str phase " report format changed"))
     (invariant (eq (at (get report :counts) "modules") moduleCount) (str phase " did not report " moduleCount " modules"))
     (invariant (and (Array/isArray (get report :modules)) (= (js-length (get report :modules)) moduleCount)) (str phase " module records are incomplete"))
     (let ((bySource (new globalThis.Map (js-call (get report :modules) :map (lambda (module) (js-array (get module :source) module))))))
@@ -210,7 +210,7 @@
                               (invariant (eq (get (get shared :report) :digest) (get (get sharedClean :report) :digest)) "shared incremental graph digest differs from a forced clean build")
                               (invariant (eq (JSON/stringify sharedSemantics) (JSON/stringify sharedCleanSemantics)) "shared incremental behavior differs from a forced clean build"))
                             (let ((finalSources (await (treeIdentity projectRoot maximumSourceBytes))) (temporary (await (treeIdentity directory maximumTemporaryBytes))))
-                              (js-object :schemaVersion 1 :format "eliscript-project-scale-invalidation" :version 1 :verified t
+                              (js-object :format "eliscript-project-scale-invalidation" :verified t
                                 :graph (js-object :modules moduleCount :edges (get graph :edges) :rootFanout (js-length (aref (get graph :dependencies) 0)) :chainModules (1+ (- chainEnd chainStart))
                                   :diamonds diamondCount :diamondModules (* diamondCount 4) :cycles cycleCount :cycleModules (* cycleCount cycleSize) :sharedImporters (1+ (- fanoutEnd fanoutStart))
                                   :leaf (sourceName leafModule) :sharedDependency (sourceName sharedModule) :topologyDigest (get graph :topologyDigest))

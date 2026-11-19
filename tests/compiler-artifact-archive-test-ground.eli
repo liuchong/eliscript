@@ -452,7 +452,7 @@
           (catch __eli_iteration_9_close_error (unless __eli_iteration_9_failed (throw __eli_iteration_9_close_error))))))))))))
 (funcall literalPhase "runtime-cache-publish-start" -1)
 (let* ((ready (await (js-call session :request (js-object :operation "runtime"))))
-          (cachedIROptions (Object/freeze (js-object :responseMode "events-v1" :responseStringChunks t))))
+          (cachedIROptions (Object/freeze (js-object :responseMode "events" :responseStringChunks t))))
           (js-call resourceObserver :assertBounded) (funcall literalPhase "runtime-cache-publish-complete" -1)
           (js-call globalThis.console :info "complete default source assets: authenticated runtime compilation finished")
           (ae (get ready :ready) t) (ae (get ready :filename) (get (get sources :runtime) :filename)) (ae (get ready :revision) 1)
@@ -844,7 +844,7 @@
     (assert (not (js-call (JSON/stringify (get result :files)) :includes "node_modules"))) (same (get result :productIdentity) (get artifact :productIdentity))))))))))
   (test "the public compiler CLI retains structured backend failures without an Error stack" (async ()
 (let* ((cli (await (funcall dynamicImport "../tools/backends/compiler-cli.mjs")))
-  (diagnostic (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-B0001" :severity "error" :phase "managed-backend" :message "unsupported source operation"
+  (diagnostic (js-object :format "eliscript-diagnostic" :code "ELI-B0001" :severity "error" :phase "managed-backend" :message "unsupported source operation"
     :location (js-object :file "original.eli" :start (js-object :line 3 :column 7))))
   (rendered (JSON/parse (js-call cli :renderCompilerCLIError (js-object :message (get diagnostic :message) :eliscriptDiagnostic diagnostic)))))
   (ae (get rendered :message) (get diagnostic :message)) (same (get rendered :eliscriptDiagnostic) diagnostic)
@@ -1118,7 +1118,7 @@
   (test "automatic debug metadata loads exact values through authenticated bounded reads of one file" (async ()
 (await (sessionResourceFixture (async (context)
 (let* ((directory (get context :directory)) (artifact (get context :artifact)) (path (get context :path)) (source (get context :source)) (bytes (get context :bytes)))
-(let* ((document (js-object :format "eliscript-debug-map" :version 1 :target "wasm" :offsetBase "module"
+(let* ((document (js-object :format "eliscript-debug-map" :target "wasm" :offsetBase "module"
   :ranges (js-array (js-object :start 0 :end 8 :kind "function" :span (js-object :filename "原😀\ud800.eli" :start 0 :end 8)))
   :functions (js-array) :sections (js-array) :trapSites (js-array) :zero zero
   :text (str (js-call "x" :repeat 65515) "中😀\udfff\"\\\n" (js-call "é中😀" :repeat 24000)) :values (js-array nil t zero globalThis.Number.MIN_VALUE)))

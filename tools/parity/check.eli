@@ -172,11 +172,9 @@
   (defasync inspect-compiler-parity-corpus (contract root)
     (let ((errors (js-array)))
       (unless (and (plain-object? contract)
-                   (= (get contract :schemaVersion) 1)
-                   (= (get contract :format) "eliscript-compiler-parity-corpus")
-                   (= (get contract :version) 1))
+                   (= (get contract :format) "eliscript-compiler-parity-corpus"))
         (throw (new CompilerParityCorpusError
-                 (js-array "contract must use eliscript-compiler-parity-corpus version 1"))))
+                 (js-array "contract must use eliscript-compiler-parity-corpus"))))
       (let* ((manifest (await (read-json root "tests/conformance/manifest.json")))
              (surface (await (read-json root "contracts/public-surface.json")))
              (specification-index (await (read-json root "specs/index.json")))
@@ -278,8 +276,7 @@
                       (not (= (get contract :identity) expected-identity)))
               (js-call errors :push "identity must bind the complete parity inventory and source files"))
             (js-object :errors errors :expectedIdentity expected-identity
-              :report (js-object :schemaVersion 1
-                        :stableFeatures (js-length actual-features)
+              :report (js-object :stableFeatures (js-length actual-features)
                         :fixtures (js-length fixture-state)
                         :validCases (sum-field fixture-state "valid")
                         :diagnosticCases diagnostic-case-count

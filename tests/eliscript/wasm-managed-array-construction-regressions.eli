@@ -6,6 +6,7 @@
   (import "../tools/backends/build.mjs" buildBackends root)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "./helpers/managed-browser-transport.mjs" loadManagedReference)
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
   (defvar directory undefined) (defvar backend undefined) (defvar runtime-ir undefined)
   (defconst source (str
     "(defun from (text) (Array/from text))\n"
@@ -97,7 +98,7 @@
              (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (get compiled :bytes))) :exports))
              (heap (js-call e "heap-new" 32 8192 65536))
              (raw (lambda (name &rest arguments)
-               (let ((out (uint32 (Reflect/apply (get e name) e (js-call (js-array heap) :concat arguments)))))
+               (let ((out (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array heap) :concat arguments)))))
                  (js-call assert :strictEqual (js-call e "last-error") 0 name) out)))
              (key (funcall raw "value-string" 1)) (caller (funcall raw "frame-new" 1)))
         (funcall raw "frame-set" caller 0 key) (funcall raw "value-unit-set" key 0 120) (funcall raw "value-seal" key)
@@ -105,7 +106,10 @@
                           (js-array 4294967295 key 0 1 0) (js-array 0 4294967295 0 1 0)) :forEach
           (lambda (row)
             (funcall raw "value-exception-class-set" 0)
-            (js-call assert :strictEqual (js-call e "value-source-get-with-receiver" heap (aref row 0) (aref row 1) (aref row 2)) 0)
+            (js-call assert :strictEqual (js-call e "value-source-get-with-receiver" heap
+                                          (funcall globalThis.BigInt (aref row 0))
+                                          (funcall globalThis.BigInt (aref row 1))
+                                          (funcall globalThis.BigInt (aref row 2))) (funcall globalThis.BigInt 0))
             (js-call assert :strictEqual (js-call e "last-error") (aref row 3))
             (js-call assert :strictEqual (funcall raw "value-exception-class") (aref row 4))
             (js-call assert :strictEqual (funcall raw "frame-depth") 1)
@@ -163,7 +167,7 @@
              (heap (js-call e "heap-new" 32 8192 65536))
              (raw (lambda (name &rest arguments)
                (js-call assert :strictEqual (value-type (get e name)) "function" name)
-               (let ((out (uint32 (Reflect/apply (get e name) e (js-call (js-array heap) :concat arguments)))))
+               (let ((out (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array heap) :concat arguments)))))
                  (js-call assert :strictEqual (js-call e "last-error") 0 name) out)))
              (caller (funcall raw "frame-new" 1)) (kept (funcall raw "value-string" 1)))
         (funcall raw "frame-set" caller 0 kept) (funcall raw "value-unit-set" kept 0 120) (funcall raw "value-seal" kept)
@@ -191,7 +195,7 @@
         (let ((before (funcall raw "heap-collections")) (index 0) (exhausted false))
           (while (and (< index 32) (not exhausted))
             (let ((temporary (js-call e "frame-new" heap 0)))
-              (if (= temporary 0)
+              (if (= temporary (funcall globalThis.BigInt 0))
                 (progn (js-call assert :strictEqual (js-call e "last-error") 2) (setq exhausted t))
                 (funcall raw "frame-pop" temporary)))
             (setq index (1+ index)))

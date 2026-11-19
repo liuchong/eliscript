@@ -22,7 +22,7 @@
                     (Object/assign (js-object) options (js-object :markdownFile undefined)))))
            (file (get options :markdownFile)))
       ;; All original commit/tree/ancestor, contract, artifact and measurement
-      ;; checks above stay strict. Only the versioned text projection lives here.
+      ;; The checks above stay strict. Only the text projection lives here.
       (when file
         (unless (= (await (readFile (resolve (get options :root root) file) "utf8")) (humanCompatibilityReport report))
           (throw (new CompatibilityRehearsalError (js-array "run Markdown does not match generated report"))))) report))

@@ -190,7 +190,7 @@ nil or `always'."
           (setq build
                 (eliscript-project-build
                  eliscript-analysis--source-file directory project-root)
-                module (eliscript-project-build-result-entry-output build)
+                module (car (eliscript-project-build-result-entry-outputs build))
                 service
                 (eliscript-service-start
                  (eliscript-service-module-declare

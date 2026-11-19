@@ -15,7 +15,7 @@
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
      "list" "vector" "hash-map" "hash-set" "queue" "js-array" "car"
-     "cdr" "cons" "js-cons" "nth" "js-nth" "aref" "length" "js-length" "__eliscript_array_build"
+     "cdr" "cons" "js-cons" "nth" "js-nth" "aref" "length" "js-length" "__eliscript_array_build" "__eliscript_array_copy_assoc"
      "new" "print" "str"
      "object-keys" "object-has?" "object-assoc" "__eliscript_arity_error"
      "funcall" "apply"))
@@ -26,6 +26,12 @@
   (defconst top-level-operators
     (js-array "defun" "defn" "defportable" "defasync" "defvar" "defconst"
       "export" "export-default" "import" "import-portable" "module"))
+
+  (defconst builtin-operator-set (new globalThis.Set builtin-operators))
+  (defconst portable-forbidden-operator-set (new globalThis.Set portable-forbidden-operators))
+  (defconst top-level-operator-set (new globalThis.Set top-level-operators))
+  (defconst transient-import-pattern
+    (new globalThis.RegExp "(^|/)(stdlib|runtime)/core/transient\\.(mjs|eli)$"))
 
   (defconst fail
     (lambda (diagnostic)
@@ -50,7 +56,6 @@
       (fail
         (js-object
           :format "eliscript-diagnostic"
-          :version 1
           :code code
           :severity "error"
           :phase phase
@@ -632,10 +637,40 @@
             (setq index (1+ index)))))
       (analyze-sequence body child context)))
 
+  (defun function-body (body parameter-count asynchronous context)
+    ;; Validate the declaration without changing the AST consumed by lowering.
+    (let* ((first (js-nth 0 body))
+           (items (and first (= (node-kind first) "list") (node-items first))))
+      (if (not (and items (> (js-length items) 0)
+                    (symbol-node-p (js-nth 0 items))
+                    (= (node-name (js-nth 0 items)) "memory-sig")))
+          body
+        (progn
+          (when asynchronous
+            (analyzer-fail context (node-span first)
+              "memory-sig is only permitted as the leading form of a synchronous function"))
+          (unless (= (js-length items) (+ parameter-count 2))
+            (analyzer-fail context (node-span first)
+              (str "memory-sig requires 1 result type and " parameter-count " parameter types")))
+          (when (<= (js-length body) 1)
+            (analyzer-fail context (node-span first) "memory-sig requires a function body"))
+          (let ((index 1))
+            (while (< index (js-length items))
+              (let* ((token (js-nth index items))
+                     (name (if (symbol-node-p token) (node-name token)
+                             (if (string-node-p token) (node-value token) nil))))
+                (unless (or (= name "u32") (= name "f64")
+                            (= name "v64") (= name "bits64"))
+                  (analyzer-fail context (node-span token)
+                    "memory-sig requires explicit u32, f64, v64, or bits64 types")))
+              (setq index (1+ index))))
+          (js-call body :slice 1)))))
+
   (defun analyze-function
       (parameters body scope context &optional asynchronous)
     (let ((parameter-items (function-parameters parameters context))
           (index 0))
+      (setq body (function-body body (js-length parameter-items) asynchronous context))
       (while (< index (get parameter-items :length))
         (analyze-pattern-defaults (get (js-nth index parameter-items) :node) scope context)
         (setq index (1+ index)))
@@ -854,126 +889,139 @@
           context form-span "try requires a catch or finally clause"))
       (put context :recurBarrier recur-barrier)))
 
+  (defconst special-operator-set
+    (new globalThis.Set
+      (js-array
+        "memory-sig" "lambda" "fn" "async" "await" "throw" "try"
+        "catch" "finally" "let" "let*" "loop" "recur" "setq" "set!"
+        "cond" "if" "when" "unless" "progn" "do" "and" "or" "while"
+        "quote" "js-object" "hash-map" "get" "put" "js-call" "js*")))
+
   (defun analyze-call (form scope context)
     (let* ((items (node-items form))
            (operator-node (js-nth 0 items))
            (operator (and (symbol-node-p operator-node)
-                          (node-name operator-node)))
-           (args (js-call items :slice 1))
-           (form-span (node-span form)))
-      (cond
-        ((or (= operator "lambda") (= operator "fn"))
-         (when (= (get args :length) 0)
-           (analyzer-fail
-             context form-span
-             (str operator " requires an argument list")))
-         (analyze-function
-           (js-nth 0 args) (js-call args :slice 1) scope context))
-        ((= operator "async")
-         (when (= (get args :length) 0)
-           (analyzer-fail
-             context form-span "async requires an argument list"))
-         (analyze-function
-           (js-nth 0 args) (js-call args :slice 1) scope context t))
-        ((= operator "await")
-         (unless (= (get args :length) 1)
-           (analyzer-fail context form-span "await expects 1 argument"))
-         (unless (async-function-p scope)
-           (analyzer-fail
-             context form-span
-             "await is only valid inside an async function"))
-         (analyze-non-tail (js-nth 0 args) scope context))
-        ((= operator "throw")
-         (unless (= (get args :length) 1)
-           (analyzer-fail context form-span "throw expects 1 argument"))
-         (analyze-non-tail (js-nth 0 args) scope context))
-        ((= operator "try")
-         (analyze-try args scope context form-span))
-        ((or (= operator "catch") (= operator "finally"))
-         (analyzer-fail
-           context form-span
-           (str operator " is only valid as a try clause")))
-        ((= operator "let")
-         (analyze-let args scope false context form-span))
-        ((= operator "let*")
-         (analyze-let args scope t context form-span))
-        ((= operator "loop")
-         (analyze-loop args scope context form-span))
-        ((= operator "recur")
-         (analyze-recur args scope context form-span))
-        ((= operator "setq")
-         (analyze-assignment args scope "setq" context form-span))
-        ((= operator "set!")
-         (unless (= (get args :length) 2)
-           (analyzer-fail context form-span "set! expects 2 arguments"))
-         (analyze-assignment args scope "set!" context form-span))
-        ((= operator "cond") (analyze-cond args scope context))
-        ((= operator "if")
-         (unless (and (>= (get args :length) 2)
-                      (<= (get args :length) 3))
-           (analyzer-fail context form-span "if expects 2..3 arguments"))
-         (analyze-non-tail (js-nth 0 args) scope context)
-         ;; These are alternatives, not successive body forms.  Each branch
-         ;; inherits the conditional's tail position, including the first.
-         (let ((index 1))
-           (while (< index (get args :length))
-             (analyze-expression (js-nth index args) scope context)
-             (setq index (1+ index)))))
-        ((or (= operator "when") (= operator "unless"))
-         (when (= (get args :length) 0)
-           (analyzer-fail
-             context form-span (str operator " expects 1+ arguments")))
-         (analyze-non-tail (js-nth 0 args) scope context)
-         (analyze-sequence (js-call args :slice 1) scope context))
-        ((or (= operator "progn") (= operator "do")
-             (= operator "and") (= operator "or"))
-         (analyze-sequence args scope context))
-        ((= operator "while")
-         (when (= (get args :length) 0)
-           (analyzer-fail context form-span "while expects 1+ arguments"))
-         (analyze-non-tail-sequence args scope context))
-        ((= operator "quote") nil)
-        ((= operator "js-object")
-         (analyze-object args scope context form-span operator))
-        ((= operator "hash-map")
-         (when (= (% (get args :length) 2) 1)
-           (analyzer-fail
-             context form-span
-             "hash-map expects complete key/value pairs"))
-         (analyze-non-tail-sequence args scope context))
-        ((or (= operator "get") (= operator "put") (= operator "js-call"))
-         (analyze-property-call
-           operator args scope context form-span))
-        ((= operator "js*") nil)
-        ((js-call builtin-operators :includes operator)
-         (analyze-non-tail-sequence args scope context))
-        ((js-call top-level-operators :includes operator)
-         (analyzer-fail
-           context form-span
-           (str operator " is only valid at module top level")))
-        (t
-         (analyze-non-tail operator-node scope context)
-         (analyze-non-tail-sequence args scope context)))))
+                          (node-name operator-node))))
+      (if (or (eq operator "quote") (eq operator "js*"))
+          nil
+        (let ((args (js-call items :slice 1))
+              (form-span (node-span form)))
+          (cond
+            ((not (and operator (js-call special-operator-set :has operator)))
+             (cond
+               ((and operator (js-call builtin-operator-set :has operator))
+                (analyze-non-tail-sequence args scope context))
+               ((and operator (js-call top-level-operator-set :has operator))
+                (analyzer-fail
+                  context form-span
+                  (str operator " is only valid at module top level")))
+               (t
+                (analyze-non-tail operator-node scope context)
+                (analyze-non-tail-sequence args scope context))))
+            ((or (eq operator "get") (eq operator "put") (eq operator "js-call"))
+             (analyze-property-call operator args scope context form-span))
+            ((eq operator "let")
+             (analyze-let args scope false context form-span))
+            ((eq operator "let*")
+             (analyze-let args scope t context form-span))
+            ((eq operator "setq")
+             (analyze-assignment args scope "setq" context form-span))
+            ((eq operator "if")
+             (unless (and (>= (get args :length) 2)
+                          (<= (get args :length) 3))
+               (analyzer-fail context form-span "if expects 2..3 arguments"))
+             (analyze-non-tail (js-nth 0 args) scope context)
+             ;; These are alternatives, not successive body forms.  Each branch
+             ;; inherits the conditional's tail position, including the first.
+             (let ((index 1))
+               (while (< index (get args :length))
+                 (analyze-expression (js-nth index args) scope context)
+                 (setq index (1+ index)))))
+            ((or (eq operator "when") (eq operator "unless"))
+             (when (= (get args :length) 0)
+               (analyzer-fail
+                 context form-span (str operator " expects 1+ arguments")))
+             (analyze-non-tail (js-nth 0 args) scope context)
+             (analyze-sequence (js-call args :slice 1) scope context))
+            ((or (eq operator "progn") (eq operator "do")
+                 (eq operator "and") (eq operator "or"))
+             (analyze-sequence args scope context))
+            ((eq operator "cond") (analyze-cond args scope context))
+            ((eq operator "while")
+             (when (= (get args :length) 0)
+               (analyzer-fail context form-span "while expects 1+ arguments"))
+             (analyze-non-tail-sequence args scope context))
+            ((or (eq operator "lambda") (eq operator "fn"))
+             (when (= (get args :length) 0)
+               (analyzer-fail
+                 context form-span
+                 (str operator " requires an argument list")))
+             (analyze-function
+               (js-nth 0 args) (js-call args :slice 1) scope context))
+            ((eq operator "async")
+             (when (= (get args :length) 0)
+               (analyzer-fail
+                 context form-span "async requires an argument list"))
+             (analyze-function
+               (js-nth 0 args) (js-call args :slice 1) scope context t))
+            ((eq operator "await")
+             (unless (= (get args :length) 1)
+               (analyzer-fail context form-span "await expects 1 argument"))
+             (unless (async-function-p scope)
+               (analyzer-fail
+                 context form-span
+                 "await is only valid inside an async function"))
+             (analyze-non-tail (js-nth 0 args) scope context))
+            ((eq operator "throw")
+             (unless (= (get args :length) 1)
+               (analyzer-fail context form-span "throw expects 1 argument"))
+             (analyze-non-tail (js-nth 0 args) scope context))
+            ((eq operator "try")
+             (analyze-try args scope context form-span))
+            ((or (eq operator "catch") (eq operator "finally"))
+             (analyzer-fail
+               context form-span
+               (str operator " is only valid as a try clause")))
+            ((eq operator "loop")
+             (analyze-loop args scope context form-span))
+            ((eq operator "recur")
+             (analyze-recur args scope context form-span))
+            ((eq operator "set!")
+             (unless (= (get args :length) 2)
+               (analyzer-fail context form-span "set! expects 2 arguments"))
+             (analyze-assignment args scope "set!" context form-span))
+            ((eq operator "js-object")
+             (analyze-object args scope context form-span operator))
+            ((eq operator "hash-map")
+             (when (= (% (get args :length) 2) 1)
+               (analyzer-fail
+                 context form-span
+                 "hash-map expects complete key/value pairs"))
+             (analyze-non-tail-sequence args scope context))
+            (t
+             (analyzer-fail context form-span
+               "memory-sig is only permitted as the leading form of a synchronous function")))))))
 
   (defun analyze-expression (form scope context)
     (when form
-      (cond
-        ((or (= (node-kind form) "literal")
-             (= (node-kind form) "undefined")
-             (= (node-kind form) "keyword")) nil)
-        ((= (node-kind form) "symbol")
-         (let ((name (node-name form)))
-           (if (qualified-name-p name)
-               (guarded-reference-name name context (node-span form))
-             (require-binding scope form context))))
-        ((= (node-kind form) "vector")
-         (analyze-non-tail-sequence (node-items form) scope context))
-        ((= (node-kind form) "list")
-         (analyze-call form scope context))
-        (t
-         (analyzer-fail
-           context (node-span form)
-           (str "unsupported form: " (node-display form)))))))
+      (let ((kind (node-kind form)))
+        (cond
+          ((eq kind "list")
+           (analyze-call form scope context))
+          ((eq kind "symbol")
+           (let ((name (node-name form)))
+             (if (qualified-name-p name)
+                 (guarded-reference-name name context (node-span form))
+               (require-binding scope form context))))
+          ((or (eq kind "literal")
+               (eq kind "undefined")
+               (eq kind "keyword")) nil)
+          ((eq kind "vector")
+           (analyze-non-tail-sequence (node-items form) scope context))
+          (t
+           (analyzer-fail
+             context (node-span form)
+             (str "unsupported form: " (node-display form))))))))
 
   (defun import-bindings (args context form-span portable)
     (unless (and (> (get args :length) 0)
@@ -1078,7 +1126,10 @@
                    (= operator "import-portable"))
                  :forEach
                  (lambda (name)
-                   (declare-binding scope name "import" false context))))
+                   (declare-binding scope name "import" false context)))
+               (if (js-call transient-import-pattern :test (node-value (js-nth 0 args)))
+                   (put context :hasTransient t)
+                 nil))
               ((= operator "defvar")
                (unless (and (>= count 1) (<= count 2))
                  (analyzer-fail
@@ -1341,7 +1392,7 @@
            (operator (and (symbol-node-p operator-node)
                           (node-name operator-node)))
            (args (js-call items :slice 1)))
-      (when (js-call portable-forbidden-operators :includes operator)
+      (when (js-call portable-forbidden-operator-set :has operator)
         (portable-fail
           context (node-span form)
           (str "portable function " entry " cannot use " operator " ("
@@ -1384,7 +1435,7 @@
          (portable-host-key-call
            args scope declarations dependencies entry context))
         (t
-         (unless (js-call builtin-operators :includes operator)
+         (unless (js-call builtin-operator-set :has operator)
            (portable-expression
              operator-node scope declarations dependencies entry context))
          (portable-sequence
@@ -1505,7 +1556,8 @@
       (predeclare-top-level flattened scope context)
       (js-call flattened :forEach
         (lambda (form) (analyze-top-level form scope context)))
-      (analyze-transients forms filename)
+      (when (get context :hasTransient false)
+        (analyze-transients forms filename))
       ;; With no portable entry the dependency worklist is empty.  All normal
       ;; declarations/imports were already checked above; do not construct a
       ;; second Map and copy every function body just to visit no entry.

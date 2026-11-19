@@ -5,7 +5,7 @@
   (import "./compiler-corpus-ground.mjs" createOriginalCorpusSourceReader)
   (defconst id "original-program:compiler-module-reader-program-fuzz")
   (defconst suite "tests/reader-program-fuzz.test.mjs")
-  (defconst suite-sha "067e55128209aee4d9c8a208e65ee470f380e345ae3822f7cc4b2b6f62727d78")
+  (defconst suite-sha "b4084ed1f3827de0fdb2500610cdb720d9173855dcfd2314589e05c3eee60193")
   (defconst files (js-array
     "tools/backends/eliscript/compiler-corpus-fuzz.eli" "tools/backends/compiler-corpus-fuzz.mjs"
     "tests/reader-program-fuzz.test.mjs"
@@ -67,12 +67,12 @@
                   :sourceSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/fuzz/reader-program-acceptance.eli"))) :sourceSha256)
                   :generatedFile "tools/fuzz/reader-program-acceptance.mjs"
                   :generatedSha256 (get (js-call proofs :find (lambda (proof) (= (get proof :file) "tools/fuzz/reader-program-acceptance.mjs"))) :sourceSha256))
-                :maintainedTransport (js-object :kind "maintained-eli-complete-fuzz-acceptance" :version 1
+                :maintainedTransport (js-object :kind "maintained-eli-complete-fuzz-acceptance"
                   :logicalSuite suite :originalSourceSha256 suite-sha
                   :sourceFile "tools/fuzz/reader-program-corpus-host.eli" :generatedFile host-file :generatedSha256 (hash host)
                   :programInputs 50000 :readerInputs 50000 :originalTimeoutMs 320000
                   :independentOracle "tools/fuzz/program-emission-oracle.el"
-                  :historicalUnicodeCompatibilityDigest "4fb6c781f78ad6237a8d7c3fae85841bf717fe6b2e938eaf24e5e6501a530130"
+                  :historicalUnicodeCompatibilityDigest "091e3fdf2e2291f1f6e8926c0b0ae21d2845f0e0ca800848ea16050c4d602a73"
                   :currentDigest "unmodified-complete-emission-bytes" :fallback false)))))))
       document))
   (export transportOriginalFuzzCorpus))

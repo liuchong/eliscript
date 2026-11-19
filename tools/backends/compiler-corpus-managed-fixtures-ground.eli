@@ -79,7 +79,13 @@
   (defasync fixture-scenario-body (name source-root file &optional call-arguments)
     (let ((assets (js-array))
           (files (js-array "tools/backends/eliscript/compiler-corpus-fixture-scenarios.eli"
-                           "tools/backends/compiler-corpus-fixture-scenarios.mjs"))
+                           "tools/backends/compiler-corpus-fixture-scenarios.mjs"
+                           "tools/backends/eliscript/compiler-corpus-fixture-scenario-shared.eli"
+                           "tools/backends/compiler-corpus-fixture-scenario-shared.mjs"
+                           "tools/backends/eliscript/compiler-corpus-fixture-language-scenarios.eli"
+                           "tools/backends/compiler-corpus-fixture-language-scenarios.mjs"
+                           "tools/backends/eliscript/compiler-corpus-fixture-value-scenarios.eli"
+                           "tools/backends/compiler-corpus-fixture-value-scenarios.mjs"))
           (prefix "") (arguments (or call-arguments "fixture")) (index 0))
       (when (= name "functionProperties")
         (js-call files :push "tests/helpers/wasm-managed-function-properties-node.eli"

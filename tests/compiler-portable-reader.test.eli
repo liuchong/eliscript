@@ -191,7 +191,7 @@
     (let* ((p (withSupport)) (text (await (readFile "bootstrap/runtime/memory.eli" "utf8"))) (first (js-call text :indexOf "  (defun value-js-truth "))
            (last (js-call text :indexOf "  (defun value-array-callback-get " first)))
       (assert (and (>= first 0) (> last first)))
-      (let* ((injected (compilerIR (str (js-call text :slice 0 first) "  (defun value-js-truth (heap value) (load-u32 4294967295))\n" (js-call text :slice last)) "reader-trap.eli"))
+      (let* ((injected (compilerIR (str (js-call text :slice 0 first) "  (defun value-js-truth (heap value) (memory-sig u32 u32 v64) (load-u32 4294967295))\n" (js-call text :slice last)) "reader-trap.eli"))
              (a (get (instance p injected) :a)) (input (state a "abc ")) (trace (js-call a :sourceObject (js-object :called false))) (callback (js-call a :invoke "reader-effect" (js-array trace)))
              (saved (js-call a :number (js* "-0"))) (frame (js-call a :frame 1)))
         (js-call a :frameSet frame 0 saved)

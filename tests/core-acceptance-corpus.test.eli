@@ -1,5 +1,6 @@
 (module tests.core-acceptance-corpus
   (import "bun:test" expect test)
+  (import "node:crypto" createHash)
   (import "node:fs/promises" readFile)
   (import "node:path" resolve)
   (import "node:url" fileURLToPath)
@@ -13,6 +14,7 @@
         (catch error (js-call (expect error) :toBeInstanceOf AcceptanceCorpusError) (setq errors (get error :errors) failed t)))
       (unless failed (throw (new globalThis.Error "expected acceptance corpus validation to fail"))) errors))
   (defun contains (actual expected) (js-call (expect actual) :toContain expected))
+  (defun sha256 (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (test "core acceptance corpus is complete and specification-derived" (async ()
     (let ((checked (await (checkAcceptanceCorpus (js-object :root ROOT)))))
       (js-call (expect (get checked :criteria)) :toHaveLength 35)
@@ -58,4 +60,22 @@
       (put (get report :summary) :acceptancePass (not (get (get report :summary) :acceptancePass)))
       (await (js-call (get (expect (verifyAcceptanceRun "unused.json" (js-object :root ROOT :report report))) :rejects) :toMatchObject
         (js-object :errors (js-array "run summary is not derived from recorded results")))))))
+  ;; A retained run binds the corpus digest to its declared source commit, not
+  ;; to the current checkout. Rebinding both the corpus field and its artifact
+  ;; entry to today's contract must still fail provenance.
+  (test "retained run rejects a contract digest rebound to the current tree" (async ()
+    (let* ((report (JSON/parse (await (readFile (resolve ROOT "acceptance/runs/m13-01.json") "utf8"))))
+           (retained "146a17c9d55c734ec9308cc3ccb5e7b9f2fac72aec961a72e1f9d5328c0fb26c")
+           (current (sha256 (await (readFile (resolve ROOT "contracts/core-acceptance-corpus.json")))))
+           (digest (if (= current retained) (str "0" (js-call current :slice 1)) current))
+           (errors undefined) (failed false))
+      (put (get report :source) :commit "8d9483c9164c140b647429459c5d39e0b50f9694")
+      (put (get report :source) :tree "34e953bf72f77b14f2f9c2f4450d2c6c60740b66")
+      (put (get report :corpus) :contractSha256 digest)
+      (js-call (get report :artifacts) :forEach (lambda (entry)
+        (when (= (get entry :file) "contracts/core-acceptance-corpus.json") (put entry :sha256 digest))))
+      (try (await (verifyAcceptanceRun "unused.json" (js-object :root ROOT :report report)))
+        (catch error (setq errors (get error :errors) failed t)))
+      (js-call (expect failed) :toBe t)
+      (contains errors "run contract digest differs from declared source commit"))))
 )

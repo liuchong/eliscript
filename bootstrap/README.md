@@ -34,21 +34,21 @@ and source spans. `compiler/reader.eli` parses the portable source grammar into
 that representation. `compiler/expander.eli` evaluates the deterministic macro
 subset without host `eval`, then `compiler/analyzer.eli` validates lexical
 scope and special forms. `compiler/ir.eli` defines JSON-safe IR nodes plus the
-closed `eliscript-ir` v1 canonical serialization boundary, and
+closed `eliscript-ir` canonical serialization boundary, and
 `compiler/lower.eli` lowers analyzed syntax across the complete language
 surface. `compiler/emitter.eli` formats portable IR through explicit text and
 mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies and owns the
-versioned evaluation request, interactive-input, form-classification, binding,
+evaluation request, interactive-input, form-classification, binding,
 export, and macro descriptors used by persistent evaluation.
 `compiler/formatter.eli` separately owns comment-preserving concrete syntax,
 fixed layout, and canonical source text without using emitter or application
 formatting behavior.
-`compiler/project.eli` owns the versioned single-file/project operation
-boundary, single-entry and multi-entry request identity, cycle-safe dependency
-traversal, portable-name fixed points, and versioned build-report normalization
+`compiler/project.eli` owns the single-file/project operation
+boundary, project request identity, cycle-safe dependency
+traversal, portable-name fixed points, and build-report normalization
 and cache-status policy.
 `host/build.eli` (`host/build.mjs`) dispatches normalized operations without
 defining compiler semantics.
@@ -66,7 +66,7 @@ commands and presentation remain host behavior; multiline completeness remains
 compiler-owned reader behavior.
 `host/watch.eli` (`host/watch.mjs`) owns canonical content snapshots, sorted
 project invalidation
-events, polling lifecycle, and the versioned `eliscript-watch-event` boundary.
+events, polling lifecycle, and the `eliscript-watch-event` boundary.
 `host/watch-cli.eli` (`host/watch-cli.mjs`) exposes that boundary without a
 framework, bundler, or development server. All `.mjs` host artifacts are
 materialized or compiled from `.eli` sources during `make bootstrap-backends`.
@@ -121,8 +121,8 @@ compiler still runs in JS; WASM/native compiler hosts and the complete nine-cell
 self-bootstrap remain open in the [backend plan](../docs/native-wasm-feasibility.md).
 
 `backends/managed.eli` starts ordinary-value lowering through the explicit
-`managed-control-v1` profile: primitive values, lexical/control forms and direct
-calls link the runtime with automatic root frames and a versioned entry
+`managed-control` profile: primitive values, lexical/control forms and direct
+calls link the runtime with automatic root frames and an entry
 descriptor. Its zero-import WASM outputs execute through the bulk checked host
 entry. It also lowers Number arithmetic, strict equality, Number/String pair
 relations and variadic comparison order. Number remainder, 32-bit conversions,

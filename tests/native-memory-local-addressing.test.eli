@@ -50,9 +50,15 @@
     (let ((functions (js-call (js-array "u32" "i32" "f64") :map (lambda (type index)
       (let* ((width (if (= type "f64") 8 4))
              (locals (Array/from (js-object :length 512) (lambda (_ slot) (js-object :name (str "slot" slot) :index slot :type (if (js-call slots :includes slot) type "u32")))))
-             (call (lambda (indirect) (node (if indirect "call-indirect" "call") "u32" (if indirect 9 3)
-               (js-call (js-array (local 0) (local 1)) :concat
-                 (js-call (js-array 4294967295 2147483648 65536 65535 7 8 9) :map literal) (if indirect (js-array (literal 0)) (js-array))))))
+             (call (lambda (indirect)
+               (let ((result (node (if indirect "call-indirect" "call") "u32" (if indirect 9 3)
+                               (js-call (js-array (local 0) (local 1)) :concat
+                                 (js-call (js-array 4294967295 2147483648 65536 65535 7 8 9) :map literal)
+                                 (if indirect (js-array (literal 0)) (js-array))))))
+                 (when indirect
+                   (put result :parameterTypes (js-array "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32"))
+                   (put result :resultType "u32"))
+                 result)))
              (body (js-call (js-call slots :map (lambda (slot i) (set slot type (operation (if (= type "f64") "load-f64" "load-u32") (address 0 (* i width))))))
                :concat (js-array (funcall call false) (operation (if (= type "f64") "store-f64" "store-u32") (local 1) (local 3 type))
                  (set 3 type (local 31 type)) (set 31 type (local 511 type)) (set 511 type (local 32 type)) (set 32 type (local 510 type)) (set 510 type (local 3 type)) (funcall call t))
@@ -82,7 +88,7 @@
             (funcall trace 7) (local 2))))))
       (js-call functions :push (js-object :name "record_trace" :index 6 :arity 1 :locals (js-array (js-object :name "digit" :index 0 :type "u32")) :span span :body (sequence (js-array
         (operation "store-u32" (literal 4096) (add (node "word-arithmetic" "u32" "*" (js-array (operation "load-u32" (literal 4096)) (literal 10))) (local 0))) (local 0)))))
-      (js-object :abi "memory-u32" :filename (get span :filename) :exports (js-call functions :map (lambda (f) (get f :name))) :table (js-array 3) :indirectArities (js-array 9) :functions functions)))
+      (js-object :abi "memory-u32" :filename (get span :filename) :exports (js-call functions :map (lambda (f) (get f :name))) :table (js-array 3) :indirectSignatures (js-array (js-object :parameterTypes (js-array "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32") :resultType "u32")) :functions functions)))
   (funcall (js-call test :skipIf (not target)) "native FP-slot boundaries preserve words, IEEE payloads and caller values against real WASM" (async ()
     (let* ((typed (program)) (saved (funcall globalThis.structuredClone typed)) (options (js-object :initialPages 1 :maximumPages 1))
            (wasmBytes (js-call (get backend :wasm) :emit_typed_memory_wasm typed options)) (wasmModule (new WebAssembly.Module (Uint8Array/from wasmBytes))))
@@ -95,7 +101,11 @@
         (let* ((emission (js-call (get backend :native) :emit_typed_native_memory_artifact typed target))
                (path (resolve directory (str "locals." (if (= target "arm64-linux") "so" "dylib")))))
           (await (writeFile path (Uint8Array/from (get emission :bytes))))
-          (let* ((signatures (Object/fromEntries (js-call (get typed :functions) :map (lambda (f) (js-array (get f :name) (get f :arity))))))
+          (let* ((signatures (Object/fromEntries (js-call (get typed :functions) :map (lambda (f)
+                   (js-array (get f :name) (js-object
+                     :parameterTypes (js-call (js-call (get f :locals) :slice 0 (get f :arity)) :map
+                       (lambda (l) (if (= (get l :type) "i32") "u32" (get l :type))))
+                     :resultType "u32"))))))
                  (n (await (openNativeMemory path signatures (Object/assign (js-object) options (js-object :nativeTarget target :debug (get emission :debug) :trapSites (get (get emission :debug) :trapSites))))))
                  (runtimes (js-array
                    (js-object :invoke (lambda (name &rest args) (Reflect/apply (get n :invoke) n (js-call (js-array name) :concat args)))

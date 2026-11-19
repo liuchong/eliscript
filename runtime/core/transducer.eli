@@ -13,6 +13,7 @@
   (import "./protocol.mjs" implementsProtocolOperation)
   (import "./set.mjs" EMPTY_SET)
   (import "./transient.mjs" IEditable conjBang persistentBang transient)
+  (import "./transient-internals.mjs" transientVectorConjArray)
   (import "./truth.mjs" isTruthy)
   (import "./value.mjs" equalValues)
   (import "./vector.mjs" EMPTY_VECTOR)
@@ -531,13 +532,20 @@
            (source (get arguments (1- (js-length arguments))))
            (seed (empty target)))
       (if (implementsProtocolOperation IEditable "transient" seed)
-          (transduce
-            transducer
-            (completing
-              (lambda (result value) (conjBang result value))
-              (lambda (result) (persistentBang result)))
-            (transient seed)
-            source)
+          (let* ((transient-seed (transient seed))
+                 (fast (if (eq transducer identity-transducer)
+                           (transientVectorConjArray) undefined)))
+            ;; Identity into is a whole-source append, not an arbitrary
+            ;; reduction. Only the registered vector entry may consume the
+            ;; source without re-entering conj! dispatch per value; every other
+            ;; transducer, source and transient collection keeps the complete
+            ;; transduce/Reduced protocol path.
+            (let ((done (if (callable? fast)
+                            (funcall fast transient-seed source)
+                            undefined)))
+              (if (undefined? done)
+                  (transduce transducer (completing conjBang persistentBang) transient-seed source)
+                  done)))
           (transduce transducer (lambda (result value) (conj result value)) seed source))))
 
   (Object/defineProperty transduce "length" (js-object :value 4 :configurable t))

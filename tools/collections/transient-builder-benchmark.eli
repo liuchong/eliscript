@@ -19,7 +19,6 @@
     persistentVectorMetrics resetPersistentVectorMetrics resetTransientVectorMetrics transientVectorMetrics)
 
   (defconst TRANSIENT_BUILDER_BENCHMARK_FORMAT "eliscript-transient-builder-benchmark")
-  (defconst TRANSIENT_BUILDER_BENCHMARK_VERSION 1)
 
   (defconst directory (js-call path :dirname (fileURLToPath (get (js* "import.meta") :url))))
   (defconst project-directory (js-call path :resolve directory "../.."))
@@ -218,8 +217,7 @@
 
   (defun validateTransientBuilderReport (report)
     (when (or (nullish? report)
-              (/= (get report :format) TRANSIENT_BUILDER_BENCHMARK_FORMAT)
-              (/= (get report :version) TRANSIENT_BUILDER_BENCHMARK_VERSION))
+              (/= (get report :format) TRANSIENT_BUILDER_BENCHMARK_FORMAT))
       (throw (new globalThis.TypeError "invalid transient builder benchmark identity")))
     (let ((samples (and (get report :parameters) (get (get report :parameters) :timingSamples)))
           (results (get report :results))
@@ -301,7 +299,6 @@
                                (>= (get (get result :timing) :speedup) minimum-speedup))))))
             (validateTransientBuilderReport (js-object
               :format TRANSIENT_BUILDER_BENCHMARK_FORMAT
-              :version TRANSIENT_BUILDER_BENCHMARK_VERSION
               :generatedAt (js-call (new globalThis.Date) :toISOString)
               :sourceDigest (await (transientBuilderSourceDigest))
               :host (js-object
@@ -340,5 +337,5 @@
       (js-call globalThis.console :error error)
       (put process :exitCode 1))))
 
-  (export TRANSIENT_BUILDER_BENCHMARK_FORMAT TRANSIENT_BUILDER_BENCHMARK_VERSION
+  (export TRANSIENT_BUILDER_BENCHMARK_FORMAT
           transientBuilderSourceDigest validateTransientBuilderReport runTransientBuilderBenchmark))

@@ -12,7 +12,7 @@
 ## Summary
 
 Eliscript adds a human-oriented terminal read-evaluate-print loop above the
-versioned persistent evaluation session. The generated compiler owns
+persistent evaluation session. The generated compiler owns
 interactive input classification. The host owns terminal prompts, commands,
 filesystem access, and presentation. The existing NDJSON protocol remains a
 separate machine interface and its framing does not change.
@@ -28,7 +28,7 @@ maturity credit for this capability.
 
 ## Compiler-owned Input Contract
 
-The generated compiler exports `eliscript-evaluation-input` version 1. Its
+The generated compiler exports `eliscript-evaluation-input`. Its
 descriptor accepts a source string, including an empty string, and a non-empty
 logical filename. It returns exactly one of:
 
@@ -55,7 +55,7 @@ Piped input therefore remains useful without terminal control bytes.
 
 The primary prompt is used for a fresh form and the continuation prompt is
 used only while the compiler reports incomplete input. Empty input is ignored.
-A complete form is sent through the same versioned evaluate operation used by
+A complete form is sent through the same evaluate operation used by
 Emacs and NDJSON clients. Definitions and macros update the session namespace;
 expressions reuse its live values and Atoms.
 
@@ -102,12 +102,12 @@ artifact may remain after the command returns.
 This specification completed the terminal REPL implementation portion of M10.
 Specification 0121 subsequently supplied host-neutral watch events, and
 specification 0133 completed the installation audit and M10 exit audit. AC-13
-remains a separate final supported-matrix criterion; stabilizing this version 1
+remains a separate final supported-matrix criterion; stabilizing this
 contract does not claim that final matrix result.
 
 ## Compatibility Freeze
 
-The version 1 interactive input classifier, multiline accumulation, persistent
+The interactive input classifier, multiline accumulation, persistent
 session state, terminal commands, canonical value and output ordering,
 recoverable diagnostics, prompt policy, EOF behavior, Bun/Node equivalence,
 and cleanup requirements are stable. Terminal presentation cannot change the
@@ -115,7 +115,7 @@ machine NDJSON protocol or compiler-owned input classification.
 
 ## Acceptance Criteria
 
-- **ITR-01:** Seed and self-hosted `eliscript-evaluation-input` version 1
+- **ITR-01:** Seed and self-hosted `eliscript-evaluation-input`
   descriptors agree on empty, incomplete, complete, and invalid inputs.
 - **ITR-02:** No-mode and explicit `--repl` invocations use one persistent
   session without changing `--stdio`, `--eval`, or `--file` behavior.

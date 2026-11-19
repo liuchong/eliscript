@@ -223,7 +223,7 @@
         (let* ((environment (get globalThis.process :env)) (engine (or (get environment :ELISCRIPT_TEST_BROWSER) "chromium"))
                (path (resolve (or (get environment :ELISCRIPT_BROWSER_ACCEPTANCE_REPORT) (+ "dist/browser-session-stage3-" engine ".json")))))
           (await (mkdir (dirname path) (js-object :recursive t)))
-          (await (writeFile path (JSON/stringify (js-object :format "eliscript-stage3-browser-acceptance" :version 1
+          (await (writeFile path (JSON/stringify (js-object :format "eliscript-stage3-browser-acceptance"
             :engine engine :stage3 authentication :effectiveCount 22 :cancelledCount 19 :observations observations :cancelled cancellations) nil 2))))
         (catch error (unless failed (setq failed t) (setq first error))))
       (when directory (try (await (rm directory (js-object :recursive t :force t))) (catch error (unless failed (setq failed t) (setq first error)))))
@@ -363,7 +363,12 @@
                  (path (resolve (get fixture :preparation) (if (= (get globalThis.process :platform) "linux") "raw.so" "raw.dylib")))
                  (runtime nil) (original undefined) (snapshot undefined))
             (await (writeFile path (get product :bytes)))
-            (setq runtime (await (openNativeMemory path (js-object :read32 1 :set32 2 :grow 1 :size 0)
+            (setq runtime (await (openNativeMemory path
+              (js-object
+                :read32 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                :set32 (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
+                :grow (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                :size (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
               (js-object :initialPages 1 :maximumPages 2 :nativeTarget native-target :debug (get metadata :debug) :trapSites (get (get metadata :debug) :trapSites)))))
             (try
               (js-call assert :strictEqual (unsigned-bit-shift-right (js-call runtime :invoke "set32" 8 4294967295) 0) 4294967295)

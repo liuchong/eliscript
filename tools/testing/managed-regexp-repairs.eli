@@ -31,7 +31,7 @@
                (start (js-call runtimeSource :indexOf "  (defun heap-regexp-point "))
                (end (js-call runtimeSource :indexOf "  (defun heap-regexp-line " start)))
           (js-call assert :ok (and (>= start 0) (> end start)))
-          (let* ((injected (+ (js-call runtimeSource :slice 0 start) "  (defun heap-regexp-point (heap text position flags) (load-u32 4294967295))\n" (js-call runtimeSource :slice end)))
+          (let* ((injected (+ (js-call runtimeSource :slice 0 start) "  (defun heap-regexp-point (heap text position flags) (memory-sig u32 u32 v64 u32 u32) (load-u32 4294967295))\n" (js-call runtimeSource :slice end)))
                  (rt (js-call (get backend :compiler) :compile_ir_string injected "regexp-trap.eli"))
                  (a (instantiateManagedRuntime (bytes backend rt program)))
                  (ignored (js-call a :auto 1)) (original (js-call a :string "ab"))

@@ -28,6 +28,7 @@
           (js-call (Object/values children) :forEach (lambda (v) (js-call a :release v))) result))))
   (defun read (a value)
     (cond ((or (= value nil) (= value undefined) (= (funcall host-typeof value) "boolean")) value)
+      ((= (funcall host-typeof value) "number") value)
       ((= (get value :kind) 4) (js-call a :readNumber value)) ((= (get value :kind) 5) (js-call a :readString value))
       ((js-call (js-array 7 14) :includes (get value :kind))
         (Array/from (js-object :length (js-call a :length value)) (lambda (unused index)

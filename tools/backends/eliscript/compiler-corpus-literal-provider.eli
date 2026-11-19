@@ -189,7 +189,7 @@
               ;; Ground sidecar publication happens after this wrapper. Bind
               ;; the authenticated declarations here; the child validates the
               ;; complete published byte graph before loading any namespace.
-              (let ((proof (Object/assign (js-object :format format :version 1 :files files)
+              (let ((proof (Object/assign (js-object :format format :files files)
                              (if source-root-provider (js-object :base "source-root")
                                (if local-package (js-object :base (get local-package :base) :emittedBit (get local-package :emittedBit)
                                  :packageBytes (get local-package :packageBytes) :packageSha256 (get local-package :packageSha256)) (js-object))))))
@@ -205,7 +205,7 @@
            (proof (when options (get options :literalHostProvider))))
       (if (or (not proof) (/= (get proof :format) format)) input
         (progn
-          (unless (and (= (get proof :version) 1) (js-call (js-array "wasm" "native") :includes (get input :target))
+          (unless (and (js-call (js-array "wasm" "native") :includes (get input :target))
                        (get (get input :descriptor) :literalRuntime)) (fail))
           (unless (or (undefined? (get proof :base)) (= (get proof :base) "source-root") (= (get proof :base) local-host-runtime)) (fail))
           (when (= (get proof :base) local-host-runtime)

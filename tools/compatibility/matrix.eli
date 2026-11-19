@@ -110,7 +110,7 @@
               (let ((record (commandRecord step result))) (js-call commands :push record)
                 (when (and (eq (get step :command) "bun install --frozen-lockfile") (not (eq (get record :status) "pass"))) (setq installFailed t)))))) (catch __eli_iteration_error_2 (closeHostIterator __eli_iterator_1 t) (throw __eli_iteration_error_2)) (finally (closeHostIterator __eli_iterator_1 false))))
           (let* ((cleanAfter (eq (await (gitOutput root "status" "--porcelain")) "")) (passed (js-length (js-call commands :filter (lambda (command) (eq (get command :status) "pass")))))
-                 (report (js-object :schemaVersion 1 :format REPORT_FORMAT :version 1 :generatedAt (js-call (new globalThis.Date) :toISOString) :matrixSha256 matrixSha256
+                 (report (js-object :format REPORT_FORMAT :generatedAt (js-call (new globalThis.Date) :toISOString) :matrixSha256 matrixSha256
                    :source (js-object :commit commit :tree tree :cleanBefore t :cleanAfter cleanAfter) :execution (js-object :provider "local" :cell (get cell :id))
                    :cell cell :environment environment :commands commands :summary (js-object :required (js-length plan) :passed passed
                      :failed (js-length (js-call commands :filter (lambda (command) (eq (get command :status) "fail"))))
@@ -158,6 +158,11 @@
                 ;; Pinned CI actions and installer policy are not part of the
                 ;; measured local cell; their current checks remain separate.
                 (Reflect/deleteProperty currentFunctional "actions") (Reflect/deleteProperty measuredFunctional "actions")
+                ;; A retained historical matrix predates the removal of its
+                ;; internal version fields; compare only the current functional
+                ;; contract without adding a version branch to current reports.
+                (Reflect/deleteProperty measuredFunctional "schemaVersion")
+                (Reflect/deleteProperty measuredFunctional "version")
                 (unless (and (eq (get matrix :performanceAcceptance) "deferred") (eq previousPolicy "strict") unchangedSystems optionalAdditions (isDeepStrictEqual currentFunctional measuredFunctional))
                   (funcall reject "historical matrix contract differs beyond performanceAcceptance, Emacs policy and optional system additions"))
                 (let ((result (js-object :report filename :reportCommit reportCommit :artifactSha256 (sha256 bytes) :sourceCommit (get (get report :source) :commit)
@@ -167,8 +172,8 @@
     (let* ((options (options-from supplied)) (root (js-call path :resolve (coalesce (get options :root) DEFAULT_ROOT)))
            (loaded (if (and (host-truth (get options :matrix)) (host-truth (get options :matrixSha256))) options (await (readMatrix root))))
            (matrix (get loaded :matrix)) (matrixSha256 (get loaded :matrixSha256)) (errors (js-array)) (historicalContract undefined))
-      (unless (and (isPlainObject report) (eq (get report :schemaVersion) 1) (eq (get report :format) REPORT_FORMAT) (eq (get report :version) 1))
-        (throw (new LocalCompatibilityMatrixError (js-array (str "report must use " REPORT_FORMAT " version 1")))))
+      (unless (and (isPlainObject report) (eq (get report :format) REPORT_FORMAT))
+        (throw (new LocalCompatibilityMatrixError (js-array (str "report must use " REPORT_FORMAT)))))
       (let* ((cells (new globalThis.Map (js-call (expectedMatrixCells matrix) :map (lambda (cell) (js-array (get cell :id) cell))))) (expectedCell (js-call cells :get (at (get report :cell) "id"))) (historical false))
         (when (and (/= (get report :matrixSha256) matrixSha256)
                    (eq (get (coalesce (get options :env) (get process :env)) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
@@ -251,7 +256,7 @@
         (let* ((requiredIds (new globalThis.Set (js-call required :map (lambda (cell) (get cell :id)))))
                (missing (js-call (Array/from requiredIds) :filter (lambda (id) (not (js-call seen :has id)))))
                (optionalMissing (js-call (js-call expected :map (lambda (cell) (get cell :id))) :filter (lambda (id) (and (not (js-call requiredIds :has id)) (not (js-call seen :has id))))))
-               (result (js-object :schemaVersion 1 :targeted (js-length expected) :required (js-length required) :retained (get seen :size)
+               (result (js-object :targeted (js-length expected) :required (js-length required) :retained (get seen :size)
                  :completed (if currentSource (js-length (js-call (Array/from requiredIds) :filter (lambda (id) (js-call seen :has id)))) 0)
                  :missing missing :optionalMissing optionalMissing :stale (if currentSource (js-array) (Array/from seen)) :currentSource currentSource :complete (and currentSource (= (js-length missing) 0))
                  :sourceIdentity (coalesce (aref (Array/from codeIdentities) 0) nil))))

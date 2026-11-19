@@ -1,17 +1,18 @@
 (module eliscript.managed-runtime-identifier
   (import "../../stdlib/managed-literals.eli"
-    Keyword EliscriptSymbol literal-keyword literal-symbol literal-ensure-type)
+    Keyword EliscriptSymbol literal-keyword literal-symbol literal-ensure-type literal-value-type-symbol)
 
   (literal-ensure-type 6)
   (literal-ensure-type 7)
-  (defconst identifier-type (js-call globalThis/Symbol :for "eliscript.value.type"))
   (defun keyword (&rest values) (apply literal-keyword values))
   (defun eliscriptSymbol (&rest values) (apply literal-symbol values))
   (defun logical-identifier-type (value)
     (let ((type (js* "typeof value")))
       (if (or (and (= type "object") (not (nil? value))) (= type "function"))
           (try
-            (let ((descriptor (Object/getOwnPropertyDescriptor value identifier-type)))
+            ;; The brand key is the one captured while loading this module, so a
+            ;; later replacement of globalThis.Symbol/Symbol.for cannot change it.
+            (let ((descriptor (Object/getOwnPropertyDescriptor value (literal-value-type-symbol))))
               (if (and (not (undefined? descriptor)) (Object/hasOwn descriptor "value"))
                   (get descriptor :value) nil))
             (catch error nil))

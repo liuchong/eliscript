@@ -6,7 +6,7 @@
   (import "node:url" pathToFileURL)
   (import "../backends/build.mjs" root)
   (import "../backends/compiler-build.mjs" independentCompilerResources)
-  (import "../backends/managed-runtime.mjs" createManagedProjectFacades createManagedModuleGraph readManagedModuleMetadata)
+  (import "../backends/managed-runtime.mjs" compileManagedWasmModule createManagedProjectFacades createManagedModuleGraph readManagedModuleMetadata)
   (defun wireFixtureFunctionalProfile (sourceSha environment)
     (and (= sourceSha "19b05147751d7dd6a14361b2ef57631b90794dfda8a05f1796a7e39456b7a83d")
       (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
@@ -58,7 +58,7 @@
         :collections (get actual :collections))))
   (defun readWireProjectDescriptor (bytes)
     (let* ((module (if (js-call globalThis.WebAssembly.Module (get globalThis.Symbol :hasInstance) bytes) bytes
-                     (new globalThis.WebAssembly.Module bytes)))
+                     (compileManagedWasmModule bytes)))
            (sections (js-call globalThis.WebAssembly.Module :customSections module "eliscript-managed-control")))
       (unless (= (js-length sections) 1)
         (throw (new globalThis.TypeError "wire fixture requires exactly one actual managed control section")))

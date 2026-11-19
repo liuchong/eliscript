@@ -8,7 +8,6 @@
   (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_LOCATE_FORMAT "eliscript-compiler-locate-benchmark")
-  (defconst COMPILER_LOCATE_VERSION 1)
 
   (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst project-directory (js-call path :resolve directory "../.."))
@@ -159,8 +158,7 @@
 
   (defun validateCompilerLocateReport (report)
     (when (or (not report)
-              (not (= (get report :format) COMPILER_LOCATE_FORMAT))
-              (not (= (get report :version) COMPILER_LOCATE_VERSION)))
+              (not (= (get report :format) COMPILER_LOCATE_FORMAT)))
       (throw (new globalThis.TypeError "invalid compiler locate report identity")))
     (let ((validation (get report :validation))
           (corpus (get report :corpus)))
@@ -297,7 +295,6 @@
                      (report
                        (js-object
                          :format COMPILER_LOCATE_FORMAT
-                         :version COMPILER_LOCATE_VERSION
                          :generatedAt (js-call (new globalThis.Date) :toISOString)
                          :sourceDigest (await (compilerLocateSourceDigest))
                          :host (js-object
@@ -364,7 +361,6 @@
 
   (export
     COMPILER_LOCATE_FORMAT
-    COMPILER_LOCATE_VERSION
     compilerLocateSourceDigest
     validateCompilerLocateReport
     runCompilerLocateBenchmark))

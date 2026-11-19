@@ -8,7 +8,7 @@
 
 ## Summary
 
-Project builds expose a versioned, JSON-compatible report that explains the
+Project builds expose a JSON-compatible report that explains the
 result of the current invocation. It describes the graph, cache outcome,
 compiled and reused counts, and one stable decision for every module.
 
@@ -41,17 +41,16 @@ Diagnostics still use standard error and a nonzero exit status. Without
 
 ## Report Schema
 
-Version 1 has this shape:
+The report has this shape:
 
 ```json
 {
   "format": "eliscript-build-report",
-  "version": 1,
   "mode": "standard",
   "root": "/absolute/project",
   "outDir": "/absolute/project/dist",
-  "entry": "source/main.eli",
-  "entryOutput": "source/main.mjs",
+  "entries": ["source/main.eli"],
+  "entryOutputs": ["source/main.mjs"],
   "manifest": "eliscript-project.json",
   "digest": "<sha256>",
   "portableEntries": [],
@@ -105,11 +104,11 @@ The accompanying reason is a stable identifier. Complete misses may report:
 
 - `cache-disabled`
 - `manifest-missing`
-- `manifest-version-changed`
-- `entry-changed`
+- `manifest-format-invalid`
+- `entries-changed`
 - `graph-digest-invalid`
 - `cache-missing`
-- `cache-version-changed`
+- `cache-format-invalid`
 - `cache-records-invalid`
 - `cache-digest-invalid`
 - `compiler-changed`
@@ -143,8 +142,8 @@ so a consumer can explain the build without reconstructing internal control
 flow.
 
 These values are protocol identifiers, not diagnostic prose. Additive reasons
-may be introduced within report version 1; field removal, semantic replacement,
-or structural changes require a new report version.
+may be introduced within the report; field removal, semantic replacement, or
+structural changes require a new report format.
 
 ## Acceptance Evidence
 

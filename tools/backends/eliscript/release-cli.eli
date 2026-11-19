@@ -14,7 +14,7 @@
   (defconst import-release-tool (js* "(specifier) => import(specifier)"))
 
   (defconst release-help
-    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--native-target arm64-macos|arm64-linux] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY] [--retain-artifacts]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
+    "Eliscript JavaScript compiler bootstrap and final outputs\n\n  bootstrap --stage0-manifest FILE --output DIRECTORY\n  verify-bootstrap [--bootstrap-manifest FILE]\n  verify-prepared-stage3 [--root DIRECTORY]\n  targets [--bootstrap-manifest FILE] [--corpus-records FILE] [--output DIRECTORY] [--native-target arm64-macos|arm64-linux] [--functional-runtime-profile small] [--resume-from PREVIOUS_DIRECTORY] [--retain-artifacts]\n  compile [--bootstrap-manifest FILE] --input SOURCE --target javascript|wasm|native --output PATH\n  compile [--bootstrap-manifest FILE] --project ENTRY --root DIRECTORY --target TARGET --output PATH\n  request [--bootstrap-manifest FILE] --request FILE [--output PATH]\n  package [--bootstrap-manifest FILE] --output DIRECTORY\n  prepare-release-package [--bootstrap-manifest FILE]\n\nEmacs generates JavaScript stage0. stage0 -> stage1 -> stage2 -> stage3 all run as JavaScript.\nOnly stage3 supplies the final javascript, wasm and native program outputs.\nThe stage2/stage3 fixed point is verified before a final compiler is used.\nFunctional small resources explicitly defer the original sequence capacity acceptance.\n")
 
   (defun release-default (value fallback) (if (undefined? value) fallback value))
   (defun release-type-error (message) (throw (new globalThis.TypeError message)))
@@ -70,7 +70,7 @@
     (let* ((certified (await (resolveReleaseCompiler
                         (js-object :bootstrapManifestPath (release-manifest values)))))
            (source (get certified :sourceIdentity)))
-      (js-object :format "eliscript-bootstrap-verification" :version 1
+      (js-object :format "eliscript-bootstrap-verification"
         :scope "stage2-stage3-complete-products" :verification "identical"
         :bootstrapManifestPath (get certified :bootstrapManifestPath)
         :fileCount (get certified :fixedPointFileCount)
@@ -170,9 +170,7 @@
           ;; Portable identity for retained reports; checkout paths never enter
           ;; the committed measurement, and current-source checks compare this
           ;; certificate with freshly authenticated final bytes.
-          ;; v1 authenticated declared bytes without excluding shadow package
-          ;; scopes. Only fresh measurements may claim the v2 loading contract.
-          :reportIdentity (js-object :format "eliscript-prepared-stage3" :version 2
+          :reportIdentity (js-object :format "eliscript-prepared-stage3"
             :fixedPointFileCount (get certified :fixedPointFileCount)
             :sourceSha256 (get (get certified :sourceIdentity) :sha256)
             :productSha256 (get (get certified :productIdentity) :sha256))))))
@@ -181,7 +179,9 @@
     (unless (and (not (nullish? source)) (not (nullish? certified))
                  (not (nullish? (get certified :reportIdentity)))
                  (= (get (get certified :reportIdentity) :format) "eliscript-prepared-stage3")
-                 (= (get (get certified :reportIdentity) :version) 2)
+                 (isDeepStrictEqual
+                   (js-call (Object/keys (get certified :reportIdentity)) :sort)
+                   (js-array "fixedPointFileCount" "format" "productSha256" "sourceSha256"))
                  (isDeepStrictEqual (get source :preparedCompiler) (get certified :reportIdentity)))
       (release-type-error "benchmark source does not match the authenticated prepared stage3 compiler"))
     (unless (Array/isArray (get source :files))
@@ -294,7 +294,7 @@
                      :productIdentity packaged-product-identity
                      :stage3FullProductIdentity (get metadata :productIdentity))))
                  (release-receipt (js-object
-                   :format "eliscript-stage3-release" :version 1 :status "accepted"
+                   :format "eliscript-stage3-release" :status "accepted"
                    :scope "stage2-stage3-complete-products" :verification "identical"
                    :metadataPath "compiler-artifact.json"
                    :fixedPointFileCount (get certified :fixedPointFileCount)
@@ -365,6 +365,11 @@
         ((= command "verify-bootstrap")
          (let ((report (await (verify-release-bootstrap values))))
            (release-write io (+ (JSON/stringify report) "\n")) report))
+        ((= command "verify-prepared-stage3")
+         (let ((certified (await (requirePreparedStage3
+                 (resolve (release-default (get values :root) root))))))
+           (release-write io (+ (JSON/stringify (get certified :reportIdentity)) "\n"))
+           certified))
         ((= command "bootstrap")
          (unless (and (get values :stage0-manifest) (get values :output))
            (release-type-error "bootstrap requires --stage0-manifest and --output"))
@@ -407,7 +412,7 @@
 
   (defun renderReleaseCLIError (error &optional options)
     (if (and options (get options :json))
-      (JSON/stringify (js-object :format "eliscript-compiler-cli-error" :version 1 :error (compilerFailure error)))
+      (JSON/stringify (js-object :format "eliscript-compiler-cli-error" :error (compilerFailure error)))
       (let ((record (compilerFailure error)))
         (release-default (get record :stack) (JSON/stringify record nil 2)))))
 

@@ -28,9 +28,9 @@
     (js-object
       :frozen (js-array t t t) :metadata (js-array t "read" t)
       :definition (js-object
-        :value (js-object :format "eliscript-protocol-definition" :version 1 :name "Measured" :operations (js-array "read" "size"))
+        :value (js-object :format "eliscript-protocol-definition" :name "Measured" :operations (js-array "read" "size"))
         :frozen (js-array t t)
-        :restored (js-object :format "eliscript-protocol-definition" :version 1 :name "Measured" :operations (js-array "read" "size"))
+        :restored (js-object :format "eliscript-protocol-definition" :name "Measured" :operations (js-array "read" "size"))
         :isolated t :missingReason "missing")
       :dispatch (js-object :direct (js-array "direct:alpha" 5 t) :exact (js-array "exact:beta" 4 t)
         :category (js-array "category:remote" 0) :fallback (js-array "default:7" -1)
@@ -75,7 +75,7 @@
               :forEach (lambda (text) (js-call assert :ok (js-call generated :includes text))))
             ;; The immutable module binding now has a TDZ guard. Its actual
             ;; WeakMap allocation remains required; storage spelling is private.
-            (js-call assert :match generated (new globalThis.RegExp "(?:const|var) protocol_states = new (?:\\((?:globalThis\\.)?WeakMap\\)|(?:globalThis\\.)?WeakMap)\\(\\)"))
+            (js-call assert :match generated (new globalThis.RegExp "(?:const|var) (?:protocol_states|protocol_entries) = new (?:\\((?:globalThis\\.)?WeakMap\\)|(?:globalThis\\.)?WeakMap)\\(\\)"))
             (js-call (js-array "Runtime.defineProtocol" "Runtime.extendProtocol" "vite" "react")
               :forEach (lambda (text) (js-call assert :strictEqual (js-call generated :includes text) false))))
           (let ((facade (await (readFile (resolve root "runtime/core/protocol.mjs") "utf8"))))
@@ -97,7 +97,7 @@
               (js-call assert :deepStrictEqual report expected))))
           (let ((map (JSON/parse (await (readFile (+ seed ".map") "utf8")))))
             (js-call assert :ok (js-call (aref (get map :sourcesContent) 0) :includes
-              "(defun external-method (state record receiver)"))
+              "(defun external-method (protocol state record receiver)"))
             (js-call assert :ok (js-call (aref (get map :sourcesContent) 0) :includes
               "(defun dispatch (protocol record receiver arguments)")))
           (finally (await (rm directory (js-object :recursive t :force t))))))) 90000)

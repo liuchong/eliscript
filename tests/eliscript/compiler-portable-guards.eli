@@ -147,7 +147,7 @@
                    (message (get (get original :failure) :message)) (error (get failure :failure)))
               (js-call assert :strictEqual (get original :failed) t) (js-call assert :strictEqual (get failure :failed) t)
               (js-call assert :strictEqual (get error :message) (+ "guarded-names.eli:2:3: " message))
-              (js-call assert :deepStrictEqual (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic" :version 1
+              (js-call assert :deepStrictEqual (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic"
                 :code "ELI-A0001" :severity "error" :phase "analysis" :message message
                 :location (js-object :file "guarded-names.eli" :start (js-object :offset 12 :line 2 :column 3) :end (js-object :offset 15 :line 2 :column 6))))
               (js-call assert :strictEqual (Object/hasOwn context (cacheName index)) false))))

@@ -121,7 +121,7 @@
   ;; each shared node into another serialized subtree and parsed object.
   (defasync graph-product (session request)
     (await (js-call session :request request
-      (js-object :responseMode "graph-events-v1" :responseStringChunks t))))
+      (js-object :responseMode "graph-events" :responseStringChunks t))))
 
   (defasync compare-graph-product (session request direct target reversed)
     ;; Only this candidate and the baseline remain live. Release compared subgraphs
@@ -385,7 +385,11 @@
                     (finally
                       (clear-product-fields native)
                       (setq native undefined))))
-                (let ((runtime (await (openNativeMemory artifact-path (js-object :read32 1 :set32 2 :grow 1 :size 0)
+                (let ((runtime (await (openNativeMemory artifact-path (js-object
+                        :read32 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                        :set32 (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
+                        :grow (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                        :size (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
                         (Object/assign (js-object) memory (js-object :nativeTarget native-target))))))
                   (try
                     (progn

@@ -16,7 +16,7 @@
   (test "complete compiler parity corpus closes every local parity dimension"
     (async ()
       (js-call (expect (await (checkCompilerParityCorpus (js-object :root root)))) :toEqual
-        (js-object :schemaVersion 1 :stableFeatures 71 :fixtures 4 :validCases 122
+        (js-object :stableFeatures 71 :fixtures 4 :validCases 122
           :diagnosticCases 110 :bootstrapSources 13 :irKinds 58 :dimensions 7
           :evidence 11 :sourceFiles 153
           :identity (js-call expect :stringMatching (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))))))

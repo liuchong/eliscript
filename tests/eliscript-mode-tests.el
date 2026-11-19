@@ -201,11 +201,10 @@
                            "--diagnostic-format" "json")))))
       (delete-directory directory t))))
 
-(ert-deftest eliscript-mode-decodes-versioned-check-diagnostics ()
+(ert-deftest eliscript-mode-decodes-check-diagnostics ()
   (let* ((source (make-temp-file "eliscript-mode-diagnostic-" nil ".eli"))
          (json (json-serialize
                 `((format . "eliscript-diagnostic")
-                  (version . 1)
                   (code . "ELI-A0001")
                   (severity . "error")
                   (phase . "analysis")
@@ -231,7 +230,7 @@
   (let* ((source (make-temp-file "eliscript-mode-flymake-" nil ".eli"))
          (eliscript-mode-check-command
           '("/bin/sh" "-c"
-            "cat >/dev/null; printf '%s\\n' '{\"format\":\"eliscript-diagnostic\",\"version\":1,\"code\":\"ELI-A0001\",\"severity\":\"error\",\"phase\":\"analysis\",\"message\":\"unbound symbol: missing\"}' >&2; exit 1"
+            "cat >/dev/null; printf '%s\\n' '{\"format\":\"eliscript-diagnostic\",\"code\":\"ELI-A0001\",\"severity\":\"error\",\"phase\":\"analysis\",\"message\":\"unbound symbol: missing\"}' >&2; exit 1"
             "eliscript-check-test"))
          completed
          diagnostics)
@@ -336,7 +335,6 @@
             (let* ((ready
                     (json-serialize
                      `((format . "eliscript-watch-event")
-                       (version . 1)
                        (sequence . 0)
                        (event . "ready")
                        (root . ,root)
@@ -345,7 +343,6 @@
                    (change
                     (json-serialize
                      `((format . "eliscript-watch-event")
-                       (version . 1)
                        (sequence . 1)
                        (event . "change")
                        (root . ,root)
@@ -411,7 +408,7 @@
           (make-directory (file-name-directory source) t)
           (write-region "(print 1)\n" nil source nil 'silent)
           (write-region
-           "{\"schemaVersion\":1,\"sourceRoot\":\"src\",\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
+           "{\"sourceRoot\":\"src\",\"entries\":[\"main.eli\"],\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
            nil configuration nil 'silent)
           (add-hook 'eliscript-mode-watch-event-hook
                     (lambda (event) (push event events)))
@@ -467,7 +464,7 @@
           (make-directory (file-name-directory source) t)
           (write-region "(print 41)\n" nil source nil 'silent)
           (write-region
-           "{\"schemaVersion\":1,\"sourceRoot\":\"src\",\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
+           "{\"sourceRoot\":\"src\",\"entries\":[\"main.eli\"],\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
            nil configuration nil 'silent)
           (setq source-buffer (find-file-noselect source))
           (with-current-buffer source-buffer

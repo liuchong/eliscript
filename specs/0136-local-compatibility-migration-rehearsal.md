@@ -25,7 +25,7 @@ stable behavior has already been frozen.
 
 ## Transition Inventory
 
-The version 1 contract owns three intentional transitions:
+The contract owns two intentional transitions:
 
 1. Specification 0010 is superseded by the framework-neutral contract in
    0118. The rehearsal checks registry and specification metadata only. React,
@@ -33,9 +33,6 @@ The version 1 contract owns three intentional transitions:
 2. The provisional `array` constructor is rejected with the stable lexical
    diagnostic, while the migrated `js-array` and `js-object` source compiles to
    byte-identical seed/self-hosted ESM and produces identical Bun/Node output.
-3. A version 1 incremental cache is read and automatically rewritten as the
-   version 2 `eliscript-project-cache` family by the maintained Emacs project
-   implementation.
 
 Adding a transition requires updating the closed contract, executable checks,
 and this specification together. Removing a transition silently is invalid.
@@ -52,7 +49,7 @@ The stable fixture and migrated host-container fixture compile through both
 compiler generations. Their generated modules must be byte-identical, and
 every generated module must produce the frozen stdout under both JavaScript
 runtimes. Ground source must fail under both compilers with matching normalized
-diagnostics. The cache migration runs as one named ERT test.
+diagnostics.
 
 ## Evidence Contract
 
@@ -86,8 +83,6 @@ bun tools/compatibility/rehearse.mjs \
   and identical expected output under Bun and Node.
 - **CMR-03:** Retired native-container aliases fail consistently, while the
   documented explicit-host rewrite preserves intended runtime behavior.
-- **CMR-04:** The maintained project implementation reads a ground cache hit
-  and rewrites it to the current cache family and version.
 - **CMR-05:** The framework-specific contract transition is verified without
   importing or executing application frameworks.
 - **CMR-06:** The run starts and ends with a clean tracked checkout and binds
@@ -97,9 +92,9 @@ bun tools/compatibility/rehearse.mjs \
 
 ## Compatibility Freeze
 
-The version 1 transition schema, ordered migration inventory, dual-compiler
+The transition schema, ordered migration inventory, dual-compiler
 artifact comparison, Bun and Node execution checks, ground diagnostic parity,
-cache migration, local provenance, and explicit `completesAc02: false`
+local provenance, and explicit `completesAc02: false`
 boundary are stable. Future transitions may be added deliberately, but an
 existing transition cannot disappear without replacement evidence and this
 rehearsal cannot be reinterpreted as the complete final compatibility corpus.

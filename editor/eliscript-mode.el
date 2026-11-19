@@ -410,7 +410,6 @@ Prefer the nearest `eliscript.json', then fall back to `project.el'."
              (root (alist-get 'root event)))
         (unless (and (equal (alist-get 'format event)
                             "eliscript-watch-event")
-                     (= (or (alist-get 'version event) 0) 1)
                      (integerp sequence)
                      (>= sequence 0)
                      (member kind '("ready" "change" "error"))
@@ -677,7 +676,6 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
                               (ignore-errors
                                 (file-truename buffer-file-name)))))))
         (when (and (equal (alist-get 'format value) "eliscript-diagnostic")
-                   (= (or (alist-get 'version value) 0) 1)
                    same-file)
           (let* ((start (eliscript-mode--diagnostic-position
                          (alist-get 'start location) (point-min)))

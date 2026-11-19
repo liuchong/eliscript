@@ -92,22 +92,31 @@
   (defasync trap-case ()
     (let* ((state (await (prepareManagedCollectionCases))) (source (get state :runtimeSource))
            (specs (js-array
-             (js-array "value-source-method-check" "heap value method" "has-extra" false)
-             (js-array "value-collection-prototype-builtin" "heap receiver arguments count operation" "has-extra" 9)
-             (js-array "value-source-iterator-advance" "heap iterator" "next-extra" 9)
-             (js-array "value-source-query-check" "heap value method" "lookup" false)
-             (js-array "value-source-method" "heap value method a b" "lookup" false))))
+             (js-array "value-source-method-check" "heap value method" "has-extra" false
+               "(memory-sig u32 u32 v64 u32) (load-u32 4294967295)")
+             (js-array "value-collection-prototype-builtin" "heap receiver arguments count operation" "has-extra" 9
+               "(memory-sig v64 u32 v64 v64 u32 u32) (progn (load-u32 4294967295) (v64-literal 0 0))")
+             (js-array "value-source-iterator-advance" "heap iterator" "next-extra" 9
+               "(memory-sig u32 u32 v64) (load-u32 4294967295)")
+             (js-array "value-source-query-check" "heap value method" "lookup" false
+               "(memory-sig u32 u32 v64 u32) (load-u32 4294967295)")
+             (js-array "value-source-method" "heap value method a b" "lookup" false
+               "(memory-sig v64 u32 v64 u32 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0))"))))
       (await (each-await specs (async (spec)
         (let* ((name (aref spec 0)) (entry (aref spec 2)) (start (js-call source :indexOf (+ "  (defun " name " ")))
                (end (js-call source :indexOf "  (defun " (+ start 3))))
           (ok (and (>= start 0) (> end start)))
           (let* ((injected (js-call (get (get state :b) :compiler) :compile_ir_string
-                    (+ (js-call source :slice 0 start) "  (defun " name " (" (aref spec 1) ") (load-u32 4294967295))\n" (js-call source :slice end)) "source-map-trap.eli"))
+                    (+ (js-call source :slice 0 start) "  (defun " name " (" (aref spec 1) ") " (aref spec 4) ")\n" (js-call source :slice end)) "source-map-trap.eli"))
                  (a (instantiateManagedRuntime (globalThis.Uint8Array.from (js-call (get (get state :b) :managed) :emit_managed_wasm (get state :program) injected))))
                  (ignored (js-call a :auto 1)) (map (js-call a :invoke "empty-map"))
                  (marker (js-call a :sourceArray (js-array false))) (key (js-call a :number 1))
                  (iterator (if (= name "value-source-iterator-advance") (js-call a :invoke "entries" (js-array map)) nil))
                  (frame (js-call a :frame 1)))
+            (when (= name "value-collection-prototype-builtin")
+              (let ((method-key (js-call a :string "values")))
+                (try (js-call a :release (js-call a :invoke "read-value" (js-array marker method-key)))
+                  (finally (js-call a :release method-key)))))
             (js-call a :frameSet frame 0 map)
             (js-call assert :throws (lambda () (js-call a :invoke entry
               (if iterator (js-array iterator marker) (if (= entry "lookup") (js-array map key) (js-array map key marker)))))

@@ -256,7 +256,7 @@
       (assert (and (>= start 0) (> end start)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call source :slice 0 start)
-                              "  (defun value-cell-new (heap value) (load-u32 4294967295))\n"
+                              "  (defun value-cell-new (heap value) (memory-sig v64 u32 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                               (js-call source :slice end))
                          "binding-trap.eli"))
              (prog (js-call (get b :compiler) :compile_ir_string

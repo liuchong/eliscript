@@ -218,10 +218,8 @@
                         (get options :manifest)))
            (errors (js-array)))
       (when (or (not (plain-object? contract))
-                (not (= (get contract :schemaVersion) 1))
-                (not (= (get contract :format) "eliscript-maturity-progress"))
-                (not (= (get contract :version) 1)))
-        (js-call errors :push "maturity progress contract must use eliscript-maturity-progress version 1"))
+                (not (= (get contract :format) "eliscript-maturity-progress")))
+        (js-call errors :push "maturity progress contract must use eliscript-maturity-progress"))
       (let* ((manifest-features (let ((features (host-get manifest "features")))
                                   (if (Array/isArray features) features (js-array))))
              (feature-ids (new globalThis.Set
@@ -262,7 +260,7 @@
                                     (lambda (feature) (= (get feature :status) "stable")))))
           (when (> (js-length errors) 0)
             (throw (new MaturityProgressValidationError errors)))
-          (js-object :schemaVersion 1 :format "eliscript-maturity-progress-report" :version 1
+          (js-object :format "eliscript-maturity-progress-report"
             :implementation (progress-record (get implementation :completed) (get implementation :total)
                               (js-object :milestones (get implementation :milestones)
                                 :incomplete (get implementation :incomplete)

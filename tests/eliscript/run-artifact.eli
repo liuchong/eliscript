@@ -13,7 +13,7 @@
   (test "ordinary artifact sequences snapshot the existing runtime options and retain debug false and unchanged defaults"
     (async ()
       (let ((diagnosed 0) (reads 0) (options (js-object :maxSlots 2048 :initialBytes 65536
-                            :maxBytes 4194304 :extendedHeap false :debug t)))
+                            :maxBytes 4194304 :debug t)))
         (Object/defineProperty options "auto" (js-object :enumerable t :configurable t
           :get (lambda () (setq reads (1+ reads)) 134217728)))
         (let ((captured (await (run-artifact-mode (js-object :runtimeOptions options)
@@ -23,7 +23,7 @@
                            (put options :maxSlots 1)
                            configuration)))))
           (js-call assert :deepStrictEqual captured (js-object :maxSlots 2048 :initialBytes 65536
-            :maxBytes 4194304 :extendedHeap false :debug false :auto 134217728))
+            :maxBytes 4194304 :debug false :auto 134217728))
           (js-call assert :strictEqual (Object/isFrozen captured) t))
         (js-call assert :strictEqual reads 1)
         (js-call assert :strictEqual diagnosed 0)
@@ -65,9 +65,10 @@
                (snapshot (lambda (actual)
                  (js-call assert :strictEqual actual runtime)
                  (js-call trace :push "snapshot")
-                 (Object/freeze (js-object :format "eliscript-managed-allocator-snapshot" :version 1
+                 (Object/freeze (js-object :format "eliscript-managed-allocator-snapshot"
                    :maxSlots 4194303 :highWater 100 :liveValues 5 :freeReusableSlots 90 :retiredSlots 5
-                   :neverAllocatedSlots 4194203 :slotBits 22 :slotMask 4194303 :generationMax 1023
+                   :neverAllocatedSlots 4194203 :slotBits 24 :slotMask 16777215 :generationMax 16777215
+                   :roBytes 0 :roEntryCount 0 :committedBytes 16384
                    :usedBytes 1768 :capacityBytes 16384 :maxBytes 1073741824
                    :freeBytes 256 :largestFreeBlock 128 :freeBlockCount 2 :tailCapacityBytes 14360
                    :byteHeadroomBytes 1073740056 :slotTableBytes 64 :freeSlotsHead 1 :freeSlotsTail 9

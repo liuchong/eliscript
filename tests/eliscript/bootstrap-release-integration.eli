@@ -43,6 +43,7 @@
           (js-call assert :match text (pattern "stage0"))
           (js-call assert :match text (pattern "stage3"))
           (js-call assert :match text (pattern "verify-bootstrap"))
+          (js-call assert :match text (pattern "verify-prepared-stage3"))
           (js-call assert :match text (pattern "javascript"))
           (js-call assert :match text (pattern "wasm"))
           (js-call assert :match text (pattern "native"))))))
@@ -105,11 +106,35 @@
               (resolveReleaseCompiler (js-object :bootstrapManifestPath (join directory "missing.json")))))
             (let ((path (join directory "bootstrap.json")))
               (await (writeFile path (JSON/stringify
-                (js-object :format "eliscript-js-bootstrap" :version 1 :status "accepted"
+                (js-object :format "eliscript-js-bootstrap" :status "accepted"
                   :stages (js-array) :fixedPoint (js-object :status "identical")))))
               (await (js-call assert :rejects
                 (resolveReleaseCompiler (js-object :bootstrapManifestPath path))))))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "release CLI verify-prepared-stage3 rejects unprepared roots and authenticates the prepared checkout"
+    (async ()
+      (let ((directory (await (mkdtemp (join (tmpdir) "eliscript-verify-prepared-")))))
+        (try
+          (await (js-call assert :rejects
+            (runReleaseCLI (js-array "verify-prepared-stage3" "--root" directory))
+            (lambda (error)
+              (and (js-call globalThis.TypeError.prototype :isPrototypeOf error)
+                (js-call (pattern "prepared stage3 required") :test (get error :message))))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))
+      (let ((prepared nil))
+        (try
+          (progn
+            (await (readFile (resolve root "dist/stage3-release.json") "utf8"))
+            (setq prepared t))
+          (catch _ nil))
+        (when prepared
+          (let* ((lines (js-array))
+                 (certified (await (runReleaseCLI (js-array "verify-prepared-stage3" "--root" root)
+                   (js-object :write (lambda (text) (js-call lines :push text)))))))
+            (js-call assert :strictEqual (get certified :scope) "stage3-identity")
+            (js-call assert :deepStrictEqual (JSON/parse (js-call (js-call lines :join "") :trim))
+              (get certified :reportIdentity)))))))
 
   (test "release error output preserves structured false and undefined exceptions"
     (lambda ()
@@ -117,7 +142,6 @@
         (lambda (value)
           (let ((record (JSON/parse (renderReleaseCLIError value (js-object :json t)))))
             (js-call assert :strictEqual (get record :format) "eliscript-compiler-cli-error")
-            (js-call assert :strictEqual (get record :version) 1)
             (js-call assert :ok (Object/hasOwn record "error")))))))
 
   (test "release workflow preserves the full corpus on demand and defaults to real three-output platform acceptance"
@@ -300,13 +324,13 @@
                 (setq ir-c (get (await (js-call session :request (js-object :operation "compile-ir"
                              :source "(defun answer () 77) (export answer)" :filename "c.eli"))) :ir)))
               (finally (await (js-call session :close))))
-            (let* ((req-a (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+            (let* ((req-a (js-object :operation "emit-ir" :target "wasm" :abi "managed-module"
                      :debug t :numericTag 0 :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
-                   (req-a-neg (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                   (req-a-neg (js-object :operation "emit-ir" :target "wasm" :abi "managed-module"
                      :debug t :numericTag (- 0) :ir ir-a :memory (js-object :initialPages 2 :maximumPages 8)))
-                   (req-b (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                   (req-b (js-object :operation "emit-ir" :target "wasm" :abi "managed-module"
                      :debug t :numericTag (- 0) :ir ir-b :memory (js-object :initialPages 2 :maximumPages 8)))
-                   (req-c (js-object :operation "emit-ir" :target "wasm" :abi "managed-module-v1"
+                   (req-c (js-object :operation "emit-ir" :target "wasm" :abi "managed-module"
                      :debug t :numericTag 1 :ir ir-c :memory (js-object :initialPages 2 :maximumPages 8)))
                    (req-a-path (join directory "req-a.json"))
                    (req-a-neg-path (join directory "req-a-neg.json"))
@@ -324,7 +348,7 @@
                    (out-i (join directory "out-i.wasm"))
                    (cache-key (js-call (js-call (createHash "sha256") :update
                      (encodeCompilerMetadata (js-object
-                       :schema 1
+                       :format "eliscript-cli-request-cache"
                        :productIdentity (get artifact :productIdentity)
                        :sourceIdentity (get artifact :sourceIdentity)
                        :artifactIdentity (get artifact :artifactIdentity)
@@ -336,7 +360,7 @@
                        :request req-a))) :digest "hex"))
                    (cache-key-neg (js-call (js-call (createHash "sha256") :update
                      (encodeCompilerMetadata (js-object
-                       :schema 1
+                       :format "eliscript-cli-request-cache"
                        :productIdentity (get artifact :productIdentity)
                        :sourceIdentity (get artifact :sourceIdentity)
                        :artifactIdentity (get artifact :artifactIdentity)
@@ -364,7 +388,7 @@
                 "--request" req-a-path "--output" out-a)))
               (js-call assert :deepStrictEqual metrics (js-object :hits 0 :misses 1 :repairs 0 :evictions 0 :skippedOversize 0))
               (let ((meta (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8")))))
-                (js-call assert :strictEqual (get meta :schema) 1)
+                (js-call assert :strictEqual (get meta :format) "eliscript-cli-request-cache")
                 (js-call assert :strictEqual (get meta :hasDebug) t)
                 (js-call assert :strictEqual (get meta :hasSidecar) t)
                 (js-call assert :strictEqual (get meta :debugPath) "out-a.wasm.debug.json"))
@@ -407,8 +431,8 @@
               (await (runCompilerCLI (js-array "request" "--compiler-artifact" metadata-path
                 "--request" req-a-neg-path "--output" out-a-neg)))
               (js-call assert :deepStrictEqual metrics (js-object :hits 2 :misses 3 :repairs 1 :evictions 0 :skippedOversize 0))
-              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8"))) :schema) 1)
-              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir-neg "complete.json") "utf8"))) :schema) 1)
+              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir "complete.json") "utf8"))) :format) "eliscript-cli-request-cache")
+              (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve cache-dir-neg "complete.json") "utf8"))) :format) "eliscript-cli-request-cache")
               (js-call assert :deepStrictEqual (await (readFile out-a-neg)) (await (readFile out-a)))
               (await (rm cache-dir-neg (js-object :recursive t :force t)))
               ;; 5. Changed request payload invalidates cache, and bounded eviction keeps <= 2 entries

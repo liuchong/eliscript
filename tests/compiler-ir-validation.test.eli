@@ -47,7 +47,7 @@
       ((Array/isArray value) (str "[" (js-call (js-call value :map originalCanonical) :join ",") "]"))
       (t (str "{" (js-call (js-call (js-call (Object/keys value) :sort) :map
         (lambda (key) (str (JSON/stringify key) ":" (originalCanonical (get value key))))) :join ",") "}"))))
-  (defun envelope (p) (js-object :format "eliscript-ir" :program p :version 1))
+  (defun envelope (p) (js-object :format "eliscript-ir" :program p))
   (test "validation-only IR keeps the complete original fixture corpus and canonical formatter bytes" (async ()
     (let ((fixture (JSON/parse (await (readFile "tests/fixtures/bootstrap-ir.json" "utf8")))) (index 0))
       (while (< index (get (get fixture :valid) :length))

@@ -579,7 +579,7 @@
                     "(defasync saveSupportingProducts ()\n"
                     "  (await (mkdir (get configuration :supportingDirectory) (js-object :recursive t)))\n"
                     "  (await (writeFile (get configuration :supportingManifest)\n"
-                    "           (JSON/stringify (js-object :format \"eliscript-original-compiler-supporting-products\" :version 1 :products supportingProducts)))))\n"
+                    "           (JSON/stringify (js-object :format \"eliscript-original-compiler-supporting-products\" :products supportingProducts)))))\n"
                     "(defasync buildSelectedArtifact (producer role target sources)\n"
                     "  (let ((artifact (await (buildIndependentCompiler\n"
                     "                           (js-object :host target :outputRoot (resolve (get configuration :supportingDirectory) role)\n"

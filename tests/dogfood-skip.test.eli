@@ -74,7 +74,7 @@
     (let* ((sources (aref __host_forwarded_arguments_3 0)))
     (let*
       ((srcs (or sources (str "[" MARKDOWN_SOURCE " " REMOTE_SOURCE "]"))))
-      (str "(module dogfood.config\n  (defconst config\n    {:schema-version 1\n     :site {:title \"T\" :base-url \"https://example.github.io/t/\" :language \"en\"}\n     :sources " srcs "\n     :publishing {:owner {:login \"owner\" :id \"U_owner\"} :coauthors []}\n     :adapters\n     [{:id :utterances :carrier-kind :issue\n       :principal \"utterances-bot\" :marker \"Canonical post: \"}]\n     :identity {:conflict :fail :projections []}\n     :comments {:presentation :tabs :channels []}\n     :refresh {:articles :hybrid :comments :runtime :no-change :skip}\n     :output {:directory \"site\"}})\n  (export config))\n"))))
+      (str "(module dogfood.config\n  (defconst config\n    {\n     :site {:title \"T\" :base-url \"https://example.github.io/t/\" :language \"en\"}\n     :sources " srcs "\n     :publishing {:owner {:login \"owner\" :id \"U_owner\"} :coauthors []}\n     :adapters\n     [{:id :utterances :carrier-kind :issue\n       :principal \"utterances-bot\" :marker \"Canonical post: \"}]\n     :identity {:conflict :fail :projections []}\n     :comments {:presentation :tabs :channels []}\n     :refresh {:articles :hybrid :comments :runtime :no-change :skip}\n     :output {:directory \"site\"}})\n  (export config))\n"))))
   (defasync
     useSources
     (sources)

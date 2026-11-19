@@ -17,7 +17,6 @@
   (defconst host-typeof (js* "(value) => typeof value"))
   (defconst import-module (js* "(specifier) => import(specifier)"))
   (defconst CORE_BENCHMARK_FORMAT "eliscript-core-performance-benchmark")
-  (defconst CORE_BENCHMARK_VERSION 1)
   (defconst toolPath (fileURLToPath (js* "import.meta.url")))
   (defconst projectDirectory (js-call path "resolve" (js-call path "dirname" toolPath) "../.."))
   (defconst compilerDirectory (js-call path "join" projectDirectory "dist/bootstrap"))
@@ -140,7 +139,7 @@
           (let ((__eli_iterator_19 (openHostIterator buildBenchmarkSources))) (try (while (advanceHostIterator __eli_iterator_19) (let ((file (get __eli_iterator_19 :value))) (let ((destination (js-call path "join" sourceRoot file)))
               (await (mkdir (js-call path "dirname" destination) (js-object :recursive t)))
               (await (cp (js-call path "join" projectDirectory file) destination))))) (catch __eli_iteration_error_20 (closeHostIterator __eli_iterator_19 t) (throw __eli_iteration_error_20)) (finally (closeHostIterator __eli_iterator_19 false))))
-          (let* ((options (js-object :root sourceRoot :entry entry :outDir outDir :moduleDirectory compilerDirectory :useCache t))
+          (let* ((options (js-object :root sourceRoot :entries (js-array entry) :outDir outDir :moduleDirectory compilerDirectory :useCache t))
                  (clean (await (timedAsync (lambda () (buildProject options)))))
                  (moduleCount (get (get (get clean :value) :report) :counts))
                  (noOpSamplesMs (js-array)) (incrementalSamplesMs (js-array)))
@@ -161,7 +160,7 @@
                        (js-object :BUN (get process :execPath) :ELISCRIPT_BENCHMARK_SIZE (string-value (get parameters :workerSize)) :ELISCRIPT_BENCHMARK_ROUNDS (string-value (get parameters :workerRounds)) :ELISCRIPT_BENCHMARK_ITERATIONS (string-value (get parameters :timingSamples))))))))
            (report (JSON/parse (get result :stdout))) (workload (get report :workload))
            (samples (get report :samples)) (timings (get report :timingsMs)) (ratios (get report :ratios)))
-      (unless (and (= (get report :protocolVersion) 1) (= (optional workload "name") "score-values")
+      (unless (and (= (optional workload "name") "score-values")
                    (= (optional workload "size") (get parameters :workerSize)) (= (optional workload "rounds") (get parameters :workerRounds))
                    (= (optional workload "iterations") (get parameters :timingSamples))
                    (= (optional (optional samples "emacs") "length") (get parameters :timingSamples))
@@ -248,7 +247,7 @@
                 (js-call (get source :files) "every" (lambda (entry)
                   (and (= (funcall host-typeof (get entry :file)) "string") (digest-p (get entry :sha256)))))))))
   (defun validateCoreBenchmarkReport (report)
-    (unless (and (= (optional report "format") CORE_BENCHMARK_FORMAT) (= (optional report "version") CORE_BENCHMARK_VERSION))
+    (unless (= (optional report "format") CORE_BENCHMARK_FORMAT)
       (throw (new globalThis.TypeError "invalid core performance benchmark identity")))
     (unless (and (= (funcall host-typeof (get report :generatedAt)) "string") (Number/isFinite (Date/parse (get report :generatedAt)))
                  (js-call (js-array "platform" "architecture" "operatingSystem" "bunVersion" "emacsVersion") "every"
@@ -305,7 +304,7 @@
         (unless (= (JSON/stringify source) (JSON/stringify (await (coreBenchmarkSourceDigest))))
           (throw (new globalThis.Error "core performance sources changed during measurement")))
         (await (validateCoreBenchmarkSource
-          (js-object :format CORE_BENCHMARK_FORMAT :version CORE_BENCHMARK_VERSION :generatedAt (js-call (new globalThis.Date) "toISOString") :host (js-object :platform (get process :platform) :architecture (get process :arch) :operatingSystem (+ (js-call os "type") " " (js-call os "release")) :bunVersion (get globalThis.Bun :version) :emacsVersion (await (emacsVersion))) :parameters parameters :thresholds CORE_BENCHMARK_THRESHOLDS :runs runs :summary summary :decision (js-object :baselineRuns (get parameters :baselineRuns) :correct correct :stable stable :withinRegressionBudgets withinRegressionBudgets :passed (and correct stable withinRegressionBudgets)) :source source))))))
+          (js-object :format CORE_BENCHMARK_FORMAT :generatedAt (js-call (new globalThis.Date) "toISOString") :host (js-object :platform (get process :platform) :architecture (get process :arch) :operatingSystem (+ (js-call os "type") " " (js-call os "release")) :bunVersion (get globalThis.Bun :version) :emacsVersion (await (emacsVersion))) :parameters parameters :thresholds CORE_BENCHMARK_THRESHOLDS :runs runs :summary summary :decision (js-object :baselineRuns (get parameters :baselineRuns) :correct correct :stable stable :withinRegressionBudgets withinRegressionBudgets :passed (and correct stable withinRegressionBudgets)) :source source))))))
   (defun parseArguments (arguments_)
     (let ((output undefined) (singleRun false) (index 0))
       (while (< index (get arguments_ :length))
@@ -335,5 +334,5 @@
   (js-call (run-module-entry) :catch (lambda (error)
     (js-call (get (js* "globalThis") :console) :error error)
     (put (get (js* "globalThis") :process) :exitCode 1)))
-  (export CORE_BENCHMARK_FORMAT CORE_BENCHMARK_VERSION CORE_BENCHMARK_PARAMETERS CORE_BENCHMARK_THRESHOLDS
+  (export CORE_BENCHMARK_FORMAT CORE_BENCHMARK_PARAMETERS CORE_BENCHMARK_THRESHOLDS
           coreBenchmarkSourceDigest runCoreBenchmarkSample validateCoreBenchmarkReport validateCoreBenchmarkSource runCorePerformanceBenchmark))

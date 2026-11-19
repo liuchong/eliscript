@@ -161,7 +161,7 @@
            (url (new globalThis.URL manifestURL package-base)) (resources (new globalThis.Map)))
       (unless (undefined? manifestIdentity) (checkIdentity manifestIdentity (get url :href)))
       (let ((manifest (await (readMetadataResource url fetchResource manifestIdentity resources))))
-        (unless (and (eq (get manifest :format) "eliscript-compiler-package") (= (get manifest :version) 1) (Array/isArray (get manifest :files)))
+        (unless (and (eq (get manifest :format) "eliscript-compiler-package") (Array/isArray (get manifest :files)))
           (throw (new globalThis.TypeError "unsupported compiler package")))
         (let* ((declared (new globalThis.Map))
                (identityFor (lambda (resourceURL)

@@ -4,7 +4,6 @@
   (import "node:path" isAbsolute join relative resolve sep)
 
   (defconst watchEventFormat "eliscript-watch-event")
-  (defconst watchEventVersion 1)
   (defconst defaultWatchInterval 250)
   (defconst minimumWatchInterval 25)
   (defconst maximumWatchInterval 60000)
@@ -22,7 +21,6 @@
     (let ((error (new globalThis.Error message))
           (diag (js-object
                   :format "eliscript-diagnostic"
-                  :version 1
                   :code "ELI-W0001"
                   :severity "error"
                   :phase "project-watch"
@@ -168,7 +166,6 @@
         (Object/assign
           (js-object
             :format watchEventFormat
-            :version watchEventVersion
             :sequence sequence
             :event event
             :root root)
@@ -216,7 +213,6 @@
               (get error :eliscriptDiagnostic)
               (js-object
                 :format "eliscript-diagnostic"
-                :version 1
                 :code "ELI-W0002"
                 :severity "error"
                 :phase "project-watch"
@@ -297,7 +293,6 @@
 
   (export
     watchEventFormat
-    watchEventVersion
     defaultWatchInterval
     minimumWatchInterval
     maximumWatchInterval

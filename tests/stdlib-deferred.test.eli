@@ -24,7 +24,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-deferred-")))) (outputRoot (resolve directory "stdlib")) (usageModule (resolve directory "deferred-usage.mjs")))
       (try
         (let ((report (JSON/parse (await (build outputRoot t)))))
-          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :version 1 :counts (js-object :modules 7 :compiled 7 :reused 0) :entry "deferred.eli" :entryOutput "deferred.mjs")))
+          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 7 :compiled 7 :reused 0) :entries (js-array "deferred.eli") :entryOutputs (js-array "deferred.mjs"))))
         (await (compile (resolve ROOT "tests/fixtures/deferred-usage.eli") usageModule))
         (let ((hosts (js-array (get globalThis.process :execPath) (get (get globalThis.process :env) :NODE_BINARY "node"))) (index 0))
           (while (< index (js-length hosts))

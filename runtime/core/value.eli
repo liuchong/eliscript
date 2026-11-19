@@ -16,9 +16,9 @@
     recordHashValueCall)
   (import "./protocol.mjs" extendProtocolType implementsProtocolOperation)
 
-  (defun typeof-value (value) (js* "typeof value"))
   (defconst IEquiv I_EQUIV)
   (defconst IHash I_HASH)
+  (defun typeof-value (value) (js* "typeof value"))
 
   (defun extendValueType (ctor implementations)
     (when (or (nil? implementations)
@@ -31,28 +31,26 @@
     (extendProtocolType IHash ctor (js-object :hash (get implementations :hash)))
     ctor)
 
-  (defun equal-values-distinct (left right)
-    (cond
-      ((and (= (funcall typeof-value left) "number")
-            (= (funcall typeof-value right) "number"))
-       (and (Number/isNaN left) (Number/isNaN right)))
-      ((or (nil? left)
-           (nil? right)
-           (and (not (= (funcall typeof-value left) "object"))
-                (not (= (funcall typeof-value left) "function")))
-           (and (not (= (funcall typeof-value right) "object"))
-                (not (= (funcall typeof-value right) "function"))))
-       false)
-      ((or (not (implementsProtocolOperation IEquiv "equal" left))
-           (not (implementsProtocolOperation IEquiv "equal" right)))
-       false)
-      (t
-       (eq (dispatchValueEqual left right equalValues) t))))
+  (defun equal-values-slow (left right)
+    (if (and (eq (js* "typeof left") "number")
+             (eq (js* "typeof right") "number"))
+        (and (Number/isNaN left) (Number/isNaN right))
+        (if (or (nil? left)
+                (nil? right)
+                (and (not (eq (js* "typeof left") "object"))
+                     (not (eq (js* "typeof left") "function")))
+                (and (not (eq (js* "typeof right") "object"))
+                     (not (eq (js* "typeof right") "function"))))
+            false
+            (if (or (not (implementsProtocolOperation IEquiv "equal" left))
+                    (not (implementsProtocolOperation IEquiv "equal" right)))
+                false
+                (eq (dispatchValueEqual left right equalValues) t)))))
 
-  (defun equalValues (left right)
-    ;; The overwhelmingly common identity path stays small enough to inline;
-    ;; protocol discovery and recursive comparison remain on the cold path.
-    (if (eq left right) t (equal-values-distinct left right)))
+  (defconst equalValues
+    (funcall
+      (js* "(slow) => function equalValues(left, right) { return left === right ? true : slow(left, right); }")
+      equal-values-slow))
 
   (defun hashValue (value)
     (recordHashValueCall)

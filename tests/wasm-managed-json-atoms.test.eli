@@ -28,6 +28,8 @@
     (when directory
       (await (rm directory (js-object :recursive t :force t))))))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
+
   (defun finish (a values)
     (js-call values :forEach (lambda (x) (js-call a :release x)))
     (js-call a :closeModule)
@@ -54,7 +56,7 @@
                  (n (js-call a :objectGet object value))
                  (array (js-call a :objectGet object items)))
             (js-call assert :equal (js-call a :readString s) "same")
-            (js-call assert :equal (js-call a :readNumber n) 42)
+            (js-call assert :equal (funcall num-val a n) 42)
             (when previous
               (js-call assert :equal (js-call a :keyEqual object (get previous :object)) false)
               (js-call assert :equal (js-call a :keyEqual array (get previous :array)) false)
@@ -88,7 +90,7 @@
                   (let ((item (js-call a :get out i))
                         (expected (aref parsed i)))
                     (if (= (value-type expected) "number")
-                      (funcall assert (Object/is (js-call a :readNumber item) expected))
+                      (funcall assert (Object/is (funcall num-val a item) expected))
                       (js-call assert :equal (js-call a :readString item) expected))
                     (js-call a :release item))
                   (setq i (1+ i)))))
@@ -122,7 +124,7 @@
              (object (js-call a :invoke "parse" (js-array duplicate))))
         (js-call a :release duplicate)
         (js-call a :collect)
-        (js-call assert :equal (js-call a :live) 4 "only object, property table, live key and final value remain")
+        (js-call assert :equal (js-call a :live) 3 "only inline object, live key and final value remain")
         (js-call a :release object)
         (js-call a :collect)
         (js-call assert :equal (js-call a :live) 0))
@@ -156,13 +158,13 @@
                 (let ((diag (get e :eliscriptDiagnostic)))
                   (and diag (= (get diag :code) (if (js-call text :endsWith ",]") "ELI-RT0003" "ELI-RT0002"))))))
             (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-            (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+            (funcall assert (Object/is (funcall num-val a held) -0.0))
             (js-call a :release input)
             (js-call a :collect))))
       (let* ((valid (js-call a :string "[\"retry\",\"retry\",0,-0]"))
              (out (js-call a :invoke "parse" (js-array valid)))
              (minus (js-call a :get out 3)))
-        (funcall assert (Object/is (js-call a :readNumber minus) -0.0))
+        (funcall assert (Object/is (funcall num-val a minus) -0.0))
         (js-call a :leaveFrame frame)
         (finish a (js-array held valid out minus))))))
 
@@ -173,7 +175,7 @@
       (funcall assert (and (>= start 0) (> end start)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call source :slice 0 start)
-                              "  (defun heap-table-grow (heap table) (load-u32 4294967295))\n"
+                              "  (defun heap-table-grow (heap table) (memory-sig u32 u32 v64) (load-u32 4294967295))\n"
                               (js-call source :slice end))
                          "atom-trap.eli"))
              (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p injected))))
@@ -191,7 +193,7 @@
           (lambda () (js-call a :invoke "parse" (js-array input)))
           globalThis.WebAssembly.RuntimeError)
         (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (funcall assert (Object/is (funcall num-val a held) -0.0))
         (js-call a :release input)
         (js-call a :release bad)
         (js-call a :collect)

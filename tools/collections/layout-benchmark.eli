@@ -3,7 +3,6 @@
     ArrayNode BitmapIndexedNode MapEntry mapAssoc mapDissoc mapFind mapHash)
 
   (defconst LAYOUT_HOST_REPORT_FORMAT "eliscript-hamt-layout-host")
-  (defconst LAYOUT_HOST_REPORT_VERSION 1)
   (defconst DEFAULT_OCCUPANCIES (Object/freeze (js-array 4 8 12 15 16 20 24 28 32)))
   (defconst NOT_FOUND -1)
   (defconst MIXED_WEIGHTS (Object/freeze (js-object :lookup 0.8 :assoc 0.1 :dissoc 0.1)))
@@ -281,7 +280,6 @@
             (setq index (1+ index)))
           (Object/freeze (js-object
             :format LAYOUT_HOST_REPORT_FORMAT
-            :version LAYOUT_HOST_REPORT_VERSION
             :host (Object/freeze (Object/assign (js-object) host))
             :parameters (Object/freeze (js-object
               :occupancies occupancy-values
@@ -300,14 +298,11 @@
   (defun validateLayoutHostReport (report)
     (let ((errors (js-array))
           (format (unless (nullish? report) (get report :format)))
-          (version (unless (nullish? report) (get report :version)))
           (validation (unless (nullish? report) (get report :validation)))
           (measurements (unless (nullish? report) (get report :measurements)))
           (parameters (unless (nullish? report) (get report :parameters))))
       (unless (= format LAYOUT_HOST_REPORT_FORMAT)
         (js-call errors :push (str "invalid format " (JSON/stringify format))))
-      (unless (= version LAYOUT_HOST_REPORT_VERSION)
-        (js-call errors :push (str "invalid version " (JSON/stringify version))))
       (unless (and validation (= (get validation :passed) t))
         (js-call errors :push "lookup validation did not pass"))
       (when (or (not (Array/isArray measurements)) (= (js-length measurements) 0))
@@ -363,5 +358,5 @@
         (throw (new globalThis.TypeError (str "invalid HAMT layout host report: " (js-call errors :join "; ")))))
       report))
 
-  (export LAYOUT_HOST_REPORT_FORMAT LAYOUT_HOST_REPORT_VERSION DEFAULT_OCCUPANCIES
+  (export LAYOUT_HOST_REPORT_FORMAT DEFAULT_OCCUPANCIES
           runLayoutHostBenchmark validateLayoutHostReport))

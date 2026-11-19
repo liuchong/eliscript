@@ -63,7 +63,7 @@
            (stages (get manifest :stages)))
       (if (= (get manifest :format) "eliscript-stage3-release")
         (progn
-          (unless (and (= (get manifest :version) 1) (= (get manifest :status) "accepted")
+          (unless (and (= (get manifest :status) "accepted")
                        (= (get manifest :verification) "identical")
                        (Number/isInteger (get manifest :fixedPointFileCount))
                        (> (get manifest :fixedPointFileCount) 0))
@@ -103,7 +103,7 @@
                 :sourceIdentity (get manifest :formalSourceIdentity)
                 :productIdentity (get manifest :stage3ProductIdentity)))))
         (progn
-          (unless (and (= (get manifest :format) "eliscript-js-bootstrap") (= (get manifest :version) 1)
+          (unless (and (= (get manifest :format) "eliscript-js-bootstrap")
                        (= (get manifest :status) "accepted") (Array/isArray stages) (= (js-length stages) 4))
             (fail "an accepted JavaScript stage0-stage3 bootstrap is required"))
           (let ((index 0))
@@ -271,7 +271,7 @@
           (unless (= (compilerDigest (await (readFile frozen-path))) corpus-sha)
             (fail "frozen stage3 corpus changed while archiving")))
         (await (writeFile frozen-path (get corpus :recordsBytes))))
-      (let* ((summary (js-object :format "eliscript-stage3-targets" :version 1 :scope "javascript-stage3-output-targets"
+      (let* ((summary (js-object :format "eliscript-stage3-targets" :scope "javascript-stage3-output-targets"
                :status "running" :verification "unverified" :bootstrapManifestPath (get authentication :bootstrapManifestPath)
                :stage3MetadataPath (get authentication :stage3MetadataPath) :sourceIdentity source-identity
                :producerIdentity (get authentication :productIdentity) :corpusIdentity (get corpus :identity)

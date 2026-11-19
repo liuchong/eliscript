@@ -8,7 +8,6 @@
   (import "./controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_RUNTIME_SCAN_FORMAT "eliscript-compiler-runtime-scan-benchmark")
-  (defconst COMPILER_RUNTIME_SCAN_VERSION 1)
 
   (defconst directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst project-directory (js-call path :resolve directory "../.."))
@@ -164,8 +163,7 @@
 
   (defun validateCompilerRuntimeScanReport (report)
     (when (or (not report)
-              (not (= (get report :format) COMPILER_RUNTIME_SCAN_FORMAT))
-              (not (= (get report :version) COMPILER_RUNTIME_SCAN_VERSION)))
+              (not (= (get report :format) COMPILER_RUNTIME_SCAN_FORMAT)))
       (throw (new globalThis.TypeError "invalid compiler runtime scan report identity")))
     (let ((validation (get report :validation)))
       (when (or (not validation)
@@ -287,7 +285,6 @@
                      (report
                        (js-object
                          :format COMPILER_RUNTIME_SCAN_FORMAT
-                         :version COMPILER_RUNTIME_SCAN_VERSION
                          :generatedAt (js-call (new globalThis.Date) :toISOString)
                          :sourceDigest (await (compilerRuntimeScanSourceDigest))
                          :host (js-object
@@ -338,7 +335,6 @@
 
   (export
     COMPILER_RUNTIME_SCAN_FORMAT
-    COMPILER_RUNTIME_SCAN_VERSION
     compilerRuntimeScanSourceDigest
     validateCompilerRuntimeScanReport
     runCompilerRuntimeScanBenchmark))

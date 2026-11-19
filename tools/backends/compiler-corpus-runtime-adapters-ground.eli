@@ -658,7 +658,7 @@
             :sourceSha256 (get identity :sha256) :originalAssertion titles :originalCases owners
             :completeOriginalCaseCoverage false :regions regions :maintainedSource maintained
             :nativeInstrumentationScope (when (= suite "tests/core-stdlib.test.mjs")
-              (js-object :kind "javascript-host-implementation-counters" :version 1
+              (js-object :kind "javascript-host-implementation-counters"
                 :executedTargets (js-array "javascript") :notEvaluatedTargets (js-array "wasm" "native")
                 :functionalInputCount 50000 :functionalResultsUnchanged t))
             :sourceAssets source-assets :helperPrograms (js-call helpers :map (lambda (helper) (js-object :sha256 (get helper :helpersSha256)))) :setupReplacement (js-object :kind "actual-selected-library-artifacts"

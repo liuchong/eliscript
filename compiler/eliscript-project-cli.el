@@ -18,7 +18,7 @@
    "                       [--json] [--diagnostic-format human|json]\n"
    "                       --out-dir DIR ENTRY...\n\n"
    "Compile ENTRIES and their relative .eli imports into an ESM directory tree.\n"
-   "Use --config FILE for a versioned project request. Explicit build flags\n"
+   "Use --config FILE for a project request. Explicit build flags\n"
    "and ENTRIES override configured values; --no-cache always disables reuse.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
    "Reuse verified modules by default; --no-cache forces complete compilation.\n"
@@ -89,15 +89,8 @@
                (let ((configured
                       (eliscript-project-read-configuration configuration)))
                  (when entries
-                   (if (= (length entries) 1)
-                       (progn
-                         (setf (eliscript-project-request-entry configured)
-                               (car entries))
-                         (setf (eliscript-project-request-entries configured)
-                               nil))
-                     (setf (eliscript-project-request-entry configured) nil)
-                     (setf (eliscript-project-request-entries configured)
-                           entries)))
+                   (setf (eliscript-project-request-entries configured)
+                         entries))
                  (when out-dir
                    (setf (eliscript-project-request-out-dir configured) out-dir))
                  (when root
@@ -114,8 +107,7 @@
                (unless out-dir
                  (error "missing --out-dir"))
                (eliscript-project-request-create
-                :entry (and (= (length entries) 1) (car entries))
-                :entries (and (> (length entries) 1) entries)
+                :entries entries
                 :out-dir out-dir
                 :root root
                 :portable-entries (nreverse portable-entries)

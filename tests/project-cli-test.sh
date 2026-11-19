@@ -43,8 +43,7 @@ JSON_REPORT=$(
 printf '%s' "$JSON_REPORT" | bun --eval '
   const report = JSON.parse(await Bun.stdin.text());
   if (report.format !== "eliscript-build-report" ||
-      report.version !== 1 ||
-      report.entryOutput !== "examples/stdlib-cli/main.mjs" ||
+      JSON.stringify(report.entryOutputs) !== JSON.stringify(["examples/stdlib-cli/main.mjs"]) ||
       report.cache.status !== "hit" ||
       report.counts.compiled !== 0 ||
       report.counts.reused !== 4 ||
@@ -70,7 +69,7 @@ test -f "$TEXT.map"
 test -f "$OBJECT"
 test -f "$OBJECT.map"
 test -f "$MANIFEST"
-grep -q '"entry":"examples/stdlib-cli/main.mjs"' "$MANIFEST"
+grep -q '"entries":\["examples/stdlib-cli/main.mjs"\]' "$MANIFEST"
 grep -q '"digest":"[0-9a-f][0-9a-f]*"' "$MANIFEST"
 grep -q 'from "../../stdlib/sequence.mjs"' "$ENTRY"
 grep -q 'from "../../stdlib/text.mjs"' "$ENTRY"
@@ -117,8 +116,8 @@ PUBLIC_MANIFEST="$TMP_DIR/node-build/eliscript-project.json" \
 SEED_MANIFEST="$TMP_DIR/seed-build/eliscript-project.json" bun -e '
   const publicManifest = await Bun.file(process.env.PUBLIC_MANIFEST).json();
   const seedManifest = await Bun.file(process.env.SEED_MANIFEST).json();
-  const identity = ({ format, version, entry, modules, digest }) =>
-    ({ format, version, entry, modules, digest });
+  const identity = ({ format, entries, modules, digest }) =>
+    ({ format, entries, modules, digest });
   if (JSON.stringify(identity(publicManifest)) !==
       JSON.stringify(identity(seedManifest))) {
     throw new Error("seed and self-hosted public manifests differ");
@@ -126,7 +125,7 @@ SEED_MANIFEST="$TMP_DIR/seed-build/eliscript-project.json" bun -e '
 '
 
 cat >"$TMP_DIR/eliscript.json" <<EOF
-{"schemaVersion":1,"sourceRoot":"$PROJECT_DIR","entry":"examples/stdlib-cli/main.eli","outDir":"configured-build","portableEntries":[],"cache":true}
+{"sourceRoot":"$PROJECT_DIR","entries":["examples/stdlib-cli/main.eli"],"outDir":"configured-build","portableEntries":[],"cache":true}
 EOF
 if "$PROJECT_DIR/bin/eliscript-build" --config "$TMP_DIR/eliscript.json" \
     >"$TMP_DIR/config-stdout" 2>"$TMP_DIR/config-stderr"; then
@@ -138,7 +137,7 @@ grep -q 'sourceRoot must be a contained relative path' "$TMP_DIR/config-stderr"
 mkdir -p "$TMP_DIR/config-project/src"
 printf '%s\n' '(print 42)' >"$TMP_DIR/config-project/src/main.eli"
 cat >"$TMP_DIR/config-project/eliscript.json" <<'EOF'
-{"schemaVersion":1,"sourceRoot":"src","entry":"main.eli","outDir":"build","portableEntries":[],"cache":true}
+{"sourceRoot":"src","entries":["main.eli"],"outDir":"build","portableEntries":[],"cache":true}
 EOF
 CONFIG_OUTPUT=$(
   "$PROJECT_DIR/bin/eliscript-build" \
@@ -187,12 +186,12 @@ CONFIG_OUTPUT=$(
 test "$(bun run "$CONFIG_OUTPUT")" = '42'
 
 printf '%s\n' '(print 43)' >"$TMP_DIR/config-project/src/other.eli"
-cat >"$TMP_DIR/config-project/eliscript-v2.json" <<'EOF'
-{"schemaVersion":2,"sourceRoot":"src","entries":["other.eli","main.eli"],"outDir":"multi-build","portableEntries":[],"cache":true}
+cat >"$TMP_DIR/config-project/eliscript-multi.json" <<'EOF'
+{"sourceRoot":"src","entries":["other.eli","main.eli"],"outDir":"multi-build","portableEntries":[],"cache":true}
 EOF
 MULTI_OUTPUT=$(
   "$PROJECT_DIR/bin/eliscript-build" \
-    --config "$TMP_DIR/config-project/eliscript-v2.json"
+    --config "$TMP_DIR/config-project/eliscript-multi.json"
 )
 EXPECTED_MULTI_OUTPUT=$(printf '%s\n%s' \
   "$TMP_DIR/config-project/multi-build/main.mjs" \
@@ -200,7 +199,6 @@ EXPECTED_MULTI_OUTPUT=$(printf '%s\n%s' \
 test "$MULTI_OUTPUT" = "$EXPECTED_MULTI_OUTPUT"
 test "$(bun run "$TMP_DIR/config-project/multi-build/main.mjs")" = '42'
 test "$(bun run "$TMP_DIR/config-project/multi-build/other.mjs")" = '43'
-grep -q '"version":2' "$TMP_DIR/config-project/multi-build/eliscript-project.json"
 grep -q '"entries":\["main.mjs","other.mjs"\]' \
   "$TMP_DIR/config-project/multi-build/eliscript-project.json"
 
@@ -214,8 +212,7 @@ DIRECT_MULTI_REPORT=$(
 )
 printf '%s' "$DIRECT_MULTI_REPORT" | bun --eval '
   const report = JSON.parse(await Bun.stdin.text());
-  if (report.version !== 2 ||
-      JSON.stringify(report.entries) !== JSON.stringify(["main.eli", "other.eli"]) ||
+  if (JSON.stringify(report.entries) !== JSON.stringify(["main.eli", "other.eli"]) ||
       JSON.stringify(report.entryOutputs) !== JSON.stringify(["main.mjs", "other.mjs"])) {
     throw new Error("unexpected multi-entry build report");
   }
@@ -230,7 +227,7 @@ test "$OVERRIDE_OUTPUT" = "$TMP_DIR/config-project/override-build/main.mjs"
 test "$(bun run "$OVERRIDE_OUTPUT")" = '42'
 
 cat >"$TMP_DIR/config-project/invalid.json" <<'EOF'
-{"schemaVersion":1,"entry":"main.eli","outDir":"build","undeclaredOption":true}
+{"entries":["main.eli"],"outDir":"build","undeclaredOption":true}
 EOF
 if "$PROJECT_DIR/bin/eliscript-build" --diagnostic-format json \
     --config "$TMP_DIR/config-project/invalid.json" \
@@ -249,7 +246,7 @@ CONFIG_DIAGNOSTIC_FILE="$TMP_DIR/config-diagnostic-stderr" bun -e '
 '
 
 cat >"$TMP_DIR/config-project/duplicate.json" <<'EOF'
-{"schemaVersion":1,"entry":"main.eli","\u0065ntry":"other.eli","outDir":"build"}
+{"entries":["main.eli"],"\u0065ntries":["other.eli"],"outDir":"build"}
 EOF
 if "$PROJECT_DIR/bin/eliscript-build" --diagnostic-format json \
     --config "$TMP_DIR/config-project/duplicate.json" \
@@ -261,7 +258,7 @@ DUPLICATE_DIAGNOSTIC_FILE="$TMP_DIR/duplicate-stderr" bun -e '
   const diagnostic = await Bun.file(process.env.DUPLICATE_DIAGNOSTIC_FILE).json();
   if (diagnostic.code !== "ELI-B0002" ||
       diagnostic.phase !== "project-config" ||
-      diagnostic.message !== "duplicate configuration key: entry") {
+      diagnostic.message !== "duplicate configuration key: entries") {
     throw new Error("unexpected duplicate configuration diagnostic");
   }
 '
@@ -295,7 +292,7 @@ fi
 DIAGNOSTIC_FILE="$TMP_DIR/diagnostic-stderr" bun -e '
   const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
   if (diagnostic.format !== "eliscript-diagnostic" ||
-      diagnostic.version !== 1 || diagnostic.code !== "ELI-C0001" ||
+      "version" in diagnostic || diagnostic.code !== "ELI-C0001" ||
       diagnostic.phase !== "cli" ||
       diagnostic.message !== "missing --out-dir") {
     throw new Error("unexpected project CLI diagnostic");
@@ -318,7 +315,7 @@ test "$PORTABLE_OUTPUT" = "$PORTABLE_DATA"
 test -f "$PORTABLE_DATA"
 test -f "$PORTABLE_OBJECT"
 test -f "$PORTABLE_MANIFEST"
-grep -q '"entry":"data.mjs"' "$PORTABLE_MANIFEST"
+grep -q '"entries":\["data.mjs"\]' "$PORTABLE_MANIFEST"
 grep -q 'from "./object.mjs"' "$PORTABLE_DATA"
 grep -q 'function group_by' "$PORTABLE_DATA"
 ! grep -q 'function index_by' "$PORTABLE_DATA"

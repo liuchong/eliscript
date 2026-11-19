@@ -5,23 +5,21 @@
 
 ## Configuration File
 
-`eliscript.json` describes one versioned project request. Paths are resolved
-relative to the configuration file. Unknown fields and unsupported versions
-are rejected.
+`eliscript.json` describes one project request. Paths are resolved relative
+to the configuration file. Unknown fields are rejected.
 
 <!-- eliscript-snippet:project-config -->
 ```json
 {
-  "schemaVersion": 1,
   "sourceRoot": "src",
-  "entry": "main.eli",
+  "entries": ["main.eli"],
   "outDir": "dist"
 }
 ```
 
-Version 2 replaces `entry` with a non-empty `entries` array for multi-entry
-builds. The normalized entry set is ordered, duplicate physical sources are
-rejected, and the union graph owns one versioned manifest identity.
+`entries` is a non-empty array for single-entry and multi-entry builds. The
+normalized entry set is ordered, duplicate physical sources are rejected, and
+the union graph owns one manifest identity.
 
 ## Paths And Containment
 
@@ -49,13 +47,12 @@ bundler, publishing, server, or hosting options.
 
 ## Incremental Cache
 
-The build manifest owns a private version 2 cache family. Verified unchanged
-modules are reused; dirty modules are rebuilt independently. A readable version
-1 cache can migrate automatically after a successful hit. `--no-cache` disables
-reads without changing generated module semantics.
+The build manifest owns a private cache identity. Verified unchanged
+modules are reused; dirty modules are rebuilt independently. `--no-cache`
+disables reads without changing generated module semantics.
 
 ## Watch
 
-`./bin/eliscript-watch --config eliscript.json --json` emits versioned,
-content-level project events. It reports canonical source identities and stops
+`./bin/eliscript-watch --config eliscript.json --json` emits content-level
+project events. It reports canonical source identities and stops
 cleanly on termination. The Emacs mode shares one watcher per project.

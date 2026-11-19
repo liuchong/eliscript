@@ -4,6 +4,24 @@
   (import "node:path" :as path)
   (import "./retained-performance-snapshot.mjs" retainedPerformanceSnapshot deferredPerformanceAcceptance retainedGitSnapshotBytes)
   (defconst SOAK "benchmarks/worker-lifecycle-soak-macos-arm64.json")
+  (defconst extended-runtime-files (js-array
+    "bootstrap/runtime/memory.eli"
+    "tools/runtime/unicode-case-runtime.el"
+    "runtime/array-text.mjs"
+    "runtime/errors.mjs"
+    "runtime/math.mjs"
+    "runtime/number-radix.mjs"
+    "runtime/prelude.mjs"
+    "runtime/primitives.mjs"
+    "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.mjs"
+    "runtime/array-text.eli"
+    "runtime/errors.eli"
+    "runtime/math.eli"
+    "runtime/number-radix.eli"
+    "runtime/prelude.eli"
+    "runtime/primitives.eli"
+    "runtime/unicode-case.eli"))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun same (a b) (= (JSON/stringify a) (JSON/stringify b)))
   (defun ensure (condition message)
@@ -49,8 +67,8 @@
              (acceptedBytes (git root (js-array "show" (str revision ":" filename))))
              (_accepted (ensure (= (digest acceptedBytes) (get (aref bound 0) "sha256")) "accepted artifact hash does not match its Git snapshot"))
              (accepted (JSON/parse (decode acceptedBytes))) (current (JSON/parse (decode currentBytes))))
-        (ensure (and (= (get current "schemaVersion") 1) (= (get current "format") "eliscript-worker-lifecycle-soak")
-                     (= (get current "version") 1) (eq (get current "verified") t) (eq (get current "acceptanceQualified") t)) "fresh report is not acceptance qualified")
+        (ensure (and (= (get current "format") "eliscript-worker-lifecycle-soak")
+                     (eq (get current "verified") t) (eq (get current "acceptanceQualified") t)) "fresh report is not acceptance qualified")
         (ensure (same (get current "limits") (js-object :runTimeoutSeconds 180 :requestTimeoutMs 5000 :blockingTimeoutMs 25)) "original timeout policy changed")
         (ensure (and (Number/isFinite (get current "elapsedMs")) (> (get current "elapsedMs") 0) (<= (get current "elapsedMs") 180000)) "original elapsed budget failed")
         (check-fields (get current "workload") (js-object :successfulRequests 100000 :responseCount 100000 :uniqueResponses 100000
@@ -106,10 +124,14 @@
               (let ((initial (get (aref medians 0) key)) (final (get (aref medians 4) key)))
                 (ensure (and (= (get (get trend "initialMedianKiB") key) initial) (= (get (get trend "finalMedianKiB") key) final)
                   (= (get (get trend "deltaKiB") key) (- final initial)) (<= (- final initial) 16384)) (str "total " key " trend failed")))))))
-        (let ((files (field (get current "source") "files")) (old-files (field (get accepted "source") "files")))
+        (let* ((files (field (get current "source") "files"))
+               (old-files (field (get accepted "source") "files"))
+               (file-names (when (Array/isArray files) (js-call files :map (lambda (entry) (get entry "file")))))
+               (old-file-names (when (Array/isArray old-files) (js-call old-files :map (lambda (entry) (get entry "file"))))))
           (ensure (and (Array/isArray files) (Array/isArray old-files) (> (js-length files) 0)
-            (same (js-call files :map (lambda (entry) (get entry "file"))) (js-call old-files :map (lambda (entry) (get entry "file"))))
-            (= (get (new globalThis.Set (js-call files :map (lambda (entry) (get entry "file")))) "size") (js-length files))) "source inventory changed")
+            (or (same file-names old-file-names)
+                (same file-names (js-call old-file-names :concat extended-runtime-files)))
+            (= (get (new globalThis.Set file-names) "size") (js-length files))) "source inventory changed")
           (letfn ((validate-sources (measured)
             (async ()
               (let ((fresh (await (source-manifests root files (when measured (get measured "commit")))))

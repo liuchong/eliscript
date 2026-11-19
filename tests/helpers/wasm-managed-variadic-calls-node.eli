@@ -9,7 +9,7 @@
 
   (defun decode-val (a x)
     (cond
-      ((or (= x nil) (= (funcall js-typeof x) "boolean") (undefined? x)) x)
+      ((or (= x nil) (= (funcall js-typeof x) "boolean") (undefined? x) (= (funcall js-typeof x) "number")) x)
       ((= (get x :kind) 4) (js-call a :readNumber x))
       ((= (get x :kind) 5) (js-call a :readString x))
       (t

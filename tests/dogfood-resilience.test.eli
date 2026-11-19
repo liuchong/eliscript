@@ -141,7 +141,7 @@
           (js-call (expect (await (exists (join project "site.staging")))) :toBe false)))))
   (test "a failed configuration leaves the published tree alone as well" (async () (let*
         ((project (get state :project)) (configText (get state :configText)) (before (await (digestOf (join project "site")))))
-        (await (writeFile (join project "dogfood.config.eli") (js-call configText :replace ":schema-version 1" ":schema-version 1 :mystery t") "utf8"))
+        (await (writeFile (join project "dogfood.config.eli") (js-call configText :replace ":site" ":mystery t\n     :site") "utf8"))
         (let*
           ((failed (await (build))))
           (js-call (expect (get failed :exitCode)) :toBe 1)

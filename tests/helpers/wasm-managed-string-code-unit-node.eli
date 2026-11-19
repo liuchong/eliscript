@@ -13,6 +13,7 @@
 
   (defun decode (a v)
     (cond
+      ((= (value-type v) "number") v)
       ((and v (= (get v :kind) 4)) (js-call a :readNumber v))
       ((and v (= (get v :kind) 5)) (js-call a :readString v))
       ((and v (= (get v :kind) 14))

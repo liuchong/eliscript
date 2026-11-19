@@ -310,10 +310,10 @@
            (last (js-call mem-src :indexOf "  (defun heap-object-read " first)))
       (assert (and (>= first 0) (> last first)))
       (let* ((trapped (str (js-call mem-src :slice 0 first)
-                           "  (defun heap-object-read-data (heap object key) (load-u32 4294967295))\n"
+                           "  (defun heap-object-read-data (heap object key) (memory-sig v64 u32 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                            (js-call mem-src :slice last)))
              (exposed (str (js-call (js-call trapped :trimEnd) :slice 0 -1)
-                           "\n (defun test-array-has-inherited (heap value index) (heap-source-array-index-read heap value index 2))\n (export test-array-has-inherited))"))
+                           "\n (defun test-array-has-inherited (heap value index) (memory-sig u32 u32 v64 u32) (heap-source-array-index-read-has heap value index))\n (export test-array-has-inherited))"))
              (injected (js-call (get backend :compiler) :compile_ir_string exposed "inheritance-get-trap.eli"))
              (artifact (Uint8Array/from (js-call (get backend :managed) :emit_managed_wasm program injected))))
         (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module artifact)) (js-array))
@@ -324,7 +324,7 @@
           (js-call (new globalThis.DataView (get (get e :memory) :buffer))
             :setUint16 (js-call e "value-data" h key 5) 49 t)
           (js-call e "value-seal" h key)
-          (js-call e "value-object-put" h prototype key 3 2)
+          (js-call e "value-object-put" h prototype key (funcall globalThis.BigInt 3) 2)
           (let ((input (js-call e "value-array-new" h 2))
                 (caller (js-call e "frame-new" h 1)))
             (js-call e "frame-set" h caller 0 input)
@@ -355,7 +355,7 @@
       (try
         (let ((i 0))
           (while (< i 128)
-            (js-call padding :push (js-call a :number i))
+            (js-call padding :push (js-call a :array))
             (setq i (1+ i))))
         (catch error
           (js-call assert :equal
@@ -455,10 +455,10 @@
            (last (js-call mem-src :indexOf "  (defun heap-object-read " first)))
       (assert (and (>= first 0) (> last first)))
       (let* ((trapped (str (js-call mem-src :slice 0 first)
-                           "  (defun heap-object-read-data (heap object key) (load-u32 4294967295))\n"
+                           "  (defun heap-object-read-data (heap object key) (memory-sig v64 u32 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                            (js-call mem-src :slice last)))
              (exposed (str (js-call (js-call trapped :trimEnd) :slice 0 -1)
-                           "\n (defun test-iterator-step (heap iterator) (heap-source-iterator-step heap iterator))\n (export test-iterator-step))"))
+                           "\n (defun test-iterator-step (heap iterator) (memory-sig u32 u32 v64) (heap-source-iterator-step heap iterator))\n (export test-iterator-step))"))
              (injected (js-call (get backend :compiler) :compile_ir_string exposed "iterator-inherited-get-trap.eli"))
              (artifact (Uint8Array/from (js-call (get backend :managed) :emit_managed_wasm program injected))))
         (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module artifact)) (js-array))
@@ -471,11 +471,11 @@
               (js-call (new globalThis.DataView (get (get e :memory) :buffer))
                 :setUint16 (js-call e "value-data" h key 5) 49 t)
               (js-call e "value-seal" h key)
-              (js-call e "value-object-put" h prototype key 3 2)
+              (js-call e "value-object-put" h prototype key (funcall globalThis.BigInt 3) 2)
               (let* ((input (js-call e "value-array-new" h 2))
                      (caller (js-call e "frame-new" h 2))
                      (_ (js-call e "frame-set" h caller 0 input))
-                     (iterator (js-call e "value-source-method" h input method 3 3)))
+                     (iterator (js-call e "value-source-method" h input method (funcall globalThis.BigInt 3) (funcall globalThis.BigInt 3))))
                 (js-call e "frame-set" h caller 1 iterator)
                 (js-call assert :equal (js-call e "test-iterator-step" h iterator) 1)
                 (if (= method 7)

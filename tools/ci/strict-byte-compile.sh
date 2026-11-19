@@ -5,18 +5,19 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 EMACS=${EMACS:-emacs}
 
 cleanup() {
-  find "$ROOT" -name '*.elc' -delete
+  find "$ROOT" \( -name .git -o -name node_modules -o -name _worktree \) -prune -o -name '*.elc' -exec rm -f {} +
 }
 trap cleanup EXIT
 cleanup
 
 cd "$ROOT"
 "$EMACS" --batch -Q \
-  -L compiler -L editor -L tools/org -L tools/worker \
+  -L compiler -L editor -L tools -L tools/org -L tools/worker \
   --eval '(setq byte-compile-error-on-warn t)' \
   -f batch-byte-compile \
   compiler/*.el \
   editor/*.el \
+  tools/clean.el \
   tools/org/*.el \
   tools/worker/*.el \
   tests/eliscript-tests.el \
@@ -33,4 +34,5 @@ cd "$ROOT"
   tests/eliscript-org-tests.el \
   tests/eliscript-worker-tests.el \
   tests/bootstrap-tests.el \
+  tests/eliscript-clean-tests.el \
   tests/eliscript-syntax-tests.el

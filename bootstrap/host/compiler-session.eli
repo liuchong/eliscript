@@ -31,7 +31,7 @@
 
   (defun session-fail (message &optional filename)
     (let* ((error (new globalThis.Error message))
-           (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+           (diagnostic (js-object :format "eliscript-diagnostic"
              :code "ELI-H0001" :severity "error" :phase "compiler-session" :message message)))
       (when filename (put diagnostic :location (js-object :file filename)))
       (put error :eliscriptDiagnostic diagnostic)
@@ -49,7 +49,6 @@
   (defun session-live (state)
     (unless (and (session-object-p state)
                  (= (get state :format nil) "eliscript-compiler-session")
-                 (= (get state :version nil) 1)
                  (= (get state :closed nil) false))
       (session-fail "compiler session is closed or invalid"))
     state)
@@ -65,16 +64,17 @@
       (catch ignored nil)))
 
   (defun compiler-session-new ()
-    (js-object :format "eliscript-compiler-session" :version 1 :closed false
+    (js-object :format "eliscript-compiler-session" :closed false
       :runtime nil :runtimeSource nil :runtimeFilename nil :revision 0
       :literalSources nil :literalModules nil :literalKey nil :literalRevision 0 :literalCache (new globalThis.Map)
       :projectKey nil :projectModules nil :projectPortablePlan nil
       :projectRevision 0 :moduleCache (new globalThis.Map)
-      :responseCursor nil :responseToken 0 :phaseObserver nil :lastPhase nil))
+      :responseCursor nil :responseToken 0 :responseFastJson false :phaseObserver nil :lastPhase nil))
 
   (defun compiler-session-close (state)
     (session-live state)
     (session-response-clear state)
+    (put state :responseFastJson false)
     (put state :runtime nil)
     (put state :runtimeSource nil)
     (put state :runtimeFilename nil)
@@ -388,8 +388,8 @@
   (defun session-response-find-identity (identities value)
     (let ((segments (get identities :segments)) (index 0) (id nil))
       (while (and (nil? id) (< index (js-length segments)))
-        (let ((segment (js-nth index segments)))
-          (when (js-call segment :has value) (setq id (js-call segment :get value))))
+        (let ((found (js-call (js-nth index segments) :get value)))
+          (unless (undefined? found) (setq id found)))
         (setq index (1+ index)))
       id))
 
@@ -410,7 +410,12 @@
         ((nil? value) (js-array "value" nil))
         ((= kind "bigint")
           (throw (new globalThis/TypeError "compiler IR cannot contain BigInt values")))
-        ((= kind "number") (js-array "value" (if (Number/isFinite value) value nil)))
+        ((= kind "number")
+          (if (Number/isFinite value)
+              (progn
+                (when (and (= value 0) (< (/ 1 value) 0)) (put cursor :batchNegativeZero t))
+                (js-array "value" value))
+            (js-array "value" nil)))
         ((= kind "string")
           (if (and (get cursor :stringChunks false) (> (js-length value) 8192))
               (progn
@@ -456,7 +461,11 @@
           ;; which ends a run belongs to this frame until its next event.
           (let ((item (js-nth index container)))
             (if (= (value-type item) "number")
-                (js-call values :push (if (Number/isFinite item) item nil))
+                (if (Number/isFinite item)
+                    (progn
+                      (when (and (= item 0) (< (/ 1 item) 0)) (put cursor :batchNegativeZero t))
+                      (js-call values :push item))
+                  (js-call values :push nil))
               (progn
                 (setq stop t)
                 (if (> (js-length values) 0)
@@ -519,6 +528,7 @@
         (js-length (js-nth 1 event)) 0))
 
   (defun session-response-batch (state cursor)
+    (put cursor :batchNegativeZero false)
     (let ((events (js-array)) (units 0) (stop false))
       (while (and (not stop) (< (js-length events) 256) (< units 32768))
         (let ((event (get cursor :pendingEvent nil)))
@@ -529,23 +539,26 @@
               (if (and (> (js-length events) 0) (> (+ units next-units) 32768))
                   (progn (put cursor :pendingEvent event) (setq stop t))
                 (progn (js-call events :push event) (setq units (+ units next-units))))))))
-      (let* ((done (and (get cursor :started) (= (js-length (get cursor :frames)) 0)
+      (let* ((fast-json (not (get cursor :batchNegativeZero false)))
+             (done (and (get cursor :started) (= (js-length (get cursor :frames)) 0)
                        (nil? (get cursor :pendingEvent nil))))
-             (result (js-object :format "eliscript-compiler-response-events" :version (get cursor :version)
+             (result (js-object :format "eliscript-compiler-response-events" :mode (get cursor :mode)
                        :token (get cursor :token) :events events :done done)))
         (when done
           (session-phase state "response-events-complete" 0)
           (session-response-clear state))
+        (put state :responseFastJson fast-json)
         result)))
 
   (defun session-response-start (state value &optional mode identity-size string-chunks)
-    (let ((token (1+ (get state :responseToken 0))) (graph (= mode "graph-events-v1")))
+    (let ((token (1+ (get state :responseToken 0))) (graph (= mode "graph-events")))
       (unless (and (Number/isSafeInteger token) (> token 0))
         (session-fail "compiler response token space is exhausted"))
       (let ((cursor (js-object :token token :root value :frames (js-array)
                       :ancestors (new globalThis.Set) :started false :pendingEvent nil
+                      :batchNegativeZero false
                       :stringChunks (= string-chunks t)
-                      :version (if graph 2 1) :identities (if graph
+                      :mode (if graph "graph-events" "events") :identities (if graph
                         (session-response-identities
                           (if (nil? identity-size) session-response-identity-segment-size identity-size)) nil)
                       :nextIdentity 1)))
@@ -558,9 +571,11 @@
       (unless (and cursor (Number/isSafeInteger token) (> token 0) (= token (get cursor :token)))
         (session-fail "compiler response token is absent, stale or invalid"))
       (if (= operation "response-next") (session-response-batch state cursor)
-        (let ((result (js-object :format "eliscript-compiler-response-events" :version (get cursor :version)
+        (let ((result (js-object :format "eliscript-compiler-response-events" :mode (get cursor :mode)
                         :token token :events (js-array) :done t)))
-          (session-response-clear state) result))))
+          (session-response-clear state)
+          (put state :responseFastJson t)
+          result))))
 
   (defun session-compile-program (request source filename)
     (let ((entries (get request :portableEntries nil))
@@ -719,7 +734,7 @@
               (put location :end (js-object :offset (get span :end)
                 :line (get span :endLine) :column (get span :endColumn))))
             (put error :eliscriptDiagnostic (js-object
-              :format "eliscript-diagnostic" :version 1 :code "ELI-B0001"
+              :format "eliscript-diagnostic" :code "ELI-B0001"
               :severity "error" :phase "managed-backend" :message message :location location))))
         (throw error))))
 
@@ -934,7 +949,7 @@
 
   (defun session-portable-import-fail (message filename)
     (let ((error (new globalThis.Error message)))
-      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
+      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic"
         :code "ELI-B0001" :severity "error" :phase "project-build" :message message
         :location (js-object :file filename)))
       (throw error)))
@@ -1499,11 +1514,11 @@
                   (js-object :source (format-source (session-string request "source" undefined)
                     (session-string request "filename" "<input>") (get request :options nil))))
                  ((= operation "capabilities")
-                  (js-object :format "eliscript-compiler-capabilities" :version 1
+                  (js-object :format "eliscript-compiler-capabilities"
                     :operations (js-array "runtime" "compile" "compile-ir" "stage" "cached-ir" "emit-ir" "serialize-ir" "deserialize-ir"
                       "protocol" "project" "project-ir" "emit-memory-ir" "emit-typed-memory" "project-plan" "format" "analyze" "query" "edit-preview"
                       "response-next" "response-close")
-                    :responseModes (js-array "events-v1" "graph-events-v1")
+                    :responseModes (js-array "events" "graph-events")
                     :responseStringChunks t
                     :targets (js-array "javascript" "wasm" "native")
                     :nativeTargets (js-array "arm64-macos" "arm64-linux")
@@ -1526,7 +1541,7 @@
                        (when (get state :responseCursor nil)
                          (session-fail "compiler response is pending; use response-next or response-close"))
                        (let ((mode (get request :responseMode)))
-                         (unless (or (undefined? mode) (= mode "events-v1") (= mode "graph-events-v1"))
+                         (unless (or (undefined? mode) (= mode "events") (= mode "graph-events"))
                            (session-fail "unsupported compiler responseMode"))
                          (let ((chunks (get request :responseStringChunks)))
                            (unless (or (undefined? chunks) (= chunks t) (= chunks false))
@@ -1534,18 +1549,21 @@
                            (when (and (= chunks t) (undefined? mode))
                              (session-fail "responseStringChunks requires an event responseMode")))
                          (let ((value (session-request-result state request operation)))
-                           (if (or (= mode "events-v1") (= mode "graph-events-v1"))
+                           (if (or (= mode "events") (= mode "graph-events"))
                                (session-response-start state value mode undefined
                                  (get request :responseStringChunks false)) value)))))))
             ;; This remains a small JSON envelope in events mode. Its scalar
             ;; strings are already owned by the result; no whole reply joins.
             (unless control (session-phase state "response-serialize-start" 0))
-            (let ((text (session-ir-wire result (new globalThis.Set))))
+            (let* ((fast (= (get state :responseFastJson false) t))
+                   (_ (when fast (put state :responseFastJson false)))
+                   (text (if fast (JSON/stringify result) (session-ir-wire result (new globalThis.Set)))))
               (unless control (session-phase state "response-serialize-complete" (js-length text)))
               text))))
       (catch error
         ;; Cleanup is secondary: malformed input, getters and compilation keep
         ;; their first original thrown value even if cleanup itself fails.
+        (put state :responseFastJson false)
         (try (session-response-clear state) (catch cleanup nil))
         (throw error))))
 
@@ -1570,7 +1588,7 @@
                     (progn
                       (when (get state :responseCursor nil)
                         (session-fail "compiler response is pending; use response-next or response-close"))
-                      (js-object :format "eliscript-compiler-owned-project" :version 1
+                      (js-object :format "eliscript-compiler-owned-project"
                         :value (session-project state request)))
                   nil))))
           (catch error

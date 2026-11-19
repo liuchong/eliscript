@@ -8,7 +8,9 @@
   (import "node:url" pathToFileURL)
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" buildBackends)
-  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime readManagedAllocatorSnapshot)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
 
   (defconst js-typeof (js* "(v) => typeof v"))
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
@@ -52,7 +54,7 @@
   (defun read-val (a value)
     (let ((kind (if (nullish? value) undefined (get value :kind))))
       (cond
-        ((= kind 4) (js-call a :readNumber value))
+        ((= kind 4) (decoded-number-value a value))
         ((= kind 5) (js-call a :readString value))
         (t value))))
 
@@ -132,8 +134,8 @@
                (out (js-call a :invoke "number-extra" (js-array text trace)))
                (key (js-call a :string "visited"))
                (visited (js-call a :objectGet trace key)))
-          (js-call assert :equal (js-call a :readNumber out) 42)
-          (js-call assert :equal (js-call a :readNumber visited) 7)
+          (js-call assert :equal (decoded-number-value a out) 42)
+          (js-call assert :equal (decoded-number-value a visited) 7)
           (finish a (js-array text trace out key visited))))))
 
   (test "Number predicates never coerce while global isFinite and isNaN do, including IEEE boundaries"
@@ -196,18 +198,18 @@
                (zero (js-call a :invoke "number-apply" (js-array empty)))
                (args (js-call a :sourceArray (js-array undefined)))
                (nan (js-call a :invoke "number-apply" (js-array args))))
-          (funcall assert (Object/is (js-call a :readNumber converted) -0))
+          (funcall assert (Object/is (decoded-number-value a converted) -0))
           (js-call expected-nums :forEach
             (lambda (expected index)
               (let ((x (js-call a :get mapped index)))
-                (funcall assert (Object/is (js-call a :readNumber x) expected))
+                (funcall assert (Object/is (decoded-number-value a x) expected))
                 (js-call a :release x))))
           (let ((i 0))
             (while (< i 3)
               (js-call assert :equal (js-call a :get finite i) false)
               (setq i (+ i 1))))
-          (js-call assert :equal (js-call a :readNumber zero) 0)
-          (funcall assert (Number/isNaN (js-call a :readNumber nan)))
+          (js-call assert :equal (decoded-number-value a zero) 0)
+          (funcall assert (Number/isNaN (decoded-number-value a nan)))
           (js-call assert :equal (js-call a :invoke "array-call" (js-array values)) t)
           (js-call assert :equal (js-call a :invoke "array-call" (js-array text)) false)
           (finish a (js-array closure text converted values mapped finite empty zero args nan))))))
@@ -241,7 +243,7 @@
                   (let* ((name (aref pair 0))
                          (expected (aref pair 1))
                          (out (js-call a :invoke name (js-array x))))
-                    (js-call assert :equal (js-call a :readNumber out) expected)
+                    (js-call assert :equal (decoded-number-value a out) expected)
                     (js-call a :release out))))
               (finish a (js-array x))))))))
 
@@ -337,9 +339,9 @@
                (control (js-object))
                (ordinary-key (js-call a :string "visited"))
                (ordinary-seen (js-call a :objectGet plain-trace ordinary-key)))
-          (funcall assert (Object/is (js-call a :readNumber ordinary) (js-call js :number_extra (js-object) control)))
+          (funcall assert (Object/is (decoded-number-value a ordinary) (js-call js :number_extra (js-object) control)))
           (js-call assert :equal (get control :visited) 7)
-          (js-call assert :equal (js-call a :readNumber ordinary-seen) (get control :visited))
+          (js-call assert :equal (decoded-number-value a ordinary-seen) (get control :visited))
           (js-call (js-array ordinary plain plain-trace ordinary-key ordinary-seen) :forEach
             (lambda (value) (js-call a :release value))))
         (js-call assert :throws
@@ -351,10 +353,10 @@
             (let ((diag (get e :eliscriptDiagnostic)))
               (= (if diag (get diag :code) undefined) "ELI-RT0003"))))
         (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-        (funcall assert (Object/is (js-call a :readNumber held) -0))
+        (funcall assert (Object/is (decoded-number-value a held) -0))
         (let* ((key (js-call a :string "visited"))
                (seen (js-call a :objectGet trace key)))
-          (js-call assert :equal (js-call a :readNumber seen) 7)
+          (js-call assert :equal (decoded-number-value a seen) 7)
           (js-call a :leaveFrame frame)
           (finish a (js-array object trace held key seen))))
       (let* ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8")))
@@ -363,7 +365,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((injected (js-call (get b :compiler) :compile_ir_string
                            (str (js-call source :slice 0 start)
-                                "  (defun value-builtin-primitive (heap input count operation) (load-u32 4294967295))\n"
+                                "  (defun value-builtin-primitive (heap input count operation) (memory-sig v64 u32 v64 u32 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                                 (js-call source :slice end))
                            "trap.eli"))
                (trap-rt (instantiateManagedRuntime
@@ -377,20 +379,25 @@
             WebAssembly.RuntimeError)
           (js-call assert :equal (get (js-call trap-rt :stats) :frameDepth) 1)
           (js-call assert :equal (js-call trap-rt :readString x) "42")
-          (funcall assert (Object/is (js-call trap-rt :readNumber saved) -0))
+          (funcall assert (Object/is (decoded-number-value trap-rt saved) -0))
           (js-call trap-rt :leaveFrame outer)
           (finish trap-rt (js-array x saved))))))
 
   (test "capacity failures during builtin conversion leave the module and caller frame usable"
     (lambda ()
-      (let* ((inst (instance (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384)))
+      (let* ((inst (instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)))
              (a (get inst :a))
              (input (str "1." (js-call "0" :repeat 2000) "1"))
              (text (js-call a :string input))
              (saved (js-call a :number -0))
              (frame (js-call a :frame 1)))
         (js-call a :frameSet frame 0 saved)
-        (let ((remaining (- 16384 (get (js-call a :stats) :usedBytes) 512)))
+        ;; `stats().usedBytes` covers only the object arena; the fixed Control,
+        ;; slot and bitmap arenas plus the new block's 32-byte header come out of
+        ;; the same honest budget, so deduct them before sizing the filler.
+        (let* ((snap (readManagedAllocatorSnapshot a))
+               (fixed (- (get snap :usedBytes) (get snap :objectCapacity)))
+               (remaining (* (Math/floor (/ (- 16384 fixed (get snap :objectUsed) 512 32) 8)) 8)))
           (funcall assert (> remaining 0))
           (let ((pressure (js-call a :bytes (new globalThis.Uint8Array remaining))))
             (js-call assert :throws
@@ -400,13 +407,13 @@
                   (= (if diag (get diag :code) undefined) "ELI-RT0002"))))
             (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
             (js-call assert :equal (js-call a :readString text) input)
-            (funcall assert (Object/is (js-call a :readNumber saved) -0))
+            (funcall assert (Object/is (decoded-number-value a saved) -0))
             (js-call a :leaveFrame frame)
             (js-call a :release text)
             (js-call a :release pressure)
             (js-call a :collect)
             (let ((out (js-call a :invoke "number-empty")))
-              (js-call assert :equal (js-call a :readNumber out) 0)
+              (js-call assert :equal (decoded-number-value a out) 0)
               (finish a (js-array saved out))))))))
 
   (test "Node executes the identical independent builtin WASM including aliases and predicate boundaries"
@@ -479,6 +486,6 @@
                   (let* ((name (aref pair 0))
                          (receiver (aref pair 1))
                          (out (js-call a :invoke name (js-array receiver x))))
-                    (js-call assert :equal (js-call a :readNumber out) 37)
+                    (js-call assert :equal (decoded-number-value a out) 37)
                     (js-call a :release out))))
               (finish a (js-array f num-obj host nested x) (= index 1)))))))))

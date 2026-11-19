@@ -36,11 +36,7 @@
     (error "ELISCRIPT_READER_FIXTURE is required"))
   (princ
    (eliscript-bootstrap-reader-oracle--ascii-json
-    (decode-coding-string
-     (json-serialize
-      (eliscript-bootstrap-tests-reader-results fixture)
-      :null-object nil
-      :false-object :false)
-     'utf-8-unix))))
+    (eliscript-bootstrap-tests-serialize-json
+     (eliscript-bootstrap-tests-reader-results fixture)))))
 
 ;;; bootstrap-reader-oracle.el ends here

@@ -9,7 +9,6 @@
   (defconst module-directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst DEFAULT_ROOT (js-call path :resolve module-directory "../.."))
   (defconst REPEATED_DETERMINISM_FORMAT "eliscript-repeated-determinism-run")
-  (defconst REPEATED_DETERMINISM_VERSION 1)
   (defconst REQUIRED_ITERATIONS 20)
   (defconst compiler-modules
     (js-array "analyzer" "compiler" "emitter" "expander" "formatter" "ir" "lower" "project"
@@ -22,7 +21,6 @@
     (js-array "acceptance.generatedAt" "acceptance.commands[].durationMs" "acceptance.commands[].outputSha256"
       "acceptance.commands[].summary" "compiler.temporaryDirectory"))
   (defconst identity-projection-format "eliscript-repeated-determinism-identity")
-  (defconst identity-projection-version 1)
   (defconst commit-pattern "^[0-9a-f]{40}$")
 
   (defun repeat-error-message (messages)
@@ -75,7 +73,7 @@
         (js-object :artifactCount (js-length artifacts) :sha256 (identity-digest artifacts) :artifacts artifacts))))
 
   (defun acceptanceIdentity (report)
-    (js-object :schemaVersion 1 :format "eliscript-core-acceptance-identity" :version 1
+    (js-object :format "eliscript-core-acceptance-identity"
       :source (get report :source) :environment (get report :environment) :corpus (get report :corpus)
       :commands (js-call (get report :commands) :map
                   (lambda (command)
@@ -152,14 +150,12 @@
                                         (setq ok nil)))
                                     (setq cursor (1+ cursor)))
                                   ok))
-               (report (js-object :schemaVersion 1 :format REPEATED_DETERMINISM_FORMAT
-                         :version REPEATED_DETERMINISM_VERSION
+               (report (js-object :format REPEATED_DETERMINISM_FORMAT
                          :generatedAt (js-call (new globalThis.Date) :toISOString)
                          :source (js-object :commit (get (get (aref runs 0) :source) :commit)
                                    :tree (get (get (aref runs 0) :source) :tree))
                          :parameters (js-object :iterations iterations :requiredIterations REQUIRED_ITERATIONS)
                          :identityProjection (js-object :format identity-projection-format
-                                               :version identity-projection-version
                                                :excludedObservations excluded-observations)
                          :identity (js-object :sha256 (get reference :sha256)
                                      :compilerSha256 (get reference :compilerSha256)
@@ -187,9 +183,7 @@
            (parameters (host-get report "parameters"))
            (projection (host-get report "identityProjection"))
            (iterations (host-get parameters "iterations")))
-      (when (or (not (= (host-get report "schemaVersion") 1))
-                (not (= (host-get report "format") REPEATED_DETERMINISM_FORMAT))
-                (not (= (host-get report "version") REPEATED_DETERMINISM_VERSION)))
+      (when (not (= (host-get report "format") REPEATED_DETERMINISM_FORMAT))
         (js-call errors :push "report identity is invalid"))
       (when (or (not (hash-text (host-get (host-get report "source") "commit")))
                 (not (hash-text (host-get (host-get report "source") "tree"))))
@@ -200,8 +194,7 @@
                 (not (= (run-count report) iterations)))
         (js-call errors :push "iteration parameters and run inventory do not agree"))
       (when (or (not (= (JSON/stringify (host-get projection "excludedObservations")) (JSON/stringify excluded-observations)))
-                (not (= (host-get projection "format") identity-projection-format))
-                (not (= (host-get projection "version") identity-projection-version)))
+                (not (= (host-get projection "format") identity-projection-format)))
         (js-call errors :push "identity projection does not declare the exact observations"))
       (when (or (not (= (host-get identity "compilerArtifactCount") (js-length compiler-artifacts)))
                 (not (js-call globalThis.Number :isSafeInteger (host-get identity "acceptanceArtifactCount")))
@@ -258,7 +251,7 @@
                    (str "- Acceptance qualified: " (yes-no (get (get report :summary) :acceptanceQualified)))
                    ""
                    "Timing, command-output digests, summaries, and temporary directories are"
-                   "observations outside artifact identity by the versioned projection schema."
+                   "observations outside artifact identity by the projection schema."
                    ""
                    "| Run | Compiler SHA-256 | Acceptance SHA-256 | Identity SHA-256 |"
                    "| ---: | --- | --- | --- |"))
@@ -343,6 +336,6 @@
           (js-call (get globalThis.process :stderr) :write (str (if (nullish? stack) error stack) "\n")))
         (put globalThis.process :exitCode 1))))
 
-  (export DEFAULT_ROOT REPEATED_DETERMINISM_FORMAT REPEATED_DETERMINISM_VERSION REQUIRED_ITERATIONS
+  (export DEFAULT_ROOT REPEATED_DETERMINISM_FORMAT REQUIRED_ITERATIONS
     RepeatedDeterminismError acceptanceIdentity runRepeatedDeterminism validateRepeatedDeterminismReport
     humanRepeatedDeterminismReport))

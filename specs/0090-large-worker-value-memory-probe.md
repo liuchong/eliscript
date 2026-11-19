@@ -25,7 +25,7 @@ The acceptance workload constructs one ASCII string containing exactly
 268,435,456 bytes and UTF-16 units. It then:
 
 1. hashes the source in Emacs
-2. sends the string through `eliscript-value-chunks-v1`
+2. sends the string through `eliscript-value-chunks`
 3. waits for a worker progress value proving complete input decoding
 4. releases the Emacs source string and runs garbage collection
 5. returns the same worker string through chunked response framing
@@ -62,7 +62,7 @@ CI cost.
 
 ## Report Contract
 
-The version 1 report format is `eliscript-worker-value-stream-probe`. A valid
+The report format is `eliscript-worker-value-stream-probe`. A valid
 acceptance report has both `verified: true` and `withinBudget: true`.
 
 The reference budgets are:
@@ -132,7 +132,7 @@ the separate supported-environment acceptance criterion.
 ## Acceptance Criteria
 
 - **LVP-01:** A real Emacs process starts the production Bun worker and selects
-  the versioned value codec and chunk framing.
+  the value codec and chunk framing.
 - **LVP-02:** The logical dataset is exactly 256 MiB and reaches the worker and
   returns to Emacs without summary substitution.
 - **LVP-03:** Source and result lengths and SHA-256 digests match.

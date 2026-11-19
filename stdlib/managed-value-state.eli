@@ -1,12 +1,18 @@
 (module eliscript.managed-value-state
   (import-portable "./bit.eli" rotate-left)
 
-  (defvar protocol-hashes (new globalThis/WeakMap))
-  (defvar host-object-hashes (new globalThis/WeakMap))
-  (defvar host-symbol-hashes (new globalThis/Map))
+  ;; Captured at load: replacing globalThis.WeakMap later cannot break the
+  ;; internal hash tables.
+  (defconst intrinsic-weak-map globalThis/WeakMap)
+
+  (defvar protocol-hashes nil)
+  (defvar host-object-hashes nil)
+  (defvar host-symbol-hashes nil)
   (defvar next-host-identity 1)
-  (defconst metrics (js-object :hashValueCalls 0 :protocolHashComputations 0
-    :protocolHashCacheHits 0 :hostIdentityAssignments 0))
+  (defvar metric-hash-value-calls 0)
+  (defvar metric-protocol-hash-computations 0)
+  (defvar metric-protocol-hash-cache-hits 0)
+  (defvar metric-host-identity-assignments 0)
   (defun callable? (value) (= (js* "typeof value") "function"))
   (defun object? (value)
     (and (not (nil? value)) (or (= (js* "typeof value") "object") (callable? value))))
@@ -49,8 +55,9 @@
       (while (< index (aref value "length"))
         (setq hash (mixHash hash (js-call value :charCodeAt index)) index (1+ index)))
       (finishHash hash (aref value "length"))))
+  (defun truth (value) (js* "!!value"))
   (defun hashNumber (value)
-    (if (funcall globalThis/Boolean (Number/isNaN value)) 1490037359
+    (if (truth (Number/isNaN value)) 1490037359
       (let* ((normalized (if (= value 0) 0 value))
              (words (number-float64-words (toNumber normalized))))
         (finishHash (mixHash (mixHash 374761393 (get words 0)) (get words 1)) 2))))
@@ -62,7 +69,7 @@
         (setq hash (mixHash hash (funcall globalThis/Number (% magnitude base)))
           magnitude (/ magnitude base) limbs (1+ limbs) complete (= magnitude zero)))
       (finishHash hash limbs)))
-  (defun hashBoolean (value) (mixHash 1260232563 (if (funcall globalThis/Boolean value) 1911856395 423263297)))
+  (defun hashBoolean (value) (mixHash 1260232563 (if (truth value) 1911856395 423263297)))
   (defun hashNull () 1108378657)
   (defun hashUndefined () 2135587861)
   (defun hashGlobalSymbol (key) (hashString key 2657455275))
@@ -76,7 +83,7 @@
           (setq active false)
           (let ((step (js-call next :call iterator)))
             (unless (object? step) (fail "iterator result must be an object"))
-            (if (funcall globalThis/Boolean (aref step "done")) (setq complete t)
+            (if (truth (aref step "done")) (setq complete t)
               (let ((value (aref step "value")))
                 (setq active t) (funcall visit value)))))
         (catch error
@@ -100,40 +107,53 @@
             product (uint32 (imul32 product (bit-or hash 1))) count (1+ count)))))
       (finishHash (mixHash (mixHash (mixHash tag sum) xor) product) count)))
   (defun cachedProtocolHash (value compute)
-    (let ((cached (js-call protocol-hashes :get value)))
+    (let* ((table (or protocol-hashes (setq protocol-hashes (new intrinsic-weak-map))))
+           (cached (js-call table :get value)))
       (if (not (undefined? cached))
-        (progn (put metrics :protocolHashCacheHits (1+ (get metrics :protocolHashCacheHits))) cached)
+        (progn (setq metric-protocol-hash-cache-hits (1+ metric-protocol-hash-cache-hits)) cached)
         (progn
-          (put metrics :protocolHashComputations (1+ (get metrics :protocolHashComputations)))
+          (setq metric-protocol-hash-computations (1+ metric-protocol-hash-computations))
           (let ((hash (uint32 (funcall compute))))
-            (js-call protocol-hashes :set value hash) hash)))))
+            ;; compute() may call clearValueCaches(), so resolve the live table on write.
+            (js-call (or protocol-hashes (setq protocol-hashes (new intrinsic-weak-map))) :set value hash)
+            hash)))))
   (defun recordHashValueCall ()
-    (put metrics :hashValueCalls (1+ (get metrics :hashValueCalls))) undefined)
+    (setq metric-hash-value-calls (1+ metric-hash-value-calls)) undefined)
   (defun hostIdentityHash (value)
-    (let* ((hashes (if (= (js* "typeof value") "symbol") host-symbol-hashes host-object-hashes))
-           (cached (js-call hashes :get value)))
+    ;; Symbols need identity indexing without materialising Map and its
+    ;; iterator prototype chain: a null-prototype object indexes symbol keys by
+    ;; identity and supports hasOwn/aref/put directly. Objects keep the weak
+    ;; table so entries disappear with their keys.
+    (let* ((symbol-value (= (js* "typeof value") "symbol"))
+           (hashes (if symbol-value
+                     (or host-symbol-hashes (setq host-symbol-hashes (Object/create nil)))
+                     (or host-object-hashes (setq host-object-hashes (new intrinsic-weak-map)))))
+           (cached (if symbol-value
+                     (if (Object/hasOwn hashes value) (aref hashes value) undefined)
+                     (js-call hashes :get value))))
       (if (not (undefined? cached)) cached
         (let ((hash (finishHash 762272397 next-host-identity)))
-          (setq next-host-identity (1+ next-host-identity))
-          (put metrics :hostIdentityAssignments (1+ (get metrics :hostIdentityAssignments)))
-          (js-call hashes :set value hash) hash))))
+          (setq next-host-identity (1+ next-host-identity)
+                metric-host-identity-assignments (1+ metric-host-identity-assignments))
+          (if symbol-value (put hashes value hash) (js-call hashes :set value hash))
+          hash))))
   (defun resetValueMetrics ()
-    (put metrics :hashValueCalls 0)
-    (put metrics :protocolHashComputations 0)
-    (put metrics :protocolHashCacheHits 0)
-    (put metrics :hostIdentityAssignments 0)
+    (setq metric-hash-value-calls 0
+          metric-protocol-hash-computations 0
+          metric-protocol-hash-cache-hits 0
+          metric-host-identity-assignments 0)
     undefined)
   (defun clearValueCaches ()
-    (setq protocol-hashes (new globalThis/WeakMap)
-      host-object-hashes (new globalThis/WeakMap)
-      host-symbol-hashes (new globalThis/Map)
-      next-host-identity 1)
+    (setq protocol-hashes nil
+          host-object-hashes nil
+          host-symbol-hashes nil
+          next-host-identity 1)
     (resetValueMetrics))
   (defun readValueMetrics ()
-    (Object/freeze (js-object :hashValueCalls (get metrics :hashValueCalls)
-      :protocolHashComputations (get metrics :protocolHashComputations)
-      :protocolHashCacheHits (get metrics :protocolHashCacheHits)
-      :hostIdentityAssignments (get metrics :hostIdentityAssignments))))
+    (Object/freeze (js-object :hashValueCalls metric-hash-value-calls
+      :protocolHashComputations metric-protocol-hash-computations
+      :protocolHashCacheHits metric-protocol-hash-cache-hits
+      :hostIdentityAssignments metric-host-identity-assignments)))
   (defun hashPrimitiveValue (value)
     (let ((type (js* "typeof value")))
       (cond ((nil? value) (hashNull))

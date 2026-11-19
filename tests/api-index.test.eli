@@ -31,7 +31,7 @@
     (async ()
       (let ((index (await (buildApiIndex (js-object :root ROOT)))))
         (js-call (expect (get index :moduleCount)) :toBe 46)
-        (js-call (expect (get index :exportCount)) :toBe 599)
+        (js-call (expect (get index :exportCount)) :toBe 601)
         (js-call (expect (get (named-module index "core-protocol") :exports)) :toContain "read-external-protocol-method")
         (js-call (expect (named-module index "core-regex")) :toEqual
           (expected-module "core-regex" "stdlib/core/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"

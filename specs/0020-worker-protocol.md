@@ -8,7 +8,7 @@
 
 ## Summary
 
-Eliscript protocol version 1 connects Emacs to a long-lived Bun compute worker
+Eliscript worker protocol connects Emacs to a long-lived Bun compute worker
 over newline-delimited JSON. Emacs retains editor state and process lifecycle;
 the worker imports generated ESM and executes explicitly named functions over
 JSON-compatible arguments.
@@ -23,17 +23,16 @@ The same slice provides a pure workload and an end-to-end benchmark that
 separates runtime speed from compilation, startup, transport, and conversion
 costs.
 
-## Framing and Versioning
+## Framing
 
 Each protocol message is one UTF-8 JSON object followed by a newline. Blank
-lines are ignored and one line may not exceed 16 MiB. Every message contains
-`version: 1`; an incompatible version receives a `version-mismatch` protocol
-error.
+lines are ignored and one line may not exceed 16 MiB. A message carrying a
+unknown field receives an `invalid-message` protocol error.
 
 On startup the worker sends:
 
 ```json
-{"version":1,"type":"ready","capabilities":["request","progress","cancel","timeout","shutdown","module-cache","module-version"],"pid":123}
+{"type":"ready","capabilities":["request","progress","cancel","timeout","shutdown","module-cache","module-digest"],"pid":123}
 ```
 
 stdout is reserved for protocol frames. The worker redirects module
@@ -46,7 +45,7 @@ A request carries a unique string id, local module path or file URL, generated
 ESM export name, JSON argument array, and optional positive `timeoutMs`:
 
 ```json
-{"version":1,"type":"request","id":"7","module":"/tmp/work.mjs","export":"score_values","arguments":[[1,2,3],4],"timeoutMs":30000}
+{"type":"request","id":"7","module":"/tmp/work.mjs","export":"score_values","arguments":[[1,2,3],4],"timeoutMs":30000}
 ```
 
 Requests for statically checked modules may replace `export` with an Eliscript
@@ -55,15 +54,15 @@ source-level `operation` name. The worker resolves it only through the frozen
 required. A missing operation returns `missing-portable`.
 
 The worker accepts only local `file:` modules and caches import promises by
-normalized URL and module version. `moduleVersion` is optional; without it the
-worker derives a filesystem fingerprint. One module version is immutable
-within a worker generation. A changed version receives
-`module-version-changed`, and the Emacs client normally prevents that response
+normalized URL and module digest. `moduleDigest` is optional; without it the
+worker derives a filesystem fingerprint. One module digest is immutable
+within a worker generation. A changed digest receives
+`module-digest-changed`, and the Emacs client normally prevents that response
 by restarting before it sends the request. Requests may execute concurrently
 and responses may arrive out of order; the id is the sole correlation key.
 
 Project requests may also provide `projectManifest`, naming a local
-`eliscript-project.json`. Its graph digest becomes the module version, its
+`eliscript-project.json`. Its graph digest becomes the module digest, its
 generated file digests are verified on cold load, and its complete Source Map
 set covers imported-module stack frames. This contract is defined in
 [0030-project-graph-manifest.md](0030-project-graph-manifest.md). Requests that
@@ -86,13 +85,13 @@ argument.
 
 Specification [0126](0126-explicit-host-capability-packages.md) additionally
 exposes the same request-owned operations through the frozen
-`context.capabilities` token and adds `operation-capabilities-v1` to ready
+`context.capabilities` token and adds `operation-capabilities` to ready
 negotiation. The direct fields remain compatible views; neither form grants
 filesystem, process, network, clock, randomness, or module authority.
 
 ```json
-{"version":1,"type":"progress","id":"7","value":{"stage":"indexing"}}
-{"version":1,"type":"cancel","id":"7"}
+{"type":"progress","id":"7","value":{"stage":"indexing"}}
+{"type":"cancel","id":"7"}
 ```
 
 Cancellation and timeout race the operation promise against an AbortSignal.
@@ -122,14 +121,14 @@ as `:false`, and JSON null as nil. This is the initial transport representation,
 not a promise of transparent Emacs object serialization.
 
 Specification [0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md)
-adds an opt-in `eliscript-value-v1` encoding without changing protocol version
+adds an opt-in `eliscript-value` encoding without changing the protocol
 1 or this default. Requests that select it receive explicit Emacs records for
 persistent values and repeat the encoding identifier on progress and success
 messages.
 
 Specification
 [0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
-adds an opt-in `eliscript-value-chunks-v1` framing. It sends bounded value-event
+adds an opt-in `eliscript-value-chunks` framing. It sends bounded value-event
 batches in protocol messages, acknowledges one argument chunk at a time, and
 streams progress and success values while awaiting stdout backpressure. The
 ground JSON and non-streaming codec paths remain unchanged.
@@ -140,7 +139,7 @@ Each worker response reports durations in milliseconds:
 
 - `moduleLoadMs`
 - `moduleCacheHit`
-- `moduleVersion`
+- `moduleDigest`
 - `sourceMapLoaded`
 - `sourceMapCount`
 - `executionMs`
@@ -164,7 +163,7 @@ representative workloads rather than engine-only timings.
 
 ## Acceptance Evidence
 
-The Bun integration test covers ready negotiation, malformed JSON, version
+The Bun integration test covers ready negotiation, malformed JSON, unknown-field
 rejection, successful execution, timing fields, missing exports, progress,
 cancellation, timeout, unserializable values, logging isolation, and shutdown.
 

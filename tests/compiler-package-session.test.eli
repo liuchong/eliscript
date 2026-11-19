@@ -243,7 +243,7 @@
           (catch __eli_iteration_5_close_error (unless __eli_iteration_5_failed (throw __eli_iteration_5_close_error))))))))))))) 120000)
 
   (test "the distributable preserves every emitted compiler file, source identity and session provenance without a seed runtime" (async ()
-    (js-call assert :equal (get manifest :format) "eliscript-compiler-package") (js-call assert :equal (get manifest :version) 1)
+    (js-call assert :equal (get manifest :format) "eliscript-compiler-package")
     (js-call assert :equal (get manifest :host) "javascript") (js-call assert :equal (get artifact :host) "javascript")
     (js-call assert :equal (get (get manifest :capabilities) :seedRuntimeDependency) false) (js-call assert :equal (get (get manifest :capabilities) :externalCompilerBackend) false)
     (js-call assert :deepEqual (get (get manifest :capabilities) :environments) (js-array "node" "bun" "browser"))
@@ -634,7 +634,7 @@
                         (js-call assert :deepEqual (js-call (get (get (js* "globalThis") :WebAssembly) :Module) :imports module) (js-array)) (js-call runtime :zero64 8)
                         (assert (Object/is (js-call (new globalThis.DataView (get (get runtime :memory) :buffer)) :getFloat64 8 t) (js* "-0"))))
                       (when nativeExecutable
-                        (let ((runtime (await (openNativeMemory path (js-object :zero64 1) (copy (get base :memory) (js-object :nativeTarget nativeTarget))))))
+                        (let ((runtime (await (openNativeMemory path (js-object :zero64 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")) (copy (get base :memory) (js-object :nativeTarget nativeTarget))))))
                           (try (js-call runtime :invoke "zero64" 8)
                             (assert (Object/is (js-call (new globalThis.DataView (get (js-call runtime :read 8 8) :buffer)) :getFloat64 0 t) (js* "-0")))
                             (finally (js-call runtime :close)))))))))))
@@ -1488,7 +1488,7 @@
                             (progn
                               (js-call assert :equal (get child :status) 1) (js-call assert :equal (get child :stdout) "")
                               (let ((failure (JSON/parse (get child :stderr))))
-                                (js-call assert :equal (get failure :format) "eliscript-compiler-cli-error") (js-call assert :equal (get failure :version) 1)
+                                (js-call assert :equal (get failure :format) "eliscript-compiler-cli-error")
                                 (let* ((__eli_iteration_42_sequence (js-array "name" "message" "code" "eliscriptDiagnostic" "diagnostics" "macroOrigins"))
        (__eli_iteration_42_iterator (let ((result (Reflect/apply (get __eli_iteration_42_sequence Symbol.iterator) __eli_iteration_42_sequence (js-array)))) (unless (and (not (nullish? result)) (= (funcall globalThis.Object result) result)) (throw (new globalThis.TypeError "iterator must return an object"))) result))
        (__eli_iteration_42_next (get __eli_iteration_42_iterator :next)) (__eli_iteration_42_step undefined)
@@ -1738,7 +1738,7 @@
                       (let ((failure (funcall run badPath badOutput)))
                         (js-call assert :equal (get failure :status) 1) (js-call assert :equal (get failure :stdout) "")
                         (let ((error (JSON/parse (get failure :stderr))))
-                          (js-call assert :equal (get error :format) "eliscript-compiler-cli-error") (js-call assert :equal (get error :version) 1) (js-call assert :equal (funcall type-of (get (get error :error) :message)) "string"))
+                          (js-call assert :equal (get error :format) "eliscript-compiler-cli-error") (js-call assert :equal (funcall type-of (get (get error :error) :message)) "string"))
                         (await (js-call assert :rejects (async () (readFile badOutput)) (js-object :code "ENOENT"))))
                       (when (and (not raw) (not (= target "javascript")))
                         (let ((badRuntime (resolve work (str prefix "-invalid-runtime.eli"))))

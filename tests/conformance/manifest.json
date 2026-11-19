@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "features": [
     {
       "id": "acceleration.measurement-probe",
@@ -70,7 +69,7 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-builds-explicit-ir" },
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-preserves-macro-call-origin" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
-        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR v1 is lossless, strict, and host reproducible" }
+        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR is lossless, strict, and host reproducible" }
       ]
     },
     {
@@ -177,7 +176,7 @@
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-ir-lowering-satisfies-bootstrap-cases" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
-        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR v1 is lossless, strict, and host reproducible" }
+        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR is lossless, strict, and host reproducible" }
       ]
     },
     {
@@ -201,12 +200,12 @@
       "evidence": [{ "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }]
     },
     {
-      "id": "worker.protocol-v1",
-      "title": "Versioned worker protocol",
+      "id": "worker.protocol",
+      "title": "Worker protocol",
       "status": "stable",
       "spec": "0020",
       "contracts": ["Correlates requests and responses over NDJSON", "Supports progress, cancellation, timeout, errors, and shutdown"],
-      "evidence": [{ "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "long-lived worker implements the versioned NDJSON protocol" }]
+      "evidence": [{ "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "long-lived worker implements the NDJSON protocol" }]
     },
     {
       "id": "portable.function-closure",
@@ -432,7 +431,7 @@
       "contracts": ["Classifies current public and internal interfaces", "Rejects drift in IR, CLI, adapters, libraries, and Emacs APIs", "Prints generated conformance and public-surface matrices"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
-        { "kind": "fixture", "file": "contracts/public-surface.json", "contains": "\"schemaVersion\": 1" }
+        { "kind": "fixture", "file": "contracts/public-surface.json", "contains": "\"schemas\": [" }
       ]
     },
     {
@@ -1062,8 +1061,8 @@
       ]
     },
     {
-      "id": "worker.persistent-value-codec-v1",
-      "title": "Versioned Emacs worker persistent value codec",
+      "id": "worker.persistent-value-codec",
+      "title": "Emacs worker persistent value codec",
       "status": "stable",
       "spec": "0088",
       "contracts": ["Negotiates an opt-in value encoding without changing protocol v1 JSON defaults", "Round trips persistent List, Vector, Map, Set, Keyword, Symbol, metadata, undefined, special numbers, native Arrays, and native Objects", "Rejects unsupported, cyclic, duplicate, malformed, and resource-exhausting values with structured errors", "Allows seed and self-hosted portable closures to construct persistent values for explicit worker transport"],
@@ -1078,7 +1077,7 @@
       ]
     },
     {
-      "id": "worker.chunked-persistent-value-stream-v1",
+      "id": "worker.chunked-persistent-value-stream",
       "title": "Chunked Emacs worker persistent value streams",
       "status": "stable",
       "spec": "0089",
@@ -1088,7 +1087,7 @@
         { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "chunked value stream bounds frames and splits long Unicode text" },
         { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "stream decoder rejects malformed, duplicate, truncated, and oversized input" },
         { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "stream encoder rejects cycles, unsupported values, limits, and cancellation" },
-        { "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "value-chunks-v1" },
+        { "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "value-chunks" },
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-value-stream-is-incremental-and-bounded" },
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-negotiates-persistent-value-codec" }
       ]
@@ -1269,7 +1268,7 @@
       ]
     },
     {
-      "id": "worker.accelerated-operation-service-v1",
+      "id": "worker.accelerated-operation-service",
       "title": "Accelerated Emacs operation service",
       "status": "stable",
       "spec": "0104",
@@ -1296,11 +1295,11 @@
       ]
     },
     {
-      "id": "toolchain.versioned-project-request-v1",
-      "title": "Versioned project request configuration",
+      "id": "toolchain.project-request",
+      "title": "Project request configuration",
       "status": "stable",
       "spec": "0106",
-      "contracts": ["Routes direct and configured project builds through one request operation", "Validates a closed schemaVersion 1 configuration before graph traversal", "Rejects unknown or duplicate keys, unsafe paths, invalid booleans, and duplicate portable entries", "Preserves explicit command-line precedence and structured configuration diagnostics", "Keeps application frameworks, bundlers, publishing, hosting, and development servers outside the core schema and evidence"],
+      "contracts": ["Routes direct and configured project builds through one request operation", "Validates a closed configuration before graph traversal", "Rejects unknown or duplicate keys, unsafe paths, invalid booleans, and duplicate portable entries", "Preserves explicit command-line precedence and structured configuration diagnostics", "Keeps application frameworks, bundlers, publishing, hosting, and development servers outside the core schema and evidence"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-configuration-drives-shared-build-operation" },
         { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-configuration-rejects-undeclared-inputs" },
@@ -1354,7 +1353,7 @@
         {
           "kind": "bun-test",
           "file": "tests/bootstrap-ir-serialization.test.mjs",
-          "contains": "canonical IR v1 is lossless, strict, and host reproducible"
+          "contains": "canonical IR is lossless, strict, and host reproducible"
         },
         {
           "kind": "bun-test",
@@ -1369,7 +1368,7 @@
       "status": "stable",
       "spec": "0109",
       "contracts": [
-        "Owns version 1 report normalization and cache-status policy in Eliscript",
+        "Owns report normalization and cache-status policy in Eliscript",
         "Derives counts from canonical sorted module decisions and rounds non-deterministic timings",
         "Matches cache-free seed report semantics under Bun and Node",
         "Reports cache-disabled behavior without claiming incremental reuse or default CLI routing",
@@ -1394,7 +1393,7 @@
       "status": "stable",
       "spec": "0110",
       "contracts": [
-        "Owns v2 cache identity, ground v1 migration, and module reuse policy in Eliscript",
+        "Owns cache identity and module reuse policy in Eliscript",
         "Keeps filesystem, path, digest, and artifact effects in standards-based hosts",
         "Reuses standard cached dependency edges and revalidates portable closure before artifact reuse",
         "Supports complete Bun and Node cross-host hits plus selective repair of damaged outputs",
@@ -1404,7 +1403,7 @@
         {
           "kind": "ert",
           "file": "tests/eliscript-project-tests.el",
-          "contains": "eliscript-project-migrates-ground-cache-on-successful-read"
+          "contains": "eliscript-project-rebuilds-invalid-cache-format"
         },
         {
           "kind": "bun-test",
@@ -1424,7 +1423,7 @@
       "status": "stable",
       "spec": "0111",
       "contracts": [
-        "Owns version 1 request and configuration normalization in Eliscript",
+        "Owns request and configuration normalization in Eliscript",
         "Keeps JSON, filesystem, path, process, and presentation effects in a shared standards-based host",
         "Routes the public project command through the self-hosted service under Bun and Node",
         "Retains the seed project command as an explicit differential reference",
@@ -1459,7 +1458,7 @@
       "status": "stable",
       "spec": "0112",
       "contracts": [
-        "Owns version 1 single-file and project operation normalization in Eliscript",
+        "Owns single-file and project operation normalization in Eliscript",
         "Routes normal single-file and project commands through one generated-compiler dispatcher",
         "Preserves stdout, Source Map, portable, diagnostic, graph, report, and cache contracts under Bun and Node",
         "Keeps explicit seed commands non-circular and limited to bootstrap plus differential evidence",
@@ -1484,8 +1483,8 @@
       ]
     },
     {
-      "id": "toolchain.versioned-multi-entry-project-identity",
-      "title": "Versioned multi-entry project identity",
+      "id": "toolchain.multi-entry-project-identity",
+      "title": "Multi-entry project identity",
       "status": "stable",
       "spec": "0113",
       "contracts": [
@@ -1500,7 +1499,7 @@
         {
           "kind": "ert",
           "file": "tests/eliscript-project-tests.el",
-          "contains": "eliscript-project-builds-versioned-multi-entry-graph"
+          "contains": "eliscript-project-builds-multi-entry-graph"
         },
         {
           "kind": "bun-test",
@@ -1638,7 +1637,7 @@
         {
           "kind": "ert",
           "file": "tests/eliscript-mode-tests.el",
-          "contains": "eliscript-mode-decodes-versioned-check-diagnostics"
+          "contains": "eliscript-mode-decodes-check-diagnostics"
         },
         {
           "kind": "ert",
@@ -2550,7 +2549,7 @@
         {
           "kind": "bun-test",
           "file": "tests/repeated-determinism.test.mjs",
-          "contains": "twenty identical clean runs satisfy the versioned local contract"
+          "contains": "twenty identical clean runs satisfy the local contract"
         },
         {
           "kind": "bun-test",

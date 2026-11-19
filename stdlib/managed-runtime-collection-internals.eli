@@ -1,13 +1,41 @@
 (module eliscript.managed-runtime-collection-internals
   (import "../../stdlib/managed-literal-protocols.eli"
-    I_COUNTED I_EMPTYABLE I_CONJ I_LOOKUP I_ASSOCIATIVE I_INDEXED I_SEQABLE I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE
-    COLLECTION_COUNT COLLECTION_EMPTY COLLECTION_CONJ COLLECTION_GET COLLECTION_ASSOC COLLECTION_CONTAINS COLLECTION_NTH
-    COLLECTION_SEQ COLLECTION_REDUCE COLLECTION_REDUCE_KV COLLECTION_DISSOC COLLECTION_DISJ COLLECTION_PEEK COLLECTION_POP COLLECTION_RSEQ
-    managed-literal-is-reduced managed-literal-reduced managed-literal-unreduced managed-literal-reduce-iterable
-    managed-literal-checked-count)
+    managed-literal-protocol
+    managed-literal-is-reduced managed-literal-reduced managed-literal-unreduced
+    managed-literal-reduce-iterable managed-literal-checked-count)
   (import "./protocol.eli" protocolMethod)
+  (import "../../stdlib/core/protocol.eli" protocol-slot)
   (import "./collection.eli" SequenceView MemoizedSequenceView ReductionView
     sequenceView unboundedSequenceView memoizedSequenceView memoizedSequenceStatus sliceSequenceView prependSequenceView reductionView)
+
+  (defconst I_COUNTED (managed-literal-protocol "collection.ICounted"))
+  (defconst I_EMPTYABLE (managed-literal-protocol "collection.IEmptyable"))
+  (defconst I_CONJ (managed-literal-protocol "collection.IConj"))
+  (defconst I_LOOKUP (managed-literal-protocol "collection.ILookup"))
+  (defconst I_ASSOCIATIVE (managed-literal-protocol "collection.IAssociative"))
+  (defconst I_INDEXED (managed-literal-protocol "collection.IIndexed"))
+  (defconst I_SEQABLE (managed-literal-protocol "collection.ISeqable"))
+  (defconst I_REDUCE (managed-literal-protocol "collection.IReduce"))
+  (defconst I_KV_REDUCE (managed-literal-protocol "collection.IKVReduce"))
+  (defconst I_MAP (managed-literal-protocol "collection.IMap"))
+  (defconst I_SET (managed-literal-protocol "collection.ISet"))
+  (defconst I_STACK (managed-literal-protocol "collection.IStack"))
+  (defconst I_REVERSIBLE (managed-literal-protocol "collection.IReversible"))
+  (defconst COLLECTION_COUNT (protocol-slot I_COUNTED "count"))
+  (defconst COLLECTION_EMPTY (protocol-slot I_EMPTYABLE "empty"))
+  (defconst COLLECTION_CONJ (protocol-slot I_CONJ "conj"))
+  (defconst COLLECTION_GET (protocol-slot I_LOOKUP "get"))
+  (defconst COLLECTION_ASSOC (protocol-slot I_ASSOCIATIVE "assoc"))
+  (defconst COLLECTION_CONTAINS (protocol-slot I_ASSOCIATIVE "contains"))
+  (defconst COLLECTION_NTH (protocol-slot I_INDEXED "nth"))
+  (defconst COLLECTION_SEQ (protocol-slot I_SEQABLE "seq"))
+  (defconst COLLECTION_REDUCE (protocol-slot I_REDUCE "reduce"))
+  (defconst COLLECTION_REDUCE_KV (protocol-slot I_KV_REDUCE "reduceKV"))
+  (defconst COLLECTION_DISSOC (protocol-slot I_MAP "dissoc"))
+  (defconst COLLECTION_DISJ (protocol-slot I_SET "disj"))
+  (defconst COLLECTION_PEEK (protocol-slot I_STACK "peek"))
+  (defconst COLLECTION_POP (protocol-slot I_STACK "pop"))
+  (defconst COLLECTION_RSEQ (protocol-slot I_REVERSIBLE "rseq"))
 
   (defconst dispatchCollectionCount (protocolMethod I_COUNTED "count"))
   (defconst dispatchCollectionEmpty (protocolMethod I_EMPTYABLE "empty"))

@@ -13,6 +13,12 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
   (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
+  (defun bits-f64 (bits)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setBigUint64 0
+        (js-call globalThis.BigInt :asUintN 64 (funcall globalThis.BigInt bits)) t)
+      (js-call view :getFloat64 0 t)))
   (defconst is-instance (js* "(a, b) => a instanceof b"))
   (defconst js-global (js* "() => globalThis"))
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
@@ -120,6 +126,8 @@
                           (setq i (+ i 1)))
                         total))))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
+
   (defun box-val (a x)
     (let ((ty (funcall js-typeof x)))
       (cond
@@ -131,7 +139,7 @@
     (if (and (not (nullish? x)) (= (funcall js-typeof x) "object"))
       (let ((k (get x :kind)))
         (cond
-          ((= k 4) (js-call a :readNumber x))
+          ((= k 4) (funcall num-val a x))
           ((= k 5) (js-call a :readString x))
           (t x)))
       x))
@@ -694,7 +702,7 @@
                   (and (not (nullish? diag))
                        (= (get diag :code) code)))))
             (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-            (js-call assert :equal (js-call a :readNumber one) 1))))
+            (js-call assert :equal (funcall num-val a one) 1))))
         (js-call a :leaveFrame caller)
         (js-call a :release bad)
         (js-call a :release one)
@@ -708,7 +716,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((rt (js-call (get backend :compiler) :compile_ir_string
                             (str (js-call source :slice 0 start)
-                                 "  (defun value-truth (heap value) (load-u32 4294967295))\n"
+                                 "  (defun value-truth (heap value) (memory-sig u32 u32 v64) (load-u32 4294967295))\n"
                                  (js-call source :slice end))
                             "later-trap.eli"))
                (ir (js-call (get backend :compiler) :compile_ir_string
@@ -742,10 +750,10 @@
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
              (call-exp (lambda (name &rest args)
-                         (let ((out (unsigned-bit-shift-right (apply (aref e name) args) 0)))
+                         (let ((out (funcall normalize-u64 (apply (aref e name) args))))
                            (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                            out)))
-             (heap (funcall call-exp "heap-new" 16 1024 65536))
+             (heap (funcall call-exp "heap-new" 16 4136 65536))
              (retained (funcall call-exp "value-number" heap 0 1079558144))
              (frame (funcall call-exp "frame-new" heap 1)))
         (funcall call-exp "frame-set" heap frame 0 retained)
@@ -761,16 +769,16 @@
                (right (funcall make-text "2")))
           (funcall call-exp "heap-auto" heap 1)
           (let* ((result (funcall call-exp "value-primitive-binary" heap left right 2))
-                 (data (funcall call-exp "value-data" heap result 4)))
-            (funcall assert (Object/is (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64 data t) -0.0))
+                 (value (bits-f64 (funcall call-exp "value-number-bits" heap result))))
+            (funcall assert (Object/is value -0.0))
             (js-call assert :equal (funcall call-exp "frame-depth" heap) 1)
             (js-call assert :equal (funcall call-exp "frame-get" heap frame 0) retained)
-            (funcall assert (> (funcall call-exp "heap-capacity" heap) 1024))
+            (funcall assert (> (funcall call-exp "heap-capacity" heap) 4136))
             (funcall assert (> (funcall call-exp "heap-collections" heap) 0)))
           (funcall call-exp "frame-pop" heap frame)
           (funcall call-exp "heap-collect" heap)
           (js-call assert :equal (funcall call-exp "heap-live" heap) 0)))
-      (let ((small (instantiateManagedRuntime bytes (js-object :maxSlots 32 :initialBytes 1024 :maxBytes 1024))))
+      (let ((small (instantiateManagedRuntime bytes (js-object :maxSlots 32 :initialBytes 4576 :maxBytes 4576))))
         (js-call small :auto 1)
         (let* ((s (js-call small :string "1.5"))
                (n (js-call small :number -0.0))
@@ -784,7 +792,7 @@
                      (= (get diag :code) "ELI-RT0002")))))
           (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
           (js-call assert :equal (js-call small :readString s) "1.5")
-          (funcall assert (Object/is (js-call small :readNumber n) -0.0))
+          (funcall assert (Object/is (funcall num-val small n) -0.0))
           (js-call small :leaveFrame caller)
           (js-call small :release s)
           (js-call small :release n)

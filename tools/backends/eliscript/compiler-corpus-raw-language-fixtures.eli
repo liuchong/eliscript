@@ -18,7 +18,7 @@
     (js-object :family "strings" :hostOnlyGroups (js-array))
     ;; Its exact named function-value observation uses getExport, which is a
     ;; module ABI operation even though this complete fixture has no globals.
-    (js-object :family "callables" :requiredABI "managed-module-v1" :hostOnlyGroups (js-array))
+    (js-object :family "callables" :requiredABI "managed-module" :hostOnlyGroups (js-array))
     (js-object :family "primitive-operators" :hostOnlyGroups (js-array "host valueOf callbacks and external trace; original primitive operators Node oracle"))
     (js-object :family "js-cons" :hostOnlyGroups (js-array "host Set/Map iterator objects; original js-cons iterator interoperability"))
     (js-object :family "json" :hostOnlyGroups (js-array))))
@@ -627,7 +627,7 @@
             (exclude "own order and prototypes" 1 0 "raw prototype identities replace host-view prototype reflection"))))
       (mkdirSync directory (js-object :recursive t))
       (writeFileSync (resolve directory "original-fixture-observations.json")
-        (JSON/stringify (js-object :version 1 :family family :target (get context :target)
+        (JSON/stringify (js-object :family family :target (get context :target)
           :sourceIdentity (get context :sourceIdentity) :originalHostSha256 (get configuration :originalHostSha256)
           :completeOriginalObservations observations :portableObservations portable :groups groups :hostOnlyGroups excluded)))
       (js-call globalThis.console :log (JSON/stringify (js-object :observations portable)))))

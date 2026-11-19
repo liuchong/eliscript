@@ -1,0 +1,541 @@
+(module tools.backends.compiler-corpus-program-ground
+  (import "node:buffer" Buffer)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile writeFile mkdir symlink lstat)
+  (import "node:path" resolve join relative isAbsolute sep)
+  (import "node:url" pathToFileURL fileURLToPath)
+  (import "node:child_process" spawn)
+  (import "node:crypto" createHash)
+  (import "./compiler-corpus-host-context.mjs" openOriginalProgramContext inheritOriginalProgramContext originalProgramBunLauncher)
+  (import "./compiler-metadata.mjs" readCompilerMetadata)
+
+  (defun
+    typeof-str
+    (v)
+    (js* "typeof v"))
+  (defun
+    nullish?
+    (v)
+    (or (= v nil) (= v undefined)))
+  (defun
+    undefined?
+    (v)
+    (= v undefined))
+  (defun
+    truthy?
+    (v)
+    (js* "!!v"))
+  (defun
+    plain-obj?
+    (v)
+    (and (not (= v nil)) (= (typeof-str v) "object")))
+  (defun
+    box-val
+    (v)
+    (let*
+      ((arr (js-array)))
+      (js-call arr :push v)
+      arr))
+  (defun
+    unbox
+    (b)
+    (aref b 0))
+  (defun
+    set-box!
+    (b v)
+    (put b 0 v))
+  (defun
+    clone-obj
+    (obj)
+    (let*
+      ((out (js-object)))
+      (when
+        (not (nullish? obj))
+        (let*
+          ((__coll_37 (Array/from (globalThis.Object.entries obj))) (__idx_38 0))
+          (while
+            (< __idx_38 (js-length __coll_37))
+            (let
+              ((entry (aref __coll_37 __idx_38)))
+              (put out (aref entry 0) (aref entry 1)))
+            (setq __idx_38 (1+ __idx_38)))))
+      out))
+  (defun
+    merge-objs
+    (&rest objs)
+    (let*
+      ((out (js-object)))
+      (let*
+        ((__coll_39 (Array/from objs)) (__idx_40 0))
+        (while
+          (< __idx_40 (js-length __coll_39))
+          (let
+            ((obj (aref __coll_39 __idx_40)))
+            (when
+              (not (nullish? obj))
+              (let*
+                ((__coll_41 (Array/from (globalThis.Object.entries obj))) (__idx_42 0))
+                (while
+                  (< __idx_42 (js-length __coll_41))
+                  (let
+                    ((entry (aref __coll_41 __idx_42)))
+                    (put out (aref entry 0) (aref entry 1)))
+                  (setq __idx_42 (1+ __idx_42))))))
+          (setq __idx_40 (1+ __idx_40))))
+      out))
+  (defun
+    valueRecord
+    (value)
+    (cond
+      ((undefined? value) (js-object :$eliscriptObservation "undefined"))
+      ((= (typeof-str value) "bigint") (js-object :$eliscriptObservation "bigint" :decimal (globalThis.String value)))
+      ((= (typeof-str value) "number") (cond
+          ((globalThis.Object.is value -0) (js-object :$eliscriptObservation "-0"))
+          ((not (globalThis.Number.isFinite value)) (js-object :$eliscriptObservation (globalThis.String value)))
+          (t value)))
+      ((globalThis.Array.isArray value) (js-call value :map valueRecord))
+      ((plain-obj? value) (globalThis.Object.fromEntries (js-call (globalThis.Object.entries value) :map (lambda (entry) (js-array (aref entry 0) (valueRecord (aref entry 1)))))))
+      (t value)))
+  (defun
+    managedValue
+    (a value)
+    (if
+      (not (plain-obj? value))
+      value
+      (let*
+        ((kind (get value :kind)))
+        (cond
+          ((= kind 4) (js-call a :readNumber value))
+          ((= kind 5) (js-call a :readString value))
+          ((= kind 34) (js-call a :readBigInt value))
+          ((= kind 13) (let*
+              ((result (js-object)) (keys (js-call a :objectKeys value)))
+              (try
+                (let*
+                  ((len (js-call a :length keys)))
+                  (let*
+                    ((index 0) (__loop_43 t))
+                    (while
+                      __loop_43
+                      (setq __loop_43 false)
+                      (when
+                        (< index len)
+                        (let*
+                          ((key (js-call a :get keys index)) (child (js-call a :objectGet value key)))
+                          (try
+                            (globalThis.Object.defineProperty result (js-call a :readString key) (js-object :value (managedValue a child) :enumerable t :writable t :configurable t))
+                            (finally
+                              (js-call a :release child)
+                              (js-call a :release key))))
+                        (progn
+                          (setq index (+ index 1))
+                          (setq __loop_43 t))))))
+                (finally
+                  (js-call a :release keys)))
+              result))
+          ((not (= kind 14)) (throw (new globalThis.TypeError "original corpus observation has an unsupported source value kind")))
+          (t (globalThis.Array.from (js-object :length (js-call a :length value)) (lambda (__ign_44 index) (let*
+                  ((child (js-call a :get value index)))
+                  (try
+                    (managedValue a child)
+                    (finally
+                      (js-call a :release child)))))))))))
+  (defun
+    wire-json
+    (item)
+    (cond
+      ((and (= (typeof-str item) "number") (globalThis.Object.is item -0)) "-0")
+      ((globalThis.Array.isArray item) (str "[" (js-call (js-call item :map wire-json) :join ",") "]"))
+      ((plain-obj? item) (str "{" (js-call (js-call (globalThis.Object.keys item) :map (lambda (key) (str (globalThis.JSON.stringify key) ":" (wire-json (aref item key))))) :join ",") "}"))
+      (t (globalThis.JSON.stringify item))))
+  (defun
+    resolveOriginalCorpusRequest
+    (value results)
+    (cond
+      ((globalThis.Array.isArray value) (js-call value :map (lambda (item) (resolveOriginalCorpusRequest item results))))
+      ((not (plain-obj? value)) value)
+      ((and (= (get (globalThis.Object.keys value) :length) 1) (globalThis.Object.hasOwn value "$compilerCorpusRef")) (let*
+          ((parts (js-call (aref value "$compilerCorpusRef") :split ".")) (step (aref parts 0)) (path (js-call parts :slice 1)))
+          (when
+            (not (js-call results :has step))
+            (throw (new globalThis.Error "original request sequence references an unavailable step")))
+          (let*
+            ((result-box (box-val (js-call results :get step))))
+            (let*
+              ((__coll_45 (Array/from path)) (__idx_46 0))
+              (while
+                (< __idx_46 (js-length __coll_45))
+                (let
+                  ((part (aref __coll_45 __idx_46)))
+                  (let*
+                    ((cur (unbox result-box)))
+                    (when
+                      (or (= cur nil) (not (globalThis.Object.hasOwn cur part)))
+                      (throw (new globalThis.Error "original request sequence references an unavailable result")))
+                    (set-box! result-box (aref cur part))))
+                (setq __idx_46 (1+ __idx_46))))
+            (globalThis.structuredClone (unbox result-box)))))
+      ((and (= (get (globalThis.Object.keys value) :length) 1) (globalThis.Object.hasOwn value "$compilerCorpusConcat")) (js-call (resolveOriginalCorpusRequest (aref value "$compilerCorpusConcat") results) :join ""))
+      ((and (= (get (globalThis.Object.keys value) :length) 1) (globalThis.Object.hasOwn value "$compilerCorpusReplace")) (let*
+          ((resolved (resolveOriginalCorpusRequest (aref value "$compilerCorpusReplace") results)))
+          (js-call (aref resolved 0) :replace (aref resolved 1) (aref resolved 2))))
+      ((and (= (get (globalThis.Object.keys value) :length) 1) (globalThis.Object.hasOwn value "$compilerCorpusJsonPatch")) (let*
+          ((resolved (resolveOriginalCorpusRequest (aref value "$compilerCorpusJsonPatch") results)) (source (aref resolved 0)) (patches (aref resolved 1)) (document (globalThis.JSON.parse source)))
+          (let*
+            ((__coll_47 (Array/from patches)) (__idx_48 0))
+            (while
+              (< __idx_48 (js-length __coll_47))
+              (let
+                ((patch (aref __coll_47 __idx_48)))
+                (let*
+                  ((owner-box (box-val document)) (prefix (js-call (get patch :path) :slice 0 -1)) (key (js-call (get patch :path) :at -1)))
+                  (let*
+                    ((__coll_49 (Array/from prefix)) (__idx_50 0))
+                    (while
+                      (< __idx_50 (js-length __coll_49))
+                      (let
+                        ((part (aref __coll_49 __idx_50)))
+                        (set-box! owner-box (aref (unbox owner-box) part)))
+                      (setq __idx_50 (1+ __idx_50))))
+                  (let*
+                    ((owner (unbox owner-box)))
+                    (cond
+                      ((globalThis.Object.hasOwn patch "duplicateIndex") (let*
+                          ((array (aref owner key)) (index (get patch :duplicateIndex)))
+                          (when
+                            (or (not (globalThis.Array.isArray array)) (not (globalThis.Number.isSafeInteger index)) (< index 0) (>= index (get array :length)) (not (globalThis.Object.hasOwn array index)) (globalThis.Object.hasOwn patch "append") (globalThis.Object.hasOwn patch "value") (globalThis.Object.hasOwn patch "negativeZero"))
+                            (throw (new globalThis.TypeError "original corpus duplicateIndex must select one existing own array element")))
+                          (js-call array :push (globalThis.structuredClone (aref array index)))))
+                      ((globalThis.Object.hasOwn patch "append") (js-call (aref owner key) :push (get patch :append)))
+                      (t (put owner key (if
+                            (truthy? (get patch :negativeZero))
+                            -0
+                            (get patch :value))))))))
+              (setq __idx_48 (1+ __idx_48))))
+          (wire-json document)))
+      (t (globalThis.Object.fromEntries (js-call (globalThis.Object.entries value) :map (lambda (entry) (js-array (aref entry 0) (resolveOriginalCorpusRequest (aref entry 1) results))))))))
+  (defun
+    childOutput
+    (command args &optional opts)
+    (let*
+      ((options (or opts (js-object))) (cwd (get options :cwd)) (signal (get options :signal)) (env (get options :env)) (timeoutMs (get options :timeoutMs)))
+      (when
+        (and (not (undefined? timeoutMs)) (or (not (globalThis.Number.isSafeInteger timeoutMs)) (<= timeoutMs 0)))
+        (throw (new globalThis.TypeError "original host deadline must retain its positive integer timeout")))
+      (new globalThis.Promise (lambda (accept reject) (let*
+            ((merged-env (if
+                  (truthy? env)
+                  (merge-objs (get globalThis.process :env) env)
+                  (get globalThis.process :env))) (child (spawn command args (js-object :cwd cwd :signal signal :env merged-env :stdio (js-array "ignore" "pipe" "pipe")))) (stdout (js-array)) (stderr (js-array)) (timer-box (box-val undefined)) (term-box (box-val undefined)) (expired-box (box-val false)) (clear (lambda () (globalThis.clearTimeout (unbox timer-box)) (globalThis.clearTimeout (unbox term-box)))))
+            (when
+              (not (undefined? timeoutMs))
+              (set-box! timer-box (globalThis.setTimeout (lambda () (set-box! expired-box t) (js-call child :kill "SIGTERM") (let*
+                      ((term (globalThis.setTimeout (lambda () (js-call child :kill "SIGKILL")) 1000)))
+                      (js-call term :unref)
+                      (set-box! term-box term))) timeoutMs)))
+            (js-call (get child :stdout) :on "data" (lambda (chunk) (js-call stdout :push chunk)))
+            (js-call (get child :stderr) :on "data" (lambda (chunk) (js-call stderr :push chunk)))
+            (js-call child :once "error" (lambda (error) (clear) (reject error)))
+            (js-call child :once "close" (lambda (code) (clear) (cond
+                  ((unbox expired-box) (let*
+                      ((error (new globalThis.Error (str "original corpus host exceeded its " timeoutMs " ms timeout"))))
+                      (put error :code "ELISCRIPT_ORIGINAL_HOST_TIMEOUT")
+                      (put error :timeoutMs timeoutMs)
+                      (reject error)))
+                  ((= code 0) (accept (js-call (globalThis.Buffer.concat stdout) :toString "utf8")))
+                  (t (let*
+                      ((err-text (js-call (js-call (globalThis.Buffer.concat stderr) :toString "utf8") :trim)))
+                      (reject (new globalThis.Error (if
+                            (> (get err-text :length) 0)
+                            err-text
+                            (str "corpus host exited with " code))))))))))))))
+  (defun
+    box
+    (a value)
+    (cond
+      ((= (typeof-str value) "bigint") (js-call a :bigint value))
+      ((= (typeof-str value) "number") (js-call a :number value))
+      ((= (typeof-str value) "string") (js-call a :string value))
+      ((not (plain-obj? value)) value)
+      (t (let*
+          ((children (js-array)))
+          (try
+            (if
+              (globalThis.Array.isArray value)
+              (let*
+                ((items (js-call value :map (lambda (item) (let*
+                          ((child (box a item)))
+                          (js-call children :push child)
+                          child)))))
+                (js-call a :sourceArray items))
+              (let*
+                ((items (globalThis.Object.fromEntries (js-call (globalThis.Object.entries value) :map (lambda (entry) (let*
+                            ((child (box a (aref entry 1))))
+                            (js-call children :push child)
+                            (js-array (aref entry 0) child)))))))
+                (js-call a :sourceObject items)))
+            (finally
+              (js-call children :forEach (lambda (child) (js-call a :release child)))))))))
+  (defasync
+    javascriptEnvironment
+    (artifact sourceRoot)
+    (let*
+      ((modules (join (resolve (get artifact :path) "..") "node_modules")))
+      (await (mkdir modules (js-object :recursive t)))
+      (try
+        (await (symlink (resolve sourceRoot) (join modules "eliscript") "dir"))
+        (catch
+          error
+          (when
+            (not (= (get error :code) "EEXIST"))
+            (throw error))))
+      (get (pathToFileURL (get artifact :path)) :href)))
+  (defasync
+    javascriptModule
+    (artifact sourceRoot)
+    (let*
+      ((url (await (javascriptEnvironment artifact sourceRoot))))
+      (funcall (js* "(u) => import(u)") url)))
+  (defasync
+    originalProgramAliases
+    (artifact record)
+    (let*
+      ((directory (if
+            (not (nullish? (get artifact :directory)))
+            (get artifact :directory)
+            (resolve (get artifact :path) ".."))) (modules (if
+            (= (get artifact :target) "javascript")
+            (get artifact :modules)
+            (when
+              (and (not (nullish? (get artifact :descriptor))) (not (nullish? (get (get artifact :descriptor) :project))))
+              (get (get (get artifact :descriptor) :project) :modules)))))
+      (when
+        (not (globalThis.Array.isArray modules))
+        (throw (new globalThis.Error "original host oracle requires actual phased module exports")))
+      (let*
+        ((__coll_51 (Array/from modules)) (__idx_52 0))
+        (while
+          (< __idx_52 (js-length __coll_51))
+          (let
+            ((mod (aref __coll_51 __idx_52)))
+            (let*
+              ((id (get mod :id)))
+              (when
+                (or (not (= (typeof-str id) "string")) (not (js-call id :endsWith ".mjs")))
+                (throw (new globalThis.TypeError "original program module identity must end in .mjs")))
+              (let*
+                ((alias (str (js-call id :slice 0 -4) ".eli")) (file (resolve directory alias)))
+                (when
+                  (or (js-call id :startsWith "/") (js-call (js-call id :split "/") :some (lambda (part) (or (not (truthy? part)) (= part ".") (= part "..")))) (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test id))
+                  (throw (new globalThis.TypeError "original program alias escapes the product")))
+                (await (mkdir (resolve file "..") (js-object :recursive t)))
+                (let*
+                  ((base (str "./" (js-call (js-call id :split "/") :at -1))) (exports-arr (get mod :exports)) (hasDefault (and (globalThis.Array.isArray exports-arr) (js-call exports-arr :some (lambda (item) (= (get item :name) "default"))))))
+                  (await (writeFile file (str "export * from " (globalThis.JSON.stringify base) ";\n" (if
+                          hasDefault
+                          (str "export {default} from " (globalThis.JSON.stringify base) ";\n")
+                          ""))))))))
+          (setq __idx_52 (1+ __idx_52))))
+      (await (javascriptEnvironment artifact (get record :sourceRoot)))
+      (try
+        (await (symlink (resolve (get record :sourceRoot) "runtime") (resolve directory "runtime") "dir"))
+        (catch
+          error
+          (when
+            (not (= (get error :code) "EEXIST"))
+            (throw error))))))
+  (defasync
+    originalProgramSidecars
+    (artifact record)
+    (let*
+      ((directory (resolve (if
+              (not (nullish? (get artifact :directory)))
+              (get artifact :directory)
+              (resolve (get artifact :path) "..")))) (put-sidecar (async (id source) (when
+              (or (not (= (typeof-str id) "string")) (not (truthy? id)) (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test id) (js-call (js-call id :split "/") :some (lambda (part) (or (not (truthy? part)) (= part ".") (= part "..")))) (not (= (typeof-str source) "string")))
+              (throw (new globalThis.TypeError "invalid original provider sidecar"))) (let*
+              ((path (resolve directory id)) (part (relative directory path)))
+              (when
+                (or (isAbsolute part) (= part "..") (js-call part :startsWith (str ".." sep)))
+                (throw (new globalThis.TypeError "original provider sidecar escapes its artifact")))
+              (let*
+                ((parent-box (box-val directory)))
+                (let*
+                  ((__coll_53 (Array/from (js-call (js-call id :split "/") :slice 0 -1))) (__idx_54 0))
+                  (while
+                    (< __idx_54 (js-length __coll_53))
+                    (let
+                      ((segment (aref __coll_53 __idx_54)))
+                      (let*
+                        ((next-parent (join (unbox parent-box) segment)))
+                        (set-box! parent-box next-parent)
+                        (await (mkdir next-parent (js-object :recursive t)))
+                        (let*
+                          ((details (await (lstat next-parent))))
+                          (when
+                            (or (js-call details :isSymbolicLink) (not (js-call details :isDirectory)))
+                            (throw (new globalThis.TypeError "original provider sidecar traverses an alias"))))))
+                    (setq __idx_54 (1+ __idx_54)))))
+              (try
+                (await (writeFile path source (js-object :flag "wx")))
+                (catch
+                  error
+                  (when
+                    (not (= (get error :code) "EEXIST"))
+                    (throw error))
+                  (let*
+                    ((details (await (lstat path))))
+                    (when
+                      (or (js-call details :isSymbolicLink) (not (js-call details :isFile)) (not (js-call (await (readFile path)) :equals (globalThis.Buffer.from source))))
+                      (throw (new globalThis.Error "original provider sidecar conflicts with emitted source"))))))
+              path))) (hostSources (if
+            (and (not (nullish? (get record :request))) (globalThis.Array.isArray (get (get record :request) :hostSources)))
+            (get (get record :request) :hostSources)
+            (js-array))))
+      (let*
+        ((__coll_55 (Array/from hostSources)) (__idx_56 0))
+        (while
+          (< __idx_56 (js-length __coll_55))
+          (let
+            ((source (aref __coll_55 __idx_56)))
+            (await (put-sidecar (get source :id) (get source :source))))
+          (setq __idx_56 (1+ __idx_56))))
+      (let*
+        ((execution (or (get record :execution) (js-object))))
+        (cond
+          ((not (nullish? (get execution :hostSource))) (await (put-sidecar (get execution :host) (get execution :hostSource))))
+          ((truthy? (get execution :host)) (resolve (get record :sourceRoot) (get execution :host)))
+          (t nil)))))
+  (defun
+    originalProgramArguments
+    (contract entry base)
+    (let*
+      ((records (if
+            (not (nullish? (get contract :arguments)))
+            (get contract :arguments)
+            (js-call (if
+                (not (nullish? (get contract :argumentModules)))
+                (get contract :argumentModules)
+                (js-array entry)) :map (lambda (mod) (js-object :module mod))))))
+      (when
+        (not (globalThis.Array.isArray records))
+        (throw (new globalThis.TypeError "original program arguments must be an array")))
+      (js-call records :map (lambda (record) (when
+            (or (not (plain-obj? record)) (globalThis.Array.isArray record) (not (= (get (globalThis.Object.keys record) :length) 1)))
+            (throw (new globalThis.TypeError "original program requires an explicit argument recipe"))) (cond
+            ((globalThis.Object.hasOwn record "literal") (progn
+                (when
+                  (not (= (typeof-str (get record :literal)) "string"))
+                  (throw (new globalThis.TypeError "original program literal argument must be text")))
+                (get record :literal)))
+            ((globalThis.Object.hasOwn record "directory") (progn
+                (when
+                  (not (= (get record :directory) t))
+                  (throw (new globalThis.TypeError "original program directory argument must select its artifact")))
+                (fileURLToPath (new globalThis.URL "./" base))))
+            (t (let*
+                ((id (get record :module)))
+                (when
+                  (or (not (= (typeof-str id) "string")) (not (truthy? id)) (js-call (new globalThis.RegExp "[\\\\:\\u0000]") :test id) (js-call (js-call id :split "/") :some (lambda (part) (or (not (truthy? part)) (= part ".") (= part "..")))))
+                  (throw (new globalThis.TypeError "original program module argument must stay inside its artifact")))
+                (let*
+                  ((url (new globalThis.URL (js-call (js-call (js-call id :split "/") :map globalThis.encodeURIComponent) :join "/") base)))
+                  (if
+                    (= (get contract :argument) "url")
+                    (get url :href)
+                    (fileURLToPath url))))))))))
+  (defasync
+    originalCompilerSourceMaps
+    (context)
+    (let*
+      ((record (get context :record)) (artifact (get context :artifact)) (session (get context :session)) (signal (get context :signal)) (target (get context :target)))
+      (if
+        (or (not (truthy? (get (get record :execution) :compilerSourceMaps))) (= target "javascript"))
+        (js-array)
+        (let*
+          ((modules (if
+                (not (nullish? (get record :modules)))
+                (get record :modules)
+                (get (get record :request) :modules))))
+          (when
+            (or (not (globalThis.Array.isArray modules)) (= (get modules :length) 0))
+            (throw (new globalThis.TypeError "original compiler source maps require the entire original source graph")))
+          (let*
+            ((request (merge-objs (get record :request) (js-object :operation "project" :modules modules :entry (if
+                      (not (nullish? (get record :entry)))
+                      (get record :entry)
+                      (get (get record :request) :entry)) :target "javascript" :sourceMap t :debug false :phased false))) (response (await (js-call session :request request (js-object :signal signal)))) (support (await (js-call context :archiveProduct response "original-compiler-javascript-maps" "javascript"))))
+            (js-call assert :equal (get support :target) "javascript")
+            (js-call assert :deepEqual (js-call (js-call (get support :modules) :map (lambda (m) (get m :id))) :sort) (js-call (js-call modules :map (lambda (m) (get m :id))) :sort))
+            (let*
+              ((maps (js-array)))
+              (let*
+                ((__coll_57 (Array/from (get support :modules))) (__idx_58 0))
+                (while
+                  (< __idx_58 (js-length __coll_57))
+                  (let
+                    ((mod (aref __coll_57 __idx_58)))
+                    (when
+                      (not (= (typeof-str (get mod :sourceMapPath)) "string"))
+                      (throw (new globalThis.Error "original compiler JavaScript source map was not emitted")))
+                    (let*
+                      ((source (await (readFile (get mod :sourceMapPath) "utf8"))))
+                      (js-call assert :equal (js-call (js-call (createHash "sha256") :update source) :digest "hex") (get mod :sourceMapSha256))
+                      (js-call maps :push (js-object :id (str (get mod :id) ".map") :source source))))
+                  (setq __idx_58 (1+ __idx_58))))
+              (await (originalProgramSidecars artifact (js-object :request (js-object :hostSources maps) :execution (js-object))))
+              (js-array (js-object :role "original-compiler-javascript-source-maps" :target "javascript" :directory (js-call (js-call (relative (get context :directory) (get support :directory)) :split sep) :join "/") :identitySha256 (get support :identitySha256)))))))))
+  (defasync
+    runOriginalProgramDriver
+    (configuration)
+    (let*
+      ((input (await (readCompilerMetadata configuration))) (env (get globalThis.process :env)))
+      (put env :ELISCRIPT_ORIGINAL_TARGET (get input :target))
+      (put env :ELISCRIPT_ORIGINAL_SOURCE_ROOT (get input :sourceRoot))
+      (let*
+        ((context (await (openOriginalProgramContext input (js-object :identity configuration)))) (failed-box (box-val false)))
+        (when
+          (= (get input :childProcesses) "inherit-selected-artifact")
+          (inheritOriginalProgramContext (js-object :configuration configuration :sourceRoot (get input :sourceRoot))))
+        (when
+          (truthy? (get input :runtimeLaunchers))
+          (let*
+            ((launcher (await (originalProgramBunLauncher (js-object :directory (fileURLToPath (get input :base)) :bun (get globalThis.process :execPath) :configuration configuration :sourceRoot (get input :sourceRoot))))))
+            (put env :ELISCRIPT_ORIGINAL_BUN launcher)
+            (put env :ELISCRIPT_JS_RUNTIME launcher)))
+        (try
+          (let*
+            ((entry (new globalThis.URL (get input :entry) (get input :base))))
+            (cond
+              ((truthy? (get input :hostEval)) (progn
+                  (put env (get input :environment) (fileURLToPath entry))
+                  (let ((inline-path (resolve (fileURLToPath (get input :base)) "__eliscript_original_inline_host.mjs")))
+                    (await (writeFile inline-path (get input :hostEval) "utf8"))
+                    (await (funcall (js* "(u) => import(u)") (get (pathToFileURL inline-path) :href))))))
+              ((truthy? (get input :host)) (let*
+                  ((args (originalProgramArguments input (get input :entry) (get input :base))) (argv (js-array (get globalThis.process :execPath) (get input :host))))
+                  (let*
+                    ((__coll_59 (Array/from args)) (__idx_60 0))
+                    (while
+                      (< __idx_60 (js-length __coll_59))
+                      (let
+                        ((arg (aref __coll_59 __idx_60)))
+                        (js-call argv :push arg))
+                      (setq __idx_60 (1+ __idx_60))))
+                  (put globalThis.process :argv argv)
+                  (await (funcall (js* "(u) => import(u)") (pathToFileURL (get input :host))))))
+              (t (await (funcall (js* "(u) => import(u)") (new globalThis.URL (get (get context :facades) :loadEntry) (get input :base)))))))
+          (catch
+            error
+            (set-box! failed-box t)
+            (throw error))
+          (finally
+            (try
+              (await (js-call context :close))
+              (catch
+                error
+                (when
+                  (not (unbox failed-box))
+                  (throw error)))))))))
+  (export typeof-str nullish? undefined? truthy? box-val unbox set-box! clone-obj merge-objs valueRecord managedValue resolveOriginalCorpusRequest childOutput box javascriptEnvironment javascriptModule originalProgramAliases originalProgramSidecars originalProgramArguments originalCompilerSourceMaps runOriginalProgramDriver)
+)

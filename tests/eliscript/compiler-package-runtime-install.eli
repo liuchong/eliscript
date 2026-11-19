@@ -14,7 +14,7 @@
               (isCompilerRequestFixture root argument (get globalThis.process :env)))))
     (throw (new globalThis.TypeError "package cleanup adapter requires its exact original suite")))
   (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-             "4c41757d393d631c138a2e331c10bbae4263f24eb96ad375275bbe1f26e5c353")
+             "e60739cf167072a3ad874ab229026b4f4258974e6ff1007cc976c93e97943546")
     (throw (new globalThis.TypeError "package cleanup adapter refuses changed original suite bytes")))
   (defconst original (Object/assign (js-object) wasm))
   (defconst original-framework (Object/assign (js-object) framework))

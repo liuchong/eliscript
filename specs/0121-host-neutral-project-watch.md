@@ -10,7 +10,7 @@
 
 ## Summary
 
-Eliscript adds one versioned, host-neutral source invalidation stream for
+Eliscript adds one host-neutral source invalidation stream for
 configured and explicit-root projects. The public `eliscript-watch` command
 emits normalized project events; the maintained Emacs mode consumes the same
 events to refresh project diagnostics. Filesystem observation, timers, paths,
@@ -32,7 +32,6 @@ changing it.
 Every machine event is one JSON line with:
 
 - `format`: `"eliscript-watch-event"`
-- `version`: `1`
 - `sequence`: a non-negative safe integer, increasing within one process
 - `event`: `"ready"`, `"change"`, or `"error"`
 - `root`: the canonical absolute source root
@@ -44,9 +43,9 @@ snapshot digest. Each change has a canonical absolute `file`, a root-relative
 `"create"`, `"modify"`, or `"delete"`. A configuration file outside the source
 root has no relative `path` but retains its canonical `file` identity.
 
-An `error` event contains one versioned Eliscript diagnostic. Observation
+An `error` event contains one Eliscript diagnostic. Observation
 continues after a recoverable scan error. Event objects and change arrays are
-closed: unknown event kinds, change kinds, or fields are not part of version 1.
+closed: unknown event kinds, change kinds, or fields are rejected.
 
 Snapshot digests are SHA-256 over sorted canonical file identities and content
 digests. Timestamps, inode numbers, native watcher event names, polling times,
@@ -56,7 +55,7 @@ and temporary paths do not affect the digest.
 
 An explicit-root watch recursively observes regular `.eli` files below the
 canonical root. A configured watch resolves `eliscript.json` through the same
-versioned project request as build/check commands, observes the resulting
+project request as build/check commands, observes the resulting
 source root, and also observes the canonical configuration file. Directory and
 file symlinks are not followed. Non-Eliscript files and generated output do not
 produce source events.
@@ -74,7 +73,7 @@ coalesced per snapshot and sorted by canonical file identity.
 - `--config FILE`
 
 `--interval MILLISECONDS` selects a bounded polling interval. `--json` emits
-the versioned NDJSON contract; human mode prints a concise ready line and one
+the NDJSON contract; human mode prints a concise ready line and one
 line per change or error. `--help` exits without starting a timer.
 
 Normal end of input does not terminate a watch. SIGINT, SIGTERM, command
@@ -103,7 +102,7 @@ audit. AC-12 remains a separate final supported-editor matrix criterion.
 
 ## Compatibility Freeze
 
-The `eliscript-watch-event` version 1 envelope, content-derived snapshots,
+The `eliscript-watch-event` envelope, content-derived snapshots,
 sorted create/modify/delete changes, configured-project resolution, bounded
 polling, Bun/Node event equivalence, signal cleanup, and shared Emacs consumer
 lifecycle are stable. Native watcher details, timestamps, and application
@@ -111,13 +110,13 @@ development servers cannot enter event identity or core evidence.
 
 ## Acceptance Criteria
 
-- **HPW-01:** Ready and change events satisfy `eliscript-watch-event` version 1
+- **HPW-01:** Ready and change events satisfy `eliscript-watch-event`
   and use strictly increasing process-local sequences.
 - **HPW-02:** Content snapshots report sorted create, modify, and delete changes
   for regular `.eli` files without relying on timestamps.
 - **HPW-03:** Non-source files, generated output, directory symlinks, and file
   symlinks do not produce source events.
-- **HPW-04:** Configured watching uses the versioned project request and detects
+- **HPW-04:** Configured watching uses the project request and detects
   both source and configuration changes.
 - **HPW-05:** Node and Bun emit equivalent ready/change/error events for the
   same canonical project state.

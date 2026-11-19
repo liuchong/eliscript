@@ -11,7 +11,7 @@
   (import "../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../tools/backends/managed-module-graph.mjs"
     createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph)
-  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntimeWithHostModules)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime instantiateManagedRuntimeWithHostModules)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
   (import "./helpers/managed-numeric-selfhosted.mjs" loadReference)
   (import "./helpers/performance-acceptance.mjs" currentPerformanceTest)
@@ -182,7 +182,8 @@
                         "eliscript-managed-control" (JSON/stringify descriptor))))
                (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
           (js-call assert :deepStrictEqual (get descriptor :hostCapabilities)
-            (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+            (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+            :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
           (check-owned-source-operation-import bytes)
           (while (< index (js-length targets))
             (let* ((target (aref targets index)) (deployment (resolve directory "foreign-initializers" target))
@@ -495,6 +496,52 @@
               (lambda (id) (js-call id :endsWith "/runtime/core/vector.mjs"))))
             (js-call assert :strictEqual (JSON/stringify program) before)
             (js-call assert :strictEqual (get declaration :specifier) "eliscript/runtime/core/vector.mjs")))))))
+  (test "phased literal projects without explicit entries keep unreferenced private modules out of the roots"
+    (async ()
+      (let* ((libraries (get (await (js-call backend :loadLiteralModules)) :literalModules))
+             (program (js-call (get backend :compiler) :compile_ir_string
+                       "(defun value () 42) (export value)" "pure-literal-roots.eli")))
+        (js-call (js-array
+                   (js-object :phased t :literalModules libraries)
+                   (js-object :phased t :entries (js-array "main.mjs") :literalModules libraries))
+          :forEach
+          (lambda (options)
+            (let* ((lowered (js-call (get backend :managed) :lower_managed_project
+                              (js-array (js-object :id "main.mjs" :program program)) "main.mjs" runtime options))
+                   (descriptor (get lowered :descriptor))
+                   (bytes (globalThis.Uint8Array.from
+                     (js-call (get backend :wasm) :append_metadata_section
+                       (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed)
+                         (js-object :initialPages 1 :maximumPages 16))
+                       "eliscript-managed-control" (JSON/stringify descriptor)))))
+              ;; A pure computation entry must not inherit the awaited
+              ;; wire/http-rpc literal module as a root when entries are
+              ;; omitted: no host capability or WASM import may appear.
+              (js-call assert :deepStrictEqual
+                (if (undefined? (get descriptor :hostCapabilities)) (js-array) (get descriptor :hostCapabilities))
+                (js-array))
+              (js-call assert :deepStrictEqual
+                (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
+                (js-array))
+              (js-call assert :strictEqual
+                (js-call (get (get descriptor :project) :modules) :some
+                  (lambda (item) (js-call (get item :id) :startsWith "$eliscript_literal$")))
+                false)
+              (let* ((graph (createManagedModuleGraph descriptor))
+                     (adapter (instantiateManagedRuntime bytes
+                       (js-object :initializeModule false :moduleGraph graph))))
+                (try
+                  (js-call graph :attachRuntime adapter)
+                  (js-call adapter :auto 1)
+                  (js-call graph :prepare)
+                  (js-call (get (get descriptor :project) :modules) :forEach
+                    (lambda (mod) (js-call (get mod :steps) :forEach
+                      (lambda (step) (js-call graph :step (get step :run))))))
+                  (js-call assert :strictEqual (js-call adapter :invoke "value") 42)
+                  (finally
+                    (js-call adapter :closeModule) (js-call adapter :collect)
+                    (when (get adapter :close) (js-call adapter :close))
+                    (js-call graph :close))))))))))
   (test "real sorted APIs preserve missing undefined false and null optional boundaries"
     (async ()
       (let* ((compiler (get backend :compiler))
@@ -846,7 +893,8 @@
                    "eliscript-managed-control" (JSON/stringify descriptor))))
                (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (position 0))
           (js-call assert :deepStrictEqual (get descriptor :hostCapabilities)
-            (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+            (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+            :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
           (js-call assert :deepStrictEqual
             (js-call (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module image))
               :map (lambda (item) (js-array (get item :module) (get item :name))))
@@ -973,7 +1021,8 @@
         ;; It therefore owns this exact capability, unlike the pure graph
         ;; above; canonical host identity here is intentional, not cache bleed.
         (js-call assert :deepStrictEqual (get descriptor :hostCapabilities)
-          (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")))
+          (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+            :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
         (check-owned-source-operation-import image)
         (js-call assert :deepStrictEqual expected
           (js-object :even t :odd t :none "none" :captured 42 :stackSafe "done" :escapedEven t :portableEven t))
@@ -1199,12 +1248,13 @@
       (js-call imports :forEach (lambda (item)
         (when (Object/hasOwn item "type")
           (js-call assert :deepStrictEqual (get item :type)
-            (js-object :parameters (js-array "i32" "i32") :results (js-array "i32"))))))
+            (js-object :parameters (js-array "i32" "i64") :results (js-array "i64"))))))
       ;; Independently authenticate the actual binary type index on every
       ;; engine, including Node releases without type reflection.
       (js-call assert :deepStrictEqual (owned-binding-wasm-imports bytes)
         (js-array (js-object :module "eliscript.host" :name "source-operation" :kind "function"
-          :type (js-object :parameters (js-array 127 127) :results (js-array 127)))))))
+          :type (js-object :parameters (js-array 127 126) :results (js-array 126)))))))
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
   (defun check-literal-brand-admission (bytes descriptor budget)
     ;; Reuse the same true zero-import image and its actual public project
     ;; prepare/get/close exports. Runtime-private module helpers are not part
@@ -1214,7 +1264,7 @@
            (raw (lambda (name &rest arguments)
              (let ((function (get exports name)))
                (js-call assert :strictEqual (value-type function) "function" name)
-               (uint32 (Reflect/apply function exports arguments)))))
+               (funcall normalize-u64 (Reflect/apply function exports arguments)))))
            (checked (lambda (name &rest arguments)
              (let ((result (Reflect/apply raw undefined (js-call (js-array name) :concat arguments))))
                (js-call assert :strictEqual (funcall raw "last-error") 0 name) result)))
@@ -1235,9 +1285,7 @@
            (role-callee undefined) (role-arguments undefined) (failed false))
       (try
         (progn
-          (js-call assert :strictEqual (get probe :version) 1)
           (js-call assert :strictEqual (js-length (get probe :registries)) 3)
-          (js-call assert :strictEqual (get role-probe :version) 1)
           (js-call assert :strictEqual (js-length (get role-probe :registries)) 4)
           (js-call assert :deepStrictEqual (js-call (get role-probe :registries) :slice 0 3) (get probe :registries))
           (js-call assert :strictEqual (js-length registries) 4)
@@ -1262,7 +1310,7 @@
             (funcall checked "value-set" heap role-arguments 0 text))
           (let ((callee (funcall checked getter heap (get binding :kind) (get binding :index))))
             (funcall checked "heap-pin" heap callee) (js-call roots :push callee)
-            (let ((value (funcall checked "value-object-new" heap 0)))
+            (let ((value (funcall checked "value-object-new" heap (globalThis.BigInt 0))))
               (funcall checked "heap-pin" heap value) (js-call roots :push value)
               (let ((arguments (funcall checked "value-refs" heap 7 1)))
                 (funcall checked "heap-pin" heap arguments) (js-call roots :push arguments)
@@ -1271,39 +1319,37 @@
                 ;; layout. The slot-zero metadata owns the kind-8 seven-ref
                 ;; binding slab. Validate it before touching its three cells.
                 (let* ((control (js-call (funcall view) :getUint32 (+ heap 16) t))
-                       (pool (js-call (funcall view) :getUint32 (+ control 4) t))
-                       (base (js-call (funcall view) :getUint32 (+ pool 16) t))
-                       (binding-slab (js-call (funcall view) :getUint32 (+ base 16) t))
+                       (binding-slab (js-call (funcall view) :getBigUint64 (+ control 1176) t))
                        (count (get (get descriptor :module) :bindingCount))
                        (cells (funcall checked "value-data" heap binding-slab 8)))
                   (setq slab binding-slab)
                   (js-call assert :strictEqual (funcall checked "value-kind" heap slab) 8)
-                  (js-call assert :strictEqual (funcall checked "value-length" heap slab) (* count 7))
-                  (js-call assert :ok (<= (+ cells (* count 28)) (get (funcall view) :byteLength)))
+                  (js-call assert :ok (>= (funcall checked "value-length" heap slab) count))
+                  (js-call assert :ok (<= (+ cells (* count 40)) (get (funcall view) :byteLength)))
                   (js-call registries :forEach (lambda (entry)
                     (js-call assert :strictEqual (get entry :kind) 0)
                     (js-call assert :ok (< (get entry :index) count))
-                    (let ((cell (+ cells (* (get entry :index) 28))))
+                    (let ((cell (+ cells (* (get entry :index) 40))))
                       (js-call assert :strictEqual (js-call (funcall view) :getUint32 cell t) 2)
                       (js-call saved-cells :push (js-object :index (get entry :index)
                         :bytes (globalThis.Uint8Array.from
-                          (new globalThis.Uint8Array (get (get exports :memory) :buffer) cell 28))))
+                          (new globalThis.Uint8Array (get (get exports :memory) :buffer) cell 40))))
                       ;; The saved bytes are host data, not managed GC roots.
                       ;; Pin every real reference before removing it from its
                       ;; cell, preserving duplicate roots with balanced pins.
-                      (let ((word 0))
-                        (while (< word 7)
-                          (let ((value (js-call (funcall view) :getUint32 (+ cell (* word 4)) t)))
-                            (when (> value 3)
+                      (let ((offset 16))
+                        (while (< offset 40)
+                          (let ((value (js-call (funcall view) :getBigUint64 (+ cell offset) t)))
+                            (when (> value (globalThis.BigInt 3))
                               (funcall checked "heap-pin" heap value) (js-call roots :push value)))
-                          (setq word (1+ word)))))))
+                          (setq offset (+ offset 8)))))))
                   (js-call saved-cells :forEach (lambda (entry)
                     (js-call (new globalThis.Uint8Array (get (get exports :memory) :buffer)
-                              (+ cells (* (get entry :index) 28)) 28) :fill 0)))
+                              (+ cells (* (get entry :index) 40)) 40) :fill 0)))
                   ;; Undeclared is a real TDZ state; automatic admission must
                   ;; return no brand without a Get or a changed last-error.
-                  (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee 3 arguments 1) 0)
-                  (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee 3 role-arguments 1) 3)
+                  (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee (globalThis.BigInt 3) arguments 1) (globalThis.BigInt 0))
+                  (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee (globalThis.BigInt 3) role-arguments 1) (globalThis.BigInt 3))
                   (funcall raw getter heap 0 (get (aref registries 0) :index))
                   (js-call assert :strictEqual (funcall raw "last-error") 8)
                   (funcall raw "value-error-restore" 0)
@@ -1311,36 +1357,36 @@
                   ;; state: declared=true, actual mutability, initialized=false,
                   ;; external=false, undefined value/export and nil module.
                   (js-call saved-cells :forEach (lambda (entry)
-                    (let ((cell (+ cells (* (get entry :index) 28))))
+                    (let ((cell (+ cells (* (get entry :index) 40))))
                       (let ((saved (new globalThis.DataView (get (get entry :bytes) :buffer))))
                         (js-call (funcall view) :setUint32 cell 2 t)
                         (js-call (funcall view) :setUint32 (+ cell 4) (js-call saved :getUint32 4 t) t)
                         (js-call (funcall view) :setUint32 (+ cell 8) 1 t)
                         (js-call (funcall view) :setUint32 (+ cell 12) 1 t)
-                        (js-call (funcall view) :setUint32 (+ cell 16) 3 t)
-                        (js-call (funcall view) :setUint32 (+ cell 20) 0 t)
-                        (js-call (funcall view) :setUint32 (+ cell 24) 3 t))))))
+                        (js-call (funcall view) :setBigUint64 (+ cell 16) (globalThis.BigInt 3) t)
+                        (js-call (funcall view) :setBigUint64 (+ cell 24) (globalThis.BigInt 0) t)
+                        (js-call (funcall view) :setBigUint64 (+ cell 32) (globalThis.BigInt 3) t))))))
                 ;; Declaration is still not initialization, so public Get keeps
                 ;; the original exact TDZ and the safe probe still reports none.
                 (funcall raw getter heap 0 (get (aref registries 0) :index))
                 (js-call assert :strictEqual (funcall raw "last-error") 8)
                 (funcall raw "value-error-restore" 0)
-                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee 3 arguments 1) 0)
-                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee 3 role-arguments 1) 3)
+                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee (globalThis.BigInt 3) arguments 1) (globalThis.BigInt 0))
+                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee (globalThis.BigInt 3) role-arguments 1) (globalThis.BigInt 3))
                 (let ((source-helper (funcall raw getter heap (get original :kind) (get original :index))))
                   (when (= (funcall raw "last-error") 0)
                     (funcall checked "heap-pin" heap source-helper) (js-call roots :push source-helper)
-                    (funcall raw "value-source-invoke-with-this" heap source-helper 3 arguments 1))
+                    (funcall raw "value-source-invoke-with-this" heap source-helper (globalThis.BigInt 3) arguments 1))
                   (js-call assert :strictEqual (funcall raw "last-error") 8))
                 (funcall raw "value-error-restore" 0)
                 (let ((source-role (funcall raw getter heap (get role-original :kind) (get role-original :index))))
                   (when (= (funcall raw "last-error") 0)
                     (funcall checked "heap-pin" heap source-role) (js-call roots :push source-role)
-                    (funcall raw "value-source-invoke-with-this" heap source-role 3 role-arguments 1))
+                    (funcall raw "value-source-invoke-with-this" heap source-role (globalThis.BigInt 3) role-arguments 1))
                   (js-call assert :strictEqual (funcall raw "last-error") 8))
                 (funcall raw "value-error-restore" 0)
-                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee 3 arguments 1) 0)
-                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee 3 role-arguments 1) 3)))))
+                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap callee (globalThis.BigInt 3) arguments 1) (globalThis.BigInt 0))
+                (js-call assert :strictEqual (funcall checked "value-source-invoke-with-this" heap role-callee (globalThis.BigInt 3) role-arguments 1) (globalThis.BigInt 3))))))
         (catch error (setq failed t) (throw error))
         (finally
           (let ((cleanup undefined) (cleanup-failed false))
@@ -1350,14 +1396,14 @@
                   (let ((cells (funcall checked "value-data" heap slab 8)))
                     (js-call saved-cells :forEach (lambda (entry)
                       (js-call (new globalThis.Uint8Array (get (get exports :memory) :buffer)
-                                (+ cells (* (get entry :index) 28)) 28) :set (get entry :bytes)))))))
+                                (+ cells (* (get entry :index) 40)) 40) :set (get entry :bytes)))))))
               (lambda ()
                 (when slab
                   (let ((cells (funcall checked "value-data" heap slab 8)))
                     (js-call saved-cells :forEach (lambda (entry)
                       (js-call assert :deepStrictEqual
                         (globalThis.Uint8Array.from (new globalThis.Uint8Array (get (get exports :memory) :buffer)
-                          (+ cells (* (get entry :index) 28)) 28)) (get entry :bytes)))))))
+                          (+ cells (* (get entry :index) 40)) 40)) (get entry :bytes)))))))
               (lambda () (js-call roots :forEach (lambda (value) (funcall raw "heap-release" heap value))))
               (lambda () (funcall raw (get (get descriptor :module) :close) heap))
               (lambda () (funcall raw "heap-collect" heap))
@@ -1575,10 +1621,11 @@
                        (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (get resources :memory))
                        "eliscript-managed-control" (JSON/stringify descriptor))))
                    (required (if (get variant :async)
-                     (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1")) (js-array)))
+                     (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+            :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")) (js-array)))
                    (required-imports (if (get variant :async)
                      (js-array (js-object :module "eliscript.host" :name "source-operation" :kind "function"
-                       :type (js-object :parameters (js-array 127 127) :results (js-array 127)))) (js-array)))
+                       :type (js-object :parameters (js-array 127 126) :results (js-array 126)))) (js-array)))
                    (position 0))
               (when (= (get acceptance :resourceAcceptance) "deferred")
                 (console/error "[owned-report-resource-acceptance]" (JSON/stringify

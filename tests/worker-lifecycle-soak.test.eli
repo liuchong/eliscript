@@ -29,8 +29,8 @@
   (defun preparedIdentityP (identity)
     (and identity
          (= (get identity :format) "eliscript-prepared-stage3")
-         (= (js-length (Object/keys identity)) 5)
-         (Number/isInteger (get identity :version))
+         (= (js-length (Object/keys identity)) 4)
+         (undefined? (get identity :version))
          (Number/isInteger (get identity :fixedPointFileCount))
          (= (value-type (get identity :sourceSha256)) "string")
          (= (value-type (get identity :productSha256)) "string")))
@@ -43,7 +43,6 @@
   (defun ensureCurrentPreparedIdentity (identity fresh)
     (ensurePreparedIdentity identity)
     (unless (and (= (get identity :format) (get fresh :format))
-                 (= (get identity :version) (get fresh :version))
                  (= (get identity :fixedPointFileCount) (get fresh :fixedPointFileCount))
                  (= (get identity :sourceSha256) (get fresh :sourceSha256))
                  (= (get identity :productSha256) (get fresh :productSha256)))
@@ -143,9 +142,7 @@
   (defun verifyReport (report)
     (js-call (expect report) :toMatchObject
       (js-object
-        :schemaVersion 1
         :format "eliscript-worker-lifecycle-soak"
-        :version 1
         :verified t
         :acceptanceQualified t
         :limits (js-object

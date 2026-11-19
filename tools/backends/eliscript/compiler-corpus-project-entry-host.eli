@@ -294,7 +294,7 @@
         (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
         (await (mkdir (get execution :directory) (js-object :recursive t)))
         (await (writeFile (resolve (get execution :directory) "original-fixture-observations.json")
-          (JSON/stringify (Object/assign (js-object) result (js-object :version 1 :family family
+          (JSON/stringify (Object/assign (js-object) result (js-object :family family
             :target (get execution :target) :sourceIdentity (get execution :sourceIdentity)
             :originalHostSha256 (get configuration-input :originalHostSha256) :observationContract "original-raw-suite")))))
         (js-call globalThis.console :log (JSON/stringify (js-object :observations (get result :observations)))))))

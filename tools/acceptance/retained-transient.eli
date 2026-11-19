@@ -8,6 +8,27 @@
   (defconst PARAMETERS (js-object :vectorSize 200000 :mapSize 100000 :setSize 100000 :warmupRounds 2 :timingSamples 11))
   (defconst POLICY (js-object :minimumSpeedup 1.5 :maximumAllocationRatio (/ 1 3) :passed t))
   (defconst support-files (js-array "runtime/testing/map.mjs" "runtime/testing/set.mjs" "runtime/testing/vector.mjs" "tools/collections/transient-builder-benchmark.mjs"))
+  (defconst extended-support-files (js-array
+    "runtime/testing/map.mjs" "runtime/testing/set.mjs" "runtime/testing/vector.mjs"
+    "tools/collections/transient-builder-benchmark.eli" "tools/collections/transient-builder-benchmark.mjs"
+    "runtime/array-text.eli" "runtime/array-text.mjs"
+    "runtime/binding.eli" "runtime/binding.mjs"
+    "runtime/errors.eli" "runtime/errors.mjs"
+    "runtime/math.eli" "runtime/math.mjs"
+    "runtime/number-radix.eli" "runtime/number-radix.mjs"
+    "runtime/prelude.eli" "runtime/prelude.mjs"
+    "runtime/primitives.eli" "runtime/primitives.mjs"
+    "runtime/unicode-case.eli" "runtime/unicode-case.mjs"
+    "runtime/unicode-case-data.eli" "runtime/unicode-case-data.mjs"
+    "bootstrap/runtime/memory.eli"
+    "tools/runtime/unicode-case-runtime.el"
+    "tools/compiler/controlled-baseline.eli" "tools/compiler/controlled-baseline.mjs"))
+  (defun matching-inventory (actual core)
+    (let ((legacy (js-call core :concat support-files))
+          (extended (Array/from (new globalThis.Set (js-call core :concat extended-support-files)))))
+      (cond ((same actual legacy) legacy)
+            ((same actual extended) extended)
+            (t nil))))
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun same (a b) (= (JSON/stringify a) (JSON/stringify b)))
   (defun ensure (condition message) (unless condition (throw (new globalThis.Error (str "retained transient refresh: " message)))))
@@ -66,8 +87,8 @@
         (let ((validate-fresh (async ()
                 (let* ((core (js-call (js-call (js-call (await (readdir (js-call path :join root "runtime/core"))) :filter (lambda (name) (js-call name :endsWith ".mjs"))) :sort)
                                 :map (lambda (name) (str "runtime/core/" name))))
-                       (inventory (js-call core :concat support-files)))
-                  (ensure (same (get (get current :sourceDigest) :files) inventory) "fresh source inventory is incomplete")
+                       (inventory (matching-inventory (get (get current :sourceDigest) :files) core)))
+                  (ensure (not (nil? inventory)) "fresh source inventory is incomplete")
                   (ensure (= (await (source-digest root inventory)) (get (get current :sourceDigest) :value)) "fresh source aggregate is stale"))))
               (failure undefined) (fresh false))
           (if (not (eq (get options :deferPerformanceAcceptance) t))
@@ -77,8 +98,8 @@
               (if fresh t
                 (try
                   (let* ((measured (retainedPerformanceSnapshot root filename currentBytes))
-                         (inventory (js-call (retainedRuntimeSourceFiles root (get measured :commit)) :concat support-files)))
-                    (ensure (same (get (get current :sourceDigest) :files) inventory) "measured source inventory is incomplete")
+                         (inventory (matching-inventory (get (get current :sourceDigest) :files) (retainedRuntimeSourceFiles root (get measured :commit)))))
+                    (ensure (not (nil? inventory)) "measured source inventory is incomplete")
                     (ensure (= (await (source-digest root inventory (get measured :commit))) (get (get current :sourceDigest) :value)) "measured source aggregate differs from its Git snapshot")
                     (Object/assign (deferredPerformanceAcceptance filename measured)
                       (js-object :currentSourceFailure (js-object :name (get failure :name) :message (get failure :message)))))

@@ -13,7 +13,7 @@
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun project-error (message filename)
     (let ((error (new globalThis.Error message)))
-      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic" :version 1
+      (put error :eliscriptDiagnostic (js-object :format "eliscript-diagnostic"
         :code "ELI-B0001" :severity "error" :phase "project-build" :message message
         :location (js-object :file filename)))
       (throw error)))
@@ -77,7 +77,7 @@
             :private t :exports exports)) "\n") "utf8"))))
       (js-call files :push (js-object :path "eliscript-runtime.json" :content
         (js-call Buffer :from (str (JSON/stringify (js-object :format "eliscript-project-runtime"
-          :version 1 :capsules identities)) "\n") "utf8")))
+          :capsules identities)) "\n") "utf8")))
       (js-object :files files :inputs inputs)))
   (defun existing-runtime-route (out-dir)
     ;; Preserve an already available complete package and its actual provider

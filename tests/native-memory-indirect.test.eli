@@ -16,12 +16,14 @@
     (setq b (await (buildBackends (js-object :outputRoot directory))))
     (setq memory (await (funcall (js* "(url) => import(url)") (get (pathToFileURL (resolve (get b :directory) "memory.mjs")) :href))))) 120000)
   (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
-  (defconst source "(import \"eliscript:memory32\" call-source load-u8 load-u32 store-u8 store-u32)\n(defun first (a b c d) (+ (+ a b) (+ c d)))\n(defun second (a b c d) (+ (* a b) (* c d)))\n(defun wrong (a) a)\n(defun mark (value digit) (store-u32 0 (+ (* (load-u32 0) 10) digit)) value)\n(defun dispatch (slot) (call-source (mark 1 1) (mark 2 2) (mark 3 3) (mark 4 4) (mark slot 5)))\n(defun after (slot) (dispatch slot) (store-u8 8 99))\n(defun target-trap (a b c d) (store-u8 9 77) (load-u32 65535))\n(defun bounce (a b c d) (call-source a b c d 0))\n(defun read (p) (load-u32 p))\n(export dispatch after read)")
+  (defconst source "(import \"eliscript:memory32\" call-source load-u8 load-u32 store-u8 store-u32 v64-from-u32 v64-low)\n(defun first (a b c d) (memory-sig v64 u32 v64 v64 u32) (v64-from-u32 (+ (+ a (v64-low b)) (+ (v64-low c) d))))\n(defun second (a b c d) (memory-sig v64 u32 v64 v64 u32) (v64-from-u32 (+ (* a (v64-low b)) (* (v64-low c) d))))\n(defun wrong (a) a)\n(defun mark (value digit) (store-u32 0 (+ (* (load-u32 0) 10) digit)) value)\n(defun mark-v64 (value digit) (memory-sig v64 u32 u32) (store-u32 0 (+ (* (load-u32 0) 10) digit)) (v64-from-u32 value))\n(defun dispatch (slot) (v64-low (call-source (mark 1 1) (mark-v64 2 2) (mark-v64 3 3) (mark 4 4) (mark slot 5))))\n(defun after (slot) (dispatch slot) (store-u8 8 99))\n(defun target-trap (a b c d) (memory-sig v64 u32 v64 v64 u32) (store-u8 9 77) (v64-from-u32 (load-u32 65535)))\n(defun bounce (a b c d) (memory-sig v64 u32 v64 v64 u32) (call-source a b c d 0))\n(defun read (p) (load-u32 p))\n(export dispatch after read)")
   (defun typed (&rest __host_default_arguments_1)
     (let* ((text (aref __host_default_arguments_1 0))) (js-call memory :lower_memory_program (js-call (get b :compiler) :compile_ir_string (if (= text undefined) source text) "indirect.eli"))))
   (defun findFunction (program name) (js-call (get program :functions) :find (lambda (f) (= (get f :name) name))))
   (defun table (program names) (put program :table (js-call names :map (lambda (name) (get (findFunction program name) :index)))) program)
   (defun diagnostic (error) (let ((info (get error :eliscriptDiagnostic))) (if (nullish? info) undefined (get info :code))))
+  (defun u32-signature (arity)
+    (js-object :arity arity :parameterTypes (js-call (new globalThis.Array arity) :fill "u32") :resultType "u32"))
   (defun each (items operation) (js-call items :forEach operation))
   (defun invoke (runtime name &rest args) (Reflect/apply (get runtime :invoke) runtime (js-call (js-array name) :concat args)))
   (defasync pair (program signatures &rest __host_default_arguments_2)
@@ -41,7 +43,7 @@
         (js-call assert :deepEqual first (Uint8Array/from (js-call (get b :native) :emit_typed_native_memory_object program "arm64-macos")))
         (js-call assert :equal (JSON/stringify program) saved)))))
   (nativeTest "native call-source selects runtime table slots, checks signature/bounds, and preserves argument effects" (async ()
-    (let* ((result (await (pair (table (typed) (js-array "first" "second" "wrong" "target-trap" "bounce")) (js-object :dispatch 1 :after 1 :read 1))))
+    (let* ((result (await (pair (table (typed) (js-array "first" "second" "wrong" "target-trap" "bounce")) (js-object :dispatch (u32-signature 1) :after (u32-signature 1) :read (u32-signature 1)))))
            (n (get result :n)) (w (get result :w)))
       (try
         (each (js-array (js-array 0 10) (js-array 1 14) (js-array 4 10)) (lambda (item)
@@ -62,7 +64,7 @@
   (nativeTest "native raw call-source with an empty declared table traps after arguments without host imports" (async ()
     (let ((program (typed)) (file (resolve directory "empty.dylib")))
       (await (writeFile file (Uint8Array/from (js-call (get b :native) :emit_native_memory_library (js-call (get b :compiler) :compile_ir_string source "indirect.eli") "arm64-macos"))))
-      (let ((n (await (openNativeMemory file (js-object :dispatch 1 :read 1))))
+      (let ((n (await (openNativeMemory file (js-object :dispatch (u32-signature 1) :read (u32-signature 1)))))
             (w (get (new WebAssembly.Instance (new WebAssembly.Module (Uint8Array/from (js-call (get b :wasm) :emit_typed_memory_wasm program)))) :exports)))
         (try (js-call assert :throws (lambda () (invoke n "dispatch" 0)) WebAssembly.RuntimeError)
           (js-call assert :throws (lambda () (js-call w :dispatch 0)) WebAssembly.RuntimeError)
@@ -73,46 +75,57 @@
       (each (js-array
         (lambda (p) (put p :abi "numeric-f64")) (lambda (p) (put p :table (js-array -1)))
         (lambda (p) (put p :table (js-array (get (get p :functions) :length)))) (lambda (p) (put p :table (js-array nil)))
-        (lambda (p) (put p :indirectArities (js-array -1))) (lambda (p) (put p :indirectArities (js-array 65536)))
-        (lambda (p) (put p :table nil)) (lambda (p) (put (aref (get (get (findFunction p "dispatch") :body) :children) 0) :value 3)))
+        (lambda (p) (put p  :indirectSignatures (js-array -1))) (lambda (p) (put p  :indirectSignatures (js-array 65536)))
+        (lambda (p) (put p :table nil)) (lambda (p) (put (aref (get (get (findFunction p "bounce") :body) :children) 0) :value 3)))
         (lambda (mutate) (let ((p (funcall globalThis.structuredClone valid))) (funcall mutate p)
           (js-call assert :throws (lambda () (js-call (get b :native) :emit_typed_native_memory_object p "arm64-macos")) (lambda (error) (= (diagnostic error) "ELI-B0001")))))))))
   (nativeTest "the complete managed runtime executes native object captures, closures and GC through the real table" (async ()
-    (let* ((runtime (js-call (get b :compiler) :compile_ir_string (str (await (readFile (resolve "bootstrap/runtime/memory.eli") "utf8")) "\n(defun invalid-function (heap) (value-function-new heap 4294967295 0)) (export invalid-function)") "runtime.eli"))
+    (let* ((runtime (js-call (get b :compiler) :compile_ir_string (str (await (readFile (resolve "bootstrap/runtime/memory.eli") "utf8")) "\n(defun invalid-function (heap) (memory-sig v64 u32) (value-function-new heap 4294967295 0)) (export invalid-function)") "runtime.eli"))
            (program (js-call (get b :compiler) :compile_ir_string "\n (defun make (x) (let ((box (js-object :value x))) (lambda (step) (put box :value (+ (get box :value) step)) (get box :value))))\n (defun run (x) (let ((f (make x))) (+ (funcall f 2) (funcall f 3))))\n (export make run)" "native-managed.eli"))
            (lowered (js-call (get b :managed) :lower_managed_program program runtime)) (saved (JSON/stringify (get lowered :typed)))
-           (names (js-array "heap-new" "last-error" "value-number" "value-data" "heap-pin" "heap-release" "heap-collect" "heap-live" "heap-auto" "value-refs" "value-set" "value-source-invoke" "invalid-function" "frame-current" "frame-depth" "frame-unwind"))
-           (signatures (Object/fromEntries (js-call names :map (lambda (name) (js-array name (get (findFunction (get lowered :typed) name) :arity)))))))
-      (each (get (get lowered :typed) :aliases) (lambda (alias) (put signatures (get alias :name) (get (findFunction (get lowered :typed) (get alias :function)) :arity))))
+           (names (js-array "heap-new" "last-error" "value-number" "value-number-bits" "value-data" "heap-pin" "heap-release" "heap-collect" "heap-live" "heap-auto" "value-refs" "value-set" "value-source-invoke" "invalid-function" "frame-current" "frame-depth" "frame-unwind"))
+           (signature (lambda (name)
+             (let ((fn (findFunction (get lowered :typed) name)))
+               (js-object :arity (get fn :arity) :parameterTypes (get fn :parameterTypes)
+                 :resultType (get fn :resultType)))))
+           (signatures (Object/fromEntries (js-call names :map (lambda (name) (js-array name (funcall signature name)))))))
+      (each (get (get lowered :typed) :aliases) (lambda (alias) (put signatures (get alias :name) (funcall signature (get alias :function)))))
       (let* ((result (await (pair (get lowered :typed) signatures))) (n (get result :n)) (w (get result :w))
+             (normalize (lambda (out) (if (= (funcall hostTypeof out) "bigint") (globalThis.BigInt.asUintN 64 out) (uint32 out))))
              (number (lambda (invoke heap value) (let* ((bytes (new globalThis.Uint8Array 8)) (view (new globalThis.DataView (get bytes :buffer))))
                (js-call view :setFloat64 0 value t) (funcall invoke "value-number" heap (js-call view :getUint32 0 t) (js-call view :getUint32 4 t)))))
-             (ni (lambda (name &rest args) (Reflect/apply (get n :invoke) n (js-call (js-array name) :concat args))))
-             (wi (lambda (name &rest args) (uint32 (Reflect/apply (get w name) w args))))
-             (nread (lambda (h v) (js-call (new globalThis.DataView (get (js-call n :read (funcall ni "value-data" h v 4) 8) :buffer)) :getFloat64 0 t)))
-             (wread (lambda (h v) (js-call (new globalThis.DataView (get (get w :memory) :buffer)) :getFloat64 (funcall wi "value-data" h v 4) t))))
+             (ni (lambda (name &rest args) (funcall normalize (Reflect/apply (get n :invoke) n (js-call (js-array name) :concat args)))))
+             (wi (lambda (name &rest args) (funcall normalize (Reflect/apply (get w name) w args))))
+             (read-num (lambda (invoke h v)
+               (let* ((bits (funcall invoke "value-number-bits" h v))
+                      (buf (new globalThis.ArrayBuffer 8))
+                      (dv (new globalThis.DataView buf)))
+                 (js-call dv :setBigUint64 0 bits t)
+                 (js-call dv :getFloat64 0 t))))
+             (nread (lambda (h v) (funcall read-num ni h v)))
+             (wread (lambda (h v) (funcall read-num wi h v))))
         (js-call assert :equal (JSON/stringify (get lowered :typed)) saved)
         (try (each (js-array (js-array wi wread) (js-array ni nread)) (lambda (entry)
-          (let* ((invoke (aref entry 0)) (read (aref entry 1)) (heap (funcall invoke "heap-new" 64 4096 1048576)))
+          (let* ((invoke (aref entry 0)) (read (aref entry 1)) (heap (funcall invoke "heap-new" 64 16384 1048576)))
             (assert (> heap 0)) (js-call assert :equal (funcall invoke "heap-auto" heap 1) 1)
             (let ((input (funcall number invoke heap 10)))
-              (assert (> input 0)) (js-call assert :equal (funcall invoke "heap-pin" heap input) 1)
+              (assert (> input (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "heap-pin" heap input) 1)
               (let ((early (funcall invoke "make" heap input)))
-                (assert (> early 0) (str (if (= invoke ni) "native" "WASM") " make error " (funcall invoke "last-error")))
+                (assert (> early (globalThis.BigInt 0)) (str (if (= invoke ni) "native" "WASM") " make error " (funcall invoke "last-error")))
                 (js-call assert :equal (funcall invoke "heap-pin" heap early) 1)
                 (let ((result (funcall invoke "run" heap input)))
-                  (assert (> result 0) (str (if (= invoke ni) "native" "WASM") " run error " (funcall invoke "last-error") ", live " (funcall invoke "heap-live" heap)))
+                  (assert (> result (globalThis.BigInt 0)) (str (if (= invoke ni) "native" "WASM") " run error " (funcall invoke "last-error") ", live " (funcall invoke "heap-live" heap)))
                   (js-call assert :equal (funcall invoke "last-error") 0) (js-call assert :equal (funcall read heap result) 27))
                 (let ((closure (funcall invoke "make" heap input)))
-                  (assert (> closure 0)) (js-call assert :equal (funcall invoke "heap-pin" heap closure) 1)
+                  (assert (> closure (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "heap-pin" heap closure) 1)
                   (let ((step (funcall number invoke heap 2))) (js-call assert :equal (funcall invoke "heap-pin" heap step) 1)
                     (let ((args (funcall invoke "value-refs" heap 7 1)))
-                      (assert (> args 0)) (js-call assert :equal (funcall invoke "heap-pin" heap args) 1) (js-call assert :equal (funcall invoke "value-set" heap args 0 step) 1)
+                      (assert (> args (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "heap-pin" heap args) 1) (js-call assert :equal (funcall invoke "value-set" heap args 0 step) 1)
                       (each (js-array 12 14 16) (lambda (expected) (funcall invoke "heap-collect" heap)
                         (let ((result (funcall invoke "value-source-invoke" heap closure args 1)))
-                          (assert (> result 0)) (js-call assert :equal (funcall invoke "last-error") 0) (js-call assert :equal (funcall read heap result) expected))))
+                          (assert (> result (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "last-error") 0) (js-call assert :equal (funcall read heap result) expected))))
                       (let ((invalid (funcall invoke "invalid-function" heap)))
-                        (assert (> invalid 0)) (js-call assert :equal (funcall invoke "heap-pin" heap invalid) 1)
+                        (assert (> invalid (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "heap-pin" heap invalid) 1)
                         (let ((target (funcall invoke "frame-current" heap)) (depth (funcall invoke "frame-depth" heap)))
                           (js-call assert :throws (lambda () (funcall invoke "value-source-invoke" heap invalid args 1)) WebAssembly.RuntimeError)
                           (assert (> (funcall invoke "frame-depth" heap) depth)) (js-call assert :equal (funcall invoke "frame-unwind" heap target) 1)
@@ -123,13 +136,15 @@
   (nativeTest "native typed locals begin at zero rather than reusing prior callee stack bytes" (async ()
     (let* ((program (typed "(defun poison () (let ((word 3735928559)) word)) (defun zero () 0) (defun run () (poison) (zero)) (export run)")) (zero (findFunction program "zero")))
       (put zero :locals (js-array (js-object :name "implicit-zero" :type "u32" :index 0))) (put zero :body (js-object :kind "local" :type "u32" :value 0 :children (js-array)))
-      (let* ((result (await (pair program (js-object :run 0)))) (n (get result :n)) (w (get result :w)))
+      (let* ((result (await (pair program (js-object :run (u32-signature 0))))) (n (get result :n)) (w (get result :w)))
         (try (js-call assert :equal (js-call w :run) 0) (js-call assert :equal (invoke n "run") 0) (finally (js-call n :close)))))))
   (nativeTest "native typed indirect calls retain nine word arguments and existing export aliases" (async ()
-    (let* ((program (typed "(defun sum (a b c d e f g h i) (+ (+ (+ (+ (+ (+ (+ (+ a b) c) d) e) f) g) h) i)) (defun invoke (slot a b c d e f g h i) (sum a b c d e f g h i)) (export invoke)")) (invocation (findFunction program "invoke")) (call (aref (get (get invocation :body) :children) 0)))
-      (put call :kind "call-indirect") (put call :value 9) (js-call (get call :children) :push (js-object :kind "local" :type "u32" :value 0 :children (js-array)))
-      (table program (js-array "sum")) (put program :indirectArities (js-array 9)) (put program :aliases (js-array (js-object :name "invoke-alias" :function "invoke")))
-      (let* ((result (await (pair program (js-object :invoke 10 "invoke-alias" 10)))) (n (get result :n)) (w (get result :w)))
+    (let* ((program (typed "(defun sum (a b c d e f g h i) (+ (+ (+ (+ (+ (+ (+ (+ a b) c) d) e) f) g) h) i)) (defun invoke (slot a b c d e f g h i) (sum a b c d e f g h i)) (export invoke)")) (invocation (findFunction program "invoke")) (call (aref (get (get invocation :body) :children) 0))
+           (nine-u32 (js-array "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32" "u32")))
+      (put call :kind "call-indirect") (put call :value 9) (put call :parameterTypes nine-u32) (put call :resultType "u32")
+      (js-call (get call :children) :push (js-object :kind "local" :type "u32" :value 0 :children (js-array)))
+      (table program (js-array "sum")) (put program :indirectSignatures (js-array (js-object :parameterTypes nine-u32 :resultType "u32"))) (put program :aliases (js-array (js-object :name "invoke-alias" :function "invoke")))
+      (let* ((result (await (pair program (js-object :invoke (u32-signature 10) "invoke-alias" (u32-signature 10))))) (n (get result :n)) (w (get result :w)))
         (try
           (each (js-array "invoke" "invoke-alias") (lambda (name)
             (each (js-array (js-array 1 2 3 4 5 6 7 8 9) (js-array 4294967295 2147483648 3 4 5 6 7 8 9)) (lambda (values)
@@ -149,4 +164,181 @@
         (lambda (p) (put (aref (get p :functions) 0) :arity 65536)))
         (lambda (mutate) (let ((bad (funcall globalThis.structuredClone program))) (funcall mutate bad)
           (js-call assert :throws (lambda () (js-call (get b :native) :emit_typed_native_memory_library bad "arm64-macos")) (lambda (error) (= (diagnostic error) "ELI-B0001")))))))))
+  (defconst mixed-types
+    (js-array "u32" "v64" "bits64" "u32" "v64" "bits64" "u32" "v64" "bits64" "u32"
+              "f64" "f64" "f64" "f64" "f64" "f64" "f64" "f64" "f64" "f64"))
+  (defconst swapped-types
+    (js-array "f64" "v64" "bits64" "u32" "v64" "bits64" "u32" "v64" "bits64" "u32"
+              "u32" "f64" "f64" "f64" "f64" "f64" "f64" "f64" "f64" "f64"))
+  (defconst mixed-source
+    (str "(import \"eliscript:memory32\" store-u32 store-v64 store-bits64 store-f64 v64-pack word-xor)\n"
+      "(defun mixed (i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9)\n"
+      "  (memory-sig v64 u32 v64 bits64 u32 v64 bits64 u32 v64 bits64 u32 f64 f64 f64 f64 f64 f64 f64 f64 f64 f64)\n"
+      "  (store-u32 0 i0) (store-v64 8 i1) (store-bits64 16 i2) (store-u32 24 i3)\n"
+      "  (store-v64 32 i4) (store-bits64 40 i5) (store-u32 48 i6) (store-v64 56 i7)\n"
+      "  (store-bits64 64 i8) (store-u32 72 i9)\n"
+      "  (store-f64 80 f0) (store-f64 88 f1) (store-f64 96 f2) (store-f64 104 f3)\n"
+      "  (store-f64 112 f4) (store-f64 120 f5) (store-f64 128 f6) (store-f64 136 f7)\n"
+      "  (store-f64 144 f8) (store-f64 152 f9)\n"
+      "  (v64-pack (word-xor (word-xor i0 i3) i6) i9))\n"
+      "(defun swapped (i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9)\n"
+      "  (memory-sig v64 f64 v64 bits64 u32 v64 bits64 u32 v64 bits64 u32 u32 f64 f64 f64 f64 f64 f64 f64 f64 f64)\n"
+      "  (v64-pack i9 0))\n"
+      "(defun direct (i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9)\n"
+      "  (memory-sig v64 u32 v64 bits64 u32 v64 bits64 u32 v64 bits64 u32 f64 f64 f64 f64 f64 f64 f64 f64 f64 f64)\n"
+      "  (mixed i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9))\n"
+      "(defun route (slot i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9)\n"
+      "  (memory-sig v64 u32 u32 v64 bits64 u32 v64 bits64 u32 v64 bits64 u32 f64 f64 f64 f64 f64 f64 f64 f64 f64 f64)\n"
+      "  (mixed i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9))\n"
+      "(export mixed swapped direct route)"))
+  (defun wide (value) (globalThis.BigInt.asUintN 64 value))
+  (nativeTest "ARM64-ABI-04 mixed register banks spill through the stack and call-indirect checks the exact signature" (async ()
+    (let* ((program (typed mixed-source)) (route (findFunction program "route"))
+           (call (aref (get (get route :body) :children) 0)))
+      (put call :kind "call-indirect") (put call :value 20)
+      (put call :parameterTypes mixed-types) (put call :resultType "v64")
+      (js-call (get call :children) :push (js-object :kind "local" :type "u32" :value 0 :children (js-array)))
+      (table program (js-array "mixed" "swapped"))
+      (put program :indirectSignatures (js-array
+        (js-object :parameterTypes mixed-types :resultType "v64")
+        (js-object :parameterTypes swapped-types :resultType "v64")))
+      (let* ((signatures (js-object)) (entries (js-array
+               (js-array "direct" 20 mixed-types "v64")
+               (js-array "route" 21 (js-call (js-array "u32") :concat mixed-types) "v64")))
+             (result nil) (n undefined) (w undefined))
+        (js-call entries :forEach (lambda (entry) (put signatures (aref entry 0)
+          (js-object :arity (aref entry 1) :parameterTypes (aref entry 2) :resultType (aref entry 3)))))
+        (setq result (await (pair program signatures)) n (get result :n) w (get result :w))
+        (try
+          (let* ((integers (js-array 1 (globalThis.BigInt "0x1122334455667788")
+                           (globalThis.BigInt "0x99aabbccddeeff00") 4294967295
+                           (globalThis.BigInt "0x8000000000000000") (globalThis.BigInt "0x0")
+                           3123456789 (globalThis.BigInt "0x7")
+                           (globalThis.BigInt "0xffffffffffffffff") 7))
+                 (floats (js-array 0.5 -0.0 1.25 2.5 -3.75 4.5 5.25 -6.5 7.75 8.125))
+                 (args (js-call integers :concat floats))
+                 (wasm-memory (new globalThis.Uint8Array (get (get w :memory) :buffer)))
+                 (clear (lambda () (js-call n :write (new globalThis.Uint8Array 160) 0)
+                   (js-call wasm-memory :fill 0 0 160)))
+                 (native-call (lambda (name values) (funcall wide
+                   (Reflect/apply (get n :invoke) n (js-call (js-array name) :concat values)))))
+                 (wasm-call (lambda (name values) (funcall wide
+                   (Reflect/apply (get w name) w values)))))
+            (funcall clear)
+            (let ((native-direct (funcall native-call "direct" args))
+                  (native-bytes (js-call n :read 0 160))
+                  (wasm-direct (funcall wasm-call "direct" args))
+                  (wasm-bytes (js-call wasm-memory :slice 0 160)))
+              (js-call assert :equal wasm-direct native-direct)
+              (js-call assert :deepEqual wasm-bytes native-bytes)
+              (let ((view (new globalThis.DataView (get native-bytes :buffer)
+                            (get native-bytes :byteOffset) (get native-bytes :byteLength))))
+                (js-call assert :equal (js-call view :getUint32 0 t) 1)
+                (js-call assert :equal (js-call view :getBigUint64 8 t) (globalThis.BigInt "0x1122334455667788"))
+                (js-call assert :equal (js-call view :getBigUint64 16 t) (globalThis.BigInt "0x99aabbccddeeff00"))
+                (js-call assert :equal (js-call view :getUint32 24 t) 4294967295)
+                (js-call assert :equal (js-call view :getBigUint64 32 t) (globalThis.BigInt "0x8000000000000000"))
+                (js-call assert :equal (js-call view :getUint32 48 t) 3123456789)
+                (js-call assert :equal (js-call view :getBigUint64 64 t) (globalThis.BigInt "0xffffffffffffffff"))
+                (js-call assert :equal (js-call view :getUint32 72 t) 7)
+                (js-call assert :equal (js-call view :getFloat64 80 t) 0.5)
+                (js-call assert :ok (Object/is (js-call view :getFloat64 88 t) -0.0))
+                (js-call assert :equal (js-call view :getFloat64 152 t) 8.125))
+              (funcall clear)
+              (let ((native-indirect (funcall native-call "route" (js-call (js-array 0) :concat args)))
+                    (native-indirect-bytes (js-call n :read 0 160))
+                    (wasm-indirect (funcall wasm-call "route" (js-call (js-array 0) :concat args)))
+                    (wasm-indirect-bytes (js-call wasm-memory :slice 0 160)))
+                (js-call assert :equal native-indirect native-direct)
+                (js-call assert :equal wasm-indirect wasm-direct)
+                (js-call assert :deepEqual native-indirect-bytes native-bytes)
+                (js-call assert :deepEqual wasm-indirect-bytes native-indirect-bytes)))
+            (funcall clear)
+            (js-call assert :throws
+              (lambda () (funcall native-call "route" (js-call (js-array 1) :concat args)))
+              WebAssembly.RuntimeError)
+            (js-call assert :throws
+              (lambda () (funcall wasm-call "route" (js-call (js-array 1) :concat args)))
+              WebAssembly.RuntimeError)
+            (js-call assert :deepEqual (js-call n :read 0 160) (js-call wasm-memory :slice 0 160)))
+          (finally (js-call n :close)))))))
+  (defconst const64-words
+    (js-array
+      (js-array 0 4294967295 2147483647 "0x7fffffffffffffff")
+      (js-array 8 0 2147483648 "0x8000000000000000")
+      (js-array 16 0 4294443008 "0xfff8000000000000")
+      (js-array 24 32 4294508545 "0xfff9000100000020")
+      (js-array 32 4294967295 4294967295 "0xffffffffffffffff")
+      (js-array 40 0 4294967295 "0xffffffff00000000")
+      (js-array 48 1 4294443008 "0xfff8000000000001")
+      (js-array 56 3735928559 2146959360 "0x7ff80000deadbeef")))
+  (defconst const64-source
+    (str "(import \"eliscript:memory32\" v64-literal bits64-literal store-v64 load-v64 store-bits64 load-bits64 f64-from-bits64 bits64-from-f64)\n"
+      "(defun write-v64 () (memory-sig u32)\n"
+      "  (store-v64 0 (v64-literal 4294967295 2147483647))\n"
+      "  (store-v64 8 (v64-literal 0 2147483648))\n"
+      "  (store-v64 16 (v64-literal 0 4294443008))\n"
+      "  (store-v64 24 (v64-literal 32 4294508545))\n"
+      "  (store-v64 32 (v64-literal 4294967295 4294967295))\n"
+      "  (store-v64 40 (v64-literal 0 4294967295))\n"
+      "  (store-v64 48 (v64-literal 1 4294443008))\n"
+      "  (store-v64 56 (v64-literal 3735928559 2146959360)) 0)\n"
+      "(defun write-bits64 () (memory-sig u32)\n"
+      "  (store-bits64 64 (bits64-literal 4294967295 2147483647))\n"
+      "  (store-bits64 72 (bits64-literal 0 2147483648))\n"
+      "  (store-bits64 80 (bits64-literal 0 4294443008))\n"
+      "  (store-bits64 88 (bits64-literal 32 4294508545))\n"
+      "  (store-bits64 96 (bits64-literal 4294967295 4294967295))\n"
+      "  (store-bits64 104 (bits64-literal 0 4294967295))\n"
+      "  (store-bits64 112 (bits64-literal 1 4294443008))\n"
+      "  (store-bits64 120 (bits64-literal 3735928559 2146959360)) 0)\n"
+      "(defun read-v64 (at) (memory-sig v64 u32) (load-v64 at))\n"
+      "(defun read-bits64 (at) (memory-sig bits64 u32) (load-bits64 at))\n"
+      "(defun ret-max-v64 () (memory-sig v64) (v64-literal 4294967295 4294967295))\n"
+      "(defun ret-tag-v64 () (memory-sig v64) (v64-literal 0 4294443008))\n"
+      "(defun ret-f9-v64 () (memory-sig v64) (v64-literal 32 4294508545))\n"
+      "(defun ret-max-bits64 () (memory-sig bits64) (bits64-literal 4294967295 4294967295))\n"
+      "(defun ret-nan-bits64 () (memory-sig bits64) (bits64-literal 3735928559 2146959360))\n"
+      "(defun minus-zero-f64 () (memory-sig f64) (f64-from-bits64 (bits64-literal 0 2147483648)))\n"
+      "(defun minus-zero-bits () (memory-sig bits64) (bits64-from-f64 (f64-from-bits64 (bits64-literal 0 2147483648))))\n"
+      "(defun nan-f64-bits () (memory-sig bits64) (bits64-from-f64 (f64-from-bits64 (bits64-literal 3735928559 2146959360))))\n"
+      "(export write-v64 write-bits64 read-v64 read-bits64 ret-max-v64 ret-tag-v64 ret-f9-v64 ret-max-bits64 ret-nan-bits64 minus-zero-f64 minus-zero-bits nan-f64-bits)"))
+  (nativeTest "EXACT-CONST64-05 64-bit literal words round-trip exactly on both backends" (async ()
+    (let* ((program (typed const64-source)) (signatures (js-object))
+           (entries (js-array
+             (js-array "write-v64" 0 (js-array) "u32") (js-array "write-bits64" 0 (js-array) "u32")
+             (js-array "read-v64" 1 (js-array "u32") "v64") (js-array "read-bits64" 1 (js-array "u32") "bits64")
+             (js-array "ret-max-v64" 0 (js-array) "v64") (js-array "ret-tag-v64" 0 (js-array) "v64")
+             (js-array "ret-f9-v64" 0 (js-array) "v64") (js-array "ret-max-bits64" 0 (js-array) "bits64")
+             (js-array "ret-nan-bits64" 0 (js-array) "bits64") (js-array "minus-zero-f64" 0 (js-array) "f64")
+             (js-array "minus-zero-bits" 0 (js-array) "bits64") (js-array "nan-f64-bits" 0 (js-array) "bits64")))
+           (result nil) (n undefined) (w undefined))
+      (js-call entries :forEach (lambda (entry) (put signatures (aref entry 0)
+        (js-object :arity (aref entry 1) :parameterTypes (aref entry 2) :resultType (aref entry 3)))))
+      (setq result (await (pair program signatures)) n (get result :n) w (get result :w))
+      (try
+        (let ((wasm-memory (new globalThis.Uint8Array (get (get w :memory) :buffer))))
+          (js-call assert :equal (Reflect/apply (get n :invoke) n (js-array "write-v64")) 0)
+          (js-call assert :equal (js-call w "write-v64") 0)
+          (js-call assert :deepEqual (js-call n :read 0 64) (js-call wasm-memory :slice 0 64))
+          (js-call assert :equal (Reflect/apply (get n :invoke) n (js-array "write-bits64")) 0)
+          (js-call assert :equal (js-call w "write-bits64") 0)
+          (js-call assert :deepEqual (js-call n :read 64 64) (js-call wasm-memory :slice 64 128))
+          (js-call const64-words :forEach (lambda (entry)
+            (let ((at (aref entry 0)) (expected (globalThis.BigInt (aref entry 3))))
+              (js-call assert :equal (funcall wide (Reflect/apply (get n :invoke) n (js-array "read-v64" at))) expected)
+              (js-call assert :equal (funcall wide (js-call w "read-v64" at)) expected)
+              (js-call assert :equal (funcall wide (Reflect/apply (get n :invoke) n (js-array "read-bits64" (+ at 64)))) expected)
+              (js-call assert :equal (funcall wide (js-call w "read-bits64" (+ at 64))) expected))))
+          (js-call (js-array
+            (js-array "ret-max-v64" "0xffffffffffffffff") (js-array "ret-tag-v64" "0xfff8000000000000")
+            (js-array "ret-f9-v64" "0xfff9000100000020") (js-array "ret-max-bits64" "0xffffffffffffffff")
+            (js-array "ret-nan-bits64" "0x7ff80000deadbeef") (js-array "minus-zero-bits" "0x8000000000000000")
+            (js-array "nan-f64-bits" "0x7ff80000deadbeef")) :forEach (lambda (entry)
+            (let ((expected (globalThis.BigInt (aref entry 1))))
+              (js-call assert :equal (funcall wide (Reflect/apply (get n :invoke) n (js-array (aref entry 0)))) expected)
+              (js-call assert :equal (funcall wide (js-call w (aref entry 0))) expected))))
+          (js-call assert :ok (Object/is (Reflect/apply (get n :invoke) n (js-array "minus-zero-f64")) -0.0))
+          (js-call assert :ok (Object/is (js-call w "minus-zero-f64") -0.0)))
+        (finally (js-call n :close))))))
 )

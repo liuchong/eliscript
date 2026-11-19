@@ -51,10 +51,13 @@
       (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
       bytes))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
+
   (defun read (a value)
     (cond
       ((nullish? value) value)
-      ((= (get value :kind) 4) (js-call a :readNumber value))
+      ((/= (value-type value) "object") value)
+      ((= (get value :kind) 4) (funcall num-val a value))
       ((= (get value :kind) 5) (js-call a :readString value))
       ((= (get value :kind) 14)
        (Array/from (js-object :length (js-call a :length value))
@@ -337,7 +340,7 @@
           (lambda () (js-call a :invoke "run" (js-array input trace)))
           (lambda (err) (let ((d (get err :eliscriptDiagnostic))) (and d (= (get d :code) "ELI-RT0002")))))
         (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-        (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+        (funcall assert (Object/is (funcall num-val a held) -0.0))
         (let ((completed (read a trace)))
           (funcall assert (and (> (js-length completed) 0) (< (js-length completed) 64)))
           (js-call completed :forEach (lambda (item) (js-call assert :deepEqual item (js-array 1 false)))))
@@ -355,7 +358,7 @@
       (funcall assert (and (>= first 0) (> last first)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call text :slice 0 first)
-                              "  (defun value-source-invoke (heap function arguments count) (load-u32 4294967295))\n"
+                              "  (defun value-source-invoke (heap function arguments count) (memory-sig v64 u32 v64 v64 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                               (js-call text :slice last))
                          "iteration-trap.eli"))
              (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected)))
@@ -370,7 +373,7 @@
             (lambda () (js-call a :invoke "run" (js-array input trace)))
             globalThis.WebAssembly.RuntimeError)
           (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-          (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+          (funcall assert (Object/is (funcall num-val a held) -0.0))
           (js-call assert :deepEqual (read a trace) (js-array))
           (js-call assert :equal (js-call a :invoke "empty") undefined)
           (js-call a :leaveFrame frame)
@@ -380,12 +383,12 @@
     (let* ((bytes (artifact))
            (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
            (heap (funcall uint32 (js-call e "heap-new" 64 8192 65536)))
-           (argv (funcall uint32 (js-call e "value-refs" heap 7 0))))
+           (argv (js-call e "value-refs" heap 7 0)))
       (js-call assert :equal (js-call e "last-error") 0)
       (js-call
         (js-array
           (js-array 0 argv 0 0 1)
-          (js-array heap 4294967295 0 0 1)
+          (js-array heap (funcall globalThis.BigInt 4294967295) 0 0 1)
           (js-array heap argv 1 0 3)
           (js-array heap argv 0 99 3))
         :forEach

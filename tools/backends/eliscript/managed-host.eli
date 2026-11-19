@@ -1,10 +1,12 @@
 (module tools.backends.managed-host
+  (import "./managed-layout.mjs" normalize-u64 VAL64_UNDEFINED)
   (import "./managed-host-ground.mjs" :as ground)
   (import "./managed-host-runtime.mjs" :as maintained)
   (import "./managed-host-lifecycle.mjs" createManagedHostRuntimeWithLifecycle)
   (import "./managed-foreign-binding.mjs" createManagedForeignBindingRuntime)
   (import "./managed-host-object-realm.mjs" createManagedHostObjectRealmRuntime)
-  (import "./managed-source-view.mjs" withManagedSourceDecode registerManagedSourceDecodeRuntime)
+  (import "./managed-source-view.mjs" withManagedSourceDecode registerManagedSourceDecodeRuntime
+    managedSourceIdentityOwner registerManagedSourceIdentityOwner)
 
   ;; Retain all unaffected public functions, including their original defaults
   ;; and identity. Only the high-level host decoder's function property read
@@ -28,11 +30,11 @@
               (when (Object/hasOwn literal (aref item 0))
                 (let* ((probe (get literal (aref item 0))) (binding (get bindings (aref item 1)))
                        (slot (get binding :index)))
-                  (unless (and (= (get probe :version) 1) (= (get binding :kind) 1)
+                  (unless (and (= (get binding :kind) 1)
                                (Number/isInteger slot) (>= slot 0) (< slot (get module :functionCount))
                                (not (js-call slots :has slot)))
                     (throw (new globalThis.TypeError "invalid automatic literal probe binding")))
-                  (js-call slots :set slot (aref item 2))))))
+                  (js-call slots :set slot (funcall globalThis.BigInt (aref item 2)))))))
           ;; These actual codec entries call the original brand logic inside
           ;; WASM, beyond the host invoke wrapper. Keep their whole synchronous
           ;; operation in the same automatic-probe scope without replacing any
@@ -54,12 +56,7 @@
                    (Reflect/apply (get (get descriptors name) :value) exports arguments)))
                  (get-original (get (get descriptors getter-name) :value))
                  (invoke-original (get (get descriptors "value-source-invoke-with-this") :value))
-                 (handle-identity (lambda (value)
-                   ;; WASM exports return signed i32, while the host transport
-                   ;; carries the same handle bits as uint32. Identity uses the
-                   ;; bits; forwarding still preserves the original ABI value.
-                   (if (and (Number/isInteger value) (>= value -2147483648) (<= value 4294967295))
-                     (uint32 value) value)))
+                 (handle-identity (lambda (value) (if (= (value-type value) "bigint") (normalize-u64 value) nil)))
                  (get-binding (lambda (heap kind index)
                    (let* ((value (Reflect/apply get-original exports (js-array heap kind index)))
                           (identity (funcall handle-identity value)))
@@ -67,20 +64,20 @@
                      ;; callees. No fabricated kind, code read, root or handle
                      ;; lifetime is introduced. Generations never ABA-reuse.
                      (when (and (= (funcall raw "last-error") 0) (= kind 1)
-                                (Number/isInteger value) (>= value -2147483648) (<= value 4294967295) (> identity 3)
+                                (not (nil? identity)) (> identity (funcall globalThis.BigInt 3))
                                 (js-call slots :has index))
                        (unless (js-call heaps :has heap) (js-call heaps :set heap (new globalThis.Map)))
                        (js-call (js-call heaps :get heap) :set identity (js-call slots :get index))) value)))
                  (invoke (lambda (heap function receiver arguments count)
                    (let ((known (js-call heaps :get heap)) (identity (funcall handle-identity function)))
-                     (if (or (not known) (not (js-call known :has identity)))
+                     (if (or (nil? identity) (not known) (not (js-call known :has identity)))
                        (Reflect/apply invoke-original exports (js-array heap function receiver arguments count))
                        (if (and (js-call active :has heap)
                                 (/= (js-call known :get identity) "codec-scope"))
                          ;; Internal automatic calls have precisely this ABI.
                          ;; Invalid tuples/counts retain the original validator
                          ;; and its real error instead of becoming no-brand.
-                         (if (and (= receiver 3) (= count 1)
+                         (if (and (= receiver VAL64_UNDEFINED) (= count 1)
                                   (= (funcall raw "value-kind" heap arguments) 7)
                                   (= (funcall raw "last-error") 0)
                                   (>= (funcall raw "value-length" heap arguments) 1)
@@ -137,18 +134,18 @@
                                         (>= value 0) (<= value 4294967295)) (setq code value)))
                            (when (and memory-readable (not (nullish? observed-view)))
                              ;; value-data validates this exact owner, handle
-                             ;; generation and kind. Its public payload is
-                             ;; block+32; the existing kind18 code is block+12.
+                             ;; generation and kind. Its public payload for
+                             ;; kind18 is block+48; code remains at block+12.
                              ;; Read only this single word from the factory's
                              ;; actual view, never a caller-supplied offset.
                              (let ((payload (funcall raw "value-data" heap function 18)))
                                (when (and (= (funcall raw "last-error") 0) (Number/isInteger payload)
-                                          (>= payload 20) (<= payload 4294967295))
+                                          (>= payload 48) (<= payload 4294967295))
                                  (let* ((view observed-view)
                                         (length (get view :byteLength)))
-                                   (when (and (Number/isInteger length) (<= (- payload 16) length))
+                                   (when (and (Number/isInteger length) (<= (- payload 32) length))
                                      (setq code (Reflect/apply (get (get globalThis.DataView :prototype) :getUint32)
-                                       view (js-array (- payload 20) t)))))))))
+                                       view (js-array (- payload 36) t)))))))))
                          (catch ignored nil))) code)))
                  (entry (get descriptors "value-source-invoke-with-this"))
                  (invoke (get entry :value))
@@ -196,13 +193,14 @@
                                           (length (get view :byteLength)))
                                      (when (and (Number/isInteger heap) (>= heap 0) (<= (+ heap 20) length))
                                        (let ((control (js-call view :getUint32 (+ heap 16) t)))
-                                         (when (and (> control 0) (<= (+ control 20) length))
-                                           (put report :heapMaxSlots (js-call view :getUint32 (+ control 8) t))
-                                           (put report :heapHighwaterSlots (js-call view :getUint32 (+ control 12) t))
-                                           (put report :heapFreeSlotHead (js-call view :getUint32 (+ control 16) t)))))))
+                                         (when (and (> control 0) (<= (+ control 64) length))
+                                           (put report :heapSlotCapacity (js-call view :getUint32 (+ control 48) t))
+                                           (put report :heapMaxSlots (js-call view :getUint32 (+ control 52) t))
+                                           (put report :heapHighwaterSlots (js-call view :getUint32 (+ control 56) t))
+                                           (put report :heapFreeSlotHead (js-call view :getUint32 (+ control 60) t)))))))
                                  (let ((recent (js-call maintained :readManagedSourceOperationDiagnostics memory)))
                                    (when recent (put report :sourceOperations recent)))
-                                 (console/error "[managed-invoke]" (JSON/stringify report))))
+                                 (console/error "[managed-invoke]" (JSON/stringify report (lambda (key value) (if (= (value-type value) "bigint") (str value) value))))))
                              (catch ignored nil)
                              (finally
                                (when saved
@@ -243,14 +241,14 @@
                                                (setq source-class (funcall raw "value-exception-class" heap) saved t)
                                                (let* ((receiver (aref arguments 1))
                                                       (key (if (= name "value-source-own-descriptor") (aref arguments 2) nil))
-                                                      (receiver-raw (if (Number/isInteger receiver) receiver nil))
-                                                      (key-raw (if (Number/isInteger key) key nil))
+                                                      (receiver-raw (if (= (value-type receiver) "bigint") receiver nil))
+                                                      (key-raw (if (= (value-type key) "bigint") key nil))
                                                       (report (js-object :phase name :heap heap
                                                         :receiver receiver-raw
-                                                        :receiverKind (if (Number/isInteger receiver-raw)
+                                                        :receiverKind (if (= (value-type receiver-raw) "bigint")
                                                           (funcall raw "value-kind" heap receiver-raw) nil)
                                                         :key key-raw
-                                                        :keyKind (if (Number/isInteger key-raw)
+                                                        :keyKind (if (= (value-type key-raw) "bigint")
                                                           (funcall raw "value-kind" heap key-raw) nil)
                                                         :lastError status :sourceClass source-class :threw threw))
                                                       (sink (Object/getOwnPropertyDescriptor globalThis.console "error")))
@@ -259,7 +257,7 @@
                                                  (when (and sink (Object/hasOwn sink "value")
                                                             (= (value-type (get sink :value)) "function"))
                                                    (Reflect/apply (get sink :value) globalThis.console
-                                                     (js-array "[managed-export-failure]" (JSON/stringify report)))))))
+                                                     (js-array "[managed-export-failure]" (JSON/stringify report (lambda (key value) (if (= (value-type value) "bigint") (str value) value)))))))))
                                            (catch ignored nil)
                                            (finally
                                              (when saved
@@ -316,6 +314,8 @@
       ;; The already attached graph must never receive a second project clone.
       (Object/defineProperties facade descriptors)
       (registerManagedSourceDecodeRuntime facade runtime)
+      (let ((owner (managedSourceIdentityOwner runtime)))
+        (unless (undefined? owner) (registerManagedSourceIdentityOwner facade owner)))
       (Object/freeze facade)))
   (defun createManagedHostRuntime (exports descriptor memory &rest tail)
     ;; The ground ABI already fixes old images without a case selector to 17.

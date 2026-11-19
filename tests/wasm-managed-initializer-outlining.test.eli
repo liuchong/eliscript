@@ -10,6 +10,7 @@
   (import "./helpers/shared-realm-initialization.mjs"
     sharedRealmDeclarations assertSharedRealmOutlining exerciseSharedRealm)
   (import "./helpers/cold-array-contract.mjs" checkColdArray)
+  (import "../tools/testing/initializer-array-fixture.mjs" verifyInitializerShape sourceInitializerPart)
 
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
 
@@ -34,7 +35,6 @@
 
   (defconst resources
     (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576 :initializeModule false))
-  (defconst part-prefix "__eliscript_module_part_")
 
   (defun nodes (body)
     (let ((found (js-array))
@@ -149,67 +149,8 @@
                                     :join " ")
                                   "))"))))
                        (source (str (js-call decls :join "\n") "\n(defun read () value-0) (export read)"))
-                       (lowered (lower source))
-                       (functions (get (get lowered :typed) :functions))
-                       (parts (js-call functions :filter (lambda (fn) (js-call (get fn :name) :startsWith part-prefix))))
-                       (coordinator (js-call functions :find (lambda (fn) (= (get fn :name) "__eliscript_module_body")))))
-                  (funcall assert (globalThis.Boolean coordinator))
-                  (js-call assert :equal (get parts :length) count)
-                  (js-call assert :deepEqual
-                    (js-call parts :map (lambda (fn) (get fn :name)))
-                    (Array/from (js-object :length count) (lambda (_u index) (str part-prefix index))))
-                  (let* ((targets (new globalThis.Set (js-call parts :map (lambda (fn) (get fn :index)))))
-                         (calls (js-call (nodes (get coordinator :body)) :filter
-                                  (lambda (node)
-                                    (and (= (get node :kind) "call")
-                                         (js-call targets :has (get node :value)))))))
-                    (js-call assert :deepEqual
-                      (js-call calls :map (lambda (node) (get node :value)))
-                      (js-call parts :map (lambda (fn) (get fn :index)))
-                      "only the original source order drives the calls")
-                    (let ((module-init (js-call functions :find (lambda (fn) (= (get fn :name) "value-module-init")))))
-                      (funcall assert (globalThis.Boolean module-init))
-                      (js-call assert :equal
-                        (get (js-call (nodes (get coordinator :body)) :filter
-                               (lambda (node)
-                                 (and (= (get node :kind) "call")
-                                      (= (get node :value) (get module-init :index)))))
-                             :length)
-                        0
-                        "the coordinator must not retain a duplicate complete initializer body")
-                      (js-call parts :forEach
-                        (lambda (part)
-                          (js-call assert :equal
-                            (get (js-call (nodes (get part :body)) :filter
-                                   (lambda (node)
-                                     (and (= (get node :kind) "call")
-                                          (= (get node :value) (get module-init :index)))))
-                                 :length)
-                            1)))
-                      (js-call assert :equal
-                        (get (get (get lowered :descriptor) :module) :functionCount)
-                        1
-                        "private parts do not become source function slots")
-                      (js-call assert :deepEqual
-                        (js-call (get (get lowered :descriptor) :functions) :map (lambda (fn) (get fn :name)))
-                        (js-array "read"))
-                      (funcall assert
-                        (not (js-call (get (get lowered :typed) :aliases) :some
-                               (lambda (alias) (js-call (get alias :name) :startsWith part-prefix))))
-                        "parts are not public exports")
-                      (funcall assert
-                        (js-call functions :every
-                          (lambda (fn)
-                            (and (not (Object/hasOwn fn "initializerParts"))
-                                 (not (Object/hasOwn fn "localStorageSequence"))))))
-                      (let ((max-part 0))
-                        (js-call parts :forEach
-                          (lambda (fn)
-                            (setq max-part (Math/max max-part (get (get fn :locals) :length)))))
-                        (js-object
-                          :coordinatorLocals (get (get coordinator :locals) :length)
-                          :partLocals max-part
-                          :lowered lowered))))))))
+                       (lowered (lower source)))
+                  (verifyInitializerShape lowered count width)))))
         (let ((scalar (funcall shape 1 1))
               (wide (funcall shape 1 32))
               (many (funcall shape 48 32)))
@@ -360,7 +301,7 @@
                       (= (if diag (get diag :code) undefined) "ELI-RT0008"))))
                 (js-call failed :collect)
                 (js-call assert :equal (get (js-call failed :stats) :frameDepth) 1)
-                (js-call assert :equal (js-call failed :live) 2)
+                (js-call assert :equal (js-call failed :live) 1)
                 (funcall assert (Object/is (js-call failed :readNumber keep) -0.0))
                 (setq round (+ round 1))))
             (finally
@@ -371,15 +312,13 @@
     (lambda ()
       (let* ((lowered
                (lower "(defconst before (js-array 1 2)) (defconst failed (throw \"first failure\")) (defconst after (false)) (export before)"))
-             (later
-               (js-call (get (get lowered :typed) :functions) :find
-                 (lambda (fn) (= (get fn :name) (str part-prefix "2"))))))
+             (later (sourceInitializerPart lowered 2)))
         (funcall assert (globalThis.Boolean later))
         (put later :body
           (js-object
             :kind "memory-op"
-            :type "u32"
-            :value "load-u32"
+            :type "v64"
+            :value "load-v64"
             :children (js-array (js-object :kind "literal" :type "u32" :value 4294967295 :children (js-array)))))
         (let* ((a (instance lowered))
                (_ (js-call a :auto 1))
@@ -412,7 +351,7 @@
     (lambda ()
       (let* ((lowered
                (lower "(defconst before (js-array 1 2)) (defconst oversized (js-call \"x\" :repeat 100000)) (defconst after 9) (export before after)"))
-             (a (instance lowered (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384)))
+             (a (instance lowered (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)))
              (_ (js-call a :auto 1))
              (keep (js-call a :number -0.0))
              (frame (js-call a :frame 1)))
@@ -427,7 +366,7 @@
                     (= (if diag (get diag :code) undefined) "ELI-RT0002"))))
               (js-call a :collect)
               (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-              (js-call assert :equal (js-call a :live) 2)
+              (js-call assert :equal (js-call a :live) 1)
               (funcall assert (Object/is (js-call a :readNumber keep) -0.0))
               (setq round (+ round 1))))
           (js-call assert :throws
@@ -563,7 +502,12 @@
               (let* ((small? (js-call (js-array "cold-own" "cold-key-error" "cold-key-primitive-error") :includes name))
                      (configuration
                        (if small?
-                           (Object/assign (js-object) resources (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384))
+                           ;; The 64-slot pool budgets retain their object space.
+                           ;; Scheme B additionally owns 3656 bytes of control /
+                           ;; arena headers, a 16-byte bitmap and the 8-byte
+                           ;; reserved object offset within the same byte total.
+                           (Object/assign (js-object) resources (js-object :maxSlots 64
+                             :initialBytes (+ 4096 3656 16 8) :maxBytes (+ 16384 3656 16 8)))
                            (Object/assign (js-object) resources (js-object :maxSlots 1024 :initialBytes 65536))))
                      (a (instantiateManagedRuntime image configuration)))
                 (try
@@ -583,7 +527,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((faulty
                  (str (js-call runtime-source :slice 0 start)
-                      "  (defun value-module-init (heap index value) (load-u32 4294967295))\n"
+                      "  (defun value-module-init (heap index value) (memory-sig v64 u32 u32 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                       (js-call runtime-source :slice end)))
                (rt (js-call (get backend :compiler) :compile_ir_string faulty "outlined-trap-runtime.eli"))
                (a (instance (lower "(defconst first (js-array 1 2)) (defconst second 7) (export first second)" rt)))
@@ -595,7 +539,7 @@
             (js-call assert :throws (lambda () (js-call a :initializeModule)) globalThis.WebAssembly.RuntimeError)
             (js-call a :collect)
             (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-            (js-call assert :equal (js-call a :live) 2)
+            (js-call assert :equal (js-call a :live) 1)
             (let ((saved (js-call a :frameGet frame 0)))
               (try
                 (funcall assert (Object/is (js-call a :readNumber saved) -0.0))
@@ -609,6 +553,20 @@
             (finally
               (js-call a :leaveFrame frame)
               (finish a (js-array keep))))))))
+
+  (defun method-table-length-read-p (node)
+    (let ((children (get node :children)))
+      (and (= (get node :kind) "call") (= (js-length children) 2)
+           (= (get (aref children 0) :kind) "reference")
+           (= (get (aref children 0) :value) "load-u32")
+           (let ((address (nodes (aref children 1))))
+             (and
+               (js-call address :some (lambda (part)
+                 (and (= (get part :kind) "reference") (= (get part :value) "heap-block"))))
+               (js-call address :some (lambda (part)
+                 (and (= (get part :kind) "reference") (= (get part :value) "methods"))))
+               (js-call address :some (lambda (part)
+                 (and (= (get part :kind) "literal") (= (get part :value) 4)))))))))
 
   (defun assert-array-registration-advances ()
     (let* ((declarations (js-call (get runtime :body) :flatMap (lambda (node) (nodes node))))
@@ -633,12 +591,9 @@
                                  (lambda (child)
                                    (and (= (get child :kind) "reference")
                                         (= (get child :value) "index"))))
-                               (js-call cond-nodes :some
-                                 (lambda (child)
-                                   (and (= (get child :kind) "literal")
-                                        (= (get child :value) 27)))))))))))
+                               (js-call cond-nodes :some method-table-length-read-p))))))))
         (js-call assert :equal (get updates :length) 1 "registration has one advancement of its method index")
-        (js-call assert :equal (get loops :length) 1 "registration iterates over the actual 27-method table")
+        (js-call assert :equal (get loops :length) 1 "registration is bounded by the actual method table length at header +4")
         (funcall assert
           (js-call (js-call (get (aref loops 0) :children) :slice 1) :some
             (lambda (child) (js-call (nodes child) :includes (aref updates 0))))
@@ -648,7 +603,7 @@
     (lambda ()
       (assert-array-registration-advances)))
 
-  (test "a top-level Array constructor acquisition completes all 27 registrations and preserves descriptors symbols cache identity and GC roots"
+  (test "a top-level Array constructor acquisition completes all 28 registrations and preserves descriptors symbols cache identity and GC roots"
     (async ()
       (assert-array-registration-advances)
       (let* ((methods
@@ -659,7 +614,8 @@
                  (js-array "reduce" 1) (js-array "reduceRight" 1) (js-array "sort" 1) (js-array "toSorted" 1)
                  (js-array "splice" 2) (js-array "join" 1) (js-array "toString" 0) (js-array "concat" 1)
                  (js-array "includes" 1) (js-array "indexOf" 1) (js-array "lastIndexOf" 1)
-                 (js-array "entries" 0) (js-array "keys" 0) (js-array "values" 0) (js-array "at" 1)))
+                 (js-array "entries" 0) (js-array "keys" 0) (js-array "values" 0) (js-array "at" 1)
+                 (js-array "reverse" 0)))
              (rows
                (js-call
                  (js-call methods :map

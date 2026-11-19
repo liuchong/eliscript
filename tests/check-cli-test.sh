@@ -17,9 +17,8 @@ cat > "$TEMP_DIR/src/helper.eli" <<'EOF'
 EOF
 cat > "$TEMP_DIR/eliscript.json" <<'EOF'
 {
-  "schemaVersion": 1,
   "sourceRoot": "src",
-  "entry": "main.eli",
+  "entries": ["main.eli"],
   "outDir": "dist",
   "portableEntries": [],
   "cache": true
@@ -30,7 +29,7 @@ BUN_REPORT=$(ELISCRIPT_JS_RUNTIME=bun "$CHECK" \
   --config "$TEMP_DIR/eliscript.json" --json)
 node -e '
 const report = JSON.parse(process.argv[1]);
-if (report.format !== "eliscript-check-report" || report.version !== 1 ||
+if (report.format !== "eliscript-check-report" || "version" in report ||
     report.status !== "ok" || report.counts.modules !== 2) process.exit(1);
 ' "$BUN_REPORT"
 
@@ -61,7 +60,7 @@ fi
 node -e '
 const { realpathSync } = require("node:fs");
 const diagnostic = JSON.parse(process.argv[1]);
-if (diagnostic.format !== "eliscript-diagnostic" || diagnostic.version !== 1 ||
+if (diagnostic.format !== "eliscript-diagnostic" || "version" in diagnostic ||
     diagnostic.code !== "ELI-A0001" || diagnostic.phase !== "analysis" ||
     diagnostic.location?.file !== realpathSync(process.argv[2]) ||
     diagnostic.location?.start?.line !== 1) process.exit(1);

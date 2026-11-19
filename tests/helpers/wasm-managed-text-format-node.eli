@@ -55,7 +55,7 @@
          (let* ((a (instantiateManagedRuntime (readFileSync wasm-path)))
                 (out (js-call a :invoke "f")))
            (js-call assert :equal (get a :unicodeVersion) 17)
-           (js-call assert :equal (js-call a :readNumber out) 7)
+           (js-call assert :equal (if (= (value-type out) "number") out (js-call a :readNumber out)) 7)
            (js-call a :release out)
            (js-call a :collect)
            (js-call assert :equal (js-call a :live) 0)

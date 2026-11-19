@@ -9,6 +9,8 @@
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+  (import "../tools/backends/managed-module-graph.mjs"
+    createManagedModuleGraph createManagedProjectFacades loadManagedProjectGraph)
   (import "../tools/testing/wire-call-cases.mjs" runtimeCallShard)
   (import "../runtime/core/sorted.mjs" :as OriginalSorted)
   (import "../runtime/literals.mjs" :as OriginalLiterals)
@@ -19,6 +21,42 @@
   (defconst units (js-array (js-array entry "tests/fixtures/wasm-managed-sorted.eli")
     (js-array "tests/fixtures/persistent-sorted.mjs" "tests/fixtures/persistent-sorted.eli")
     (js-array "stdlib/core/sorted.eli" "stdlib/core/sorted.eli")))
+  (defconst brand-body
+    (js-call (js-array
+      "  (defvar brand-trace-values nil)"
+      "  (defun brand-traced-has-instance (value) (js-call (or brand-trace-values (setq brand-trace-values (js-array))) :push value) t)"
+      "  (defun brand-enable ()"
+      "    (setq brand-trace-values (js-array))"
+      "    (let ((descriptor (js-object :value brand-traced-has-instance :configurable t)))"
+      "      (Object/defineProperty Sorted/PersistentSortedMap (get globalThis/Symbol :hasInstance) descriptor)"
+      "      (Object/defineProperty Sorted/PersistentSortedSet (get globalThis/Symbol :hasInstance) descriptor))"
+      "    t)"
+      "  (defun brand-flags ()"
+      "    (let* ((map-prototype (get Sorted/PersistentSortedMap :prototype))"
+      "           (set-prototype (get Sorted/PersistentSortedSet :prototype))"
+      "           (forged-prototype (js-object :count 0 :size 0))"
+      "           (fake-map (Object/create map-prototype))"
+      "           (fake-set (Object/create set-prototype))"
+      "           (forged (Object/create forged-prototype)))"
+      "      (JSON/stringify (js-array (Object/is (Object/getPrototypeOf fake-map) map-prototype)"
+      "        (Object/is (Object/getPrototypeOf fake-set) set-prototype)"
+      "        (Object/is (Object/getPrototypeOf forged) forged-prototype)"
+      "        (Object/isFrozen (Sorted/persistentSortedMap 1 \"a\"))"
+      "        (Object/isFrozen (Sorted/persistentSortedSet 1))))))"
+      "  (defun brand-fake-map () (Object/create (get Sorted/PersistentSortedMap :prototype)))"
+      "  (defun brand-fake-set () (Object/create (get Sorted/PersistentSortedSet :prototype)))"
+      "  (defun brand-forged () (Object/create (js-object :count 0 :size 0)))"
+      "  (defun brand-real-map () (Sorted/persistentSortedMap 2 \"b\" 1 \"a\"))"
+      "  (defun brand-real-set () (Sorted/persistentSortedSet 1 2))"
+      "  (defun brand-trace (ignored) (if (nil? brand-trace-values) 0 (js-length brand-trace-values)))") :join "\n"))
+  (defun instrument-brand-source (source)
+    (let* ((export-tail " provider-inspect))")
+           (instrumented (js-call source :replace export-tail
+             " provider-inspect brand-enable brand-flags brand-fake-map brand-fake-set brand-forged brand-real-map brand-real-set brand-trace))"))
+           (last (js-call instrumented :lastIndexOf ")")))
+      (js-call assert :ok (js-call source :includes export-tail))
+      (js-call assert :notEqual instrumented source)
+      (+ (js-call instrumented :slice 0 last) "\n" brand-body "\n)")))
   (defconst cases (js-array "original-report" "original-boundaries" "rotations" "ranges" "semantics" "order-cases"
     "full-order-contracts" "comparator-failure" "transport" "lazy-iterators" "sharing"))
   (defconst partitioned (and (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
@@ -48,9 +86,11 @@
            (literalModules (get (await (js-call backend :loadLiteralModules)) :literalModules))
            (modules (js-array)) (index 0))
       (while (< index (js-length units))
-        (let* ((unit (aref units index)) (filename (aref unit 1)))
+        (let* ((unit (aref units index)) (filename (aref unit 1))
+               (source (await (readFile filename "utf8"))))
+          (when (= (aref unit 0) entry) (setq source (instrument-brand-source source)))
           (js-call modules :push (js-object :id (aref unit 0) :program
-            (js-call compiler :compile_ir_string (await (readFile filename "utf8")) filename))))
+            (js-call compiler :compile_ir_string source filename))))
         (setq index (1+ index)))
       (let ((before (JSON/stringify modules)) (libraryBefore (JSON/stringify literalModules)))
         (setq lowered (js-call (get backend :managed) :lower_managed_project modules entry runtimeIR
@@ -70,8 +110,11 @@
           (setq nativePath (resolve directory "sorted-core.dylib"))
           (await (writeFile nativePath (globalThis.Uint8Array.from
             (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) "arm64-macos")))))
+        ;; The provider boundary receives actual host sorted values whose custom
+        ;; comparators target AVL code must call, so it declares the explicit
+        ;; foreign entry capability. The ordinary target above stays import free.
         (setq boundaryLowered (js-call (get backend :managed) :lower_managed_project modules entry runtimeIR
-          (Object/assign (js-object) memory (js-object :literalModules literalModules :phased t))))
+          (Object/assign (js-object) memory (js-object :literalModules literalModules :phased t :foreignEntry t))))
         (setq boundaryBytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
           (js-call (get backend :wasm) :emit_typed_memory_wasm (get boundaryLowered :typed) memory)
           "eliscript-managed-control" (JSON/stringify (get boundaryLowered :descriptor)))))
@@ -276,7 +319,6 @@
     :hostModules (new globalThis.Map (js-array (js-array "eliscript/runtime/core/sorted.mjs" OriginalSorted)
       (js-array "eliscript/runtime/core/metadata.mjs" OriginalMetadata))))))
   (defun checkProvider (runtime)
-    (js-call runtime :initializeModule)
     (let* ((module (js-call (get (get (get boundaryLowered :descriptor) :project) :modules) :find (lambda (value) (= (get value :id) entry))))
            (call (lambda (name &optional arguments)
              (let ((binding (js-call (get module :exports) :find (lambda (value) (= (get value :name) (js-call name :replaceAll "-" "_"))))))
@@ -311,9 +353,86 @@
           (js-call assert :deepStrictEqual (Array/from changed) (js-array (js-array 1 "a") (js-array 2 "b") (js-array 3 "c") (js-array 4 "d")))
           (js-call assert :strictEqual (get changed :comparator) (get custom :comparator))))
       (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
+  (defvar providerDeployments 0)
+  ;; The provider boundary declares the explicit foreign entry capability, so
+  ;; it is a mixed project: open it through the formal project entry with its
+  ;; actual module graph and deployed ESM facades, which prepare the project
+  ;; and run every module step, as other mixed projects do.
+  (defasync open-provider-runtime (native-mode)
+    (setq providerDeployments (1+ providerDeployments))
+    (let* ((descriptor (get boundaryLowered :descriptor))
+           (deployment (resolve directory (str "provider-" (if native-mode "native" "wasm") "-" providerDeployments)))
+           (files (get (createManagedProjectFacades descriptor (js-object :entry entry)) :files))
+           (graph (createManagedModuleGraph descriptor))
+           (runtime undefined) (index 0))
+      (while (< index (js-length files))
+        (let ((output (resolve deployment (get (aref files index) :id))))
+          (await (mkdir (dirname output) (js-object :recursive t)))
+          (await (writeFile output (get (aref files index) :source))))
+        (setq index (1+ index)))
+      (try
+        (progn
+          (setq runtime (if native-mode
+            (await (instantiateNativeManagedRuntime boundaryNativePath boundaryLowered
+              (Object/assign (js-object) providerOptions memory (js-object :initializeModule false :moduleGraph graph))))
+            (instantiateManagedRuntime boundaryBytes
+              (Object/assign (js-object) providerOptions (js-object :initializeModule false :moduleGraph graph)))))
+          (js-call runtime :auto 1)
+          (await (loadManagedProjectGraph runtime descriptor
+            (js-object :moduleGraph graph :projectEntry entry
+              :projectModuleBaseURL (get (pathToFileURL (str deployment "/")) :href))))
+          runtime)
+        (catch error
+          (try (when runtime (js-call runtime :closeModule)) (catch ignored nil))
+          (try (when (and runtime (get runtime :close)) (js-call runtime :close)) (catch ignored nil))
+          (js-call graph :close)
+          (throw error)))))
+  (defun brand-invoke (runtime name &optional arguments)
+    (let ((raw (js-call runtime :invoke name (or arguments (js-array))))
+          (value undefined))
+      (try
+        (progn (setq value (js-call runtime :toHostValue raw)) value)
+        (finally (js-call runtime :release raw)))))
+  (test "Given a replaced Symbol.hasInstance on the real sorted constructors when unregistered real and forged prototypes cross the real transport boundary then the private registry still rejects them while frozen registered instances pass"
+    (lambda ()
+      (let ((runtime (instantiateManagedRuntime bytes options)))
+        (try
+          (progn
+            (brand-invoke runtime "brand_enable")
+            (js-call assert :strictEqual (brand-invoke runtime "brand_trace" (js-array 0)) 0)
+            (js-call assert :deepStrictEqual (JSON/parse (brand-invoke runtime "brand_flags"))
+              (js-array t t t t t))
+            (let ((trace-before (brand-invoke runtime "brand_trace" (js-array 0))))
+            (let ((fake-map (brand-invoke runtime "brand_fake_map")))
+              (js-call assert :strictEqual (OriginalSorted/readSortedMapState fake-map) undefined)
+              (js-call runtime :collect))
+            (let ((fake-set (brand-invoke runtime "brand_fake_set")))
+              (js-call assert :strictEqual (OriginalSorted/readSortedSetState fake-set) undefined)
+              (js-call runtime :collect))
+            (let ((forged (brand-invoke runtime "brand_forged")))
+              (js-call assert :strictEqual (OriginalSorted/readSortedMapState forged) undefined)
+              (js-call runtime :collect))
+            (js-call assert :strictEqual
+              (brand-invoke runtime "brand_trace" (js-array 0)) trace-before)
+            (let ((map (brand-invoke runtime "brand_real_map")))
+              (js-call assert :ok (OriginalSorted/isPersistentSortedMap map))
+              (js-call assert :deepStrictEqual (Array/from map)
+                (js-array (js-array 1 "a") (js-array 2 "b")))
+              (js-call assert :ok (Object/isFrozen map)))
+            (js-call runtime :collect)
+            (let ((set (brand-invoke runtime "brand_real_set")))
+              (js-call assert :ok (OriginalSorted/isPersistentSortedSet set))
+              (js-call assert :deepStrictEqual (Array/from set) (js-array 1 2))
+              (js-call assert :ok (Object/isFrozen set)))
+              (js-call assert :strictEqual
+                (brand-invoke runtime "brand_trace" (js-array 0)) (+ trace-before 4)))
+            (js-call runtime :collect))
+          (finally (finish runtime)))))
+    120000)
+
   (when shared-part? (test "Given actual provider sorted classes when bulk values cross the real phased WASM boundary then brands comparator metadata identity and pure target AVL updates survive GC"
-    (lambda () (let ((runtime (instantiateManagedRuntime boundaryBytes providerOptions)))
-      (js-call runtime :auto 1) (try (checkProvider runtime) (finally (finish runtime))))) 30000))
+    (async () (let ((runtime (await (open-provider-runtime false))))
+      (try (checkProvider runtime) (finally (finish runtime))))) 30000))
   (when shared-part? (actualTest "Given actual provider values when the same phased graph executes native machine code then provider identities and comparator effects are preserved without host sorting"
-    (async () (let ((runtime (await (instantiateNativeManagedRuntime boundaryNativePath boundaryLowered (Object/assign (js-object) providerOptions memory)))))
-      (js-call runtime :auto 1) (try (checkProvider runtime) (finally (try (finish runtime) (finally (js-call runtime :close))))))) 120000)))
+    (async () (let ((runtime (await (open-provider-runtime t))))
+      (try (checkProvider runtime) (finally (try (finish runtime) (finally (js-call runtime :close))))))) 120000)))

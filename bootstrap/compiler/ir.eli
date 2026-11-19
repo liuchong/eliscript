@@ -1,7 +1,6 @@
 (module bootstrap.compiler.ir
   (defconst ir-format "eliscript-ir")
   (defconst typeof-value (lambda (value) (js* "typeof value")))
-  (defconst ir-version 1)
   (defconst ir-max-depth 512)
 
   (defconst node-kinds
@@ -47,7 +46,7 @@
                        (new globalThis.Error message)
                      (new globalThis.Error message options))))
         (put error :eliscriptDiagnostic
-          (js-object :format "eliscript-diagnostic" :version 1
+          (js-object :format "eliscript-diagnostic"
             :code "ELI-I0001" :severity "error" :phase "ir-schema" :message message))
         error)))
 
@@ -287,11 +286,9 @@
 
   (defun validate-document (document)
     (require-closed-record
-      document (js-array "format" "program" "version") "IR document")
+      document (js-array "format" "program") "IR document")
     (unless (= (get document :format) ir-format)
       (schema-fail (str "unsupported IR format: " (get document :format))))
-    (unless (= (get document :version) ir-version)
-      (schema-fail (str "unsupported IR version: " (get document :version))))
     (validate-program (get document :program))
     document)
 
@@ -299,7 +296,6 @@
     (let ((document
            (js-object
              :format ir-format
-             :version ir-version
              :program program)))
       (validate-document document)
       (canonical-json document)))
@@ -308,7 +304,7 @@
     ;; Schema validation alone does not inspect arbitrary value/properties
     ;; payloads. Retain both original passes and the document wrapper's JSON
     ;; paths/depth, while avoiding an unused full canonical output string.
-    (let ((document (js-object :format ir-format :version ir-version :program program)))
+    (let ((document (js-object :format ir-format :program program)))
       (validate-document document)
       (canonical-json-value document "$" (new globalThis.Set) 0 false)
       program))
@@ -351,8 +347,11 @@
       (fail (str "unknown Eliscript IR node kind: " kind)))
     (unless (Array/isArray children)
       (fail "IR node children must be an array"))
-    (unless (js-call children :every node-p)
-      (fail "IR node children must all be IR nodes"))
+    (let ((cidx 0) (clen (aref children "length")))
+      (while (< cidx clen)
+        (unless (node-p (aref children cidx))
+          (fail "IR node children must all be IR nodes"))
+        (setq cidx (+ cidx 1))))
     (let ((node
            (js-object
              (progn ir-kind-key) (js-call canonical-node-kinds :get kind)
@@ -390,7 +389,6 @@
 
   (export
     ir-format
-    ir-version
     node-kinds
     node-kind-p
     reference-node-kind-p

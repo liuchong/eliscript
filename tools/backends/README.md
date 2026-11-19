@@ -39,7 +39,7 @@ persistence points without removing any saved IR, debug data or identity field.
 
 Original-case source archives snapshot and validate the full recipe before
 I/O, then hash and write IR and source assets in bounded blocks. Assets retain
-their ordinal paths, version-1 manifest and exact bytes, including lone UTF16
+their ordinal paths, manifest and exact bytes, including lone UTF16
 surrogates encoded as JSON. Reads use 64 KiB blocks and defer parse/UTF8 errors
 until the original complete asset identity check succeeds. The seven archive
 streaming regressions and 34 metadata regressions pass, including independent
@@ -265,13 +265,13 @@ and complete language/compiler lowering still require their own acceptance.
 
 ## Ordinary managed control programs
 
-`managed-control-v1` is an explicit experimental ABI for ordinary Eliscript
+`managed-control` is an explicit experimental ABI for ordinary Eliscript
 control flow. The `.eli` managed lowering links the checked runtime, emits WASM
-directly and adds a versioned export/arity descriptor. It uses zero imports.
+directly and adds an export/arity descriptor. It uses zero imports.
 The compiler host remains JavaScript, and this profile supports WASM output.
 
 ```sh
-bun tools/backends/compile.mjs --abi managed-control-v1 --target wasm \
+bun tools/backends/compile.mjs --abi managed-control --target wasm \
   -o control.wasm tests/fixtures/wasm-managed-control.eli
 ```
 
@@ -373,10 +373,10 @@ Function-valued builtin members and general function properties/conversions
 remain unsupported.
 
 Single-module top-level `defvar`/`defconst`, expression statements and value
-exports use the experimental `managed-module-v1` profile:
+exports use the experimental `managed-module` profile:
 
 ```sh
-bun tools/backends/compile.mjs --abi managed-module-v1 --target wasm -o module.wasm module.eli
+bun tools/backends/compile.mjs --abi managed-module --target wasm -o module.wasm module.eli
 ```
 
 Initializers execute once per owned heap, in source order, with hoisted named
@@ -395,11 +395,11 @@ future module calls; caller-owned handles and frames retain their lifetimes.
 Failed initialization caches its first error, drops partially initialized roots
 and preserves existing caller frames, including after actual WASM traps.
 
-The metadata envelope remains version 1, with a distinct module ABI. Logical
+The metadata envelope is format-only, with a distinct module ABI. Logical
 UTF-16 export names map to ordinal ASCII `wireName` aliases, including names
 containing lone surrogates. Private kind-20 cells and a heap-rooted environment
 hold binding identity and initialization state. Old readers explicitly refuse
-this profile. Function-only sources keep their original `managed-control-v1`
+this profile. Function-only sources keep their original `managed-control`
 ABI and physical export names unless the module profile is explicitly requested;
 requesting the old profile for module bindings is rejected. Module output is
 currently available only for WASM. This capability is not a full WASM compiler
@@ -592,8 +592,8 @@ they do not establish complete compiler performance or any missing 3×3 host cel
 
 The pure compiler session provides `analyze`, `query`, and `edit-preview` on
 the same source request protocol for all three compiler hosts. Semantic reports
-include a text `sourceIdentity` with format `eliscript-source-identity`, version
-1, filename, UTF-16 unit count and SHA-256 of the original UTF-16LE code units.
+include a text `sourceIdentity` with format `eliscript-source-identity`,
+filename, UTF-16 unit count and SHA-256 of the original UTF-16LE code units.
 This text identity preserves BOMs and unmatched surrogates. Hashing reads the
 source in fixed-size blocks without making a whole-source byte array. Diagnostic
 reports retain the text identity too. It identifies source text, while the
@@ -661,7 +661,7 @@ export. Standalone managed modules keep their existing source-name interface.
 Bindings that emit the same JS identifier shadow consistently across accepted
 scopes, including captures and assignments. Fresh project names account for
 emitted binding keys so munged local names cannot capture generated globals.
-Returned values and module lifecycle methods follow `managed-module-v1` above.
+Returned values and module lifecycle methods follow `managed-module` above.
 The private namespace initializer is accepted only with linker-owned nodes;
 private kind-20 cells remain hidden behind namespace reads. Namespace objects
 use kind 13 with reserved header flag +20, retaining the existing tracing layout.
@@ -680,7 +680,7 @@ The CLI accepts the existing virtual-project request shape in a JSON file:
 ```
 
 ```sh
-bun tools/backends/compile.mjs --abi managed-module-v1 --target wasm --project -o project.wasm request.json
+bun tools/backends/compile.mjs --abi managed-module --target wasm --project -o project.wasm request.json
 ```
 
 The host transfers sources and invokes the compiler; declaration execution,
@@ -887,8 +887,8 @@ closures. Method lookup precedes argument evaluation, including ignored extras.
 Private join frames are unwound after allocation errors and actual WASM traps.
 
 The internal `memory32` capability `call-source` passes heap, function, argument
-vector and count through a checked four-word table signature. Explicit internal
-`indirectArities` declarations allow an empty table without a matching local
+vector and count through a checked `[u32, v64, v64, u32] -> v64` table signature. Explicit internal
+`indirectSignatures` declarations allow an empty table without a matching local
 body; undeclared signatures and malformed declarations remain errors. Missing
 or incorrectly typed table targets retain WASM bounds and type traps.
 
@@ -954,19 +954,19 @@ unit, including unpaired surrogates. Mach-O page signatures and debug offsets
 refer to the original bytes. Independent binary compiler builds use this form
 and `decodeCompilerBinary` validates and decodes it into the actual file bytes.
 
-Sessions advertising `responseModes: ["events-v1"]` also accept the request
-option `responseMode: "events-v1"`. The adapter assembles ordered data events
+Sessions advertising `responseModes: ["events"]` also accept the request
+option `responseMode: "events"`. The adapter assembles ordered data events
 from bounded replies, preserving the original returned value without joining
 one enormous JSON document. Tokens isolate the pending cursor; completion,
 cancellation, failures and session close release it. Normal requests keep the
 existing JSON response protocol. Independent binary builds negotiate this mode
 through the producer's actual capabilities.
-`graph-events-v1` is a separately advertised mode with version 2 envelopes.
+`graph-events` is a separately advertised mode with `mode`-tagged envelopes.
 Containers receive consecutive IDs on first traversal; references reuse only
 completed containers. This preserves actual object sharing in compiler data
 without removing instructions or source metadata. Active-ancestor references
 remain cycle errors. Each physical object's properties are visited once in
-this explicit mode; ordinary and `events-v1` traversal are unchanged. Binary
+this explicit mode; ordinary and `events` traversal are unchanged. Binary
 builds with `debug: true` prefer graph responses when advertised, preserving
 shared source spans throughout the debug mapping. Other builds prefer events;
 graph-only producers and ground JSON producers remain supported. This choice

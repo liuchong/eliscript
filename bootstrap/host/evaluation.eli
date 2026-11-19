@@ -12,13 +12,12 @@
   (import "./project.mjs" buildProject)
 
   (defconst evaluationResultFormat "eliscript-evaluation-result")
-  (defconst evaluationResultVersion 1)
 
   (defconst projectDirectory
     (resolve (dirname (fileURLToPath (js* "import.meta.url"))) "../.."))
 
   (defconst evaluationCompilerDigest
-    (js-call (js-call (createHash "sha256") :update "eliscript-evaluation-session-v1") :digest "hex"))
+    (js-call (js-call (createHash "sha256") :update "eliscript-evaluation-session") :digest "hex"))
 
   (defun host-typeof (value)
     (js* "typeof value"))
@@ -36,7 +35,6 @@
     (let ((error (new globalThis.Error message))
           (diag (js-object
                   :format "eliscript-diagnostic"
-                  :version 1
                   :code "ELI-E0001"
                   :severity "error"
                   :phase "evaluation-request"
@@ -163,7 +161,6 @@
                (location (remapLocation raw-loc adjustment))
                (out (js-object
                       :format "eliscript-diagnostic"
-                      :version 1
                       :code "ELI-E0002"
                       :severity "error"
                       :phase "evaluation-runtime"
@@ -177,7 +174,6 @@
   (defun resultBase (request revision)
     (js-object
       :format evaluationResultFormat
-      :version evaluationResultVersion
       :id (if (and request (not (nil? (get request :id))) (not (undefined? (get request :id))))
             (get request :id)
             nil)
@@ -335,7 +331,7 @@
            (result (await
                      (buildProject
                        (js-object
-                         :entry filename
+                         :entries (js-array filename)
                          :outDir directory
                          :root root
                          :portableEntries (js-array)
@@ -344,7 +340,7 @@
                          :compiler (get session :compiler)
                          :compilerDigest evaluationCompilerDigest
                          :sourceMapReference false))))
-           (modulePath (get result :entryOutput))
+           (modulePath (aref (get result :entryOutputs) 0))
            (url (str (get (pathToFileURL modulePath) :href) "?artifact=" (get session :artifact))))
       (js-object
         :module (await (host-dynamic-import url))
@@ -573,7 +569,6 @@
 
   (export
     evaluationResultFormat
-    evaluationResultVersion
     EvaluationSession
     evaluateOnce
     readEvaluationFile))

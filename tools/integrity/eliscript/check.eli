@@ -296,7 +296,7 @@
                          (js-object :root directory :contract contract :trackedFiles tracked :compiler compiler)))
            (dependency (if (get options :artifactsOnly) undefined (await (checkDependencyBoundaries configured))))
            (artifacts (if (get options :dependenciesOnly) undefined (await (checkGeneratedArtifacts configured)))))
-      (js-object :schemaVersion 1 :format "eliscript-repository-integrity-report" :version 1
+      (js-object :format "eliscript-repository-integrity-report"
         :dependency dependency :artifacts artifacts)))
 
   (defasync main ()

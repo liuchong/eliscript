@@ -85,7 +85,6 @@
             (js-array (js-array "strict native" body 120000) (js-array "functional native" body 480000)))
           (js-call assert :strictEqual (get (sequence-execution-policy functional) :originalDeadlineMs) 60000))
         (js-call assert :strictEqual (get build-receipt :format) "eliscript-sequence-build")
-        (js-call assert :strictEqual (get build-receipt :version) 1)
         (js-call assert :strictEqual (get build-receipt :directory) directory)
         (js-call assert :notStrictEqual (get build-receipt :producerPid) (get globalThis.process :pid))
         (js-call assert :strictEqual (get build-receipt :entry) entry)
@@ -111,7 +110,7 @@
 
   (test "sequence original host launch preserves complete output identity first failure and later execution"
     (async ()
-      (let* ((context (js-object :directory (resolve root "_worktree/sequence-launch-contract")
+      (let* ((context (js-object :directory (resolve root ".eliscript-cache/sequence-launch-contract")
                         :target "native" :caseId "original-sequence" :sourceIdentity (js-object :sha256 "retained")))
              (configuration "original-run.json") (calls 0)
              (first (Object/freeze (new globalThis.Error "original child failed")))
@@ -315,16 +314,31 @@
       (let* ((trace (js-array)) (body-error (new globalThis.Error "executable body must not be read"))
              (first (js-object))
              (functions (js-array first
-               (js-object :name "heap-new" :arity 3) (js-object :name "value-kind" :arity 2)
-               (js-object :name "heap-pin" :arity 2) (js-object :name "heap-release" :arity 2)
-               (js-object :name "frame-current" :arity 1) (js-object :name "frame-unwind" :arity 2)))
+               (js-object :name "heap-new" :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+               (js-object :name "value-kind" :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+               (js-object :name "heap-pin" :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+               (js-object :name "heap-release" :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+               (js-object :name "frame-current" :arity 1 :parameterTypes (js-array "u32") :resultType "v64")
+               (js-object :name "frame-unwind" :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")))
              (exports (js-array "last-error" "heap-new" "value-kind" "heap-pin" "heap-release" "frame-current" "frame-unwind"))
              (alias (js-object)) (typed (js-object)) (input (js-object))
              (descriptor (js-object :source "中😀\ud800" :negativeZero -0
+                           :functions (js-array)
+                           :exportSignatures (js-object
+                             "last-error" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
+                             "heap-new" (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+                             "value-kind" (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+                             "heap-pin" (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+                             "heap-release" (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+                             "frame-current" (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "v64")
+                             "frame-unwind" (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
+                             "last-error-alias" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
                            :project (js-object :modules (js-array (js-object :id "source.mjs" :steps (js-array)))))))
         (Object/defineProperties first (js-object
           :name (js-object :enumerable t :get (lambda () (js-call trace :push "name") "last-error"))
           :arity (js-object :enumerable t :get (lambda () (js-call trace :push "arity") 0))
+          :parameterTypes (js-object :enumerable t :get (lambda () (js-call trace :push "parameterTypes") (js-array)))
+          :resultType (js-object :enumerable t :get (lambda () (js-call trace :push "resultType") "u32"))
           :body (js-object :enumerable t :get (lambda () (throw body-error)))))
         (Object/defineProperties alias (js-object
           :name (js-object :enumerable t :get (lambda () (js-call trace :push "alias-name") "last-error-alias"))
@@ -340,7 +354,7 @@
           :debug (js-object :enumerable t :get (lambda () (throw body-error)))))
         (let ((snapshot (snapshotNativeManagedRuntimeABI input)))
           (js-call assert :deepStrictEqual trace (js-array "typed" "abi" "typed" "functions" "typed" "exports" "descriptor"
-            "typed" "functions" "name" "arity" "exports" "aliases" "alias-name" "alias-function" "descriptor"))
+            "typed" "functions" "name" "arity" "parameterTypes" "resultType" "exports" "aliases" "alias-name" "alias-function" "descriptor"))
           (js-call assert :strictEqual (get (get snapshot :typed) :abi) "memory-u32")
           (js-call assert :deepStrictEqual (get snapshot :descriptor) descriptor)
           (js-call assert :notStrictEqual (get snapshot :descriptor) descriptor)
@@ -363,7 +377,7 @@
         (js-call assert :notStrictEqual (get snapshot :descriptor) (get lowered :descriptor))
         (js-call assert :deepStrictEqual (get snapshot :typed) (get lowered :typed))
         (js-call (get (get snapshot :typed) :functions) :forEach (lambda (fn)
-          (js-call assert :deepStrictEqual (Object/keys fn) (js-array "name" "arity"))))
+          (js-call assert :deepStrictEqual (Object/keys fn) (js-array "name" "arity" "parameterTypes" "resultType"))))
         (put (aref (get (get snapshot :typed) :functions) 0) :arity -1)
         (js-call assert :throws (lambda () (snapshotNativeManagedRuntimeABI snapshot))
           (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003"))))
@@ -456,7 +470,7 @@
     (let* ((source (await (readFile configuration "utf8"))) (input (JSON/parse source))
            (index sequence-execution-index)
            (context (js-object
-             :directory (resolve root "_worktree/evidence/goal-0.0.2"
+             :directory (resolve root ".eliscript-cache/sequence-process"
                (str "sequence-process-" (get globalThis.process :pid)) (str index "-" engine))
              :caseId (str "original-sequence:" (get input :host) ":" engine ":" (get input :mode) ":" index)
              :target (if (= (get input :host) "reference") "javascript" (get input :host))

@@ -1,26 +1,13 @@
 (module bootstrap.compiler.project
   (defconst project-plan-format "eliscript-project-plan")
   (defconst typeof-value (lambda (value) (js* "typeof value")))
-  (defconst project-plan-version 1)
   (defconst project-plan-max-iterations 100000)
   (defconst project-build-report-format "eliscript-build-report")
-  (defconst project-build-report-version 1)
-  (defconst project-build-report-multi-version 2)
   (defconst project-request-format "eliscript-project-request")
-  (defconst project-request-version 1)
-  (defconst project-request-multi-version 2)
-  (defconst project-configuration-version 1)
-  (defconst project-configuration-multi-version 2)
   (defconst build-operation-format "eliscript-build-operation")
-  (defconst build-operation-version 1)
-  (defconst build-operation-multi-version 2)
   (defconst check-operation-format "eliscript-check-operation")
-  (defconst check-operation-version 1)
   (defconst project-check-report-format "eliscript-check-report")
-  (defconst project-check-report-version 1)
   (defconst project-cache-format "eliscript-project-cache")
-  (defconst project-cache-version 2)
-  (defconst project-cache-ground-version 1)
 
   ;; Compiler metadata uses the same deterministic UTF-16 order as Array.sort.
   ;; This intentionally does not perform locale collation or normalization.
@@ -38,7 +25,7 @@
     (lambda (message)
       (let ((error (new globalThis.Error message)))
         (put error :eliscriptDiagnostic
-          (js-object :format "eliscript-diagnostic" :version 1
+          (js-object :format "eliscript-diagnostic"
             :code "ELI-B0003" :severity "error" :phase "project-plan" :message message))
         (throw error))))
   (defconst array-p Array/isArray)
@@ -63,27 +50,27 @@
     (lambda (message)
       (let ((error (new globalThis.Error message)))
         (put error :eliscriptDiagnostic
-          (js-object :format "eliscript-diagnostic" :version 1
+          (js-object :format "eliscript-diagnostic"
             :code "ELI-B0001" :severity "error" :phase "project-build" :message message))
         (throw error))))
   (defconst project-configuration-fail
     (lambda (message filename)
       (let* ((error (new globalThis.Error message))
              (diagnostic
-              (js-object :format "eliscript-diagnostic" :version 1
+              (js-object :format "eliscript-diagnostic"
                 :code "ELI-B0002" :severity "error" :phase "project-config" :message message)))
         (when (funcall globalThis.Boolean filename)
           (put diagnostic :location (js-object :file filename)))
         (put error :eliscriptDiagnostic diagnostic)
         (throw error))))
-  (defconst project-configuration-keys-v1
-    (js-array "schemaVersion" "sourceRoot" "entry" "outDir"
+  (defconst project-configuration-keys
+    (js-array "sourceRoot" "entries" "outDir"
               "portableEntries" "macroCapabilities"
               "macroFileDependencies" "cache"))
-  (defconst project-configuration-keys-v2
-    (js-array "schemaVersion" "sourceRoot" "entries" "outDir"
-              "portableEntries" "macroCapabilities"
-              "macroFileDependencies" "cache"))
+  (defconst project-manifest-keys
+    (js-array "format" "entries" "modules" "digest" "cache"))
+  (defconst project-cache-keys
+    (js-array "format" "compilerDigest" "mode" "portableEntries" "modules" "digest"))
   (defconst supported-macro-capabilities (js-array "read-file"))
 
   (defun require-string (value label)
@@ -135,9 +122,9 @@
   (defun project-request (input)
     (unless (funcall object-p input)
       (project-request-fail "project request must be an object"))
-    (let* ((entry (get input :entry))
-           (entries-input (get input :entries))
-           (multi (not (undefined? entries-input)))
+    (when (js-call globalThis.Object :hasOwn input "entry")
+      (project-request-fail "project request entries must be a non-empty string array"))
+    (let* ((entries-input (get input :entries))
            (out-dir (get input :outDir))
            (root (get input :root))
            (portable-input (get input :portableEntries))
@@ -189,28 +176,18 @@
                  (not (js-call macro-capabilities :includes "read-file")))
         (project-request-fail
           "macro file dependencies require the read-file macro capability"))
-      (when (and multi (not (undefined? entry)))
-        (project-request-fail "project request cannot contain entry and entries"))
-      (when multi
-        (unless (and (funcall array-p entries-input)
-                     (> (get entries-input :length) 0)
-                     (js-call entries-input :every
-                       (lambda (source)
-                         (and (= (funcall typeof-value source) "string")
-                              (> (get source :length) 0)))))
-          (project-request-fail
-            "project request entries must be a non-empty string array")))
+      (unless (and (funcall array-p entries-input)
+                   (> (get entries-input :length) 0)
+                   (js-call entries-input :every
+                     (lambda (source)
+                       (and (= (funcall typeof-value source) "string")
+                            (> (get source :length) 0)))))
+        (project-request-fail
+          "project request entries must be a non-empty string array"))
       (let ((entries
-             (if multi
-                 (normalize-strings
-                   entries-input "project request entries" t)
-               (progn
-                 (unless (and (= (funcall typeof-value entry) "string")
-                              (> (get entry :length) 0))
-                   (project-request-fail "project request entry is invalid"))
-                 (js-array entry)))))
-        (when (and multi
-                   (not (= (get entries :length) (get entries-input :length))))
+             (normalize-strings
+               entries-input "project request entries" t)))
+        (unless (= (get entries :length) (get entries-input :length))
           (project-request-fail
             "project request entries must not contain duplicates"))
         (unless (and (= (funcall typeof-value out-dir) "string")
@@ -222,7 +199,7 @@
           (project-request-fail "project request root is invalid"))
         (unless (funcall boolean-p use-cache)
           (project-request-fail "project request cache is invalid"))
-        (when (and multi (> (get entries :length) 1)
+        (when (and (> (get entries :length) 1)
                    (> (get portable-entries :length) 0))
           (project-request-fail
             "multi-entry portable project requests are not supported"))
@@ -230,29 +207,16 @@
         (js-call globalThis.Object :freeze macro-capabilities)
         (js-call globalThis.Object :freeze macro-file-dependencies)
         (js-call globalThis.Object :freeze entries)
-        (if multi
-            (js-call globalThis.Object :freeze
-              (js-object
-                :format project-request-format
-                :version project-request-multi-version
-                :entries entries
-                :outDir out-dir
-                :root root
-                :portableEntries portable-entries
-                :macroCapabilities macro-capabilities
-                :macroFileDependencies macro-file-dependencies
-                :useCache use-cache))
-          (js-call globalThis.Object :freeze
-            (js-object
-              :format project-request-format
-              :version project-request-version
-              :entry entry
-              :outDir out-dir
-              :root root
-              :portableEntries portable-entries
-              :macroCapabilities macro-capabilities
-              :macroFileDependencies macro-file-dependencies
-              :useCache use-cache))))))
+        (js-call globalThis.Object :freeze
+          (js-object
+            :format project-request-format
+            :entries entries
+            :outDir out-dir
+            :root root
+            :portableEntries portable-entries
+            :macroCapabilities macro-capabilities
+            :macroFileDependencies macro-file-dependencies
+            :useCache use-cache)))))
 
   (defun build-operation-request (input)
     (unless (funcall object-p input)
@@ -297,7 +261,6 @@
              (js-call globalThis.Object :freeze
                (js-object
                  :format build-operation-format
-                 :version build-operation-version
                  :mode "single"
                  :input source-input
                  :output output
@@ -305,31 +268,17 @@
                  :portableEntries portable-entries)))))
         ((= mode "project")
          (let ((request (project-request input)))
-           (if (= (get request :version) project-request-multi-version)
-               (js-call globalThis.Object :freeze
-                 (js-object
-                   :format build-operation-format
-                   :version build-operation-multi-version
-                   :mode "project"
-                   :entries (get request :entries)
-                   :outDir (get request :outDir)
-                   :root (get request :root)
-                   :portableEntries (get request :portableEntries)
-                   :macroCapabilities (get request :macroCapabilities)
-                   :macroFileDependencies (get request :macroFileDependencies)
-                   :useCache (get request :useCache)))
-             (js-call globalThis.Object :freeze
-               (js-object
-                 :format build-operation-format
-                 :version build-operation-version
-                 :mode "project"
-                 :entry (get request :entry)
-                 :outDir (get request :outDir)
-                 :root (get request :root)
-                 :portableEntries (get request :portableEntries)
-                 :macroCapabilities (get request :macroCapabilities)
-                 :macroFileDependencies (get request :macroFileDependencies)
-                 :useCache (get request :useCache))))))
+           (js-call globalThis.Object :freeze
+             (js-object
+               :format build-operation-format
+               :mode "project"
+               :entries (get request :entries)
+               :outDir (get request :outDir)
+               :root (get request :root)
+               :portableEntries (get request :portableEntries)
+               :macroCapabilities (get request :macroCapabilities)
+               :macroFileDependencies (get request :macroFileDependencies)
+               :useCache (get request :useCache)))))
         (t
          (project-request-fail "unsupported build operation mode")))))
 
@@ -339,7 +288,6 @@
     (let* ((request
             (project-request
               (js-object
-                :entry (get input :entry)
                 :entries (get input :entries)
                 :outDir "."
                 :root (object-field input "root" nil)
@@ -350,15 +298,11 @@
                 :macroFileDependencies
                 (object-field input "macroFileDependencies" (js-array))
                 :useCache false)))
-           (entries
-            (if (= (get request :version) project-request-multi-version)
-                (get request :entries)
-              (js-array (get request :entry)))))
+           (entries (get request :entries)))
       (js-call globalThis.Object :freeze entries)
       (js-call globalThis.Object :freeze
         (js-object
           :format check-operation-format
-          :version check-operation-version
           :mode "project"
           :entries entries
           :root (get request :root)
@@ -370,31 +314,17 @@
     (unless (funcall object-p input)
       (project-configuration-fail
         "configuration root must be an object" filename))
-    (let* ((schema-version
-            (object-field input "schemaVersion" undefined))
-           (configuration-keys
-            (cond
-              ((= schema-version project-configuration-version)
-               project-configuration-keys-v1)
-              ((= schema-version project-configuration-multi-version)
-               project-configuration-keys-v2)
-              (t
-               (project-configuration-fail
-                 (str "unsupported schemaVersion: " schema-version) filename)))))
-      (let ((unknown (js-array)))
-        (js-call (js-call globalThis.Object :keys input) :forEach
-          (lambda (key)
-            (unless (js-call configuration-keys :includes key)
-              (js-call unknown :push key))))
-        (js-call unknown :sort)
-        (when (> (get unknown :length) 0)
-          (project-configuration-fail
-            (str "unknown configuration key: " (js-nth 0 unknown))
-            filename))))
-    (let* ((schema-version
-            (object-field input "schemaVersion" undefined))
-           (source-root (object-field input "sourceRoot" "."))
-           (entry (object-field input "entry" undefined))
+    (let ((unknown (js-array)))
+      (js-call (js-call globalThis.Object :keys input) :forEach
+        (lambda (key)
+          (unless (js-call project-configuration-keys :includes key)
+            (js-call unknown :push key))))
+      (js-call unknown :sort)
+      (when (> (get unknown :length) 0)
+        (project-configuration-fail
+          (str "unknown configuration key: " (js-nth 0 unknown))
+          filename)))
+    (let* ((source-root (object-field input "sourceRoot" "."))
            (entries-input (object-field input "entries" undefined))
            (out-dir (object-field input "outDir" undefined))
            (portable-input
@@ -411,6 +341,15 @@
                             (> (get name :length) 0)))))
         (project-configuration-fail
           "portableEntries must be an array of non-empty strings" filename))
+      (unless (and (funcall array-p entries-input)
+                   (> (get entries-input :length) 0)
+                   (js-call entries-input :every
+                     (lambda (source)
+                       (and (= (funcall typeof-value source) "string")
+                            (> (get source :length) 0)))))
+        (project-configuration-fail
+          "entries must be a non-empty string array"
+          filename))
       (let* ((portable-entries
               (normalize-strings
                 portable-input "configuration portable entries" false))
@@ -425,20 +364,8 @@
                 "configuration macro file dependencies"
                 false))
              (entries
-              (if (= schema-version project-configuration-multi-version)
-                  (progn
-                    (unless (and (funcall array-p entries-input)
-                                 (> (get entries-input :length) 0)
-                                 (js-call entries-input :every
-                                   (lambda (source)
-                                     (and (= (funcall typeof-value source) "string")
-                                          (> (get source :length) 0)))))
-                      (project-configuration-fail
-                        "entries must be a non-empty string array"
-                        filename))
-                    (normalize-strings
-                      entries-input "configuration entries" t))
-                (js-array entry))))
+              (normalize-strings
+                entries-input "configuration entries" t)))
         (unless (= (get portable-entries :length)
                    (get portable-input :length))
           (project-configuration-fail
@@ -473,25 +400,20 @@
         (unless (funcall safe-relative-path-p source-root)
           (project-configuration-fail
             "sourceRoot must be a contained relative path" filename))
-        (if (= schema-version project-configuration-multi-version)
-            (progn
-              (unless (= (get entries :length) (get entries-input :length))
-                (project-configuration-fail
-                  "entries must not contain duplicates" filename))
-              (js-call entries :forEach
-                (lambda (source)
-                  (unless (funcall safe-relative-path-p source)
-                    (project-configuration-fail
-                      "entries must contain only contained relative paths"
-                      filename))))
-              (when (and (> (get entries :length) 1)
-                         (> (get portable-entries :length) 0))
-                (project-configuration-fail
-                  "multi-entry portable project configurations are not supported"
-                  filename)))
-          (unless (funcall safe-relative-path-p entry)
-            (project-configuration-fail
-              "entry must be a contained relative path" filename)))
+        (unless (= (get entries :length) (get entries-input :length))
+          (project-configuration-fail
+            "entries must not contain duplicates" filename))
+        (js-call entries :forEach
+          (lambda (source)
+            (unless (funcall safe-relative-path-p source)
+              (project-configuration-fail
+                "entries must contain only contained relative paths"
+                filename))))
+        (when (and (> (get entries :length) 1)
+                   (> (get portable-entries :length) 0))
+          (project-configuration-fail
+            "multi-entry portable project configurations are not supported"
+            filename))
         (unless (funcall safe-relative-path-p out-dir)
           (project-configuration-fail
             "outDir must be a contained relative path" filename))
@@ -499,29 +421,16 @@
         (js-call globalThis.Object :freeze macro-capabilities)
         (js-call globalThis.Object :freeze macro-file-dependencies)
         (js-call globalThis.Object :freeze entries)
-        (if (= schema-version project-configuration-multi-version)
-            (js-call globalThis.Object :freeze
-              (js-object
-                :format project-request-format
-                :version project-request-multi-version
-                :sourceRoot source-root
-                :entries entries
-                :outDir out-dir
-                :portableEntries portable-entries
-                :macroCapabilities macro-capabilities
-                :macroFileDependencies macro-file-dependencies
-                :cache cache))
-          (js-call globalThis.Object :freeze
-            (js-object
-              :format project-request-format
-              :version project-request-version
-              :sourceRoot source-root
-              :entry entry
-              :outDir out-dir
-              :portableEntries portable-entries
-              :macroCapabilities macro-capabilities
-              :macroFileDependencies macro-file-dependencies
-              :cache cache))))))
+        (js-call globalThis.Object :freeze
+          (js-object
+            :format project-request-format
+            :sourceRoot source-root
+            :entries entries
+            :outDir out-dir
+            :portableEntries portable-entries
+            :macroCapabilities macro-capabilities
+            :macroFileDependencies macro-file-dependencies
+            :cache cache)))))
 
   (defun freeze-request (request)
     (js-call globalThis.Object :freeze (get request :entries))
@@ -605,7 +514,6 @@
         (js-call globalThis.Object :freeze
           (js-object
             :format project-plan-format
-            :version project-plan-version
             :mode "standard"
             :entries (js-call globalThis.Object :freeze entry-list)
             :modules modules)))))
@@ -684,7 +592,6 @@
         (js-call globalThis.Object :freeze
           (js-object
             :format project-plan-format
-            :version project-plan-version
             :mode "portable"
             :entries initial
             :modules modules)))))
@@ -693,15 +600,14 @@
     (js-call globalThis.Object :freeze
       (js-object :cache nil :reason reason)))
 
-  (defun project-cache-version-kind (cache)
-    (cond
-      ((and (= (get cache :format) project-cache-format)
-            (= (get cache :version) project-cache-version))
-       "current")
-      ((and (undefined? (get cache :format))
-            (= (get cache :version) project-cache-ground-version))
-       "ground")
-      (t false)))
+  (defun record-keys-allowed-p (record allowed)
+    (and (funcall object-p record)
+         (js-call (js-call globalThis.Object :keys record) :every
+           (lambda (key) (js-call allowed :includes key)))))
+
+  (defun project-cache-valid-format-p (cache)
+    (and (record-keys-allowed-p cache project-cache-keys)
+         (= (get cache :format) project-cache-format)))
 
   (defun project-cache-records (identity-modules cache-modules)
     (if (not (and (funcall array-p identity-modules)
@@ -779,30 +685,25 @@
                       (get manifest :modules)))
                 (cache-modules
                  (and (funcall object-p cache) (get cache :modules)))
-                (version-kind
+                (valid-cache
                  (and (funcall object-p cache)
-                      (project-cache-version-kind cache))))
+                      (project-cache-valid-format-p cache))))
            (cond
-             ((or (not (funcall object-p manifest))
+             ((or (not (record-keys-allowed-p manifest project-manifest-keys))
                   (not (= (get manifest :format) "eliscript-project"))
-                  (not (or (= (get manifest :version) 1)
-                           (= (get manifest :version) 2)))
+                  (not (funcall array-p (get manifest :entries)))
                   (not (funcall array-p identity-modules)))
-              (project-cache-miss "manifest-version-changed"))
-             ((and (= (get manifest :version) 1)
-                   (not (= (get manifest :entry) (get input :expectedEntry))))
-              (project-cache-miss "entry-changed"))
-             ((and (= (get manifest :version) 2)
-                   (not (same-string-arrays
-                          (get manifest :entries)
-                          (get input :expectedEntries))))
+              (project-cache-miss "manifest-format-invalid"))
+             ((not (same-string-arrays
+                     (get manifest :entries)
+                     (get input :expectedEntries)))
               (project-cache-miss "entries-changed"))
              ((not (= (get input :graphDigestValid) t))
               (project-cache-miss "graph-digest-invalid"))
              ((not (funcall object-p cache))
               (project-cache-miss "cache-missing"))
-             ((not version-kind)
-              (project-cache-miss "cache-version-changed"))
+             ((not valid-cache)
+              (project-cache-miss "cache-format-invalid"))
              ((not (funcall array-p cache-modules))
               (project-cache-miss "cache-records-invalid"))
              ((not (= (get input :cacheDigestValid) t))
@@ -826,7 +727,6 @@
                       :cache
                       (js-call globalThis.Object :freeze
                         (js-object
-                          :sourceVersion (get cache :version)
                           :manifestDigest (get manifest :digest)
                           :records records))
                       :reason "verified")))))))))))
@@ -955,17 +855,12 @@
     (unless (funcall object-p build)
       (fail "project build report input must be an object"))
     (let* ((mode (require-string (get build :mode) "build report mode"))
-           (multi (not (undefined? (get build :entries))))
            (entries
-            (if multi
-                (normalize-strings
-                  (get build :entries) "build report entries" t)
-              (js-array)))
+            (normalize-strings
+              (get build :entries) "build report entries" t))
            (entry-outputs
-            (if multi
-                (normalize-strings
-                  (get build :entryOutputs) "build report entry outputs" t)
-              (js-array)))
+            (normalize-strings
+              (get build :entryOutputs) "build report entry outputs" t))
            (cache (get build :cache))
            (timings (get build :timings))
            (normalized (normalize-report-modules (get build :modules)))
@@ -996,20 +891,18 @@
         (fail "build report cache enabled must be a boolean"))
       (unless (funcall object-p timings)
         (fail "build report timings must be an object"))
-      (when (and multi
-                 (not (= (get entries :length) (get entry-outputs :length))))
+      (unless (= (get entries :length) (get entry-outputs :length))
         (fail "build report entries and outputs must have the same length"))
       (js-call globalThis.Object :freeze entries)
       (js-call globalThis.Object :freeze entry-outputs)
-      (let ((common
-             (js-object
+      (js-call globalThis.Object :freeze
+        (js-object
           :format project-build-report-format
-          :version
-          (if multi project-build-report-multi-version
-            project-build-report-version)
           :mode mode
           :root (require-string (get build :root) "build report root")
           :outDir (require-string (get build :outDir) "build report output directory")
+          :entries entries
+          :entryOutputs entry-outputs
           :manifest (require-string (get build :manifest) "build report manifest")
           :digest (require-string (get build :digest) "build report digest")
           :portableEntries
@@ -1045,18 +938,7 @@
               :totalMs
               (report-milliseconds
                 (get timings :totalMs) "build report total time")))
-          :modules modules)))
-        (if multi
-            (js-call globalThis.Object :assign common
-              (js-object :entries entries :entryOutputs entry-outputs))
-          (js-call globalThis.Object :assign common
-            (js-object
-              :entry
-              (require-string (get build :entry) "build report entry")
-              :entryOutput
-              (require-string
-                (get build :entryOutput) "build report entry output"))))
-        (js-call globalThis.Object :freeze common))))
+          :modules modules))))
 
   (defun normalize-check-modules (modules)
     (unless (funcall array-p modules)
@@ -1117,7 +999,6 @@
       (js-call globalThis.Object :freeze
         (js-object
           :format project-check-report-format
-          :version project-check-report-version
           :status "ok"
           :mode mode
           :root (require-string (get check :root) "project check report root")
@@ -1130,29 +1011,19 @@
 
   (export
     project-plan-format
-    project-plan-version
     project-plan
     portable-project-plan
     project-build-report-format
-    project-build-report-version
-    project-build-report-multi-version
     project-build-report
     project-request-format
-    project-request-version
-    project-request-multi-version
     project-request
     project-configuration
     build-operation-format
-    build-operation-version
-    build-operation-multi-version
     build-operation-request
     check-operation-format
-    check-operation-version
     check-operation-request
     project-check-report-format
-    project-check-report-version
     project-check-report
     project-cache-format
-    project-cache-version
     project-cache-lookup
     project-cache-decision))

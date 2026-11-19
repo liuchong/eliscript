@@ -75,7 +75,7 @@
         (js-call (expect assignmentOffset) :toBeGreaterThanOrEqual (get "(setq " :length))
         (let* ((preceding (js-call (get constantWrite :source) :slice 0 assignmentOffset)) (assignmentLine (get (js-call preceding :split "\n") :length))
                (assignmentColumn (- assignmentOffset (js-call preceding :lastIndexOf "\n"))) (assignmentMessage (str "cannot assign to immutable binding: " constant))
-               (assignmentDiagnostic (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-A0001" :severity "error" :phase "analysis" :message assignmentMessage
+               (assignmentDiagnostic (js-object :format "eliscript-diagnostic" :code "ELI-A0001" :severity "error" :phase "analysis" :message assignmentMessage
                  :location (js-object :file (get constantWrite :filename) :start (js-object :offset assignmentOffset :line assignmentLine :column assignmentColumn)
                    :end (js-object :offset (+ assignmentOffset (get constant :length)) :line assignmentLine :column (+ assignmentColumn (get constant :length))))))
                (renderedAssignmentMessage (str (get constantWrite :filename) ":" assignmentLine ":" assignmentColumn ": " assignmentMessage))
@@ -120,7 +120,7 @@
   (test "100000 deterministic reader and program mutations preserve every invariant" (async ()
     (await (proveFuzzProgramEmission))
     (let ((report (await (runAcceptanceFuzz))))
-      (js-call (expect report) :toMatchObject (js-object "schemaVersion" 1 "format" "eliscript-reader-program-fuzz" "version" 1 "verified" t "seed" "0x454c4931" "inputs" 100000 "readerInputs" 50000 "programInputs" 50000 "maximumSourceCharacters" 4096 "maximumCorpusBytes" 67108864 "corpusReplayed" t "reader" (js-object "accepted" 46889 "rejected" 53111 "deterministicResults" 100000 "structuredDiagnostics" 53111 "spanValidated" 46889 "roundTrips" 46889 "seedAgreements" 100000 "resultDigest" "31961b6ffb8ce276a67db1b7cce2b723cf512b6c1518f8023985606535c69e7e") "compiler" (js-object "accepted" 10171 "rejected" 39829 "structuredDiagnostics" 39829 "resultDigest" "b31c1f4546e42b3501fcc8a97403b171a6d3bb0ba8976bbe8bf305a235db7024") "corpusDigest" "4b49f0e21a825e41344fc29387b5298462d17cd1140b2f1f06076a18fe1f8cab"))
+      (js-call (expect report) :toMatchObject (js-object "format" "eliscript-reader-program-fuzz" "verified" t "seed" "0x454c4931" "inputs" 100000 "readerInputs" 50000 "programInputs" 50000 "maximumSourceCharacters" 4096 "maximumCorpusBytes" 67108864 "corpusReplayed" t "reader" (js-object "accepted" 46889 "rejected" 53111 "deterministicResults" 100000 "structuredDiagnostics" 53111 "spanValidated" 46889 "roundTrips" 46889 "seedAgreements" 100000 "resultDigest" "31961b6ffb8ce276a67db1b7cce2b723cf512b6c1518f8023985606535c69e7e") "compiler" (js-object "accepted" 10171 "rejected" 39829 "structuredDiagnostics" 39829 "resultDigest" "b31c1f4546e42b3501fcc8a97403b171a6d3bb0ba8976bbe8bf305a235db7024") "corpusDigest" "4b49f0e21a825e41344fc29387b5298462d17cd1140b2f1f06076a18fe1f8cab"))
       (js-call (expect (get report :corpusBytes)) :toBeGreaterThan 1000000) (js-call (expect (get report :corpusBytes)) :toBeLessThanOrEqual (get report :maximumCorpusBytes))
       (be (+ (get (get report :reader) :accepted) (get (get report :reader) :rejected)) 100000)
       (js-call (expect (get (get report :reader) :accepted)) :toBeGreaterThan 10000) (js-call (expect (get (get report :reader) :rejected)) :toBeGreaterThan 10000)

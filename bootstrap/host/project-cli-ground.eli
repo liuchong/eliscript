@@ -6,7 +6,7 @@
   (import "./build.mjs" executeBuild)
 
   (defconst usage
-    "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a versioned project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --json            Print the versioned build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
+    "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --json            Print the build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
 
   (defconst whitespace-pattern (new globalThis.RegExp "[\\t\\n\\r ]" "u"))
   (defconst delimiter-pattern (new globalThis.RegExp "[\\s,\\]}]" "u"))
@@ -15,7 +15,6 @@
     (let ((error (new globalThis.Error message))
           (diag (js-object
                   :format "eliscript-diagnostic"
-                  :version 1
                   :code "ELI-B0002"
                   :severity "error"
                   :phase "project-config"
@@ -172,8 +171,7 @@
             (when (undefined? outDir)
               (throw (new globalThis.Error "missing --out-dir"))))
           (js-object
-            :entry (if (= (js-length entries) 1) (aref entries 0) undefined)
-            :entries (if (> (js-length entries) 1) entries undefined)
+            :entries (if (> (js-length entries) 0) entries undefined)
             :outDir outDir
             :root root
             :portableEntries portableEntries
@@ -199,6 +197,7 @@
              (root (resolve directory (get configuration :sourceRoot)))
              (result
                (js-object
+                 :entries (js-call (get configuration :entries) :map (lambda (entry) (resolve root entry)))
                  :outDir (resolve directory (get configuration :outDir))
                  :root root
                  :portableEntries (Array/from (get configuration :portableEntries))
@@ -206,11 +205,6 @@
                  :macroFileDependencies (Array/from (get configuration :macroFileDependencies))
                  :useCache (get configuration :cache)
                  :configuration canonical)))
-        (if (= (get configuration :version) 2)
-          (put result :entries
-            (js-call (get configuration :entries) :map (lambda (entry) (resolve root entry))))
-          (put result :entry
-            (resolve root (get configuration :entry))))
         result)))
 
   (defasync execute (arguments_ &rest __opt)
@@ -224,13 +218,8 @@
           (if (not (undefined? (get parsed :configuration)))
             (let ((compiler (await (loadCompiler (get opts :moduleDirectory)))))
               (setq request (await (readProjectConfiguration (get parsed :configuration) compiler)))
-              (cond
-                ((not (undefined? (get parsed :entries)))
-                 (put request :entries (get parsed :entries))
-                 (Reflect/deleteProperty request "entry"))
-                ((not (undefined? (get parsed :entry)))
-                 (put request :entry (get parsed :entry))
-                 (Reflect/deleteProperty request "entries")))
+              (unless (undefined? (get parsed :entries))
+                (put request :entries (get parsed :entries)))
               (unless (undefined? (get parsed :outDir))
                 (put request :outDir (get parsed :outDir)))
               (unless (undefined? (get parsed :root))
@@ -241,7 +230,6 @@
                 (put request :useCache false)))
             (setq request
               (js-object
-                :entry (get parsed :entry)
                 :entries (get parsed :entries)
                 :outDir (get parsed :outDir)
                 :root (get parsed :root)

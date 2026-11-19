@@ -15,8 +15,8 @@
 
 The Emacs worker can now carry canonical Eliscript values without erasing
 their language categories through ordinary JSON. The new encoding is explicit,
-versioned, deterministic, resource-bounded, and negotiated independently of
-worker protocol version 1.
+deterministic, resource-bounded, and negotiated independently of the worker
+protocol.
 
 This is an editor/worker transport adapter. It does not define List, Vector,
 Map, Set, identifier, metadata, equality, or hashing semantics; those remain
@@ -28,14 +28,14 @@ and is not evidence for its correctness.
 The worker ready message advertises two additive capabilities:
 
 ```text
-value-codec-v1
+value-codec
 runtime-resolution
 ```
 
 A request opts in with:
 
 ```json
-{"valueEncoding":"eliscript-value-v1"}
+{"valueEncoding":"eliscript-value"}
 ```
 
 Every encoded success response and progress message repeats the same
@@ -43,8 +43,8 @@ Every encoded success response and progress message repeats the same
 and treats missing, unexpected, or mismatched response encodings as protocol
 errors.
 
-Requests without `valueEncoding` retain the stable protocol-v1 JSON behavior.
-The protocol version therefore remains 1; the new value family is not silently
+Requests without `valueEncoding` retain the stable JSON behavior. The value
+family is not silently
 enabled for existing callers.
 
 ## Wire Values
@@ -133,20 +133,20 @@ using JSON-compatible values.
 
 ## Compatibility
 
-The `eliscript-value-v1` identifier, opt-in negotiation, wire tags, category
+The `eliscript-value` identifier, opt-in negotiation, wire tags, category
 distinctions, deterministic non-streaming ordering, default limits, structured
-failure families, and Emacs record mapping are stable. The ground protocol-v1
+failure families, and Emacs record mapping are stable. The ground protocol
 JSON path remains unchanged. Unsupported executable and host-identity values
 remain outside the codec rather than acquiring a lossy fallback.
 
 ## Acceptance Criteria
 
-- **WVC-01:** Worker protocol version remains 1 and ground requests preserve
+- **WVC-01:** Ground requests preserve
   their existing JSON behavior.
 - **WVC-02:** Ready messages advertise value codec and runtime resolution
   capabilities.
 - **WVC-03:** Requests, success responses, and progress messages negotiate the
-  exact `eliscript-value-v1` identifier.
+  exact `eliscript-value` identifier.
 - **WVC-04:** List, Vector, Map, Set, Keyword, Symbol, and metadata categories
   survive JavaScript encode/decode.
 - **WVC-05:** `undefined`, NaN, infinities, and negative zero survive without

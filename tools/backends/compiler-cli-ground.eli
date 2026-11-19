@@ -576,7 +576,7 @@
                                            (let ((hash (createHash "sha256")))
                                              (forEachCompilerMetadataChunk
                                                (js-object
-                                                 :schema 1
+                                                 :format "eliscript-cli-request-cache"
                                                  :productIdentity (get artifact :productIdentity)
                                                  :sourceIdentity (get artifact :sourceIdentity)
                                                  :artifactIdentity (get artifact :artifactIdentity)
@@ -618,7 +618,7 @@
                                         (debug-expected (if has-debug (get meta :debugBytes) 0))
                                         (sidecar-expected (if has-sidecar (get meta :sidecarBytes) 0))
                                         (expected-total (+ product-expected debug-expected sidecar-expected)))
-                                   (if (not (and (= (get meta :schema) 1)
+                                   (if (not (and (= (get meta :format) "eliscript-cli-request-cache")
                                                  (Number/isSafeInteger product-expected) (>= product-expected 0)
                                                  (= (value-type (get meta :productSha256)) "string")
                                                  (or (not has-debug)
@@ -745,7 +745,7 @@
                                            (setq stage-dir (+ cache-dir ".tmp-" (funcall unique-suffix)))
                                            (await (mkdir stage-dir (js-object :recursive t)))
                                            (let ((meta (js-object
-                                                         :schema 1
+                                                         :format "eliscript-cli-request-cache"
                                                          :productBytes (get product-bytes :byteLength)
                                                          :productSha256 (funcall digest-bytes product-bytes)
                                                          :hasDebug has-debug
@@ -817,7 +817,7 @@
   (defun renderCompilerCLIError (error &optional options)
     (let ((json (and (not (nullish? options)) (get options :json))))
       (if json
-        (JSON/stringify (js-object :format "eliscript-compiler-cli-error" :version 1 :error (compilerFailure error)))
+        (JSON/stringify (js-object :format "eliscript-compiler-cli-error" :error (compilerFailure error)))
         (if (and (not (nullish? error)) (= (value-type (get error :stack)) "string"))
           (get error :stack)
           (if (and (not (nil? error)) (= (value-type error) "object"))

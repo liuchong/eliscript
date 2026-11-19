@@ -3,14 +3,13 @@
 
   (defconst formatter-format "eliscript-formatter")
   (defconst typeof-value (lambda (value) (js* "typeof value")))
-  (defconst formatter-version 1)
   (defconst formatter-width 88)
   (defconst formatter-indent 2)
   (defconst trailing-horizontal-whitespace-pattern (new globalThis.RegExp "[ \\t]+$" "u"))
   (defconst formatter-fail
     (lambda (message filename)
       (let* ((error (new globalThis.Error message))
-             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+             (diagnostic (js-object :format "eliscript-diagnostic"
                :code "ELI-F0001" :severity "error" :phase "formatter" :message message)))
         (when (funcall globalThis.Boolean filename)
           (put diagnostic :location (js-object :file filename)))
@@ -362,7 +361,6 @@
 
   (export
     formatter-format
-    formatter-version
     formatter-width
     formatter-indent
     format-source))

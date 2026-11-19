@@ -2070,19 +2070,17 @@ stats 无退役槽及最大空闲块计数，liveValues 未满时不得虚构槽
 
 本批因此不再追加微型常量池，而实现显式的完整编译器资源档：
 `full-compiler` 固定 maxSlots=4194303、initialBytes=134217728、
-maxBytes=1073741824、extendedHeap=true，原始内存 initialPages=4096、
+maxBytes=1073741824，原始内存 initialPages=4096、
 maximumPages=65535、auto=16777216。该档在首次取样前冻结；受控进程仍使用
 既定构建预算，不将运行时配置当作解除外部内存监控的理由。原 small 与
 full-runtime 档、原门槛和原失败均保留，新增档只推进完整功能，不据此
 将原资源/性能验收改判为通过。
 
-实现分工归原 H02/H03/H04/M03/Q03：运行时新增显式 heap-new-extended，
-采用每 heap 的 slot mask/shift 和代际上限；旧 heap-new 保持原 20 位槽、
-12 位代际、4095 永久退役，新最大档为 22 位槽、10 位代际、1023 永久退役，
-均不得回绕或令过期句柄重新有效。WASM/native 构造路线迁移到 `.eli`，仅在
-显式 opt-in 时选择新构造器；原 ESM/TLA 和全图先验证的宿主 IO 保留为未改写
-旧适配器，不以 require 降低合同，不新写 JavaScript。相关源码与原/新边界
-测试完整冻结后统一生成和验收，未验收前不关闭任何整项或增加九格计分。
+当前受管堆只有 `heap-new(slotsCeiling, initialBytes, maxBytes)` 一个构造入口。
+值采用 Val64；动态句柄固定为 24 位槽号和 24 位代际，到顶永久退役而不回绕。
+槽表、位图与对象区独立按需增长，全部堆拥有容量都计入 `maxBytes`。
+当前 `full-compiler` 资源参数以 `tools/backends/compiler-build.eli` 的正式配置为准；
+下列先前测量保留其真实结果，不能作为本次架构的验收依据。
 旧档唯一完整 WASM 诊断随后真实结束：799.451 秒、峰值 2201862144 字节、
 退出 1、清理完成，lastPhase=`runtime-program-read`。失败后第一份 stats
 为 usedBytes=162681912、capacityBytes=268435456、liveValues=881036、
@@ -2092,7 +2090,7 @@ native 标准链因此按归属核对后主动取消：1597.321 秒、峰值 623
 字节、exit=143、reason=cancelled、清理完成。它没有返回内部容量错误，
 不写成容量或限时实测失败，也不继续消耗旧档无解的运行。两条旧运行均已
 收口，后续仅推进新显式档的完整代码批与一次统一验收。
-扩展档及两构造器的 `.eli` 迁移整批完成后，唯一 Bootstrap 已通过，4.670 秒、
+先前容量迁移批次的唯一 Bootstrap 曾通过，4.670 秒、
 峰值 179601408 字节、退出 0 且清理完成。初次缺括号和新测试误用尚不支持的
 `dolist` 均保留失败，修齐本批源码后才运行行为验证。Node 下构建工具、
 加载器、矩阵和记录入口 29 项通过，包含真实 native 且禁用 WASM 构造器的
@@ -2492,8 +2490,8 @@ flowchart LR
 
 | 施工 | 基线符号及位置 | 精确变更 | 对应最终验收 |
 | --- | --- | --- | --- |
-| [x] CAP01 | memory.eli:329 `heap-new-extended`、336 `heap-new-layout` | 显式档新增 maxSlots 8388607、slotBits 23、generationMax 511；20/21/22位、永久退役、防ABA、1GiB池上限均保持。23位表201326592字节，最小初始池201326624 | 实际八百万表、23位511代全部退休/陈旧引用、FIFO/分配失败恢复、旧布局原断言 |
-| [x] CAP02 | compiler-build.eli:32 `full-compiler`；managed-runtime.eli `readManagedAllocatorSnapshot` | 仅该profile maxSlots=8388607、initialBytes=268435456，maxBytes仍1073741824；原memory4096/65535及旧profile不变；快照识别23位，native复用相同分配器 | 两类实际WASM factory与真实native构造/快照/边界、原资源档精确值 |
+| [ ] CAP01 | `heap-new` / 统一 Val64 布局 | 唯一构造器；24 位槽号与 24 位代际；弹性 slot/bitmap/object Arena；控制头及动态容量完整计入总预算；到顶退役不回绕 | 当前源码下验证大堆、退役/陈旧引用、FIFO、分配失败回滚与回收后恢复；待集中验收 |
+| [ ] CAP02 | compiler-build.eli `full-compiler`；managed-runtime.eli `readManagedAllocatorSnapshot` | 显式预算保持 maxSlots=8388607、initialBytes=268435456、maxBytes=1073741824、memory4096/65535；快照使用唯一 Control 字节偏移和24位动态句柄，Native/WASM使用相同预算模型 | 当前源码下实际 WASM/Native 构造、快照、边界及资源参数验收；待集中执行 |
 | [x] CAP03 | compiler-session.eli:664 `session-protocol` deserialize-ir 分支 | 将 `(session-string input "text" undefined)` 改交 `(get input :text undefined)` 给原 `deserialize-ir-program`，由原schema validator处理类型；不改IR语法或接受范围 | 新compiler-session-protocol Eli用实际独立编译器检查6类非法值的ELI-I0001与同session恢复；原完整sequence保留 |
 | [x] CAP04 | 原literal-runtime.test.mjs五组、project adapter literal分支、core corpus:619源审计 | 整套literal测试及受影响source-archive测试迁Eli；hostSource为真实完整生成测试原文，保独立seed/selected算法、完整字节/map/值/错误/codec及原时限。项目adapter和core corpus用Eli facade只替换受影响literal能力，旧其余实现原字节改名ground；source-only精确绑定Eli审计函数完整form/span/真实hash，最终恢复全部原coverage顺序，不冒充semantic覆盖 | 全部原case及源证据拒绝、5原标题/时限/13模块、源码审计真实执行与独立覆盖、原完整corpus与source-archive全用例 |
 | [x] CAP05 | bootstrap.el工具/测试映射与.gitignore | 新Eli工具和测试统一从维护中Emacs Lisp起点生成；新中间.mjs忽略且最终从index排除，保留未修改ground来源字节；Makefile以bootstrap-backends前置生成，并将新增Eli用例接入原全量门禁 | 全B/全C完成后一次Bootstrap及集中回归，再生成同源三镜像执行九格和原门禁 |
@@ -5389,7 +5387,7 @@ join 调用以带源位置的 ELI-B0001 明确拒绝。下一批接续既有数�
 
 普通数组拼接、源码转换回调、默认对象/数组转文字、方法捕获和参数效果已
 实现；空函数表新增真实 Red 证明内部调用类型不能依赖恰好存在同参数数目的
-函数体。直接发射器现支持显式 `indirectArities` 声明，仍拒绝未声明的调用
+函数体。直接发射器现支持显式 `indirectSignatures` 声明，仍拒绝未声明的调用
 类型、非法声明、缺少函数表和不匹配参数；实际越界或类型不匹配由 WASM trap
 保留。此项不代表完整动态对象转换或编译器宿主完成。
 
@@ -6339,3 +6337,111 @@ WASM、真实 native 与独立 Node 中执行。扩充的 77 组 JSON、12 组�
 
 正式性能仍 DEFERRED / NOT ACCEPTED，完整九格仍 0/9、版本 0.0.1。
 保留原 Reader、大 JSON 解码与远端限时记录，不原样重试已暂缓候选。
+
+## 统一受管内存与值 ABI（正式实现）
+
+本节规定唯一正式的受管值与内存 ABI。本文中带有运行身份的测量记录只证明其对应输入，不替代当前源码的统一验收。
+
+### 值编码
+
+- 托管语言值为 64 位无符号位串 `Val64`，地址/长度/标志仍为 32 位
+  `addr32`。
+- 低区单例：`0` 为 `nil`（兼 ABI 失败返回）、`1` 为 `false`、`2` 为
+  `true`、`3` 为 `undefined`；`4`、`5`、`6` 为私有 `hole`、
+  `unmaterialized`、`materializing`，公开入口确定性拒绝。
+- 普通双精度值内联：`raw + 2^48`，覆盖 `±0.0`、有限数、`±Infinity`、
+  规范 `NaN` 及原始位 `< 0xFFF7_0000_0000_0000` 的负 `NaN`。
+- 原始位 `>= 0xFFF7_0000_0000_0000` 的碰撞负 `NaN` 装箱为不可变
+  `kind=4` `RawNaN` 块，原始 64 位逐位保真；算术产生的 `NaN` 统一规范化。
+- 动态句柄：`0xFFF8_<gen24>_<slot24>`；槽位与代数均为 24 位，到顶退役，
+  不回绕。
+- 只读常量句柄：`0xFFF9_<roImageSlot16>_<roIndex32>`，仅指向编译期密封
+  字符串与编译期碰撞 `RawNaN`；实例关闭后失效。
+- 高区 `0xFFFA..0xFFFF` 保留非法。
+
+### 线性内存与竞技场
+
+- 实例低 `256` 字节为固定控制头。下列位置均为**字节偏移**：`0` 为外层分配游标，
+  `4` 为生命周期令牌，`8` 为 `last-error`，`12` 为活对象头；
+  `72..100` 每隔四字节记录 `roBase=256`、`roDir`、`roCount`、`roImageSlot`、
+  `imageDataEnd`、`outerFreeHead`、`metaDir`、`metaCount`。
+- `ROData` 位于 `[256 .. imageDataEnd)`，并通过 Section 11 Active Data
+  Segment（WASM）或 Mach-O `__TEXT,__const` / ELF `.rodata`（Native）
+  装载；动态分配游标初始化为 `imageDataEnd`，`retire` 不重置该游标。
+- 固定 `control` 为 `882` 个 `u32` 字（payload `3,528` 字节，含外层块头
+  计费 `3,560` 字节）；`slotBits=24`、`slotMask=16777215`、
+  `generationMax=16777215`。
+- 槽、位图和对象竞技场独立，按需 `2×` 扩容；显式 `maxSlots` 为硬上限，
+  省略时在 `maxBytes` 内弹性增长。扩容先核验新旧并存峰值，失败保留旧块并
+  返回 `ELI-RT0002`，成功先发布新指针再回收旧块。
+- `object_arena` 首部 `[0..7]` 为 8 字节空哨兵，真实块偏移恒 `>= 8` 且
+  8 字节对齐。
+
+### 固定签名与 ABI
+
+- 所有编译器导出显式携带 `:parameterTypes`（元素为 `"u32"`、`"f64"`、
+  `"bits64"` 或 `"v64"`，长度等于 `:arity`）与 `:resultType`；缺失或未知
+  类型直接拒绝。
+- JS 宿主对外部值使用 `BigInt` 并无符号归一；`bits64` 为原始位串，禁止
+  进入句柄缓存或作为 `Val64` 传递。数字原始位读取使用
+  `value-number-bits`，不再对数字调用 `value-data`。
+- ARM64 使用 AAPCS64/Apple 混合寄存器与栈槽布局；WASM 使用 `i64` 承载
+  `v64`/`bits64`；FFI 不允许异常跨栈展开，错误经 `pendingException` 与
+  `exceptionPending` 闩锁返回。
+- 顶层无捕获函数使用扁平 `kind=18`（代码索引 + 内联 `Val64` 捕获）与
+  编译期 `FunctionStaticMeta`，首次观察才物化为本 Realm 函数实例。
+
+### 只读图像、函数元数据与启动
+
+`ROData.bytes` 是小端字节序列，编译器接受 Array 或 Uint8Array。
+图像在节内偏移 `0..32`（线性内存 `256..288`）含八个 `u32`：
+`roBase=256`、`roDir`、`roCount`、`roImageSlot`、`imageDataEnd`、
+`metaDir`、`metaCount`、保留零。`imageDataEnd = 256 + roBytes`，八字节对齐。
+空常量表且空元数据表不发射只读节。目录项均为线性内存绝对偏移。
+密封字符串和 RawNaN 使用同构的 32 字节块头；字符串保留 UTF-16
+代码单元（包括孤立代理项）并预计算运行时同算法的哈希。
+
+`FunctionStaticMeta` 每项 24 字节，依次为六个 `u32`：代码表槽、公开
+函数长度、标志（位0可构造，位1有源码）、名称 RO 索引、源码 RO 索引
+（缺失为 `0xFFFFFFFF`）、所属 Realm 的函数原型代码。该表不是语言值对象。
+顶层提升函数在模块准备时通过 `value-module-declare-lazy` 初始化为私有
+未物化状态；首次值观察通过原子物化转为该 Realm 的唯一函数实例，失败恢复
+未物化状态。已观察的实例由模块绑定强引用，模块关闭后释放。带捕获闭包及
+有顺序要求的表达式仍在原求值点创建，并通过 `value-function-set-meta` 关联元数据。
+
+启动必须先初始化低控制头（生命周期令牌为1），装载并核验 RO 图像，写入
+只读目录及元数据头，最后发布字节游标，随后才能分配堆。已初始化实例只做
+一致性检查，不重置游标、Unicode 缓存或其他活跃堆。WASM 使用 Active Data；
+Native 从实际只读节读取图像。宿主视图在内存增长后重新取得。
+
+### 宿主签名与存储
+
+`descriptor.exportSignatures` 是所有实际导出及别名的唯一机器签名注册表：
+`name -> {arity, parameterTypes, resultType}`。它与编译器 `typed.functions`
+及 `aliases` 相互核对；缺失、未知类型或实参数量不符时确定性拒绝，不能根据
+参数个数猜测类型。`descriptor.functions` 仅列源级导出，机器 `arity` 与
+源级 `publicArity` 分开；不把运行时辅助导出暴露成源级 API。
+
+`call-source` 原语参数为 `(heap:u32, callee:v64, argv:v64, count:u32,
+slot:u32) -> v64`，目标函数机器参数为 `[u32,v64,v64,u32]`，第四参是
+实参数量。`value-number(heap, low, high) -> v64` 保持三个参数；原始位读取
+使用 `value-number-bits(heap, value) -> bits64`。
+
+| 块种类 | 源值槽布局 |
+| --- | --- |
+| Refs | 块头后 `+32` 起，每槽8字节 |
+| 模块绑定 | `+32` 起，每项40字节，含值、模块、导出三个 Val64 字段 |
+| Frame | `+32` 为前驱帧，`+40` 起每根槽8字节 |
+| Object | 80字节头：`+32/+40/+48/+56` 为四个 Val64 字段，`+80` 起桶和属性单元 |
+| Array | `+32` 为命名属性表，`+40` 为原型，`+48` 起每元素8字节 |
+| Function | 固定头及 `+32/+40` 辅助字段后，`+48` 起内联捕获 |
+
+Node 跨进程传输先按精确类型编码：Val64/bits64 保留64位整数，特殊 f64
+保留两字原始位；不经 Number 截断，也不直接将 BigInt 送入 JSON.stringify。
+所有宿主入口共用当前签名校验和归一逻辑。
+
+初始竞技场容量由 `bootstrap/backends/managed-layout.eli` 的
+`compute-initial-managed-arenas` 唯一公式导出，包含控制块、保留 slot0、
+槽项、位图、对象哨兵及各块头与对齐。PL1024 的显式预算仍为1024槽、
+65536初始字节、16777216最大字节；它不是语言对象总数上限。
+本批源码尚待统一冷构建及正式运行验收，以上布局定义不等于通过结果。

@@ -2,7 +2,7 @@
   (import "node:readline" createInterface)
   (import "node:path" resolve)
   (import "node:url" fileURLToPath)
-  (import "./evaluation.mjs" EvaluationSession evaluationResultFormat evaluationResultVersion readEvaluationFile)
+  (import "./evaluation.mjs" EvaluationSession evaluationResultFormat readEvaluationFile)
 
   (defconst usage
     "Usage: eliscript-eval [OPTIONS]\n\nOptions:\n  --repl            Run the persistent terminal REPL (default mode)\n  --stdio           Read and write one JSON record per line\n  --eval SOURCE     Evaluate one form\n  --file FILE       Load one complete Eliscript source file\n  --root DIRECTORY  Set the project root for REPL, --eval, or --file\n  --json            Print the one-shot result as JSON\n  --prompt          Always print the REPL banner and prompts\n  --no-prompt       Never print the REPL banner or prompts\n  --help            Show this help\n")
@@ -97,14 +97,12 @@
   (defun protocolFailure (message revision)
     (js-object
       :format evaluationResultFormat
-      :version evaluationResultVersion
       :id nil
       :operation "unknown"
       :revision revision
       :status "error"
       :diagnostic (js-object
                     :format "eliscript-diagnostic"
-                    :version 1
                     :code "ELI-E0001"
                     :severity "error"
                     :phase "evaluation-request"

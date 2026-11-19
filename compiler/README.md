@@ -29,15 +29,14 @@ This directory contains the first Emacs Lisp seed compiler:
 
 ## Project Requests
 
-Direct project flags and versioned configuration both produce an
+Direct project flags and `eliscript.json` configuration both produce an
 `eliscript-project-request` and execute it through
 `eliscript-project-execute`. A minimal `eliscript.json` is:
 
 ```json
 {
-  "schemaVersion": 1,
   "sourceRoot": "src",
-  "entry": "main.eli",
+  "entries": ["main.eli"],
   "outDir": "dist"
 }
 ```
@@ -45,7 +44,7 @@ Direct project flags and versioned configuration both produce an
 Run it with `./bin/eliscript-build --config eliscript.json`. Paths in the file
 are relative to the file as defined by specification 0106. Explicit entry,
 root, output, portable-entry, and no-cache flags override configured values.
-Unknown keys and unsupported versions fail with structured diagnostics.
+Unknown keys and invalid fields fail with structured diagnostics.
 
 Run `./bin/eliscript-check --config eliscript.json --json` to validate the same
 entry closure without writing the configured output directory, manifest, or

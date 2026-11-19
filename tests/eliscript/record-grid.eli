@@ -94,7 +94,7 @@
             (setq receipt-path (resolve cell-directory "execution.json"))
             (let ((archived (await (archiveCompilerArtifact artifact (resolve cell-directory "metadata")))))
               (setq artifact undefined)
-              (setq receipt (js-object :format "eliscript-compiler-matrix-cell-execution" :version 1
+              (setq receipt (js-object :format "eliscript-compiler-matrix-cell-execution"
                 :host "javascript" :target "javascript" :profile "full-compiler" :status "corpus-running"
                 :verification "unverified" :sourceIdentity source-identity
                 :producerMetadataPath seed-metadata-path
@@ -301,7 +301,7 @@
           (js-call comparisons :push (js-object :target "javascript" :from index :to (1+ index)
             :status "identical" :identities (js-array "claimed-product" "claimed-product"))))
         (setq index (1+ index)))
-      (js-object :format "eliscript-compiler-bootstrap" :version 1 :directory directory
+      (js-object :format "eliscript-compiler-bootstrap" :directory directory
         :sourceIdentity identity :hosts (js-array "javascript" "javascript" "javascript")
         :status "constructed" :verification "unverified" :generations records
         :fixedPoint (js-object :status "identical" :comparisons comparisons))))
@@ -475,7 +475,7 @@
              (identity (get (await (load-source-declaration)) :identity))
              (input (recorded-grid-input))
              (generation-directory (resolve directory "generations"))
-             (metadata (js-object :format "eliscript-independent-compiler-bootstrap" :version 1
+             (metadata (js-object :format "eliscript-independent-compiler-bootstrap"
                :status "constructed" :sourceIdentity identity :fixedPoint (js-object :status "identical") :chains (js-array))))
         (put input :outputRoot (resolve directory "grid"))
         (put input :generations (js-object :directory generation-directory))

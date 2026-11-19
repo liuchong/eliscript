@@ -56,7 +56,7 @@
                (source-root (resolve directory "sources")) (source (resolve source-root "main.eli")))
           (await (mkdir source-root))
           (await (writeFile source "(defun answer () 42)\n(export answer)\n"))
-          (let* ((options (js-object :root source-root :entry source :outDir (resolve directory "first")
+          (let* ((options (js-object :root source-root :entries (js-array source) :outDir (resolve directory "first")
                            :compiler compiler :moduleDirectory modules :useCache false))
                  (before (Object/assign (js-object) options))
                  (result (await (buildProject options)))
@@ -66,7 +66,7 @@
             (js-call assert :deepStrictEqual options before)
             (js-call assert :strictEqual (get options :compiler) compiler)
             (js-call assert :strictEqual (Object/hasOwn options "compilerDigest") false)
-            (js-call assert :match (await (readFile (get result :entryOutput) "utf8"))
+            (js-call assert :match (await (readFile (aref (get result :entryOutputs) 0) "utf8"))
               (new globalThis.RegExp "function answer"))
             (await (writeFile (resolve modules "compiler.mjs.map")
               (+ (await (readFile (resolve modules "compiler.mjs.map") "utf8")) "\n")))
@@ -85,7 +85,7 @@
           (let ((invalid (js-array nil false "" (js-call "A" :repeat 64) "not-a-digest")) (index 0))
             (while (< index (js-length invalid))
               (let ((failure undefined) (failed false))
-                (try (await (buildProject (js-object :root source-root :entry source
+                (try (await (buildProject (js-object :root source-root :entries (js-array source)
                        :outDir (resolve directory (+ "bad-" index)) :moduleDirectory modules
                        :compiler compiler :compilerDigest (aref invalid index))))
                   (catch error (setq failed t failure error)))
@@ -94,7 +94,7 @@
                 (js-call assert :strictEqual (get failure :message)
                   "injected compiler requires a lowercase SHA-256 compilerDigest"))
               (setq index (1+ index))))
-          (let* ((options (js-object :root source-root :entry source
+          (let* ((options (js-object :root source-root :entries (js-array source)
                     :outDir (resolve directory "getter") :moduleDirectory modules :compiler compiler))
                  (calls 0) (failed false) (failure undefined))
             (Object/defineProperty options "compilerDigest" (js-object :enumerable t :configurable t
@@ -104,7 +104,7 @@
             (js-call assert :strictEqual failure false)
             (js-call assert :strictEqual calls 1))
           (let ((failed false) (failure undefined))
-            (try (await (buildProject (js-object :root source-root :entry (resolve source-root "missing.eli")
+            (try (await (buildProject (js-object :root source-root :entries (js-array (resolve source-root "missing.eli"))
                    :outDir (resolve directory "missing-source") :moduleDirectory (resolve directory "missing-compiler")
                    :compiler compiler)))
               (catch error (setq failed t failure error)))
@@ -113,7 +113,7 @@
               (new globalThis.RegExp "local Eliscript module does not exist")))
           (await (writeFile source "(defun broken () missing)"))
           (let ((failure undefined) (failed false))
-            (try (await (buildProject (js-object :root source-root :entry source
+            (try (await (buildProject (js-object :root source-root :entries (js-array source)
               :outDir (resolve directory "unbound") :moduleDirectory modules :compiler compiler)))
               (catch error (setq failed t failure error)))
             (js-call assert :strictEqual failed t)

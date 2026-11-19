@@ -717,7 +717,10 @@
       (try
         (setq result
           (funcall operation
-            (lambda (value) (js-call roots :push value) value)))
+            (lambda (value)
+              (when (and (not (nullish? value)) (= (value-type value) "object"))
+                (js-call roots :push value))
+              value)))
         (catch error
           (setq failed t)
           (setq failure error)))
@@ -759,7 +762,7 @@
   (defun diagnostic-data (runtime value &optional ancestors-arg memo)
     (let ((ancestors (if (nullish? ancestors-arg) (js-array) ancestors-arg)))
       (cond
-        ((or (nil? value) (undefined? value) (= (value-type value) "boolean")) value)
+        ((or (nil? value) (undefined? value) (= (value-type value) "boolean") (= (value-type value) "number")) value)
         ((= (get value :kind) 4) (js-call runtime :readNumber value))
         ((= (get value :kind) 5) (js-call runtime :readString value))
         ((= (get value :kind) 34) (js-call runtime :readBigInt value))
@@ -811,7 +814,7 @@
   (defvar source-exception-fn undefined)
 
   (defun exception-entries (runtime value ancestors memo)
-    (if (or (nil? value) (undefined? value) (= (value-type value) "boolean")
+    (if (or (nil? value) (undefined? value) (= (value-type value) "boolean") (= (value-type value) "number")
             (not (js-call (js-array 7 8 14) :includes (get value :kind))))
       (funcall source-exception-fn runtime value ancestors memo)
       (progn
@@ -842,7 +845,7 @@
           (lambda (own)
             (source-exception runtime value ancestors (js-object :entries (js-array) :own own))))
         (cond
-          ((or (nil? value) (undefined? value) (= (value-type value) "boolean")) value)
+          ((or (nil? value) (undefined? value) (= (value-type value) "boolean") (= (value-type value) "number")) value)
           ((= (get value :kind) 4) (js-call runtime :readNumber value))
           ((= (get value :kind) 5) (js-call runtime :readString value))
           ((= (get value :kind) 34) (js-call runtime :readBigInt value))
@@ -1051,8 +1054,8 @@
                  (when closed (throw (new globalThis.Error "compiler session is closed")))
                  (when busy (throw (new globalThis.Error "compiler session is busy")))
                  (when (and (not (undefined? response-mode))
-                            (/= response-mode "events-v1")
-                            (/= response-mode "graph-events-v1"))
+                            (/= response-mode "events")
+                            (/= response-mode "graph-events"))
                    (throw (new globalThis.TypeError "unsupported compiler response mode")))
                  (when (and (not (undefined? response-string-chunks))
                             (/= (value-type response-string-chunks) "boolean"))
@@ -1102,9 +1105,7 @@
                                  (unless (nil? envelope)
                                    (when (or (not envelope) (/= (value-type envelope) "object") (Array/isArray envelope)
                                              (not (Object/hasOwn envelope "format"))
-                                             (not (Object/hasOwn envelope "version"))
                                              (/= (get envelope :format) "eliscript-compiler-owned-project")
-                                             (/= (get envelope :version) 1)
                                              (not (Object/hasOwn envelope "value")))
                                      (throw (new globalThis.TypeError "compiler returned an invalid owned project envelope")))
                                    (let ((product (get envelope :value)))
@@ -1154,8 +1155,8 @@
                        (unless owned
                          (setq result (funcall receive text)))
                        (when (and (not owned) (not (undefined? response-mode)))
-                         (let* ((graph (= response-mode "graph-events-v1"))
-                                (expected-version (if (= graph t) 2 1))
+                         (let* ((graph (= response-mode "graph-events"))
+                                (expected-mode (if (= graph t) "graph-events" "events"))
                                 (decoder (compiler-response-events graph (eq response-string-chunks t)))
                                 (next-request undefined)
                                 (done-loop false))
@@ -1163,7 +1164,7 @@
                              (while (not (= done-loop t))
                                (when (or (nullish? result)
                                          (not (= (get result :format) "eliscript-compiler-response-events"))
-                                         (not (= (get result :version) expected-version))
+                                         (not (= (get result :mode) expected-mode))
                                          (not (= (Number/isSafeInteger (get result :token)) t))
                                          (< (get result :token) 1)
                                          (not (= (session-value-type (get result :done)) "boolean"))

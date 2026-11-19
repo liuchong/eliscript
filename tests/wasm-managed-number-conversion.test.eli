@@ -10,6 +10,13 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
   (import "./helpers/wasm-managed-number-conversion-node.mjs" longHex)
 
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
+  (defun bits-f64 (bits)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setBigUint64 0
+        (js-call globalThis.BigInt :asUintN 64 (funcall globalThis.BigInt bits)) t)
+      (js-call view :getFloat64 0 t)))
+
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
   (defconst js-typeof (js* "(v) => typeof v"))
   (defconst instance-of? (js* "(a, b) => a instanceof b"))
@@ -79,14 +86,17 @@
         ((= ty "number") (js-call api :number value))
         (t value))))
 
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
+
   (defun check-conversion (api name input expected)
     (let ((value (box-value api input))
           (result undefined))
       (try
         (setq result (js-call api :invoke name (js-array value)))
-        (let ((actual (if (= (get result :kind) 4)
-                          (js-call api :readNumber result)
-                          (js-call api :readString result))))
+        (let ((actual (cond
+                        ((= (funcall (js* "(v) => typeof v") result) "number") result)
+                        ((and (not (nullish? result)) (= (get result :kind) 4)) (funcall num-val api result))
+                        (t (js-call api :readString result)))))
           (funcall assert (Object/is actual expected)
             (str name "(" (JSON/stringify input) "): " (globalThis.String actual) " versus " (globalThis.String expected))))
         (finally
@@ -344,7 +354,7 @@
         (let* ((a (js-call api :string "1.5"))
                (b (js-call api :string "2.5"))
                (sum (js-call api :invoke "capture" (js-array a b))))
-          (js-call assert :equal (js-call api :readNumber sum) 4)
+          (js-call assert :equal (funcall num-val api sum) 4)
           (js-call (js-array a b sum) :forEach (lambda (v) (js-call api :release v)))
           (js-call api :collect)
           (js-call assert :equal (js-call api :live) 0)
@@ -355,9 +365,9 @@
       (open-runtime "number-parse" parse-source)
       (let* ((inst (new WebAssembly.Instance (new WebAssembly.Module (js-call compiled :get "number-parse"))))
              (e (get inst :exports))
-             (heap (funcall (get e "heap-new") 64 4096 65536))
+             (heap (funcall (get e "heap-new") 64 16384 65536))
              (call-raw (lambda (name &rest args)
-                         (let ((value (unsigned-bit-shift-right (apply (get e name) heap args) 0)))
+                         (let ((value (funcall normalize-u64 (apply (get e name) heap args))))
                            (js-call assert :equal (funcall (get e "last-error")) 0 name)
                            value)))
              (source (funcall call-raw "value-string" 3))
@@ -374,8 +384,7 @@
           (funcall call-raw "heap-pin" source)
           (funcall call-raw "heap-pin" num)
           (js-call assert :equal
-            (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :getFloat64
-              (funcall call-raw "value-data" num 4) t)
+            (bits-f64 (funcall call-raw "value-number-bits" num))
             1.5)
           (let ((text (funcall call-raw "value-to-text" num)))
             (funcall call-raw "heap-pin" text)
@@ -396,7 +405,7 @@
 
   (test "conversion capacity failures preserve exact input bits and caller roots, while successful growth reloads all pool addresses"
     (lambda ()
-      (let* ((options (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 4096))
+      (let* ((options (js-object :maxSlots 64 :initialBytes 6176 :maxBytes 6176))
              (parse (open-runtime "number-parse" parse-source options))
              (input (str "1." (js-call "0" :repeat 400) "1"))
              (source (js-call parse :string input))
@@ -419,7 +428,7 @@
           (js-call assert :throws
             (lambda () (js-call fmt :invoke "text" (js-array num)))
             (lambda (err) (= (get (get err :eliscriptDiagnostic) :code) "ELI-RT0002")))
-          (js-call assert :equal (js-call fmt :readNumber num) Number.MIN_VALUE)
+          (js-call assert :equal (funcall num-val fmt num) Number.MIN_VALUE)
           (js-call assert :equal (get (js-call fmt :stats) :frameDepth) 1)
           (js-call fmt :leaveFrame outer)
           (js-call fmt :release num)
@@ -430,9 +439,9 @@
                           (Object/assign (js-object) options (js-object :maxBytes 65536))))
                (original (js-call growing :string input))
                (result (js-call growing :invoke "parse" (js-array original))))
-          (js-call assert :equal (js-call growing :readNumber result) (globalThis.Number input))
+          (js-call assert :equal (funcall num-val growing result) (globalThis.Number input))
           (js-call assert :equal (js-call growing :readString original) input)
-          (funcall assert (> (get (js-call growing :stats) :capacityBytes) 4096))
+          (funcall assert (> (get (js-call growing :stats) :capacityBytes) 6176))
           (js-call growing :release original)
           (js-call growing :release result)
           (js-call growing :collect)
@@ -562,7 +571,7 @@
                (b32 (globalThis.BigInt 32))
                (b65535 (globalThis.BigInt 65535))
                (call-raw (lambda (name &rest args)
-                           (let ((out (unsigned-bit-shift-right (apply (get e name) args) 0)))
+                           (let ((out (funcall normalize-u64 (apply (get e name) args))))
                              (js-call assert :equal (funcall (get e "last-error")) 0 name)
                              out)))
                (write-big (lambda (p initial-val)

@@ -20,7 +20,7 @@
             (let ((original (definition source (str name " "))))
               (js-call assert :ok (js-call before :includes original))
               (js-call assert :ok (js-call after :includes original)))))
-        (js-call (js-array "memory-f64-unary-opcode" "require-memory-f64-unary") :forEach
+        (js-call (js-array "valid-words64-record-p" "memory-f64-unary-opcode" "require-memory-f64-unary") :forEach
           (lambda (name)
             (js-call assert :strictEqual (js-call before :includes (str "(defun " name " ")) false)
             (js-call assert :ok (js-call after :includes (definition source (str name " ")))))))))

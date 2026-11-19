@@ -39,7 +39,7 @@
            (projection-path (resolve (dirname configuration-path) "__eliscript_tools_cli_projection.json"))
            (projection (JSON/parse (await (readFile projection-path "utf8"))))
            (configuration (JSON/parse (await (readFile configuration-path "utf8")))))
-      (unless (and (= (get projection :kind) "original-tools-final-cli") (= (get projection :version) 1)
+      (unless (and (= (get projection :kind) "original-tools-final-cli")
                    (js-call original-tools-cli-records :includes (get projection :recordId))
                    (= (get configuration :target) "javascript")
                    (= (get configuration :sourceRoot) (get projection :sourceRoot))
@@ -113,7 +113,7 @@
             (setq index (1+ index)))
           (same (independentCompilerProductIdentity (js-object :host "javascript" :files actual))
             (get selected :productIdentity) "selected product identity differs from actual emitted files")
-          (js-object :kind "original-tools-final-cli" :version 1
+          (js-object :kind "original-tools-final-cli"
             :bootstrapManifestPath (get certified :bootstrapManifestPath)
             :stage3MetadataPath final-path :selectedMetadataPath selected-path
             :selectedArgumentPath (resolve (get input :selectedMetadataPath))

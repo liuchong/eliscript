@@ -12,6 +12,8 @@
     "(defun managed-literal-conj-bang (collection &rest values) (JSON/stringify (js-array collection values)))"
     "(defun managed-literal-dissoc-bang (collection &rest keys) (JSON/stringify (js-array collection keys)))"
     "(defconst Data (js-object :update (lambda (&rest values) (JSON/stringify values)) :update_in (lambda (&rest values) (JSON/stringify values)) :merge_with (lambda (&rest values) (JSON/stringify values))))"
+    "(defun update-in (&rest values) (JSON/stringify values))"
+    "(defun merge-with (&rest values) (JSON/stringify values))"
     "(defun pack (&rest values) (JSON/stringify values))"
     "(defun apply-input (values) (apply pack values))"
     "(defun composed (collection values) (apply pack (js-call (js-array collection) :concat values)))"
@@ -63,7 +65,7 @@
            (selected (js-array)) (selected-exports (js-array))
            (fixture (js-call compiler :compile_ir_string fixture-source "managed-apply.eli")))
       (js-call (js-array (js-array actual (js-array "conjBang" "dissocBang"))
-                        (js-array data (js-array "update" "updateIn" "mergeWith"))) :forEach (lambda (entry)
+                        (js-array data (js-array "updateIn" "mergeWith"))) :forEach (lambda (entry)
         (js-call (declarations (get (aref entry 0) :body) (js-array)) :forEach (lambda (node)
           (when (and (= (get node :kind) "function-declaration")
                      (js-call (aref entry 1) :includes (get node :value)))
@@ -73,9 +75,9 @@
               (when (js-call (aref entry 1) :includes (get reference :value))
                 (js-call selected-exports :push reference)))))))))
       (js-call assert :deepStrictEqual (js-call selected :map (lambda (node) (get node :value)))
-        (js-array "conjBang" "dissocBang" "update" "updateIn" "mergeWith"))
+        (js-array "conjBang" "dissocBang" "updateIn" "mergeWith"))
       (js-call assert :deepStrictEqual (js-call selected-exports :map (lambda (node) (get node :value)))
-        (js-array "conjBang" "dissocBang" "update" "updateIn" "mergeWith"))
+        (js-array "conjBang" "dissocBang" "updateIn" "mergeWith"))
       ;; Only the fresh fixture export declaration is extended. The five
       ;; original export references retain their source spans and identity.
       (let ((exports (js-call (get fixture :body) :filter
@@ -116,7 +118,6 @@
       (compare runtime reference "composed" (js-array "collection" values))
       (compare runtime reference "conjBang" (js-call (js-array "collection") :concat values))
       (compare runtime reference "dissocBang" (js-call (js-array "collection") :concat values))
-      (compare runtime reference "update" (js-call (js-array "collection" "key" "transform") :concat values))
       (compare runtime reference "updateIn" (js-call (js-array "collection" "path" "transform") :concat values))
       (compare runtime reference "mergeWith" (js-call (js-array "combine") :concat values))
       (compare runtime reference "rest-forward" (js-call (js-array "collection") :concat values))))

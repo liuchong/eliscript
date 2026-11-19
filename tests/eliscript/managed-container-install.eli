@@ -7,13 +7,13 @@
   (import "./managed-container-cases.mjs" managedContainerCases prepareManagedContainer closeManagedContainer)
   (defconst plans (js-array
     (js-object :kind "objects" :suite "tests/wasm-managed-objects.test.mjs"
-      :archive "tests/wasm-managed-objects-test-ground.mjs" :sha256 "eaf96d1f0fb7061cc7305da4f5a96cb5ed1c7d8c55e009af9e7c2aa0e05747dd")
+      :archive "tests/wasm-managed-objects-test-ground.mjs" :sha256 "4dd52d7ac37c2db70ebe7ecc436a2982ca026873362f4316804468d13da6173b")
     (js-object :kind "arrays" :suite "tests/wasm-managed-arrays.test.mjs"
-      :archive "tests/wasm-managed-arrays-test-ground.mjs" :sha256 "82535e15a6897e846ee3515eeb534fcf13ecdfd165b7568edb635bb98936a307")
+      :archive "tests/wasm-managed-arrays-test-ground.mjs" :sha256 "d5cd2af145e17f7a99f2f38093175714617fa450a764c74c1c2df217b6fa8927")
     (js-object :kind "builtins" :suite "tests/wasm-managed-builtins.test.mjs"
-      :archive "tests/wasm-managed-builtins-test-ground.mjs" :sha256 "f9c55046d59cea9c2e1d29e41d6fa4bf69d8665c7ef7da733168edccd8c99fed")
+      :archive "tests/wasm-managed-builtins-test-ground.mjs" :sha256 "78b90706defe9d706dd3ef9e676aa307c3ce714c1192b0c3add90d843dc6ced7")
     (js-object :kind "identity" :suite "tests/wasm-managed-identity.test.mjs"
-      :archive "tests/wasm-managed-identity-test-ground.mjs" :sha256 "b27f02b022895282dabaddc32b6566dc56f2e90123af13205486b8bb90c3fc34")))
+      :archive "tests/wasm-managed-identity-test-ground.mjs" :sha256 "30edcc9c46665e7776dbb45661986ccf9be76926723e6c35d68b5d6fff6a3a5e")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))
   (unless (= (js-length selected) 1) (throw (new globalThis.TypeError "container fixtures require exactly one original suite per process")))

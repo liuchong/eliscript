@@ -534,7 +534,7 @@
 
   (test "source table capacity failures leave committed entries intact and unwind only private roots"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 16384))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 24576 :maxBytes 24576))))
         (js-call a :auto 1)
         (let ((m (js-call a :invoke "empty-map"))
               (count 0)
@@ -579,11 +579,16 @@
       (let ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8"))))
         (js-call
           (js-array
-            (js-array "value-source-method-check" "heap value method" "has-extra" false)
-            (js-array "value-source-method" "heap value method a b" "has-extra" 9)
-            (js-array "value-source-iterator-advance" "heap iterator" "next-extra" 9)
-            (js-array "value-source-method-check" "heap value method" "lookup" false)
-            (js-array "value-source-method" "heap value method a b" "lookup" false))
+            (js-array "value-source-method-check" "heap value method" "has-extra" false
+              "(memory-sig u32 u32 v64 u32) (load-u32 4294967295)")
+            (js-array "value-collection-prototype-builtin" "heap receiver arguments count operation" "has-extra" 9
+              "(memory-sig v64 u32 v64 v64 u32 u32) (progn (load-u32 4294967295) (v64-literal 0 0))")
+            (js-array "value-source-iterator-advance" "heap iterator" "next-extra" 9
+              "(memory-sig u32 u32 v64) (load-u32 4294967295)")
+            (js-array "value-source-query-check" "heap value method" "lookup" false
+              "(memory-sig u32 u32 v64 u32) (load-u32 4294967295)")
+            (js-array "value-source-method" "heap value method a b" "lookup" false
+              "(memory-sig v64 u32 v64 u32 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0))"))
           :forEach
           (lambda (item)
             (let* ((name (aref item 0))
@@ -594,7 +599,7 @@
                    (end (js-call source :indexOf "  (defun " (+ start 3))))
               (funcall assert (and (>= start 0) (> end start)))
               (let* ((injected (js-call (get b :compiler) :compile_ir_string
-                                 (str (js-call source :slice 0 start) "  (defun " name " (" parameters ") (load-u32 4294967295))\n" (js-call source :slice end))
+                                 (str (js-call source :slice 0 start) "  (defun " name " (" parameters ") " (aref item 4) ")\n" (js-call source :slice end))
                                  "source-map-trap.eli"))
                      (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected)))))
                 (js-call a :auto 1)
@@ -626,34 +631,38 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 4096 65536)))
+             (h (funcall (aref e "heap-new") 64 8192 65536)))
         (js-call
           (js-array
-            (js-array "value-source-collection-get" (js-array 4 0))
-            (js-array "value-source-collection-put" (js-array 4 0 0))
-            (js-array "value-source-collection-has" (js-array 4 0))
-            (js-array "value-source-collection-own" (js-array 4 0))
-            (js-array "value-source-iterator-new" (js-array 4 0))
-            (js-array "value-source-iterator-advance" (js-array 4))
-            (js-array "value-source-iterator-next" (js-array 4))
-            (js-array "value-source-method-check" (js-array 4 0))
-            (js-array "value-source-method" (js-array 4 0 0 0))
-            (js-array "value-source-collection-new" (js-array 15 4)))
+            (js-array "value-source-collection-get"
+              (js-array (funcall globalThis.BigInt 4) (funcall globalThis.BigInt 0)))
+            (js-array "value-source-collection-put"
+              (js-array (funcall globalThis.BigInt 4) (funcall globalThis.BigInt 0) (funcall globalThis.BigInt 0)))
+            (js-array "value-source-collection-has"
+              (js-array (funcall globalThis.BigInt 4) (funcall globalThis.BigInt 0)))
+            (js-array "value-source-collection-own" (js-array (funcall globalThis.BigInt 4) 0))
+            (js-array "value-source-iterator-new" (js-array (funcall globalThis.BigInt 4) 0))
+            (js-array "value-source-iterator-advance" (js-array (funcall globalThis.BigInt 4)))
+            (js-array "value-source-iterator-next" (js-array (funcall globalThis.BigInt 4)))
+            (js-array "value-source-method-check" (js-array (funcall globalThis.BigInt 4) 0))
+            (js-array "value-source-method"
+              (js-array (funcall globalThis.BigInt 4) 0 (funcall globalThis.BigInt 0) (funcall globalThis.BigInt 0)))
+            (js-array "value-source-collection-new" (js-array 15 (funcall globalThis.BigInt 4))))
           :forEach
           (lambda (pair)
             (let ((name (aref pair 0))
                   (args (aref pair 1)))
               (js-call (aref e name) :apply nil (js-call (js-array h) :concat args))
               (js-call assert :equal (funcall (aref e "last-error")) 1 name))))
-        (let ((m (funcall (aref e "value-source-collection-new") h 15 3)))
+        (let ((m (funcall (aref e "value-source-collection-new") h 15 (funcall globalThis.BigInt 3))))
           (funcall (aref e "heap-pin") h m)
           (js-call
             (js-array
               (js-array "value-source-collection-own" (js-array m 2))
               (js-array "value-source-iterator-new" (js-array m 3))
               (js-array "value-source-method-check" (js-array m 10))
-              (js-array "value-source-method" (js-array m 10 0 0))
-              (js-array "value-source-collection-new" (js-array 17 3)))
+              (js-array "value-source-method" (js-array m 10 (funcall globalThis.BigInt 0) (funcall globalThis.BigInt 0)))
+              (js-array "value-source-collection-new" (js-array 17 (funcall globalThis.BigInt 3))))
             :forEach
             (lambda (pair)
               (let ((name (aref pair 0))

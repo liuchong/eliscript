@@ -145,7 +145,7 @@
       (try
         (let ((i 0))
           (while (< i 512)
-            (js-call padding :push (js-call a :number i))
+            (js-call padding :push (js-call a :array))
             (setq i (1+ i))))
         (catch error
           (js-call assert :equal (and error (get error :eliscriptDiagnostic) (get (get error :eliscriptDiagnostic) :code)) "ELI-RT0002")
@@ -170,7 +170,7 @@
       (funcall assert (and (>= first 0) (> last first)))
       (let* ((injected (js-call (get backend :compiler) :compile_ir_string
                          (str (js-call raw-source :slice 0 first)
-                              "  (defun value-array-callback-get (heap value key) (load-u32 4294967295))\n"
+                              "  (defun value-array-callback-get (heap value key) (memory-sig v64 u32 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                               (js-call raw-source :slice last))
                          "array-method-get-trap.eli"))
              (artifact (Uint8Array/from (js-call (get backend :managed) :emit_managed_wasm program injected))))

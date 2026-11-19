@@ -78,7 +78,7 @@ Requests need:
 - progress events for long-running work
 - protocol version and capability negotiation
 
-Protocol version 1 uses newline-delimited JSON with one object per line. It
+The worker protocol uses newline-delimited JSON with one object per line. It
 defines ready, request, response, progress, cancel, protocol-error, and shutdown
 messages. The wire contract contains only explicit JSON values and does not
 expose JavaScript object identity. See
@@ -168,7 +168,7 @@ warm calls separately.
 - Maintain one long-lived local JavaScript worker.
 - Add lifecycle handling and deterministic integration tests.
 
-Protocol version 1 is implemented by `runtime/worker.mjs` and
+The worker protocol is implemented by `runtime/worker.mjs` and
 `tools/worker/eliscript-worker.el`. Real-process tests cover framing, version
 negotiation, progress, cancellation, timeouts, errors, logging isolation, and
 shutdown.

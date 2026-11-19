@@ -277,9 +277,11 @@
         nil)
       (if found last-value not-found)))
 
+  (defconst fast-vector-peek (js* "(collection, notFound) => collection.peek(notFound)"))
+
   (defun last (collection &optional not-found)
     (cond
-      ((persistent-vector-p collection) (js-call collection :peek not-found))
+      ((js* "collection instanceof PersistentVector") (funcall fast-vector-peek collection not-found))
       ((implementsProtocolOperation IReversible "rseq" collection)
        (first (rseq collection) not-found))
       (t (last-reduced collection not-found))))

@@ -10,7 +10,9 @@
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
   (import "../tools/testing/math-oracle-fixture.mjs" capsuleMathOracleSource prepareMathOracleCompiler readOriginalMathSqrtSource readOriginalMathThisForm projectMathSqrtSource)
   (defun raw-value (runtime value)
-    (cond ((or (nullish? value) (= (value-type value) "boolean")) value)
+    ;; Scalar numbers surface as plain host numbers in the current value ABI;
+    ;; only composite values expose a `kind`.
+    (cond ((or (nullish? value) (= (value-type value) "boolean") (= (value-type value) "number")) value)
       ((= (get value :kind) 4) (js-call runtime :readNumber value))
       ((= (get value :kind) 5) (js-call runtime :readString value))
       ((= (get value :kind) 14)

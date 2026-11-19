@@ -39,7 +39,7 @@ Runtime deployment collects each input inode with one following `stat` call;
 output paths still use `lstat` to reject symlinks and source aliases. Source,
 module and map bytes are reauthenticated on every deployment without caching.
 
-To compare the process strategies from absent outputs, run `make clean-all`
+To compare the process strategies from absent outputs, run `make clean`
 and then `emacs -Q --batch -L compiler -L tools -l
 tools/testing/bootstrap-parity.el`. This builds both strategies from the same
 current sources and compares generated modules, maps, macro-origin sidecars,
@@ -72,7 +72,7 @@ omits listings of deleted source files; exact input digests and the enclosing
 corpus binding remain required. `--retain-artifacts` keeps products for active
 debugging. Failed records remain available while
 investigating that run. Delete these workspaces and the checkpoint when their
-purpose ends, using `make clean-all` for checkout-generated products and
+purpose ends, using `make clean` for checkout-generated products and
 removing any explicitly selected external output directory too.
 
 The Make targets expose Node GC at completed graph lifetimes. Disposable
@@ -372,7 +372,7 @@ writes:
 When `.github/workflows/release.yml` is dispatched (`gh workflow run release.yml
 -f version="$VERSION" -f publish=true`), GitHub Actions automatically verifies the
 signed tag and release tarball, runs the four-dimension benchmark against the
-full tag history, uploads the versioned benchmark reports to the GitHub Release page, updates the
+full tag history, uploads the benchmark reports to the GitHub Release page, updates the
 Release main page summary, and publishes (or stages with OIDC provenance) the
 package to npm.
 

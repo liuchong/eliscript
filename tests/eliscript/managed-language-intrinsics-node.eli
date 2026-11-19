@@ -25,6 +25,7 @@
     (setq index (1+ index)))
   (defun primitive-result (value)
     (cond ((or (eq value nil) (eq value false) (eq value t) (undefined? value)) value)
+      ((= (value-type value) "number") value)
       ((= (get value :kind) 4) (js-call runtime :readNumber value))
       ((= (get value :kind) 14)
         (let ((out (js-array)) (position 0))

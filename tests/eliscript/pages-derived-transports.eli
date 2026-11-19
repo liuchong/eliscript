@@ -32,7 +32,9 @@
   (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
   (test "Pages keeps every published source byte and binds separate browser representations to their real files"
     (async ()
-      (js-call (js-array "tools/backends/managed-host-runtime.mjs"
+      (js-call (js-array "tools/backends/managed-layout.mjs"
+                        "tools/backends/managed-layout.mjs.map"
+                        "tools/backends/managed-host-runtime.mjs"
                         "tools/backends/managed-host-runtime.mjs.map") :forEach
         (lambda (path)
           (js-call assert :ok (js-call PUBLISHED_FILES :includes path)

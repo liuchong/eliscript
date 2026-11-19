@@ -167,7 +167,8 @@
       (ae (thrown (lambda () (js-call a :initializeModule))) false)
 (js-call a :collect)
 (ae (stats a "frameDepth") 1)
-(ae (js-call a :live) 2)
+;; Only the caller frame remains: negative zero and false are inline values.
+(ae (js-call a :live) 1)
 (let ((value (js-call a :frameGet frame 0))) (try (assert (Object/is (js-call a :readNumber value) (js* "-0"))) (finally (js-call a :release value))))
       (setq __eli_iteration_4_index (+ index 1)))))
               (finally (js-call a :leaveFrame frame) (js-call a :release keep)))))))
@@ -515,7 +516,10 @@
           (setq __eli_iteration_17_active t)
           (let ((configuration (Object/assign (js-object) options
           (if (js-call (js-array "cold-own" "cold-key-error" "cold-key-primitive-error") :includes name)
-            (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384) (js-object :maxSlots 1024 :initialBytes 65536)))))
+            ;; Match the WASM sibling: fixed control / arena headers (3656),
+            ;; the 64-slot bitmap (16) and reserved object offset (8) are owned.
+            (js-object :maxSlots 64 :initialBytes (+ 4096 3656 16 8) :maxBytes (+ 16384 3656 16 8))
+            (js-object :maxSlots 1024 :initialBytes 65536)))))
           (await (eachRuntime built (lambda (a kind)
             (try (checkColdArray a reference name kind)
               (catch error (js-call failures :push error) (js-call failedCases :push (str kind "/" name))))) configuration))))))

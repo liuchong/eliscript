@@ -10,8 +10,8 @@
 ## Summary
 
 The Emacs worker can incrementally transport values encoded by
-`eliscript-value-v1` without constructing one complete JSON-ready value tree or
-one unbounded protocol line. The additive `eliscript-value-chunks-v1` framing
+`eliscript-value` without constructing one complete JSON-ready value tree or
+one unbounded protocol line. The additive `eliscript-value-chunks` framing
 uses bounded event batches, explicit request acknowledgements, asynchronous
 output backpressure, cancellation checks, and shared traversal limits.
 
@@ -23,12 +23,12 @@ probes and provide no acceptance evidence for this specification.
 
 ## Negotiation
 
-The worker ready message advertises `value-chunks-v1` in addition to the
-`value-codec-v1` capability defined by 0088. A chunked request header selects
+The worker ready message advertises `value-chunks` in addition to the
+`value-codec` capability defined by 0088. A chunked request header selects
 both identifiers and omits `arguments`:
 
 ```json
-{"version":1,"type":"request","id":"7","module":"/tmp/work.mjs","export":"run","valueEncoding":"eliscript-value-v1","valueFraming":"eliscript-value-chunks-v1"}
+{"type":"request","id":"7","module":"/tmp/work.mjs","export":"run","valueEncoding":"eliscript-value","valueFraming":"eliscript-value-chunks"}
 ```
 
 The worker accepts the header, reserves the request id, starts its timeout, and
@@ -37,8 +37,8 @@ sends an initial `value-ack` for sequence `-1`. The Emacs client then sends one
 sending the next chunk. The final acknowledgement is emitted only after the
 complete argument value has been decoded and validated.
 
-Requests that omit `valueFraming` retain the version 1 JSON or non-streaming
-0088 behavior. Chunking therefore requires no protocol-version change and is
+Requests that omit `valueFraming` retain the JSON or non-streaming
+0088 behavior. Chunking therefore requires no protocol change and is
 never silently selected for existing callers.
 
 ## Event Grammar
@@ -70,7 +70,7 @@ whose parts do not equal the declared length.
 An argument chunk has this shape:
 
 ```json
-{"version":1,"type":"value-chunk","id":"7","channel":"arguments","sequence":0,"final":false,"valueEncoding":"eliscript-value-v1","valueFraming":"eliscript-value-chunks-v1","events":[["open","array",2],["value",1]]}
+{"type":"value-chunk","id":"7","channel":"arguments","sequence":0,"final":false,"valueEncoding":"eliscript-value","valueFraming":"eliscript-value-chunks","events":[["open","array",2],["value",1]]}
 ```
 
 The acknowledgement repeats the request id, sequence, encoding, framing, and
@@ -144,7 +144,7 @@ decoded partial values from reaching application callbacks.
 
 ## Compatibility
 
-The `eliscript-value-chunks-v1` framing identifier, event grammar, bounded
+The `eliscript-value-chunks` framing identifier, event grammar, bounded
 chunk limits, acknowledgement and sequence rules, backpressure behavior,
 cancellation semantics, structured errors, and non-canonical Map/Set byte-order
 warning are stable. The framing remains opt-in and preserves both ground JSON
@@ -153,7 +153,7 @@ and non-streaming value-codec paths.
 ## Acceptance Criteria
 
 - **WVS-01:** Ready negotiation advertises chunk support without changing
-  worker protocol version 1.
+  worker protocol.
 - **WVS-02:** Chunked request headers omit arguments and require both exact
   encoding and framing identifiers.
 - **WVS-03:** One initial and one per-chunk acknowledgement enforce a single

@@ -1,12 +1,12 @@
 (module eliscript.managed-runtime-order
-  (import "./collection.mjs" reduce)
   (import "./identifier.mjs" Keyword EliscriptSymbol qualifiedIdentifierName)
   (import "./list.mjs" PersistentList)
   (import "./protocol.mjs" defineProtocol extendProtocolCategory extendProtocolType protocolMethod)
-  (import "./transient.mjs" conjBang persistentBang transient)
   (import "./vector.mjs" EMPTY_VECTOR PersistentVector)
   (import "../../stdlib/managed-literals.eli" literal-instance?)
-  (import "../../stdlib/managed-literal-protocols.eli" managed-literal-register-protocol-role)
+  (import "../../stdlib/managed-literal-protocols.eli"
+    managed-literal-register-protocol-role managed-literal-reduce)
+  (import "../../stdlib/core/protocol.eli" register-protocol-extension-loader)
 
   (defconst IComparable (defineProtocol "IComparable" (js-array "compare")))
   (managed-literal-register-protocol-role "order.IComparable" IComparable)
@@ -51,21 +51,23 @@
             (let ((order (compareValues (get left-item :value) (get right-item :value))))
               (unless (= order 0) (setq result order done t)))))) result))
 
-  (extendProtocolCategory IComparable "boolean" (js-object :compare
-    (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "boolean")) "boolean"))))
-  (extendProtocolCategory IComparable "number" (js-object :compare compare-number))
-  (extendProtocolCategory IComparable "bigint" (js-object :compare
-    (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "bigint")) "bigint"))))
-  (extendProtocolCategory IComparable "string" (js-object :compare
-    (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "string")) "string"))))
-  (extendProtocolType IComparable Keyword (js-object :compare
-    (lambda (left right) (compare-identifier left right Keyword "keyword"))))
-  (extendProtocolType IComparable EliscriptSymbol (js-object :compare
-    (lambda (left right) (compare-identifier left right EliscriptSymbol "symbol"))))
-  (extendProtocolType IComparable PersistentVector (js-object :compare
-    (lambda (left right) (compare-sequential left right PersistentVector "vector"))))
-  (extendProtocolType IComparable PersistentList (js-object :compare
-    (lambda (left right) (compare-sequential left right PersistentList "list"))))
+  (defun install-comparable-extensions ()
+    (extendProtocolCategory IComparable "boolean" (js-object :compare
+      (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "boolean")) "boolean"))))
+    (extendProtocolCategory IComparable "number" (js-object :compare compare-number))
+    (extendProtocolCategory IComparable "bigint" (js-object :compare
+      (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "bigint")) "bigint"))))
+    (extendProtocolCategory IComparable "string" (js-object :compare
+      (lambda (left right) (compare-primitive left right (lambda (value) (= (js* "typeof value") "string")) "string"))))
+    (extendProtocolType IComparable Keyword (js-object :compare
+      (lambda (left right) (compare-identifier left right Keyword "keyword"))))
+    (extendProtocolType IComparable EliscriptSymbol (js-object :compare
+      (lambda (left right) (compare-identifier left right EliscriptSymbol "symbol"))))
+    (extendProtocolType IComparable PersistentVector (js-object :compare
+      (lambda (left right) (compare-sequential left right PersistentVector "vector"))))
+    (extendProtocolType IComparable PersistentList (js-object :compare
+      (lambda (left right) (compare-sequential left right PersistentList "list")))))
+  (register-protocol-extension-loader install-comparable-extensions IComparable)
 
   (defun compareValues (left right)
     (cond ((or (eq left right) (and (Number/isNaN left) (Number/isNaN right))) 0)
@@ -81,7 +83,11 @@
       compareValues
       (lambda (left right)
         (let ((result (funcall comparison left right)))
-          (if (= (js* "typeof result") "number") (comparison-result result "comparator comparison")
+          (if (= (js* "typeof result") "number")
+            (progn
+              (unless (Number/isFinite result)
+                (throw (new globalThis/TypeError "comparator comparison must return a finite number")))
+              (if (< result 0) -1 (if (> result 0) 1 0)))
             (if (and (not (eq result false)) (not (nullish? result))) -1
               (let ((reverse (funcall comparison right left)))
                 (if (and (not (eq reverse false)) (not (nullish? reverse))) 1 0))))))))
@@ -91,22 +97,24 @@
     (let ((normalized (comparator (if (= (js-length arguments) 0) compareValues (get arguments 0)))))
       (lambda (left right) (funcall normalized right left))))
   (defun sort-decorated (values comparison)
-    (js-call values :sort (lambda (left right)
-      (let ((result (funcall comparison (get left :key) (get right :key))))
-        (if (= result 0) (- (get left :index) (get right :index)) result))))
-    (let ((builder (transient EMPTY_VECTOR)) (index 0) (limit (js-length values)))
-      (while (< index limit)
-        (conjBang builder (get (get values index) :value))
-        (setq index (1+ index)))
-      (persistentBang builder)))
+    (if (= (js-length values) 0) EMPTY_VECTOR
+      (progn
+        (js-call values :sort (lambda (left right)
+          (let ((result (funcall comparison (get left :key) (get right :key))))
+            (if (= result 0) (- (get left :index) (get right :index)) result))))
+        (let ((result (new globalThis.Array (js-length values))) (index 0))
+          (while (< index (js-length values))
+            (put result index (get (get values index) :value))
+            (setq index (1+ index)))
+          (js-call PersistentVector :from result)))))
   (defun collect-decorated (collection key-function)
     (let ((values (js-array)))
-      (reduce collection (lambda (result value)
+      (managed-literal-reduce collection (lambda (result value)
         (js-call result :push (js-object :index (js-length result) :key (funcall key-function value) :value value)) result) values)
       values))
   (defun collect-values (collection)
     (let ((values (js-array)))
-      (reduce collection (lambda (result value)
+      (managed-literal-reduce collection (lambda (result value)
         (js-call result :push value) result) values)
       values))
   (defun dense-integer-sort (values)
@@ -158,11 +166,7 @@
   (defun sort-values (values comparison)
     (let ((dense (when (eq comparison compareValues) (dense-integer-sort values))))
       (if (nullish? dense) (js-call values :sort comparison) (setq values dense)))
-    (let ((builder (transient EMPTY_VECTOR)) (index 0) (limit (js-length values)))
-      (while (< index limit)
-        (conjBang builder (get values index))
-        (setq index (1+ index)))
-      (persistentBang builder)))
+    (js-call PersistentVector :from values))
   (defun sort (&rest arguments)
     (unless (or (= (js-length arguments) 1) (= (js-length arguments) 2))
       (throw (new globalThis/TypeError "sort expects a collection or comparator and collection")))

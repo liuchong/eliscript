@@ -181,7 +181,13 @@
             (lambda (token) (assert (js-call (get (get core :execution) :hostSource) :includes token) token)))
           (js-call (js-array "runUsageHost(" "core-set-usage-host.mjs" "(defun union") :forEach
             (lambda (token) (assert (js-call (get (get set :execution) :hostSource) :includes token) token)))
-          (same (get core :modules) modules) (same (get core :request) request) (same records saved)
+          (same (get core :modules) modules)
+          (same (get core :request) (Object/assign (js-object) request
+            (js-object :hostSources (js-array (js-object
+              :id "tests/fixtures/core-stdlib-api-host.mjs"
+              :filename "tests/fixtures/core-stdlib-api-host.mjs"
+              :source (await (text "tests/fixtures/core-stdlib-api-host.mjs")))))))
+          (same records saved)
           (put (aref (get core :modules) 0) :source "changed after collection")
           (eqv (get (aref (get (aref records 0) :modules) 0) :source) (get (aref (get (aref saved 0) :modules) 0) :source)))))))
   (test "core compiler cases cannot be relabelled as host-only and their exact source region fails closed" (async ()

@@ -283,8 +283,6 @@
       (Path/join staging "_dogfood/build.json")
       (str (JSON/stringify
              (js-object :format "dogfood-build"
-                        :version 1
-                        :configSchemaVersion (Collection/get config :schema-version 1)
                         :postCount (Collection/count posts)
                         :routeCount (Collection/count documents)
                         :contentFingerprint (fingerprint documents)
@@ -296,7 +294,6 @@
     (writeFileSync
       (Path/join staging "_dogfood/posts.json")
       (str (JSON/stringify (js-object :format "dogfood-posts"
-                                      :version 1
                                       :posts (public-posts posts)))
            "\n")))
 

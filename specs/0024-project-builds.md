@@ -92,7 +92,7 @@ directory, source entry, generated entry, sorted module records, manifest path,
 and graph digest. Each module record contains its source, JavaScript output,
 source-map path, and three content digests.
 Build results also report compiled and reused module counts. Call
-`eliscript-project-build-report` to obtain the versioned JSON-compatible graph
+`eliscript-project-build-report` to obtain the JSON-compatible graph
 and cache decision schema defined by
 [0032-build-decision-reports.md](0032-build-decision-reports.md).
 

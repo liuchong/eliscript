@@ -82,7 +82,7 @@
                (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) (js-object :maximumPages 32))
                "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))
              (js-call (get backend :managed) :emit_managed_wasm program runtime
-               (js-object :abi "managed-module-v1" :maximumPages 32)))))
+               (js-object :abi "managed-module" :maximumPages 32)))))
            (path (resolve directory (+ name ".dylib"))))
       (unless foreign-entry
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module wasm)) (js-array)))
@@ -434,19 +434,21 @@
              (root-slots (lambda (function)
                (let ((pending (js-array (get function :body))) (slots (js-array)))
                  (while (> (js-length pending) 0)
-                   (let ((node (js-call pending :pop)))
-                     (when (and (= (get node :kind) "call")
-                                (= (get (aref functions (get node :value)) :name) "frame-new"))
+                   (let* ((node (js-call pending :pop))
+                          (callee (and (= (get node :kind) "call") (aref functions (get node :value))))
+                          (name (and callee (get callee :name))))
+                     (when (or (= name "frame-new") (= name "root-scope-enter"))
                        (js-call slots :push (get (aref (get node :children) 1) :value)))
                      (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))
+                 ;; A missing allocator is not zero slots. snapshots still has one real root.
                  (js-call assert :strictEqual (js-length slots) 1)
                  (aref slots 0))))
              (reference-path (resolve directory "primitive-root-slots-reference.mjs")))
         ;; This checks the emitted runtime frame capacity, including cold-only
         ;; branches. A warm-only allocation counter cannot prove this property.
-        (js-call (js-array "nil-value" "false-value" "true-value" "undefined-value" "immediate-sequence") :forEach
+        (js-call (js-array "nil-value" "false-value" "true-value" "undefined-value" "immediate-sequence" "number-value" "text-value") :forEach
           (lambda (name) (js-call assert :strictEqual (funcall root-slots (funcall entry name)) 0 name)))
-        (js-call (js-array "number-value" "text-value" "snapshots") :forEach
+        (js-call (js-array "snapshots") :forEach
           (lambda (name) (js-call assert :strictEqual (funcall root-slots (funcall entry name)) 1 name)))
         (await (writeFile reference-path (js-call (get backend :compiler) :compile_string text "primitive-root-slots.eli")))
         (let ((expected (await (native-js-reference reference-path "(reference/report)")))
@@ -692,7 +694,7 @@
              (ir (js-call (get backend :compiler) :compile_ir_string text "memory-abi-boundaries.eli"))
              (plain (funcall lowerer ir))
              (plain-image (JSON/stringify plain))
-             (signatures (js-object :setup 0 :snapshot 0 :unused 0 :safe 0 :locals 0 :recursive 0 :trap 0 :read44 0 :grow 0)))
+             (signatures (js-object :setup (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :snapshot (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :unused (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :safe (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :locals (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :recursive (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :trap (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :read44 (js-object :arity 0 :parameterTypes (js-array) :resultType "u32") :grow (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))))
         (let ((programs (js-array plain)) (index 0))
           (while (< index (js-length programs))
             (let* ((program (aref programs index))
@@ -844,18 +846,43 @@
              (expected (js-array 10 93 10 103 nil 3 (js-array 8 nil) 10 t t 3
                (js-array "left" "right") (js-array t t))))
         ;; Inspect the emitted shared IR, not an implementation-shaped mock.
-        ;; Module ownership must survive while only the fixed call bypasses
-        ;; callable materialization and its temporary argument tuple.
-        (js-call assert :strictEqual (get (get (get artifact :lowered) :descriptor) :abi) "managed-module-v1")
+        ;; A known direct call still bypasses callable materialization. A
+        ;; one-argument dynamic call uses the private slots dispatcher: a hit
+        ;; calls the slot clone, and a miss still builds a real kind-7 argv
+        ;; before the rooted invoke. The call site is not that helper.
+        (js-call assert :strictEqual (get (get (get artifact :lowered) :descriptor) :abi) "managed-module")
         (assert (js-call direct-calls :includes (get (funcall entry "plain") :name)))
         (assert (js-call direct-calls :includes "value-function-current-this"))
         (js-call assert :strictEqual
           (js-length (js-call direct-calls :filter (lambda (name) (= name "value-call-restore")))) 2)
         (js-call (js-array "value-function-named" "value-refs" "value-source-invoke-with-this" "value-source-invoke-rooted-with-this") :forEach
           (lambda (name) (js-call assert :strictEqual (js-call direct-calls :includes name) false name)))
-        (js-call (js-array "shadow" "dynamic" "optional-caller" "arity-caller") :forEach
+        (js-call (js-array "shadow" "dynamic" "arity-caller") :forEach
           (lambda (name)
-            (assert (js-call (funcall calls (funcall entry name)) :includes "value-source-invoke-rooted-with-this") name)))
+            (let ((site (funcall calls (funcall entry name))))
+              (assert (js-call site :includes "__eliscript_slot_dispatch") name)
+              (js-call assert :strictEqual (js-call site :includes "value-source-invoke-rooted-with-this") false name))))
+        (let ((dispatch (js-call functions :find (lambda (fn) (= (get fn :name) "__eliscript_slot_dispatch")))))
+          (assert dispatch)
+          (let ((dispatch-calls (funcall calls dispatch))
+                (pending (js-array (get dispatch :body))) (argv nil))
+          (while (and (not argv) (> (js-length pending) 0))
+            (let* ((node (js-call pending :pop)) (children (get node :children)))
+              (when (and (= (get node :kind) "call")
+                         (= (get (aref functions (get node :value)) :name) "value-refs")
+                         (js-call children :some (lambda (child)
+                           (and (or (= (get child :kind) "literal") (= (get child :kind) "constant"))
+                                (= (get child :value) 7)))))
+                (setq argv t))
+              (js-call children :forEach (lambda (child) (when child (js-call pending :push child))))))
+          (assert argv)
+          (assert (js-call dispatch-calls :includes "value-source-invoke-rooted-with-this"))
+          (assert (js-call dispatch-calls :some (lambda (name) (js-call name :endsWith "_slots"))))))
+        ;; An immutable optional declaration has a uniform direct ABI. Its
+        ;; argument count still selects the original optional/default behavior.
+        (let ((optional-calls (funcall calls (funcall entry "optional-caller"))))
+          (assert (js-call optional-calls :some (lambda (name) (js-call name :startsWith "__eliscript_managed_"))))
+          (js-call assert :strictEqual (js-call optional-calls :includes "value-source-invoke-rooted-with-this") false))
         ;; A tail-marked lambda calling a known module function must retain
         ;; its trampoline, rather than consuming the host stack recursively.
         (assert (js-call functions :some (lambda (fn)
@@ -993,8 +1020,12 @@
           (js-call assert :throws run (new globalThis.RegExp "closed"))))
         (let ((invalid (Object/assign (js-object) normal (js-object :lowered
                 (Object/assign (js-object) (get normal :lowered) (js-object :descriptor
-                  (Object/assign (js-object) (get (get normal :lowered) :descriptor) (js-object :version 99))))))))
+                  (Object/assign (js-object) (get (get normal :lowered) :descriptor) (js-object :unexpected 99))))))))
           (await (js-call assert :rejects (open invalid) (lambda (error) (= (code error) "ELI-RT0003")))))
+        (let ((stale (Object/assign (js-object) normal (js-object :lowered
+                (Object/assign (js-object) (get normal :lowered) (js-object :descriptor
+                  (Object/assign (js-object) (get (get normal :lowered) :descriptor) (js-object :version 1))))))))
+          (await (js-call assert :rejects (open stale) (lambda (error) (= (code error) "ELI-RT0003")))))
         (let ((next (await (open normal (js-object :initializeModule false)))))
           (js-call assert :throws (lambda () (js-call next :invoke "caught" (js-array nil)))
             (lambda (error) (reference-error-p error "ELI-RT0008")))
@@ -1041,7 +1072,7 @@
                 (put (get typed :exports) :length 0)
                 (js-call (get typed :aliases) :forEach (lambda (alias index)
                   (put alias :name (+ "changed-alias-" index)) (put alias :function "missing")))
-                (put descriptor :version 99)
+                (put descriptor :unexpected 99)
                 (put (aref (get descriptor :functions) 0) :name "changed-entry")
                 (put (aref (get descriptor :functions) 0) :arity 65535)
                 (put (get descriptor :module) :initialize "missing")
@@ -1143,18 +1174,21 @@
   (native-test "native managed instances reject foreign handles and closing during getters cannot reuse a freed mapping"
     (async ()
       (let* ((first (await (open normal))) (second (await (open normal)))
-             (number (js-call first :number 2)) (other (js-call second :number 3)) (arguments (js-array)))
-        (js-call assert :throws (lambda () (js-call second :readNumber number)) (lambda (error) (= (code error) "ELI-RT0001")))
+             (number (js-call first :number 2)) (other (js-call second :number 3))
+             (foreign (js-call first :string "foreign")) (owned (js-call second :string "owned")) (arguments (js-array)))
+        (js-call assert :strictEqual (js-call second :readNumber number) 2)
         (js-call assert :strictEqual (js-call second :readNumber other) 3)
-        (Object/defineProperty arguments "0" (js-object :get (lambda () (js-call first :close) number)))
+        (js-call assert :throws (lambda () (js-call second :readString foreign)) (lambda (error) (= (code error) "ELI-RT0001")))
+        (js-call assert :strictEqual (js-call second :readString owned) "owned")
+        (Object/defineProperty arguments "0" (js-object :get (lambda () (js-call first :close) foreign)))
         (put arguments :length 1)
         (js-call assert :throws (lambda () (js-call first :invoke "caught" arguments)) (new globalThis.RegExp "closed"))
         (js-call assert :throws (lambda () (js-call first :readNumber number)) (new globalThis.RegExp "closed"))
-        (finish second (js-array other)) (js-call first :close))))
+        (finish second (js-array other owned)) (js-call first :close))))
   (native-test "native managed capacity failures retain caller roots and source operands"
     (async ()
-      (js-call (js-array (wasm normal (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 4096))
-                        (await (open normal (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 4096)))) :forEach (lambda (runtime)
+      (js-call (js-array (wasm normal (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))
+                        (await (open normal (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192)))) :forEach (lambda (runtime)
         (js-call runtime :auto 1)
         (let* ((text (js-call runtime :string "中😀\ud800")) (count (js-call runtime :number 10000)) (frame (js-call runtime :frame 1)))
           (js-call runtime :frameSet frame 0 text)
@@ -1165,7 +1199,7 @@
           (js-call runtime :leaveFrame frame) (finish runtime (js-array text count)))))))
   (native-test "native owned scalar access preserves bits bounds and zero-copy private storage"
     (async ()
-      (let* ((owned (await (openNativeMemory (get normal :path) (js-object "last-error" 0)
+      (let* ((owned (await (openNativeMemory (get normal :path) (js-object "last-error" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
                       (js-object :initialPages 1 :maximumPages 2))))
              (packed (new globalThis.Uint8Array 96))
              (data (new globalThis.DataView (get packed :buffer)))
@@ -1225,6 +1259,8 @@
       (let* ((scope (js* "globalThis"))
              (descriptor (Object/getOwnPropertyDescriptor scope "Uint8Array"))
              (original (get descriptor :value))
+             (ro-data (get (get (get normal :lowered) :descriptor) :roData))
+             (data-offset (if (nullish? ro-data) 256 (get (get ro-data :header) :imageDataEnd)))
              (largest 0) (first undefined) (second undefined))
         (try
           (Object/defineProperty scope "Uint8Array" (Object/assign (js-object) descriptor
@@ -1235,30 +1271,31 @@
                     (setq largest (Math/max largest requested))
                     (js-call assert :ok (< requested 1048576) "native reserve must not construct a capacity-sized JavaScript array")))
                 (Reflect/construct target arguments new-target)))))))
-          (setq first (await (openNativeMemory (get normal :path) (js-object "last-error" 0)
+          (setq first (await (openNativeMemory (get normal :path) (js-object "last-error" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
             (js-object :initialPages 2 :maximumPages 65535))))
-          (setq second (await (openNativeMemory (get normal :path) (js-object "last-error" 0)
+          (setq second (await (openNativeMemory (get normal :path) (js-object "last-error" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
             (js-object :initialPages 2 :maximumPages 65535))))
           (js-call assert :strictEqual (get first :byteLength) 131072)
           (js-call assert :strictEqual (get second :byteLength) 131072)
-          (js-call first :setUint32 0 305419896 t)
+          ;; Fresh userdata starts after the initialized control and ROData image.
+          (js-call first :setUint32 data-offset 305419896 t)
           (js-call first :setUint32 131068 2309737967 false)
-          (js-call assert :strictEqual (js-call first :getUint32 0 t) 305419896)
+          (js-call assert :strictEqual (js-call first :getUint32 data-offset t) 305419896)
           (js-call assert :strictEqual (js-call first :getUint32 131068 false) 2309737967)
-          (js-call assert :strictEqual (js-call second :getUint32 0 t) 0)
-          (js-call second :setUint32 0 7 t)
-          (js-call assert :strictEqual (js-call first :getUint32 0 t) 305419896)
-          (let ((copy (js-call first :read 0 4)))
+          (js-call assert :strictEqual (js-call second :getUint32 data-offset t) 0)
+          (js-call second :setUint32 data-offset 7 t)
+          (js-call assert :strictEqual (js-call first :getUint32 data-offset t) 305419896)
+          (let ((copy (js-call first :read data-offset 4)))
             (put copy 0 0)
-            (js-call assert :strictEqual (js-call first :getUint32 0 t) 305419896))
+            (js-call assert :strictEqual (js-call first :getUint32 data-offset t) 305419896))
           (js-call assert :strictEqual (js-call first :write (new original 0) 131072) undefined)
           (js-call assert :throws (lambda () (js-call first :read 131072 1)) globalThis.RangeError)
           (js-call assert :throws (lambda () (js-call first :setUint32 131069 1 t)) globalThis.RangeError)
           (js-call assert :throws (lambda () (js-call first :write (new original 2) 131071)) globalThis.RangeError)
           (js-call assert :strictEqual (js-call first :close) undefined)
           (js-call assert :strictEqual (js-call first :close) undefined)
-          (js-call assert :throws (lambda () (js-call first :getUint32 0 t)) (new globalThis.RegExp "closed"))
-          (js-call assert :strictEqual (js-call second :getUint32 0 t) 7)
+          (js-call assert :throws (lambda () (js-call first :getUint32 data-offset t)) (new globalThis.RegExp "closed"))
+          (js-call assert :strictEqual (js-call second :getUint32 data-offset t) 7)
           (js-call assert :ok (< largest 1048576))
         (finally
           (Object/defineProperty scope "Uint8Array" descriptor)
@@ -1266,7 +1303,7 @@
           (when second (js-call second :close)))))))
   (native-test "native scalar stores convert once before checking reentrant close and preserve first throw"
     (async ()
-      (let* ((owned (await (openNativeMemory (get normal :path) (js-object "last-error" 0)
+      (let* ((owned (await (openNativeMemory (get normal :path) (js-object "last-error" (js-object :arity 0 :parameterTypes (js-array) :resultType "u32"))
                       (js-object :initialPages 1 :maximumPages 1))))
              (conversions 0) (first (js-object :original t)))
         (try
@@ -1289,4 +1326,33 @@
             (js-call assert :throws (lambda () (instantiateManagedRuntime bytes)) (lambda (error) (= (code error) "ELI-RT0003"))))))
         (js-call assert :throws (lambda () (instantiateManagedRuntime (new globalThis.Uint8Array) (js-object :initializeModule 1)))
           (lambda (error) (= (code error) "ELI-RT0003"))))))
+  (test "managed WASM cache keys on internal bytes instead of shadowed view properties"
+    (async ()
+      (let* ((first-artifact (await (build-artifact runtime-source "cache-source-a" "(defun marker () 1) (export marker)")))
+             (second-artifact (await (build-artifact runtime-source "cache-source-b" "(defun marker () 2) (export marker)")))
+             (first-source (get first-artifact :wasm)) (second-source (get second-artifact :wasm))
+             (padded-payload (+ 256 (Math/max (get first-source :byteLength) (get second-source :byteLength))))
+             (pad (lambda (bytes)
+               (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section (Array/from bytes)
+                 "eliscript-cache-padding" (js-call "x" :repeat (- padded-payload (get bytes :byteLength)))))))
+             (first-bytes (funcall pad first-source)) (second-bytes (funcall pad second-source))
+             (shadowed (globalThis.Uint8Array.from first-bytes)))
+        ;; Val64 LEB encodings can differ in length. Standard custom sections
+        ;; equalize these real modules so a length-only cache still fails here.
+        (js-call assert :strictEqual (get first-bytes :byteLength) (get second-bytes :byteLength))
+        ;; The loader reads the genuine typed-array slots, so this view still
+        ;; selects module A even though its own properties point at module B.
+        ;; The following real view of module B must then select B from a fresh
+        ;; cache key instead of returning the module already compiled for A.
+        (Object/defineProperty shadowed "buffer" (js-object :value (get second-bytes :buffer) :configurable t))
+        (Object/defineProperty shadowed "byteOffset" (js-object :value (get second-bytes :byteOffset) :configurable t))
+        (Object/defineProperty shadowed "byteLength" (js-object :value (get second-bytes :byteLength) :configurable t))
+        (let ((first (instantiateManagedRuntime shadowed)) (second (instantiateManagedRuntime second-bytes)))
+          (try
+            (let ((one (js-call first :invoke "marker")) (two (js-call second :invoke "marker")))
+              (try
+                (js-call assert :strictEqual (js-call first :readNumber one) 1)
+                (js-call assert :strictEqual (js-call second :readNumber two) 2)
+                (finally (js-call first :release one) (js-call second :release two))))
+            (finally (finish first) (finish second)))))))
 )

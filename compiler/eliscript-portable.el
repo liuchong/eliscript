@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Portable declarations form a closed, statically checked subset suitable for
-;; execution in a JavaScript worker over explicit versioned transport values.
+;; execution in a JavaScript worker over explicit transport values.
 
 ;;; Code:
 
@@ -30,7 +30,7 @@
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
     list vector hash-map hash-set js-array car cdr cons js-cons nth js-nth aref
-    length js-length __eliscript_array_build
+    length js-length __eliscript_array_build __eliscript_array_copy_assoc
     object-keys object-has? object-assoc __eliscript_arity_error
     str funcall apply js-object get cond lambda fn let let* setq set!
     quote))

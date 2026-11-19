@@ -30,7 +30,6 @@ evidence.
 The generated compiler exports:
 
 - `project-build-report-format`, equal to `eliscript-build-report`
-- `project-build-report-version`, equal to `1`
 - `project-build-report`, a synchronous normalization and policy operation
 
 The operation accepts one host-supplied record containing the build mode,

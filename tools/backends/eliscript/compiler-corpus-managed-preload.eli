@@ -31,7 +31,7 @@
                :moduleRecords module-records :moduleIds (js-call module-records :map (lambda (record) (get record :id)))
                :browserModules (new globalThis.Map))))
         (unless (and (= (get configuration :format) "eliscript-original-managed-suite")
-                     (= (get configuration :version) 1)
+
                      (= (digest (await (readFile build-path))) (get configuration :buildSha256)))
           (throw (new globalThis.TypeError "original selected frontend build source changed")))
         (put selected :load (async ()

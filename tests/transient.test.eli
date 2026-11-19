@@ -2,12 +2,13 @@
   (import "../runtime/core/transient.mjs" :as transientRuntime)
   (import "bun:test" expect test)
   (import "node:url" fileURLToPath)
-  (import "../runtime/core/collection.mjs" assoc conj count sequenceView)
+  (import "../runtime/core/collection.mjs" assoc conj count reduced sequenceView)
   (import "../runtime/core/map.mjs" EMPTY_MAP persistentHashMap)
   (import "../runtime/core/set.mjs" EMPTY_SET persistentHashSet)
   (import "../runtime/core/transient.mjs" IEditable ITransientCollection     )
   (import "../runtime/core/transducer.mjs" into)
   (import "../runtime/core/vector.mjs" EMPTY_VECTOR PersistentVector persistentVector)
+  (import "../runtime/core/transient-internals.mjs" TRANSIENT_CONJ)
   (import "../runtime/core/protocol.mjs" implementsProtocolOperation)
   (import "../runtime/core/value.mjs" hashValue)
   (import "../runtime/testing/map.mjs" inspectPersistentMap inspectTransientMap persistentMapMetrics resetPersistentMapMetrics resetTransientMapMetrics transientMapMetrics)
@@ -17,6 +18,12 @@
   (defconst HOST_FIXTURE (fileURLToPath (new globalThis.URL "./fixtures/transient-host.mjs" (js* "import.meta.url"))))
   (defconst host-truth (js* "(value) => !!value"))
   (defconst generator-bridge (js* "(source) => (function* values() { yield* source; })()"))
+  ;; Accessor with a real receiver: `observe(this)` runs before `produce()`.
+  (defconst receiver-getter (js* "(observe, produce) => ({ get() { observe(this); return produce(); } }).get"))
+  ;; Public protocol methods take the transient as `this` and the value as the
+  ;; only argument; wrap an explicit (self, value) implementation the same way
+  ;; `define-unary-method` does so the custom hook is a genuine protocol method.
+  (defconst protocol-method (js* "(fn) => ({ conj(value) { return fn(this, value); } }).conj"))
   (defun be (actual expected) (js-call (expect actual) :toBe expected))
   (defun same (actual expected) (js-call (expect actual) :toEqual expected))
   (defun match (actual expected) (js-call (expect actual) :toMatchObject expected))
@@ -163,6 +170,80 @@
       (be (get vector :count) size) (be (js-call vector :nth 0) 0) (be (js-call vector :nth (1- size)) (1- size))
       (js-call (expect (get (persistentVectorMetrics) :nodeAllocations)) :toBeLessThan 40000)
       (be (get (transientVectorMetrics) :nodeClones) 1) (be (get (transientVectorMetrics) :persistentCalls) 1))))
+  (test "into honours an own call hook on the canonical conj method" (lambda ()
+    (let* ((prototype (Object/getPrototypeOf (funcall (get transientRuntime :transient) EMPTY_VECTOR)))
+           (canonical (aref prototype TRANSIENT_CONJ))
+           (source (js-array 1 2))
+           (calls 0)
+           (own-call (lambda (self value) (setq calls (1+ calls)) (reduced self))))
+      (try
+        (progn
+          (Object/defineProperty source "0"
+            (js-object :configurable t :enumerable t
+              :get (lambda ()
+                (Object/defineProperty canonical "call"
+                  (js-object :configurable t :value own-call))
+                1)))
+          (let ((result (into EMPTY_VECTOR source)))
+            (be calls 1)
+            (be (get result :count) 0)))
+        (finally
+          (Reflect/deleteProperty canonical "call"))))))
+
+  (test "into honours a stateful call accessor on the canonical conj method" (lambda ()
+    (let* ((prototype (Object/getPrototypeOf (funcall (get transientRuntime :transient) EMPTY_VECTOR)))
+           (canonical (aref prototype TRANSIENT_CONJ))
+           (host-call (get (get globalThis.Function :prototype) :call))
+           (reflect-apply (get globalThis.Reflect :apply))
+           (call-gets 0)
+           (invoked 0)
+           (custom-call (lambda (self value) (setq invoked (1+ invoked)) (reduced self)))
+           ;; Any `Reflect.apply` aimed at the custom call would be a host-
+           ;; observable detour the reference `conj-one` never performs.
+           (guarded-apply (lambda (target this-argument args)
+             (when (eq target custom-call)
+               (throw (new globalThis.Error "custom call must not use Reflect.apply")))
+             (funcall reflect-apply target this-argument args))))
+      (try
+        (progn
+          (put globalThis.Reflect :apply guarded-apply)
+          (Object/defineProperty canonical "call"
+            (js-object :configurable t
+              :get (lambda ()
+                (setq call-gets (1+ call-gets))
+                (if (= call-gets 1) host-call custom-call))))
+          (let ((result (into EMPTY_VECTOR (js-array 1 2))))
+            (be call-gets 2)
+            (be invoked 1)
+            (be (get result :count) 0)))
+        (finally
+          (put globalThis.Reflect :apply reflect-apply)
+          (Reflect/deleteProperty canonical "call"))))))
+
+  (test "into reads the conj method once per value from the receiver" (lambda ()
+    (let* ((prototype (Object/getPrototypeOf (funcall (get transientRuntime :transient) EMPTY_VECTOR)))
+           (descriptor (Object/getOwnPropertyDescriptor prototype TRANSIENT_CONJ))
+           (canonical (aref prototype TRANSIENT_CONJ))
+           (gets 0)
+           (receivers (js-array))
+           (observer (lambda (receiver) (setq gets (1+ gets)) (js-call receivers :push receiver)))
+           (custom (funcall protocol-method
+                     (lambda (self value) (Reflect/apply canonical self (js-array value))))))
+      (try
+        (progn
+          (Object/defineProperty prototype TRANSIENT_CONJ
+            (js-object :configurable t
+              :get (funcall receiver-getter observer (lambda () custom))))
+          (let ((result (into EMPTY_VECTOR (js-array 10 20))))
+            (be gets 2)
+            (be (js-length receivers) 2)
+            (be (aref receivers 0) (aref receivers 1))
+            (be (Object/getPrototypeOf (aref receivers 0)) prototype)
+            (be (Object/isFrozen (aref receivers 0)) t)
+            (same (Array/from result) (js-array 10 20))))
+        (finally
+          (Object/defineProperty prototype TRANSIENT_CONJ descriptor))))))
+
   (test "transient behavior agrees under Bun and Node" (async ()
     (let ((expected (js-object :vector (js-array 9 2 3 4) :map (js-array (js-array "left" 3) (js-array "right" 2)) :set (js-array "right"))))
       (same (await (runHost (get globalThis.process :execPath))) expected)

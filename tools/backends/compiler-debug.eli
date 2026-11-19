@@ -50,7 +50,7 @@
                       (if (host-truth width) width (- a b)))))))
               (js-call matches :map (lambda (entryIndex) (aref entries entryIndex)))))))))
   (defun createCompilerDebugMap (document)
-    (unless (and (host-truth document) (js-call formats :has (get document :format)) (eq (get document :version) 1)
+    (unless (and (host-truth document) (js-call formats :has (get document :format))
                  (eq (get document :offsetUnit) "byte") (Array/isArray (get document :functions)) (Array/isArray (get document :ranges)))
       (throw (new globalThis.TypeError "unsupported compiler instruction map")))
     (let* ((debug (if (js-call ownedDocuments :has document) document (funcall globalThis.structuredClone document)))

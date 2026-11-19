@@ -173,8 +173,7 @@
                     (eliscript-worker-benchmark--median warm-worker))
                    (warm-execution-median
                     (eliscript-worker-benchmark--median warm-execution)))
-              `((protocolVersion . ,eliscript-worker-protocol-version)
-                (workload . ((name . "score-values")
+              `((workload . ((name . "score-values")
                              (size . ,size)
                              (rounds . ,rounds)
                              (iterations . ,iterations)

@@ -9,7 +9,6 @@
     compilerBenchmarkSourceDigest)
 
   (defconst COMPILER_SOURCE_MAP_CURSOR_FORMAT "eliscript-compiler-source-map-cursor-benchmark")
-  (defconst COMPILER_SOURCE_MAP_CURSOR_VERSION 1)
   (defconst COMPILER_SOURCE_MAP_CURSOR_BASELINE "a6013833226af047622aceca42d687b6e33e3701")
 
   (defconst controlled-target "bootstrap/compiler/source-map.eli")
@@ -154,7 +153,6 @@
   (defun validateCompilerSourceMapCursorReport (report)
     (when (or (not report)
               (not (= (get report :format) COMPILER_SOURCE_MAP_CURSOR_FORMAT))
-              (not (= (get report :version) COMPILER_SOURCE_MAP_CURSOR_VERSION))
               (not (get report :baseline))
               (not (= (get (get report :baseline) :revision) COMPILER_SOURCE_MAP_CURSOR_BASELINE)))
       (throw (new globalThis.TypeError "invalid compiler Source Map cursor report identity")))
@@ -421,7 +419,6 @@
                     (validateCompilerSourceMapCursorReport
                       (js-object
                         :format COMPILER_SOURCE_MAP_CURSOR_FORMAT
-                        :version COMPILER_SOURCE_MAP_CURSOR_VERSION
                         :generatedAt (js-call (new globalThis.Date) :toISOString)
                         :sourceDigest (await (compilerSourceMapCursorSourceDigest))
                         :host (js-object
@@ -489,7 +486,6 @@
 
   (export
     COMPILER_SOURCE_MAP_CURSOR_FORMAT
-    COMPILER_SOURCE_MAP_CURSOR_VERSION
     COMPILER_SOURCE_MAP_CURSOR_BASELINE
     compilerSourceMapCursorSourceDigest
     validateCompilerSourceMapCursorReport

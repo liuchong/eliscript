@@ -10,7 +10,7 @@
   (import "../../tools/backends/compiler-session.mjs" createCompilerSession)
   (defconst dynamicImport (js* "(specifier) => import(specifier)"))
   (defun output (kind value)
-    (js-call (get process :stdout) :write (str (JSON/stringify (Object/assign (js-object :format "eliscript-package-fixture" :version 1 :kind kind) value)) "\n")))
+    (js-call (get process :stdout) :write (str (JSON/stringify (Object/assign (js-object :format "eliscript-package-fixture" :kind kind) value)) "\n")))
   (defasync javascriptPackage (directory)
     (let* ((seed (await (buildIndependentCompiler (js-object :host "javascript" :outputRoot (resolve directory "seed") :profile "full-runtime" :retainIR false :debug false))))
       (producer (await (openCompilerArtifact seed))))

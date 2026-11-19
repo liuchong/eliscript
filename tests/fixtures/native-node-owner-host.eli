@@ -21,11 +21,11 @@
                     (js-object :initialPages 1 :maximumPages 8 :nativeTarget (get options :target) :hostCapabilities (get options :capabilities))))) "\n")))
                 ((= (get message :id) 1)
                   (when (get message :error) (throw (new globalThis.Error (JSON/stringify (get message :error)))))
-                  (js-call (get child :stdin) :write (str (JSON/stringify (js-object :id 2 :method "invoke" :args (js-array "spin" 17 23))) "\n")))
+                  (js-call (get child :stdin) :write (str (JSON/stringify (js-object :id 2 :method "invoke" :args (js-array "spin" 17 (js-object :__v64 "23")))) "\n")))
                 ((get message :callback)
                   ;; Readiness follows flush: owner death cannot unwind the
                   ;; still-running native frame by racing the callback response.
-                  (js-call (get child :stdin) :write (str (JSON/stringify (js-object :callback (get (get message :callback) :id) :result 0)) "\n")
+                  (js-call (get child :stdin) :write (str (JSON/stringify (js-object :callback (get (get message :callback) :id) :result (js-object :__v64 "0"))) "\n")
                     (lambda () (js-call (get process :stdout) :write (str (JSON/stringify (js-object :pid (get child :pid))) "\n")))))
                 (t (throw (new globalThis.Error (str "native spin returned unexpectedly: " (JSON/stringify message)))))))
             (setq end (js-call pending :indexOf "\n"))))))))

@@ -36,8 +36,7 @@
   (defun preparedIdentityP (identity)
     (and identity
          (= (get identity :format) "eliscript-prepared-stage3")
-         (= (js-length (Object/keys identity)) 5)
-         (Number/isInteger (get identity :version))
+         (= (js-length (Object/keys identity)) 4)
          (Number/isInteger (get identity :fixedPointFileCount))
          (= (value-type (get identity :sourceSha256)) "string")
          (= (value-type (get identity :productSha256)) "string")))
@@ -50,7 +49,6 @@
   (defun ensureCurrentPreparedIdentity (identity fresh)
     (ensurePreparedIdentity identity)
     (unless (and (= (get identity :format) (get fresh :format))
-                 (= (get identity :version) (get fresh :version))
                  (= (get identity :fixedPointFileCount) (get fresh :fixedPointFileCount))
                  (= (get identity :sourceSha256) (get fresh :sourceSha256))
                  (= (get identity :productSha256) (get fresh :productSha256)))
@@ -72,17 +70,12 @@
             (throw (new globalThis.Error (str "missing prepared runtime source " file))))))))
 
   (defun verifyRetainedPreparedIdentity (identity)
-    ;; Retained measurements may predate the prepared-stage3 certificate.
-    ;; When present, only the portable shape is checked; no historical
-    ;; measurement is retroactively certified by the current gate.
-    (when identity
-      (js-call (expect (get identity :format)) :toBe "eliscript-prepared-stage3")
-      (js-call (expect (js-call (Object/keys identity) :sort))
-        :toEqual (js-array "fixedPointFileCount" "format" "productSha256" "sourceSha256" "version"))
-      (js-call (expect (Number/isInteger (get identity :version))) :toBe t)
-      (js-call (expect (Number/isInteger (get identity :fixedPointFileCount))) :toBe t)
-      (js-call (expect (get identity :sourceSha256)) :toHaveLength 64)
-      (js-call (expect (get identity :productSha256)) :toHaveLength 64)))
+    (js-call (expect (get identity :format)) :toBe "eliscript-prepared-stage3")
+    (js-call (expect (js-call (Object/keys identity) :sort))
+      :toEqual (js-array "fixedPointFileCount" "format" "productSha256" "sourceSha256"))
+    (js-call (expect (Number/isInteger (get identity :fixedPointFileCount))) :toBe t)
+    (js-call (expect (get identity :sourceSha256)) :toHaveLength 64)
+    (js-call (expect (get identity :productSha256)) :toHaveLength 64))
 
   (defasync verifySourceFiles (source)
     (let ((measuredFiles (js-array))
@@ -134,9 +127,7 @@
         (let ((report (JSON/parse stdout)))
           (js-call (expect report) :toMatchObject
             (js-object
-              :schemaVersion 1
               :format "eliscript-worker-value-stream-probe"
-              :version 1
               :verified t
               :withinBudget t
               :dataset (js-object
@@ -144,8 +135,8 @@
                          :logicalMiB 1
                          :logicalBytes (* 1024 1024))
               :transport (js-object
-                           :encoding "eliscript-value-v1"
-                           :framing "eliscript-value-chunks-v1"
+                           :encoding "eliscript-value"
+                           :framing "eliscript-value-chunks"
                            :maxChunkBytes (* 256 1024)
                            :maxEventsPerChunk 512
                            :maxTextPartUnits 8192)
@@ -182,9 +173,8 @@
       (let ((report (await (readJson "benchmarks/worker-value-stream-macos-arm64.json"))))
         (js-call (expect report) :toMatchObject
           (js-object
-            :schemaVersion 1
             :format "eliscript-worker-value-stream-probe"
-            :version 1
+
             :verified t
             :withinBudget t
             :dataset (js-object
@@ -193,8 +183,8 @@
                        :logicalBytes (* 256 1024 1024)
                        :sha256 "8531f9720e3f5ce15fde831a4c677c501b3ef320d4f156c1248299cd9955392d")
             :transport (js-object
-                         :encoding "eliscript-value-v1"
-                         :framing "eliscript-value-chunks-v1"
+                         :encoding "eliscript-value"
+                         :framing "eliscript-value-chunks"
                          :maxChunkBytes (* 256 1024)
                          :maxEventsPerChunk 512
                          :maxTextPartUnits 8192)

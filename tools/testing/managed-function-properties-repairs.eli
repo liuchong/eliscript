@@ -8,6 +8,8 @@
   (import "./fixture-environment.mjs" prepareFixtureEnvironment)
   (import "./generated-fixture-module.mjs" loadGeneratedFixture)
   (import "../../tests/helpers/managed-browser-transport.mjs" writeManagedReference)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
   (defconst functionInitializationPressureTitle "manual initialization retains its capacity refusal and complete cleanup while the same bytes initialize under collecting GC")
   (defconst functionMissingDisposalTitle "a host missing a represented disposal symbol rejects transfer and preserves caller roots and supported identities")
   (defconst wellKnownSymbolNames (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species"
@@ -26,7 +28,7 @@
         (js-array "function" (get prototype :name) (get prototype :length)
           (Object/hasOwn prototype "prototype") (Object/is prototype globalThis.Function.prototype))))))
   (defun read (a value)
-    (cond ((and (not (nullish? value)) (= (get value :kind) 4)) (js-call a :readNumber value))
+    (cond ((and (not (nullish? value)) (= (get value :kind) 4)) (decoded-number-value a value))
       ((and (not (nullish? value)) (= (get value :kind) 5)) (js-call a :readString value))
       ((and (not (nullish? value)) (= (get value :kind) 14))
         (Array/from (js-object :length (js-call a :length value)) (lambda (ignored index)
@@ -53,7 +55,7 @@
            (compiled (image backend runtime program)) (bytes (get compiled :bytes)))
       (try
         (let* ((js (await (loadGeneratedFixture (get fixture :directory) (js-call (get backend :compiler) :emit_ir_string program) "function-properties-oracle")))
-               (unpressured (instantiateManagedRuntime bytes (js-object :initializeModule false))))
+               (unpressured (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
           (try
             (progn
               (js-call unpressured :initializeModule)
@@ -63,11 +65,11 @@
               (js-call unpressured :collect)
               (js-call assert :deepStrictEqual (value unpressured "cached" (js-array)) (js-call js :cached)))
             (finally (finish unpressured)))
-          (let ((collecting (instantiateManagedRuntime bytes (js-object :initializeModule false))))
+          (let ((collecting (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
             (try
               (progn
                 (let ((index 0)) (while (< index 1024)
-                  (let ((item (js-call collecting :number 7))) (js-call collecting :release item))
+                  (let ((item (js-call collecting :array))) (js-call collecting :release item))
                   (setq index (1+ index))))
                 (js-call assert :strictEqual (js-call collecting :live) 1024)
                 (js-call assert :strictEqual (get (js-call collecting :stats) :collections) 0)
@@ -126,7 +128,7 @@
                           (lambda (error) (and (Reflect/apply (get globalThis.TypeError globalThis.Symbol.hasInstance) globalThis.TypeError (js-array error))
                             (= (get error :message) "unknown managed well-known Symbol"))))
                         (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 1)
-                        (js-call assert :ok (Object/is (js-call a :readNumber held) -0))
+                        (js-call assert :ok (Object/is (decoded-number-value a held) -0))
                         (js-call a :collect)
                         (js-call assert :strictEqual (value a "symbol-description" (js-array symbol)) (+ "Symbol." (aref wellKnownSymbolNames identifier))))
                       (finally (js-call a :release index) (js-call a :release symbol))))))

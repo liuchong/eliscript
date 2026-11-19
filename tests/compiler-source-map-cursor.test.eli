@@ -53,6 +53,40 @@
       (try
         (await (buildBootstrap directory))
         (let ((sourceMap (await (loadModule directory "source-map" "protocol"))))
+          (let ((marks (js-array)) (reads 0) (span (js-object :start 0)))
+            (Object/defineProperty marks globalThis.Symbol.iterator
+              (js-object :get (lambda ()
+                (setq reads (1+ reads))
+                (when (> reads 1) (throw (new globalThis.Error "iterator read twice")))
+                (lambda () (js-call (js-array (js-object :offset 0 :span span))
+                  globalThis.Symbol.iterator)))))
+            (same (js-call sourceMap :collect_generated_marks "a" marks)
+              (js-array (js-array 0 0 span)))
+            (be reads 1))
+          (let* ((prototype (Object/getPrototypeOf (js-call (js-array) globalThis.Symbol.iterator)))
+                 (saved (Object/getOwnPropertyDescriptor prototype "return"))
+                 (observations (js-array))
+                 (span (js-object :start 0))
+                 (marker (new globalThis.Error "mark offset failed"))
+                 (mark (js-object))
+                 (normal undefined)
+                 (failure undefined))
+            (Object/defineProperty mark "offset" (js-object :get (lambda () (throw marker))))
+            (Object/defineProperty prototype "return" (js-object :configurable t :get
+              (lambda ()
+                (js-call observations :push "get")
+                (lambda () (js-call observations :push "close") (js-object)))))
+            (try
+              (setq normal (js-call sourceMap :collect_generated_marks "a"
+                (js-array (js-object :offset 0 :span span))))
+              (try (js-call sourceMap :collect_generated_marks "a" (js-array mark))
+                (catch error (setq failure error)))
+              (finally
+                (if (undefined? saved) (Reflect/deleteProperty prototype "return")
+                  (Object/defineProperty prototype "return" saved))))
+            (same normal (js-array (js-array 0 0 span)))
+            (be failure marker)
+            (same observations (js-array "get" "close")))
           ;; Protocol-phase failures propagate without running iterator.return.
           (let ((cases (js-array
                          (js-array (lambda (state)
@@ -312,6 +346,95 @@
                 (Object/defineProperty strProto "charCodeAt" savedCca)
                 (Object/defineProperty arrProto "includes" savedInc)
                 (Object/defineProperty arrProto "join" savedJoin)))))
+        (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
+  (test "Source Map avoids global Boolean and Object constructor lookups and returns boolean filter predicates" (async ()
+    (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-source-map-constructors-")))))
+      (try
+        (await (buildBootstrap directory))
+        (let ((sourceMapBytes (await (readFile (resolve directory "source-map.mjs")))))
+          (await (Promise/all
+            (js-array
+              (writeFile (resolve directory "source-map-numeric-boolean.mjs") sourceMapBytes)
+              (writeFile (resolve directory "source-map-filter-boolean.mjs") sourceMapBytes)
+              (writeFile (resolve directory "source-map-captured-object.mjs") sourceMapBytes)))))
+        (let* ((global (js* "globalThis"))
+               (savedObject globalThis.Object)
+               (savedBoolean globalThis.Boolean)
+               (booleanDescriptor (Object/getOwnPropertyDescriptor global "Boolean"))
+               (objectDescriptor (Object/getOwnPropertyDescriptor global "Object"))
+               (arrayPrototype (get globalThis.Array :prototype))
+               (filterDescriptor (Object/getOwnPropertyDescriptor arrayPrototype "filter"))
+               (originalFilter (get filterDescriptor :value))
+               (makeMethod (js* "(fn) => function(...args) { return fn(this, args); }"))
+               (numericBooleanModule nil)
+               (filterBooleanModule nil)
+               (objectModule nil)
+               (numericBooleanCalls (js-array))
+               (filterBooleanCalls (js-array))
+               (predicateValues (js-array))
+               (objectValues (js-array))
+               (observeObjects false))
+          (try
+            (Object/defineProperty global "Boolean"
+              (js-object :configurable t :writable t
+                :value (lambda (value)
+                         (js-call numericBooleanCalls :push value)
+                         (if (funcall savedBoolean value) 1 0))))
+            (setq numericBooleanModule (await (loadModule directory "source-map-numeric-boolean" "capture")))
+            (finally (js-call savedObject :defineProperty global "Boolean" booleanDescriptor)))
+          (same (js-call numericBooleanModule :collect_generated_marks "a" (js-array)) (js-array))
+          (same numericBooleanCalls (js-array))
+          (try
+            (js-call savedObject :defineProperty global "Boolean"
+              (js-object :configurable t :writable t
+                :value (lambda (value)
+                         (js-call filterBooleanCalls :push value)
+                         (if (funcall savedBoolean value) t nil))))
+            (setq filterBooleanModule (await (loadModule directory "source-map-filter-boolean" "capture")))
+            (finally (js-call savedObject :defineProperty global "Boolean" booleanDescriptor)))
+          (let ((locations nil))
+            (try
+              (js-call savedObject :defineProperty arrayPrototype "filter"
+                (js-object :configurable t :writable t
+                  :value (funcall makeMethod
+                    (lambda (self args)
+                      (let ((predicate (aref args 0)))
+                        (Reflect/apply originalFilter self
+                          (js-array
+                            (lambda (value index values)
+                              (let ((answer (funcall predicate value index values)))
+                                (js-call predicateValues :push answer)
+                                answer)))))))))
+              (setq locations
+                (js-call filterBooleanModule :source_locations "a"
+                  (js-array (js-array 0 0 (js-object :start 1.5)))))
+              (finally
+                (js-call savedObject :defineProperty arrayPrototype "filter" filterDescriptor)))
+            (same numericBooleanCalls (js-array))
+            (same filterBooleanCalls (js-array))
+            (same predicateValues (js-array false))
+            (be (get locations :size) 0))
+          (let ((objectShim
+                  (funcall makeMethod
+                    (lambda (_self args)
+                      (let ((value (aref args 0)))
+                        (when observeObjects (js-call objectValues :push value))
+                        (funcall savedObject value))))))
+            (js-call (Reflect/ownKeys savedObject) :forEach
+              (lambda (key)
+                (js-call savedObject :defineProperty objectShim key
+                  (js-call savedObject :getOwnPropertyDescriptor savedObject key))))
+            (try
+              (js-call savedObject :defineProperty global "Object"
+                (js-object :configurable t :writable t :value objectShim))
+              (setq objectModule (await (loadModule directory "source-map-captured-object" "capture")))
+              (finally (js-call savedObject :defineProperty global "Object" objectDescriptor))))
+          (setq observeObjects t)
+          (let ((span (js-object :start 0)))
+            (same (js-call objectModule :collect_generated_marks "a"
+                    (js-array (js-object :offset 0 :span span)))
+              (js-array (js-array 0 0 span))))
+          (same objectValues (js-array)))
         (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
   (test "committed Source Map cursor report preserves historical measurements and decisions" (async ()
     (let ((report (validateCompilerSourceMapCursorReport (await (readReport)))))

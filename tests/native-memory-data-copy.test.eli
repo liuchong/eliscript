@@ -5,6 +5,7 @@
   (import "node:fs/promises" mkdtemp rm writeFile)
   (import "node:path" resolve)
   (import "node:os" tmpdir)
+  (import "node:url" pathToFileURL)
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/backends/native-memory.mjs" openNativeMemory)
   (import "../tools/backends/compiler-debug.mjs" createCompilerDebugMap)
@@ -15,6 +16,8 @@
   (beforeAll (async () (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-native-data-copy-")))) (setq backend (await (buildBackends (js-object :outputRoot directory))))) 120000)
   (afterAll (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
   (defun each (items operation) (js-call items :forEach operation))
+  (defun u32-signature (arity)
+    (js-object :arity arity :parameterTypes (js-call (new globalThis.Array arity) :fill "u32") :resultType "u32"))
   (defasync eachAsync (items operation) (let ((index 0)) (while (< index (get items :length)) (await (funcall operation (aref items index))) (setq index (1+ index)))))
   (defun literal (value) (js-object :kind "literal" :type "u32" :value value :children (js-array)))
   (defun local () (js-object :kind "local" :type "u32" :value 0 :children (js-array)))
@@ -41,7 +44,7 @@
       (setq serial (1+ serial))
       (js-call assert :deepEqual typed saved "native emission preserves the public typed input")
       (await (writeFile file (Uint8Array/from (get emission :bytes))))
-      (let ((n (await (openNativeMemory file (js-object :copy 1 :outer 1)
+      (let ((n (await (openNativeMemory file (js-object :copy (u32-signature 1) :outer (u32-signature 1))
         (Object/assign (js-object) options (js-object :nativeTarget target :debug (get emission :debug) :trapSites (get (get emission :debug) :trapSites)))))))
         (try
           (let ((runtimes (js-array (js-object :invoke (lambda (name &rest args) (Reflect/apply (get n :invoke) n (js-call (js-array name) :concat args)))
@@ -69,7 +72,7 @@
       (setq serial (1+ serial)) (js-call assert :equal (JSON/stringify ir) saved)
       (assert (< (get bytes :length) (+ (* (get text :length) 2) 65536)) "packed data remains data in a source-generated native library")
       (await (writeFile file bytes))
-      (let ((runtime (await (openNativeMemory file (js-object :copy 1) (js-object :initialPages 4 :maximumPages 4 :nativeTarget target)))))
+      (let ((runtime (await (openNativeMemory file (js-object :copy (u32-signature 1)) (js-object :initialPages 4 :maximumPages 4 :nativeTarget target)))))
         (try
           (let* ((expected (utf16 text)) (counter (lambda () (let ((bytes (js-call runtime :read 0 4))) (js-call (new globalThis.DataView (get bytes :buffer) (get bytes :byteOffset) (get bytes :byteLength)) :getUint32 0 t)))))
             (js-call assert :equal (js-call runtime :invoke "copy" 64) 0)
@@ -174,4 +177,90 @@
                 (js-call assert :equal (js-call runtime :invoke "copy" 3) 0)
                 (js-call assert :deepEqual (js-call runtime :read 3 (get expected :length)) expected)))))
           (finally (js-call n :close)))))) 30000)
+  (defvar memoryModule undefined)
+  (defasync load-memory ()
+    (unless (not (undefined? memoryModule))
+      (setq memoryModule (await (funcall (js* "(url) => import(url)")
+        (get (pathToFileURL (resolve (get backend :directory) "memory.mjs")) :href)))))
+    memoryModule)
+  (defconst bulk-source
+    (str "(import \"eliscript:memory32\" memory-copy memory-fill)\n"
+      "(defun fill (dst byte len) (memory-sig u32 u32 u32 u32) (memory-fill dst byte len))\n"
+      "(defun copy (dst src len) (memory-sig u32 u32 u32 u32) (memory-copy dst src len))\n"
+      "(export fill copy)"))
+  (nativeTest "BULK-MEM-03 memory-copy is memmove on both backends and fill and copy keep page and wrap bounds" (async ()
+    (let* ((memory (await (load-memory)))
+           (parsed (js-call (get backend :compiler) :compile_ir_string bulk-source "bulk-memory.eli"))
+           (program (js-call memory :lower_memory_program parsed))
+           (options (js-object :initialPages 1 :maximumPages 1))
+           (signatures (js-object
+             :fill (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+             :copy (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")))
+           (wasm-bytes (Uint8Array/from (js-call (get backend :wasm) :emit_typed_memory_wasm
+                         (funcall globalThis.structuredClone program) options)))
+           (w (get (new WebAssembly.Instance (new WebAssembly.Module wasm-bytes)) :exports))
+           (file (resolve directory (str "bulk-" serial (if (= target "arm64-linux") ".so" ".dylib"))))
+           (n undefined))
+      (setq serial (1+ serial))
+      (await (writeFile file (Uint8Array/from
+        (js-call (get backend :native) :emit_typed_native_memory_library program target))))
+      (setq n (await (openNativeMemory file signatures
+                   (Object/assign (js-object) options (js-object :nativeTarget target)))))
+      (try
+        (let* ((wasm-memory (new globalThis.Uint8Array (get (get w :memory) :buffer)))
+               (seed (lambda (at bytes) (js-call n :write bytes at) (js-call wasm-memory :set bytes at)))
+               (same (lambda () (js-call assert :deepEqual
+                                    (js-call n :read 0 65536) (js-call wasm-memory :slice 0 65536))))
+               (native-op (lambda (name values) (Reflect/apply (get n :invoke) n
+                             (js-call (js-array name) :concat values))))
+               (wasm-op (lambda (name values) (Reflect/apply (get w name) w values)))
+               (both (lambda (name values) (js-call assert :equal
+                        (funcall native-op name values) (funcall wasm-op name values))))
+               (range (lambda (start value count)
+                        (let ((bytes (new globalThis.Uint8Array count)) (index 0))
+                          (while (< index count) (put bytes index (+ value index)) (setq index (1+ index))) bytes))))
+          ;; A zero-length fill and a zero-length copy never rewrite neighbouring bytes.
+          (funcall seed 0 (Uint8Array/of 1 2 3 4 5 6 7 8))
+          (funcall both "fill" (js-array 4 200 0))
+          (funcall both "copy" (js-array 4 0 0))
+          (js-call assert :deepEqual (js-call n :read 0 8) (Uint8Array/of 1 2 3 4 5 6 7 8))
+          ;; A non-aligned fill larger than 32 bytes takes only the low byte and
+          ;; keeps the surrounding sentinels.
+          (funcall seed 42 (Uint8Array/of 250 251))
+          (funcall both "fill" (js-array 5 427 37))
+          (let ((expected (new globalThis.Uint8Array 44)) (index 0))
+            (js-call expected :set (Uint8Array/of 1 2 3 4 5))
+            (while (< index 37) (put expected (+ 5 index) 171) (setq index (1+ index)))
+            (put expected 42 250) (put expected 43 251)
+            (js-call assert :deepEqual (js-call n :read 0 44) expected))
+          (funcall same)
+          ;; Non-overlapping copy.
+          (let ((source (funcall range 10 16 16)))
+            (funcall seed 64 source)
+            (funcall both "copy" (js-array 200 64 16))
+            (js-call assert :deepEqual (js-call n :read 200 16) source))
+          ;; Forward overlap (dst < src < dst + len) must read the original bytes.
+          (let ((source (funcall range 30 16 16)) (original undefined))
+            (funcall seed 400 source)
+            (setq original (js-call source :slice 4 16))
+            (funcall both "copy" (js-array 400 404 12))
+            (js-call assert :deepEqual (js-call n :read 400 12) original))
+          ;; Backward overlap (src < dst < src + len) must also read the original bytes.
+          (let ((source (funcall range 50 16 16)) (original undefined))
+            (funcall seed 500 source)
+            (setq original (js-call source :slice 0 12))
+            (funcall both "copy" (js-array 504 500 12))
+            (js-call assert :deepEqual (js-call n :read 504 12) original))
+          (funcall same)
+          ;; Page and u32 wrap bounds trap on both backends and leave the tail intact.
+          (funcall seed 65528 (Uint8Array/of 61 62 63 64 65 66 67 68))
+          (each (js-array (js-array "fill" (js-array 65530 7 16)) (js-array "copy" (js-array 65530 0 16))
+                          (js-array "copy" (js-array 0 65530 16)) (js-array "fill" (js-array 4294967290 7 16))
+                          (js-array "copy" (js-array 4294967290 0 16)) (js-array "copy" (js-array 0 4294967290 16)))
+            (lambda (item)
+              (js-call assert :throws (lambda () (funcall native-op (aref item 0) (aref item 1))) WebAssembly.RuntimeError)
+              (js-call assert :throws (lambda () (funcall wasm-op (aref item 0) (aref item 1))) WebAssembly.RuntimeError)))
+          (js-call assert :deepEqual (js-call n :read 65528 8) (Uint8Array/of 61 62 63 64 65 66 67 68))
+          (funcall same))
+        (finally (js-call n :close))))))
 )

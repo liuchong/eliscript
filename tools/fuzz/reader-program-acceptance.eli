@@ -54,7 +54,7 @@
              (line (js-length (js-call preceding :split "\n")))
              (column (- offset (js-call preceding :lastIndexOf "\n")))
              (message (+ "cannot assign to immutable binding: " constant))
-             (diagnostic (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-A0001" :severity "error"
+             (diagnostic (js-object :format "eliscript-diagnostic" :code "ELI-A0001" :severity "error"
                :phase "analysis" :message message :location (js-object :file (get assignment :filename)
                  :start (js-object :offset offset :line line :column column)
                  :end (js-object :offset (+ offset (js-length constant)) :line line :column (+ column (js-length constant))))))
@@ -145,8 +145,8 @@
       (setq report (JSON/parse (await (runFuzzProofCommand
         (js-call (js-array (get globalThis.process :execPath) (resolve root "tools/fuzz/reader-program-host.mjs"))
           :concat (if (undefined? directory) (js-array) (js-array directory))) (js-object) 300000))))
-      (js-call (js-array (js-array "schemaVersion" 1) (js-array "format" "eliscript-reader-program-fuzz")
-        (js-array "version" 1) (js-array "verified" t) (js-array "seed" "0x454c4931") (js-array "inputs" 100000)
+      (js-call (js-array (js-array "format" "eliscript-reader-program-fuzz")
+        (js-array "verified" t) (js-array "seed" "0x454c4931") (js-array "inputs" 100000)
         (js-array "readerInputs" 50000) (js-array "programInputs" 50000) (js-array "maximumSourceCharacters" 4096)
         (js-array "maximumCorpusBytes" 67108864) (js-array "corpusReplayed" t)
         (js-array "corpusDigest" "4b49f0e21a825e41344fc29387b5298462d17cd1140b2f1f06076a18fe1f8cab"))
@@ -165,7 +165,7 @@
         (js-call assert :strictEqual (get proof :resultDigest) (get compiler :resultDigest))
         (js-call assert :strictEqual (get proof :independentEmacsResultDigest) (get compiler :resultDigest))
         (js-call assert :strictEqual (get proof :historicalUnicodeCompatibilityDigest)
-          "4fb6c781f78ad6237a8d7c3fae85841bf717fe6b2e938eaf24e5e6501a530130")
+          "091e3fdf2e2291f1f6e8926c0b0ae21d2845f0e0ca800848ea16050c4d602a73")
         (js-call assert :ok (> (get report :corpusBytes) 1000000))
         (js-call assert :ok (<= (get report :corpusBytes) (get report :maximumCorpusBytes)))
         (js-call assert :strictEqual (+ (get reader :accepted) (get reader :rejected)) 100000)

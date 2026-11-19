@@ -273,7 +273,7 @@ call any function. Return the decision of each recorded access in order."
                 + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
                 int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
                 value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
-                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build __eliscript_array_copy_assoc
                 new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))))
          (list :children
                (append (unless fixed (list (list :expression operator scope)))
@@ -359,7 +359,7 @@ call any function. Return the decision of each recorded access in order."
                 + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null nil? undefined? nullish?
                 int32 uint32 imul32 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right unsigned-bit-shift-right
                 value-type host-identity-token string-code-unit-at string-from-code-unit string-to-number string-to-bigint number-float64-words
-                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
+                list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build __eliscript_array_copy_assoc
                 new print str object-keys object-has? object-assoc __eliscript_arity_error funcall apply get put js-call await throw))
               operator (eliscript-emitter--tdz-ground-expression operator scope))
           (eliscript-emitter--tdz-ground-sequence arguments scope))))))
@@ -677,7 +677,7 @@ With PARALLEL, every initializer must be independent of every new binding."
                              value-type host-identity-token string-code-unit-at
                              string-from-code-unit string-to-number string-to-bigint
                              number-float64-words eq equal null nil? undefined? nullish?
-                             car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build
+                             car cdr cons js-cons nth js-nth aref length js-length __eliscript_array_build __eliscript_array_copy_assoc
                              object-keys object-has? object-assoc __eliscript_arity_error
                              get put js-call new print str funcall apply))
                      (mapc #'walk arguments))
@@ -1330,6 +1330,218 @@ depth once, rather than copying and reindenting the growing nested suffix."
           (t (list :value nil)))))
       (_ (error "unknown scalar proof continuation: %S" mode)))))
 
+(defvar eliscript-emitter--proven-number-locals nil)
+
+(defun eliscript-emitter--proven-number-form-p (form)
+  "Return non-nil when FORM normally returns a JavaScript Number."
+  (cond
+   ((numberp form) t)
+   ((symbolp form)
+    (and eliscript-emitter--proven-number-locals
+         (gethash form eliscript-emitter--proven-number-locals)))
+   ((consp form)
+    (let ((operator (car form)) (arguments (cdr form)))
+      (cond
+       ((and (eq operator '1+) (= (length arguments) 1))
+        (eliscript-emitter--proven-number-form-p (car arguments)))
+       ((and (eq operator '1-) (= (length arguments) 1)) t)
+       ((eq operator '+)
+        (and arguments
+             (cl-every #'eliscript-emitter--proven-number-form-p arguments)))
+       ((memq operator '(- * / % mod & | ^ << >> >>>
+                          bit-and bit-or bit-xor bit-shift-left
+                          bit-shift-right unsigned-bit-shift-right))
+        (cl-some #'eliscript-emitter--proven-number-form-p arguments))
+       (t nil))))
+   (t nil)))
+
+(defun eliscript-emitter--contains-assignment-form-p (form)
+  (cond
+   ((vectorp form)
+    (cl-some #'eliscript-emitter--contains-assignment-form-p (append form nil)))
+   ((consp form)
+    (if (eq (car form) 'quote)
+        nil
+      (or (memq (car form) '(setq set!))
+          (cl-some #'eliscript-emitter--contains-assignment-form-p (cdr form)))))
+   (t nil)))
+
+(defun eliscript-emitter--proven-number-eligible-p (body)
+  "Function-level gate for the private Number local proof."
+  (let ((loop nil) (valid t))
+    (cl-labels
+        ((walk (forms)
+           (dolist (form forms)
+             (cond
+              ((vectorp form) (walk (append form nil)))
+              ((consp form)
+               (let ((operator (car form)))
+                 (cond
+                  ((memq operator '(js* lambda fn async await
+                                    defun defasync defn defportable
+                                    defvar defconst))
+                   (setq valid nil))
+                  ((memq operator '(while loop)) (setq loop t) (walk (cdr form)))
+                  ((eq operator 'quote) nil)
+                  (t (walk (cdr form))))))))))
+      (walk body))
+    (and valid loop (not (eliscript-emitter--contains-await-p body)))))
+
+(defun eliscript-emitter--proven-number-shadow-target (binding)
+  "Return the plain identifier BINDING introduces, or nil."
+  (cond
+   ((symbolp binding) binding)
+   ((and (consp binding) (symbolp (car binding)) (<= (length binding) 2))
+    (car binding))
+   (t nil)))
+
+(defun eliscript-emitter--proven-number-shadow-name
+    (binding parameters candidates state)
+  "Block the shadowing binding BINDING, invalidating on any collision."
+  (let ((name (eliscript-emitter--proven-number-shadow-target binding)))
+    (if (or (null name) (gethash name parameters) (gethash name candidates))
+        (setcar state t)
+      (puthash name t parameters))))
+
+(defun eliscript-emitter--collect-number-bindings (forms parameters candidates state)
+  (dolist (form forms)
+    (cond
+     ((vectorp form)
+      (eliscript-emitter--collect-number-bindings
+       (append form nil) parameters candidates state))
+     ((consp form)
+      (let ((operator (car form)))
+        (cond
+         ((memq operator '(lambda fn async)) nil)
+         ((eq operator 'quote) nil)
+         ((memq operator '(let let*))
+          (dolist (binding (cadr form))
+            (let ((name (and (consp binding) (car binding))))
+              (if (or (not (consp binding)) (not (symbolp name))
+                      (> (length binding) 2)
+                      (gethash name parameters)
+                      (gethash name candidates))
+                  (setcar state t)
+                (puthash name binding candidates)))
+            (when (consp binding)
+              (eliscript-emitter--collect-number-bindings
+               (cdr binding) parameters candidates state)))
+          (eliscript-emitter--collect-number-bindings
+           (cddr form) parameters candidates state))
+         ((eq operator 'catch)
+          (eliscript-emitter--proven-number-shadow-name
+           (cadr form) parameters candidates state)
+          (eliscript-emitter--collect-number-bindings
+           (cddr form) parameters candidates state))
+         ((eq operator 'loop)
+          (dolist (binding (cadr form))
+            (eliscript-emitter--proven-number-shadow-name
+             binding parameters candidates state)
+            (when (consp binding)
+              (eliscript-emitter--collect-number-bindings
+               (cdr binding) parameters candidates state)))
+          (eliscript-emitter--collect-number-bindings
+           (cddr form) parameters candidates state))
+         (t (eliscript-emitter--collect-number-bindings
+             (cdr form) parameters candidates state))))))))
+
+(defun eliscript-emitter--number-scope-valid-p (form scope candidates state)
+  (cond
+   ((vectorp form)
+    (dolist (child (append form nil))
+      (eliscript-emitter--number-scope-valid-p child scope candidates state)))
+   ((symbolp form)
+    (when (and (gethash form candidates) (not (memq form scope)))
+      (setcar state t)))
+   ((consp form)
+    (let ((operator (car form)))
+      (cond
+       ((eq operator 'quote) nil)
+       ((memq operator '(lambda fn async)) nil)
+       ((memq operator '(let let*))
+        (dolist (binding (cadr form))
+          (eliscript-emitter--number-scope-valid-p
+           (car (cdr binding)) scope candidates state))
+        (let ((inner (append (mapcar #'car (cadr form)) scope)))
+          (dolist (child (cddr form))
+            (eliscript-emitter--number-scope-valid-p
+             child inner candidates state))))
+       ((memq operator '(setq set!))
+        (let ((rest (cdr form)))
+          (while (cdr rest)
+            (eliscript-emitter--number-scope-valid-p
+             (cadr rest) scope candidates state)
+            (setq rest (cddr rest)))))
+       (t (dolist (child (cdr form))
+            (eliscript-emitter--number-scope-valid-p
+             child scope candidates state))))))))
+
+(defun eliscript-emitter--number-assignments-valid-p (form candidates proven)
+  (cond
+   ((vectorp form)
+    (cl-every (lambda (child)
+                (eliscript-emitter--number-assignments-valid-p
+                 child candidates proven))
+              (append form nil)))
+   ((consp form)
+    (let ((operator (car form)))
+      (cond
+       ((eq operator 'quote) t)
+       ((memq operator '(setq set!))
+        (let ((rest (cdr form)) (valid t))
+          (while rest
+            (let ((name (car rest)) (value (cadr rest)))
+              (when (and (gethash name candidates)
+                         (not (eliscript-emitter--proven-number-form-p value)))
+                (setq valid nil)))
+            (setq rest (cddr rest)))
+          (and valid
+               (cl-every (lambda (child)
+                           (eliscript-emitter--number-assignments-valid-p
+                            child candidates proven))
+                         (cdr form)))))
+       (t (cl-every (lambda (child)
+                      (eliscript-emitter--number-assignments-valid-p
+                       child candidates proven))
+                    (cdr form))))))
+   (t t)))
+
+(defun eliscript-emitter--proven-number-locals-for (parameters body)
+  (let ((parameter-names (make-hash-table :test #'eq)))
+    (dolist (parameter parameters)
+      (puthash (eliscript-parameter-form parameter) t parameter-names))
+    (when (eliscript-emitter--proven-number-eligible-p body)
+      (let ((candidates (make-hash-table :test #'eq))
+            (state (list nil))
+            ;; A successful proof with zero local candidates is still a proof.
+            ;; An empty set must remain distinct from failed admission (nil).
+            (proven (make-hash-table :test #'eq))
+            (changed t))
+        (eliscript-emitter--collect-number-bindings
+         body parameter-names candidates state)
+        (when (not (car state))
+          (dolist (form body)
+            (eliscript-emitter--number-scope-valid-p
+             form nil candidates state)))
+        (while changed
+          (setq changed nil)
+          (maphash (lambda (name binding)
+                     (unless (gethash name proven)
+                       (let ((eliscript-emitter--proven-number-locals proven))
+                         (when (eliscript-emitter--proven-number-form-p
+                                (car (cdr binding)))
+                           (puthash name t proven) (setq changed t)))))
+                   candidates))
+        (when (and (not (car state))
+                   (= (hash-table-count proven) (hash-table-count candidates)))
+          (let ((valid t)
+                (eliscript-emitter--proven-number-locals proven))
+            (dolist (form body)
+              (unless (eliscript-emitter--number-assignments-valid-p
+                       form candidates proven)
+                (setq valid nil)))
+            (and valid proven)))))))
+
 (defun eliscript-emitter--closed-scalar-loop-p (names body)
   "Prove the original scalar subset without recursive expression scans."
   (when names
@@ -1341,7 +1553,9 @@ depth once, rather than copying and reindenting the growing nested suffix."
 
 (defun eliscript-emitter--emit-function-body (parameters body)
   "Version closed scalar loops behind one Number guard per parameter."
-  (let ((names (mapcar #'eliscript-parameter-form parameters)))
+  (let ((eliscript-emitter--proven-number-locals
+         (eliscript-emitter--proven-number-locals-for parameters body))
+        (names (mapcar #'eliscript-parameter-form parameters)))
     (if (and (not eliscript-emitter--numeric-profile)
              (cl-every (lambda (p) (eq (eliscript-parameter-kind p) 'required)) parameters)
              (cl-every #'symbolp names)
@@ -1607,20 +1821,43 @@ depth once, rather than copying and reindenting the growing nested suffix."
 (defun eliscript-emitter--emit-infix (name arguments operator &optional minimum)
   "Emit ARGUMENTS joined by OPERATOR for Lisp function NAME."
   (eliscript-emitter--require-arity name arguments (or minimum 2))
-  (eliscript-emitter--numeric-fold operator (mapcar #'eliscript-emitter-emit-expression arguments)))
+  ;; Emit every operand under the ambient profile first: only this level may
+  ;; drop its own conversions, never an operand that is not itself proved.
+  (let ((expressions (mapcar #'eliscript-emitter-emit-expression arguments)))
+    (if (and (not eliscript-emitter--numeric-profile)
+             (eliscript-emitter--numeric-tag operator)
+             (cdr arguments)
+             eliscript-emitter--proven-number-locals
+             (cl-every #'eliscript-emitter--proven-number-form-p arguments))
+        (format "(%s)" (string-join expressions (format " %s " operator)))
+      (eliscript-emitter--numeric-fold operator expressions))))
 
 (defun eliscript-emitter--emit-binary-infix (name arguments operator)
   "Emit exact binary NAME over ARGUMENTS using JavaScript OPERATOR."
   (eliscript-emitter--require-arity name arguments 2 2)
-  (eliscript-emitter--numeric-binary operator
-    (eliscript-emitter-emit-expression (nth 0 arguments)) (eliscript-emitter-emit-expression (nth 1 arguments))))
+  (let ((left (eliscript-emitter-emit-expression (nth 0 arguments)))
+        (right (eliscript-emitter-emit-expression (nth 1 arguments))))
+    (if (and (not eliscript-emitter--numeric-profile)
+             eliscript-emitter--proven-number-locals
+             (eliscript-emitter--proven-number-form-p (nth 0 arguments))
+             (eliscript-emitter--proven-number-form-p (nth 1 arguments)))
+        (format "(%s %s %s)" left operator right)
+      (eliscript-emitter--numeric-binary operator left right))))
 
 (defun eliscript-emitter--emit-comparison (name arguments operator)
   "Emit one-evaluation n-ary comparison NAME using OPERATOR."
   (eliscript-emitter--require-arity name arguments 2)
   (if (= (length arguments) 2)
-      (eliscript-emitter--numeric-binary operator
-        (eliscript-emitter-emit-expression (nth 0 arguments)) (eliscript-emitter-emit-expression (nth 1 arguments)))
+      (let ((left (eliscript-emitter-emit-expression (nth 0 arguments)))
+            (right (eliscript-emitter-emit-expression (nth 1 arguments))))
+        (if (and (not eliscript-emitter--numeric-profile)
+                 (eliscript-emitter--relational-p operator)
+                 eliscript-emitter--proven-number-locals
+                 (eliscript-emitter--proven-number-form-p (nth 0 arguments))
+                 (eliscript-emitter--proven-number-form-p (nth 1 arguments))
+                 (not (eliscript-emitter--contains-assignment-form-p (nth 1 arguments))))
+            (format "(%s %s %s)" left operator right)
+          (eliscript-emitter--numeric-binary operator left right)))
     (let ((parameters (mapcar (lambda (_argument)
                                 (eliscript-emitter--fresh-name))
                               arguments))
@@ -2187,6 +2424,13 @@ results are never boolean. Use an explicit stack for deep conditional trees."
        (format "__eliscript_array_build(%s, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('__eliscript_array_copy_assoc
+       (eliscript-emitter--require-arity "__eliscript_array_copy_assoc" arguments 4 4)
+       (format "__eliscript_array_copy_assoc(%s, %s, %s, %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))
+               (eliscript-emitter-emit-expression (nth 2 arguments))
+               (eliscript-emitter-emit-expression (nth 3 arguments))))
       ('js-cons
        (eliscript-emitter--require-arity "js-cons" arguments 2 2)
        (format "[%s, ...((%s) ?? [])]"
@@ -2442,13 +2686,13 @@ results are never boolean. Use an explicit stack for deep conditional trees."
                        (or (not (eq (car node) '*)) (> (length (cdr node)) 1)))) '(quote)))
 
 (defconst eliscript-emitter--primitive-runtime-import
-  "import { stringToBigint as __eliscript_string_to_bigint, float64Words as __eliscript_number_float64_words, buildArray as __eliscript_array_build, unsupportedArity as __eliscript_arity_error } from \"eliscript/runtime/primitives.mjs\";\n")
+  "import { stringToBigint as __eliscript_string_to_bigint, float64Words as __eliscript_number_float64_words, buildArray as __eliscript_array_build, arrayCopyAssoc as __eliscript_array_copy_assoc, unsupportedArity as __eliscript_arity_error } from \"eliscript/runtime/primitives.mjs\";\n")
 (defun eliscript-emitter--uses-primitive-runtime-p (forms)
   "Find native conversion and private runtime calls in active forms."
   (eliscript-emitter--some-form forms
     (lambda (node) (and (consp node)
                        (memq (car node) '(string-to-bigint number-float64-words
-                                         __eliscript_array_build __eliscript_arity_error)))) '(quote)))
+                                         __eliscript_array_build __eliscript_array_copy_assoc __eliscript_arity_error)))) '(quote)))
 
 (defconst eliscript-emitter--value-type-import
   "import { valueType as __eliscript_value_type } from \"eliscript/runtime/primitives.mjs\";\n")

@@ -76,7 +76,21 @@
       (js-call a :auto 1)
       (js-call (js-array 0 -0 globalThis.NaN globalThis.Infinity globalThis.Number.MAX_VALUE 2147483649) :forEach
         (lambda (seed) (verify a "loop-mix" (js-array 128 seed))))
-      (assert (> (get (js-call a :stats) :collections) 1000)))))
+      ;; Word results are inline Val64 Numbers: a full 128-step loop keeps the
+      ;; live set unchanged instead of boxing and subsequently reclaiming a
+      ;; descriptor per step.
+      (let* ((before (js-call a :live))
+             (n (js-call a :number 128))
+             (s (js-call a :number 7)))
+        (js-call assert :equal (js-call a :live) before)
+        (let ((out (js-call a :invoke "loop-mix" (js-array n s))))
+          (js-call assert :equal (funcall (js* "(v) => typeof v") (js-call a :readNumber out)) "number")
+          (js-call a :release out)
+          (js-call a :release n)
+          (js-call a :release s)))
+      (js-call a :collect)
+      (js-call assert :equal (js-call a :live) 0)
+      (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
   (test "exact subnormal remainder is exhaustive across small integer significands and signs"
     (lambda () (let ((a (instantiateManagedRuntime (get fixture :bytes))) (x 0))
       (js-call a :auto 1)
@@ -94,7 +108,7 @@
         (managed (get (get fixture :backend) :managed)))
         (assert (and (>= start 0) (> end start)))
         (let* ((injected (js-call compiler :compile_ir_string
-          (str (js-call source :slice 0 start) "  (defun value-truth (heap value) (load-u32 4294967295))\n" (js-call source :slice end)) "trap-runtime.eli"))
+          (str (js-call source :slice 0 start) "  (defun value-truth (heap value) (memory-sig u32 u32 v64) (load-u32 4294967295))\n" (js-call source :slice end)) "trap-runtime.eli"))
           (ir (js-call compiler :compile_ir_string "(defun crash (x y) (progn (bit-xor x y) (if x 1 2))) (export crash)" "word-error.eli"))
           (a (instantiateManagedRuntime (globalThis.Uint8Array.from (js-call managed :emit_managed_wasm ir injected))))
           (text (js-call a :sourceObject (js-object :toString false :valueOf false)))

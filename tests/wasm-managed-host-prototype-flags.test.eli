@@ -1,0 +1,201 @@
+(module tests.wasm-managed-host-prototype-flags
+  (import "bun:test" beforeAll afterAll test)
+  (import "node:assert/strict" :default assert)
+  (import "node:fs/promises" readFile mkdtemp rm)
+  (import "node:os" tmpdir)
+  (import "node:path" resolve)
+  (import "node:process" :default process)
+  (import "../tools/backends/build.mjs" buildBackends)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+
+  (defvar directory nil)
+  (defvar b nil)
+  (defvar program nil)
+  (defvar runtime-ir nil)
+  (defvar mutated nil)
+
+  ;; The runtime publishes these two words for the guest. They are not public
+  ;; ABI: this fixture only records the writes the runtime really performs.
+  (defconst objectFlag 136)
+  (defconst arrayFlag 140)
+
+  (beforeAll
+    (async ()
+      (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-host-flags-"))))
+      (setq b (await (buildBackends (js-object :outputRoot directory))))
+      (setq runtime-ir
+        (js-call (get b :compiler) :compile_ir_string
+          (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
+      ;; A real project module whose exported function crosses the host boundary
+      ;; on every call, so the fixture exercises the actual publication path.
+      (setq program
+        (js-call (get b :compiler) :compile_ir_string
+          (await (readFile "tests/fixtures/wasm-managed-host-identity.eli" "utf8")) "host-identity.eli"))
+      120000))
+
+  (afterAll
+    (async ()
+      (when directory (await (rm directory (js-object :recursive t :force t))))))
+
+  (defun bytes ()
+    (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program runtime-ir)))
+
+  (defun runtime ()
+    (instantiateManagedRuntime (bytes)
+      (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216)))
+
+  ;; One real guest→host round trip. The exported call crosses the managed host
+  ;; boundary, which is where the runtime publishes the two words.
+  (defun drive (rt)
+    (let ((input (js-call rt :sourceObject (js-object))))
+      (funcall assert input)
+      (let ((out (js-call rt :invoke "token" (js-array input))))
+        (funcall assert out)
+        (js-call rt :release out))
+      (js-call rt :release input))
+    (js-call rt :collect)
+    0)
+
+  ;; Each case releases the handles it acquired while it runs. Closing the
+  ;; module afterwards disposes its module-level values, so the only correct
+  ;; zero-leak assertion is made after closeModule and frame unwind, never
+  ;; against a pre-call baseline (which would hide growth) and never by
+  ;; re-reading live as a fresh baseline (which would hide it too).
+  (defun finish (rt)
+    (js-call rt :closeModule)
+    (js-call rt :unwindFrames)
+    (js-call rt :collect)
+    (js-call assert :equal (js-call rt :live) 0)
+    (js-call assert :equal (get (js-call rt :stats) :frameDepth) 0)
+    0)
+
+  (defun record (log offset value)
+    (js-call log :push (js-array offset value))
+    0)
+
+  ;; The runtime publishes the object word immediately followed by the array
+  ;; word, so a pair is one 136 write and the 140 write that directly follows.
+  (defun pairs (log)
+    (let ((out (js-array)) (i 0) (n (js-length log)))
+      (while (< i (- n 1))
+        (let ((a (aref log i)) (b (aref log (+ i 1))))
+          (if (and (= (aref a 0) objectFlag) (= (aref b 0) arrayFlag))
+            (js-call out :push (js-array (aref a 1) (aref b 1)))))
+        (setq i (1+ i)))
+      out))
+
+  (defun pairs-for (log objectValue)
+    (js-call (pairs log) :filter (lambda (pair) (= (aref pair 0) objectValue))))
+
+  ;; Install a writer for one body and always restore the previous method.
+  (defun with-writer (writer body &optional cleanup)
+    (let ((original (get globalThis.DataView.prototype :setUint32)))
+      (put globalThis.DataView.prototype :setUint32 writer)
+      (try (funcall body)
+        (finally
+          (put globalThis.DataView.prototype :setUint32 original)
+          (when cleanup (funcall cleanup))))))
+
+  (test "Given a writer that mutates Object.prototype while the object word is written when a real managed call publishes then the array word is evaluated after that write instead of reusing it"
+    (lambda ()
+      (setq mutated nil)
+      (let ((log (js-array))
+            (original (get globalThis.DataView.prototype :setUint32)))
+        (with-writer
+          (new globalThis.Proxy original
+            (js-object :apply
+              (lambda (target thisArg args)
+                (let ((offset (aref args 0)) (value (aref args 1)))
+                  (record log offset value)
+                  (when (and (= offset objectFlag) (= value 1) (not mutated))
+                    (Object/defineProperty globalThis.Object.prototype "__eliscriptPrototypeProbe"
+                      (js-object :value 1 :configurable t :enumerable nil :writable t))
+                    (setq mutated t)))
+                (Reflect/apply target thisArg args))))
+          (lambda ()
+            (let ((rt (runtime)))
+              (funcall assert rt)
+              (js-call rt :auto 1)
+              (funcall drive rt)
+              (funcall assert (> (js-length log) 0) "the replaced writer must be called")
+              (funcall assert mutated "the fixture must actually mutate Object.prototype")
+              ;; Pairs published before the mutation are genuinely clean. The
+              ;; first publication after it must split: the object word was
+              ;; written before the mutation so it still reports clean, while the
+              ;; array word is evaluated after that write and must observe the
+              ;; changed realm. One shared pre-write answer would keep reporting
+              ;; a clean pair, which is exactly what must not happen here.
+              (let ((split (js-call (pairs log) :filter
+                              (lambda (pair) (and (= (aref pair 0) 1) (= (aref pair 1) 0)))))
+                    (dirty (js-call (pairs log) :filter
+                              (lambda (pair) (and (= (aref pair 0) 0) (= (aref pair 1) 0))))))
+                (funcall assert (> (js-length split) 0)
+                  "the publication after the mutation must split the two words")
+                (funcall assert (> (js-length dirty) 0)
+                  "later publications must report the changed realm"))
+              (funcall finish rt)))
+          (lambda ()
+            (when mutated
+              (setq mutated nil)
+              (Reflect/deleteProperty globalThis.Object.prototype "__eliscriptPrototypeProbe")))))))
+
+  (test "Given a Proxy writer installed on DataView.prototype when a real managed call publishes in a clean realm then both words stay clean and the original dynamic lookup and call order is preserved"
+    (lambda ()
+      (let ((log (js-array))
+            (original (get globalThis.DataView.prototype :setUint32)))
+        (with-writer
+          (new globalThis.Proxy original
+            (js-object :apply
+              (lambda (target thisArg args)
+                (record log (aref args 0) (aref args 1))
+                (Reflect/apply target thisArg args))))
+          (lambda ()
+            (let ((rt (runtime)))
+              (funcall assert rt)
+              (js-call rt :auto 1)
+              (funcall drive rt)
+              (funcall assert (> (js-length log) 0) "the installed writer must be called")
+              ;; An unmodified realm publishes both words clean while active and
+              ;; both inactive on unwind, so every pair agrees. Any reordering or
+              ;; cached answer would produce a split pair or drop a write.
+              (funcall assert (> (js-length (pairs-for log 1)) 0)
+                "the call must publish an active pair")
+              (funcall assert (> (js-length (pairs-for log 0)) 0)
+                "the call must publish an inactive pair")
+              (js-call (pairs log) :forEach
+                (lambda (pair)
+                  (js-call assert :equal (aref pair 0) (aref pair 1))))
+              (funcall finish rt)))))))
+
+  (test "Given host code that mutates Object.prototype between two managed calls when the next call publishes then it reports the current realm instead of an earlier answer"
+    (lambda ()
+      (let ((log (js-array))
+            (original (get globalThis.DataView.prototype :setUint32)))
+        (with-writer
+          (new globalThis.Proxy original
+            (js-object :apply
+              (lambda (target thisArg args)
+                (record log (aref args 0) (aref args 1))
+                (Reflect/apply target thisArg args))))
+          (lambda ()
+            (let ((rt (runtime)) (before 0))
+              (funcall assert rt)
+              (js-call rt :auto 1)
+              (funcall drive rt)
+              (funcall assert (> (js-length (pairs-for log 1)) 0)
+                "the first call must publish an active pair")
+              (setq before (js-length log))
+              (Object/defineProperty globalThis.Object.prototype "__eliscriptPrototypeProbe2"
+                (js-object :value 1 :configurable t :enumerable nil :writable t))
+              (funcall drive rt)
+              (funcall assert (> (js-length log) before) "the next call must publish again")
+              (let ((after (js-call log :slice before)))
+                (funcall assert (> (js-length (pairs after)) 0)
+                  "the next call must publish a full pair")
+                (js-call (pairs after) :forEach
+                  (lambda (pair)
+                    (js-call assert :equal (aref pair 0) 0)
+                    (js-call assert :equal (aref pair 1) 0))))
+              (funcall finish rt)))
+          (lambda ()
+            (Reflect/deleteProperty globalThis.Object.prototype "__eliscriptPrototypeProbe2")))))))

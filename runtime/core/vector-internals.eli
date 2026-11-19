@@ -8,32 +8,34 @@
   (defconst TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN (funcall globalThis.Symbol "eliscript.vector.transient-constructor"))
   (defconst metrics (js-object :nodeAllocations 0 :nodeVisits 0 :tailAllocations 0 :rootGrowths 0))
   (defconst transientMetrics (js-object :nodeClones 0 :nodeMutations 0 :tailCopies 0 :tailMutations 0 :persistentCalls 0 :invalidCalls 0))
+  (defmacro metric-inc (target field)
+    `(put ,target ,field (funcall (js* "(a, b) => a + b") (aref ,target ,field) 1)))
   ;; Native class construction is host glue; ownership and node copying are Eli.
   (defconst VectorNode (funcall
     (js* "(implementation) => class VectorNode { constructor(slots = [], owner = null) { implementation(this, slots, owner); } }")
     (lambda (self slots owner)
       (when (undefined? slots) (setq slots (js-array)))
       (when (undefined? owner) (setq owner nil))
-      (put metrics :nodeAllocations (1+ (get metrics :nodeAllocations)))
+      (metric-inc metrics "nodeAllocations")
       (put self :owner owner) (put self :slots slots) self)))
   (defun editableVectorNode (node owner)
-    (if (eq (get node :owner) owner) node
+    (if (eq (aref node "owner") owner) node
       (progn
-        (put transientMetrics :nodeClones (1+ (get transientMetrics :nodeClones)))
-        (new VectorNode (js-call (get node :slots) :slice) owner))))
+        (metric-inc transientMetrics "nodeClones")
+        (new VectorNode (js-call (aref node "slots") :slice) owner))))
   (defun recordTransientVectorNodeMutation ()
-    (put transientMetrics :nodeMutations (1+ (get transientMetrics :nodeMutations))) undefined)
+    (metric-inc transientMetrics "nodeMutations") undefined)
   (defun recordTransientVectorTailCopy ()
-    (put transientMetrics :tailCopies (1+ (get transientMetrics :tailCopies))) undefined)
+    (metric-inc transientMetrics "tailCopies") undefined)
   (defun recordTransientVectorTailMutation ()
-    (put transientMetrics :tailMutations (1+ (get transientMetrics :tailMutations))) undefined)
+    (metric-inc transientMetrics "tailMutations") undefined)
   (defun recordTransientVectorPersistent ()
-    (put transientMetrics :persistentCalls (1+ (get transientMetrics :persistentCalls))) undefined)
+    (metric-inc transientMetrics "persistentCalls") undefined)
   (defun recordInvalidTransientVectorCall ()
-    (put transientMetrics :invalidCalls (1+ (get transientMetrics :invalidCalls))) undefined)
-  (defun allocateTail (values) (put metrics :tailAllocations (1+ (get metrics :tailAllocations))) values)
-  (defun visitNode (node) (put metrics :nodeVisits (1+ (get metrics :nodeVisits))) node)
-  (defun recordRootGrowth () (put metrics :rootGrowths (1+ (get metrics :rootGrowths))) undefined)
+    (metric-inc transientMetrics "invalidCalls") undefined)
+  (defun allocateTail (values) (metric-inc metrics "tailAllocations") values)
+  (defun visitNode (node) (metric-inc metrics "nodeVisits") node)
+  (defun recordRootGrowth () (metric-inc metrics "rootGrowths") undefined)
   (defun reset-metrics (target)
     (let ((keys (Object/keys target)) (index 0))
       (while (< index (js-length keys))
@@ -46,6 +48,7 @@
   (defconst EMPTY_TAIL (Object/freeze (allocateTail (js-array))))
   (export BRANCH_BITS BRANCH_WIDTH BRANCH_MASK VECTOR_STATE VECTOR_CONSTRUCTOR_TOKEN
     TRANSIENT_VECTOR_STATE TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN VectorNode editableVectorNode
+    transientMetrics
     recordTransientVectorNodeMutation recordTransientVectorTailCopy recordTransientVectorTailMutation
     recordTransientVectorPersistent recordInvalidTransientVectorCall allocateTail visitNode recordRootGrowth
     resetVectorMetrics readVectorMetrics resetTransientVectorMetrics readTransientVectorMetrics EMPTY_ROOT EMPTY_TAIL))

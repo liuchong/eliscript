@@ -1,0 +1,319 @@
+(module eliscript.backend.managed-layout
+  ;; Single authoritative layout, Val64 bit encoding, fixed Control table,
+  ;; separated Arena budget formulas, and ROData header specification shared by
+  ;; compiler backends (bootstrap/backends/*) and host loaders (tools/backends/*).
+  ;; Compiler IR never stores JS BigInt; 64-bit compile-time constants use exact
+  ;; unsigned 32-bit word pairs {:low u32 :high u32}.
+
+  (defconst B (lambda (text) (funcall globalThis.BigInt text)))
+
+  ;; --- 1. Low-256B Linear Memory Instance Header [0 .. 255] ---
+  (defconst INSTANCE_HEADER_BYTES 256)
+  (defconst LOW_RAW_CURSOR_OFFSET 0)
+  (defconst LOW_LIFETIME_EPOCH_OFFSET 4)
+  (defconst LOW_LAST_ERROR_OFFSET 8)
+  (defconst LOW_LIVE_OBJECT_HEAD_OFFSET 12)
+  (defconst LOW_CASE_VERSION_OFFSET 16)
+  (defconst LOW_RANDOM_SEED_OFFSET 20)
+  (defconst LOW_UNICODE_CACHE_OFFSET 44)
+  (defconst LOW_HOST_PROPERTY_ORDER_OFFSET 56)
+  (defconst LOW_RO_BASE_OFFSET 72)
+  (defconst LOW_RO_DIR_OFFSET 76)
+  (defconst LOW_RO_COUNT_OFFSET 80)
+  (defconst LOW_RO_IMAGE_SLOT_OFFSET 84)
+  (defconst LOW_IMAGE_DATA_END_OFFSET 88)
+  (defconst LOW_OUTER_FREE_HEAD_OFFSET 92)
+  (defconst LOW_META_DIR_OFFSET 96)
+  (defconst LOW_META_COUNT_OFFSET 100)
+
+  (defconst RO_BASE_BYTES 256)
+  (defconst OUTER_OBJECT_HEADER_BYTES 32)
+  (defconst OBJECT_ARENA_NULL_SENTINEL_BYTES 8)
+  (defconst OBJECT_ARENA_MIN_PAYLOAD_BYTES 64)
+  (defconst SLOT_ENTRY_BYTES 24)
+  (defconst DYNAMIC_SLOT_BITS 24)
+  (defconst DYNAMIC_SLOT_MASK 16777215)
+  (defconst DYNAMIC_GENERATION_MAX 16777215)
+  (defconst MAX_SLOTS_CEILING 16777215)
+  (defconst MAX_MANAGED_BYTES 1073741824)
+  (defconst HEAP_CONTROL_MAGIC 1212498256)
+
+  ;; --- 2. Fixed Control Block Layout (882 u32 words = 3,528B payload, 3,560B owned) ---
+  ;; Section A: u32 scalars (words 0..35, byte offsets 0..140)
+  ;; Section B: u32[256] weak named-function bucket counts (words 36..291, byte offsets 144..1164)
+  ;; Section C: 8B-aligned Val64 slots (qwords 0..294, byte offsets 1168..3520):
+  ;;   - qwords 0..23  (byte offsets 1168..1352): strong roots, prototypes & caches
+  ;;   - qwords 24..38 (byte offsets 1360..1472): 15 weak well-known Symbol handles
+  ;;   - qwords 39..294 (byte offsets 1480..3520): 256 weak named-function bucket heads
+  (defconst CONTROL_U32_SCALAR_WORDS 36)
+  (defconst CONTROL_WEAK_COUNT_BUCKETS 256)
+  (defconst CONTROL_U32_TOTAL_WORDS 292)
+  (defconst CONTROL_V64_BASE_OFFSET 1168)
+  (defconst CONTROL_V64_NAMED_QWORDS 24)
+  (defconst CONTROL_V64_SYMBOL_BASE_OFFSET 1360)
+  (defconst CONTROL_V64_SYMBOL_COUNT 15)
+  (defconst CONTROL_V64_WEAK_HEAD_BASE_OFFSET 1480)
+  (defconst CONTROL_V64_WEAK_HEAD_BUCKETS 256)
+  (defconst CONTROL_V64_TOTAL_QWORDS 295)
+  (defconst FIXED_CONTROL_WORDS 882)
+  (defconst FIXED_CONTROL_PAYLOAD_BYTES 3528)
+  (defconst FIXED_OWNED_BYTES 3560)
+
+  (defconst CONTROL_U32_OFFSETS
+    (Object/freeze
+      (js-object
+        :magic 0
+        :objectArena 4
+        :slotArena 8
+        :bitmapArena 12
+        :auxArena 16
+        :roBase 20
+        :roDir 24
+        :roCount 28
+        :roImageSlot 32
+        :roBytes 36
+        :metaDir 40
+        :metaCount 44
+        :slotCapacity 48
+        :maxSlotsCeiling 52
+        :highWater 56
+        :freeSlotHead 60
+        :freeSlotTail 64
+        :objectCursor 68
+        :freeBlockHead 72
+        :freeTreeRoot 76
+        :liveCount 80
+        :ownedBytes 84
+        :maxBytes 88
+        :markGrayHead 92
+        :weakTableHead 96
+        :autoThreshold 100
+        :allocDebt 104
+        :collectionsCount 108
+        :moduleStatus 112
+        :exceptionPending 116
+        :runtimeErrorKind 120
+        :realmDirty 124
+        :foreignTokenWatermark 128
+        :descriptionInitCode 132
+        :slotBits 136
+        :slotMask 140
+        :weakBucketCountsBase 144)))
+
+  (defconst CONTROL_V64_OFFSETS
+    (Object/freeze
+      (js-object
+        :frameHead 1168
+        :moduleBindings 1176
+        :pendingException 1184
+        :moduleAbortException 1192
+        :errorProto1 1200
+        :errorProto2 1208
+        :errorProto3 1216
+        :errorProto4 1224
+        :errorProto5 1232
+        :errorAggregate 1240
+        :objectPrototype 1248
+        :arrayPrototype 1256
+        :rootSlot22 1264
+        :rootSlot23 1272
+        :realmSlot24 1280
+        :functionPrototype 1288
+        :rootSlot27 1296
+        :realmSlot28 1304
+        :realmSlot29 1312
+        :regexpPropertyTable 1320
+        :cacheSlot31 1328
+        :cacheSlot32 1336
+        :reservedRoot22 1344
+        :reservedRoot23 1352
+        :wellKnownSymbolsBase 1360
+        :weakBucketHeadsBase 1480)))
+
+  ;; --- 3. Val64 Bit Constants (Host BigInt & Compiler {low, high} Word Pairs) ---
+  (defconst VAL64_NIL (funcall B 0))
+  (defconst VAL64_FALSE (funcall B 1))
+  (defconst VAL64_TRUE (funcall B 2))
+  (defconst VAL64_UNDEFINED (funcall B 3))
+  (defconst VAL64_HOLE (funcall B 4))
+  (defconst VAL64_UNMATERIALIZED (funcall B 5))
+  (defconst VAL64_MATERIALIZING (funcall B 6))
+  (defconst VAL64_LOW_TAG_BOUND (funcall B "0x0001000000000000"))
+  (defconst VAL64_DOUBLE_ENCODE_OFFSET (funcall B "0x0001000000000000"))
+  (defconst VAL64_INLINE_F64_SPAN (funcall B "0xfff7000000000000"))
+  (defconst VAL64_INLINE_F64_MAX (funcall B "0xfff7ffffffffffff"))
+  (defconst VAL64_CANONICAL_NAN (funcall B "0x7ff9000000000000"))
+  (defconst VAL64_DYNAMIC_TAG_HIGH 4294443008)
+  (defconst VAL64_RO_TAG_HIGH 4294508544)
+  (defconst VAL64_DYNAMIC_PREFIX (funcall B "0xfff8000000000000"))
+  (defconst VAL64_RO_PREFIX (funcall B "0xfff9000000000000"))
+  (defconst VAL64_MAX_U64 (funcall B "0xffffffffffffffff"))
+  (defconst BITS64_COLLISION_START_HIGH 4294377472)
+
+  (defconst f64-scratch-buffer (new globalThis.ArrayBuffer 8))
+  (defconst f64-scratch-view (new globalThis.DataView f64-scratch-buffer))
+
+  (defun normalize-u64 (value)
+    (js-call globalThis.BigInt :asUintN 64
+      (if (= (value-type value) "bigint") value (funcall globalThis.BigInt value))))
+
+  (defun words64 (low high)
+    (Object/freeze (js-object :low (uint32 low) :high (uint32 high))))
+
+  (defun u64-to-words64 (value)
+    (let ((u (normalize-u64 value)))
+      (js-call f64-scratch-view :setBigUint64 0 u t)
+      (words64 (js-call f64-scratch-view :getUint32 0 t)
+               (js-call f64-scratch-view :getUint32 4 t))))
+
+  (defun words64-to-u64 (pair)
+    (js-call f64-scratch-view :setUint32 0 (uint32 (get pair :low)) t)
+    (js-call f64-scratch-view :setUint32 4 (uint32 (get pair :high)) t)
+    (js-call f64-scratch-view :getBigUint64 0 t))
+
+  (defun f64-to-bits64-words (num)
+    (js-call f64-scratch-view :setFloat64 0 num t)
+    (words64 (js-call f64-scratch-view :getUint32 0 t)
+             (js-call f64-scratch-view :getUint32 4 t)))
+
+  (defun bits64-u64-to-f64 (raw-bits)
+    (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw-bits) t)
+    (js-call f64-scratch-view :getFloat64 0 t))
+
+  (defun f64-raw-collides-p (low high)
+    (>= (uint32 high) BITS64_COLLISION_START_HIGH))
+
+  (defun encode-inline-f64-words (low high)
+    ;; Precondition: (not (f64-raw-collides-p low high)). Adds 0x0001_0000 to high.
+    (words64 (uint32 low) (uint32 (+ (uint32 high) 65536))))
+
+  (defun encode-ro-ref-words (image-slot ro-index)
+    (words64 (uint32 ro-index)
+             (uint32 (+ VAL64_RO_TAG_HIGH (bit-and (uint32 image-slot) 65535)))))
+
+  (defun val64-singleton-p (raw)
+    (let ((u (normalize-u64 raw)))
+      (and (>= u VAL64_NIL) (<= u VAL64_UNDEFINED))))
+
+  (defun val64-inline-number-p (raw)
+    (let ((u (normalize-u64 raw)))
+      (and (>= u VAL64_DOUBLE_ENCODE_OFFSET) (<= u VAL64_INLINE_F64_MAX))))
+
+  (defun val64-decode-inline-number (raw)
+    (bits64-u64-to-f64 (- (normalize-u64 raw) VAL64_DOUBLE_ENCODE_OFFSET)))
+
+  (defun val64-dynamic-p (raw)
+    (let ((u (normalize-u64 raw)))
+      (js-call f64-scratch-view :setBigUint64 0 u t)
+      (= (bit-and (js-call f64-scratch-view :getUint32 4 t) 4294901760)
+         (bit-and VAL64_DYNAMIC_TAG_HIGH 4294901760))))
+
+  (defun val64-ro-p (raw)
+    (let ((u (normalize-u64 raw)))
+      (js-call f64-scratch-view :setBigUint64 0 u t)
+      (= (bit-and (js-call f64-scratch-view :getUint32 4 t) 4294901760)
+         (bit-and VAL64_RO_TAG_HIGH 4294901760))))
+
+  (defun val64-readable-block-p (raw)
+    (or (val64-dynamic-p raw) (val64-ro-p raw)))
+
+  (defun val64-dynamic-slot (raw)
+    (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
+    (bit-and (js-call f64-scratch-view :getUint32 0 t) DYNAMIC_SLOT_MASK))
+
+  (defun val64-dynamic-generation (raw)
+    (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
+    (let ((low (js-call f64-scratch-view :getUint32 0 t))
+          (high (js-call f64-scratch-view :getUint32 4 t)))
+      (uint32 (+ (Math/floor (/ low 16777216)) (* (bit-and high 65535) 256)))))
+
+  (defun val64-ro-index (raw)
+    (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
+    (js-call f64-scratch-view :getUint32 0 t))
+
+  (defun val64-ro-image-slot (raw)
+    (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
+    (bit-and (js-call f64-scratch-view :getUint32 4 t) 65535))
+
+  ;; --- 4. Scheme B Honest Total Budget & Initial Arena Sizing Formulas ---
+  (defun align8-up (bytes)
+    (* (Math/ceil (/ bytes 8)) 8))
+
+  (defun align8-down (bytes)
+    (* (Math/floor (/ bytes 8)) 8))
+
+  (defun aligned-slot-arena-bytes (slot-capacity)
+    (+ OUTER_OBJECT_HEADER_BYTES (* (+ slot-capacity 1) SLOT_ENTRY_BYTES)))
+
+  (defun aligned-bitmap-arena-bytes (slot-capacity)
+    (+ OUTER_OBJECT_HEADER_BYTES
+       (align8-up (* (Math/ceil (/ (+ slot-capacity 1) 32)) 4))))
+
+  (defconst ALIGNED_MIN_OBJECT_ARENA_BYTES
+    (+ OUTER_OBJECT_HEADER_BYTES OBJECT_ARENA_MIN_PAYLOAD_BYTES))
+
+  (defun minimum-managed-heap-bytes (slot-capacity)
+    (+ FIXED_OWNED_BYTES
+       (aligned-slot-arena-bytes slot-capacity)
+       (aligned-bitmap-arena-bytes slot-capacity)
+       ALIGNED_MIN_OBJECT_ARENA_BYTES))
+
+  (defun compute-initial-managed-arenas (slots-ceiling initial-bytes max-bytes)
+    (if (or (not (Number/isInteger slots-ceiling)) (< slots-ceiling 1) (> slots-ceiling MAX_SLOTS_CEILING)
+            (not (Number/isInteger initial-bytes)) (not (Number/isInteger max-bytes))
+            (< initial-bytes 0) (> initial-bytes max-bytes) (> max-bytes MAX_MANAGED_BYTES)
+            (< initial-bytes (minimum-managed-heap-bytes 1)))
+      nil
+      (let ((low 1) (high (Math/min 1024 slots-ceiling)) (best 1))
+        (while (<= low high)
+          (let ((mid (Math/floor (/ (+ low high) 2))))
+            (if (<= (minimum-managed-heap-bytes mid) initial-bytes)
+              (progn (setq best mid) (setq low (1+ mid)))
+              (setq high (1- mid)))))
+        (let* ((slot-bytes (aligned-slot-arena-bytes best))
+               (bitmap-bytes (aligned-bitmap-arena-bytes best))
+               (remaining (- initial-bytes (+ FIXED_OWNED_BYTES slot-bytes bitmap-bytes)))
+               (object-bytes (align8-down remaining))
+               (owned (+ FIXED_OWNED_BYTES slot-bytes bitmap-bytes object-bytes)))
+          (if (or (< (- object-bytes OUTER_OBJECT_HEADER_BYTES) OBJECT_ARENA_MIN_PAYLOAD_BYTES)
+                  (> owned initial-bytes) (> owned max-bytes))
+            nil
+            (Object/freeze
+              (js-object
+                :initialSlots best
+                :slotsCeiling slots-ceiling
+                :fixedOwnedBytes FIXED_OWNED_BYTES
+                :alignedSlotArenaBytes slot-bytes
+                :alignedBitmapArenaBytes bitmap-bytes
+                :alignedObjectArenaBytes object-bytes
+                :objectArenaPayloadCapacity (- object-bytes OUTER_OBJECT_HEADER_BYTES)
+                :ownedBytes owned
+                :initialBytes initial-bytes
+                :maxBytes max-bytes)))))))
+
+  (export
+    INSTANCE_HEADER_BYTES LOW_RAW_CURSOR_OFFSET LOW_LIFETIME_EPOCH_OFFSET
+    LOW_LAST_ERROR_OFFSET LOW_LIVE_OBJECT_HEAD_OFFSET LOW_CASE_VERSION_OFFSET
+    LOW_RANDOM_SEED_OFFSET LOW_UNICODE_CACHE_OFFSET LOW_HOST_PROPERTY_ORDER_OFFSET
+    LOW_RO_BASE_OFFSET LOW_RO_DIR_OFFSET LOW_RO_COUNT_OFFSET LOW_RO_IMAGE_SLOT_OFFSET
+    LOW_IMAGE_DATA_END_OFFSET LOW_OUTER_FREE_HEAD_OFFSET LOW_META_DIR_OFFSET LOW_META_COUNT_OFFSET
+    RO_BASE_BYTES OUTER_OBJECT_HEADER_BYTES OBJECT_ARENA_NULL_SENTINEL_BYTES
+    OBJECT_ARENA_MIN_PAYLOAD_BYTES SLOT_ENTRY_BYTES DYNAMIC_SLOT_BITS DYNAMIC_SLOT_MASK
+    DYNAMIC_GENERATION_MAX MAX_SLOTS_CEILING MAX_MANAGED_BYTES HEAP_CONTROL_MAGIC
+    CONTROL_U32_SCALAR_WORDS CONTROL_WEAK_COUNT_BUCKETS CONTROL_U32_TOTAL_WORDS
+    CONTROL_V64_BASE_OFFSET CONTROL_V64_NAMED_QWORDS CONTROL_V64_SYMBOL_BASE_OFFSET
+    CONTROL_V64_SYMBOL_COUNT CONTROL_V64_WEAK_HEAD_BASE_OFFSET CONTROL_V64_WEAK_HEAD_BUCKETS
+    CONTROL_V64_TOTAL_QWORDS FIXED_CONTROL_WORDS FIXED_CONTROL_PAYLOAD_BYTES FIXED_OWNED_BYTES
+    CONTROL_U32_OFFSETS CONTROL_V64_OFFSETS
+    VAL64_NIL VAL64_FALSE VAL64_TRUE VAL64_UNDEFINED VAL64_HOLE
+    VAL64_UNMATERIALIZED VAL64_MATERIALIZING VAL64_LOW_TAG_BOUND
+    VAL64_DOUBLE_ENCODE_OFFSET VAL64_INLINE_F64_SPAN VAL64_INLINE_F64_MAX
+    VAL64_CANONICAL_NAN VAL64_DYNAMIC_TAG_HIGH VAL64_RO_TAG_HIGH
+    VAL64_DYNAMIC_PREFIX VAL64_RO_PREFIX VAL64_MAX_U64 BITS64_COLLISION_START_HIGH
+    normalize-u64 words64 u64-to-words64 words64-to-u64 f64-to-bits64-words
+    bits64-u64-to-f64 f64-raw-collides-p encode-inline-f64-words encode-ro-ref-words
+    val64-singleton-p val64-inline-number-p val64-decode-inline-number
+    val64-dynamic-p val64-ro-p val64-readable-block-p
+    val64-dynamic-slot val64-dynamic-generation val64-ro-index val64-ro-image-slot
+    align8-up align8-down aligned-slot-arena-bytes aligned-bitmap-arena-bytes
+    ALIGNED_MIN_OBJECT_ARENA_BYTES minimum-managed-heap-bytes compute-initial-managed-arenas))

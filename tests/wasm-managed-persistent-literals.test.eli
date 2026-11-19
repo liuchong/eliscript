@@ -219,7 +219,6 @@
           (js-call assert :deepEqual literal-modules original-library)
           (let ((caps (get (get lowered :descriptor) :hostCapabilities)))
             (js-call assert :deepEqual (if (nullish? caps) (js-array) caps) (js-array)))
-          (js-call assert :equal (get (get (get lowered :descriptor) :literalRuntime) :version) 1)
           (setq wasm-bytes
             (Uint8Array/from
               (js-call (get backend :wasm) :append_metadata_section

@@ -13,22 +13,30 @@
   (defportable persistent-set-same-value (_left _right)
     t)
 
+  (defportable persistent-set-make-map (map metadata)
+    (if (nil? metadata)
+        (js-object :kind persistent-set-kind
+                :map map)
+      (js-object :kind persistent-set-kind
+              :map map
+              :metadata metadata)))
+
   (defportable persistent-set-make
-      (map hash-function key-equal-function metadata)
-    (js-object :kind persistent-set-kind
-            :map map
-            :hash-function hash-function
-            :key-equal-function key-equal-function
-            :metadata metadata))
+      (map _hash-function _key-equal-function metadata)
+    (persistent-set-make-map map metadata))
+
+  (defportable persistent-set-hash-function (set)
+    (get (get (get set "map" nil) "fns" nil) 0))
+
+  (defportable persistent-set-key-equal-function (set)
+    (get (get (get set "map" nil) "fns" nil) 1))
 
   (defportable empty-persistent-set (hash-function key-equal-function)
-    (persistent-set-make
+    (persistent-set-make-map
      (empty-persistent-map
       hash-function
       key-equal-function
       persistent-set-same-value)
-     hash-function
-     key-equal-function
      nil))
 
   (defportable persistent-set? (value)
@@ -39,10 +47,10 @@
   (defportable persistent-set-compatible? (left right)
     (and (persistent-set? left)
          (persistent-set? right)
-         (= (get left "hash-function" nil)
-            (get right "hash-function" nil))
-         (= (get left "key-equal-function" nil)
-            (get right "key-equal-function" nil))))
+         (= (persistent-set-hash-function left)
+            (persistent-set-hash-function right))
+         (= (persistent-set-key-equal-function left)
+            (persistent-set-key-equal-function right))))
 
   (defportable persistent-set-count (set)
     (persistent-map-count (get set "map" nil)))
@@ -53,10 +61,8 @@
   (defportable persistent-set-with-meta (set metadata)
     (if (= metadata (persistent-set-meta set))
         set
-      (persistent-set-make
+      (persistent-set-make-map
        (get set "map" nil)
-       (get set "hash-function" nil)
-       (get set "key-equal-function" nil)
        metadata)))
 
   (defportable persistent-set-empty? (set)
@@ -73,10 +79,8 @@
           set
         (if (nil? next-map)
             nil
-          (persistent-set-make
+          (persistent-set-make-map
            next-map
-           (get set "hash-function" nil)
-           (get set "key-equal-function" nil)
            (persistent-set-meta set))))))
 
   (defportable persistent-set-disj (set value)
@@ -84,10 +88,8 @@
            (next-map (persistent-map-dissoc map value)))
       (if (= map next-map)
           set
-        (persistent-set-make
+        (persistent-set-make-map
          next-map
-         (get set "hash-function" nil)
-         (get set "key-equal-function" nil)
          (persistent-set-meta set)))))
 
   (defportable persistent-set-reduce (function initial set)
@@ -164,8 +166,8 @@
                      (persistent-set-conj result value)
                    result))
                (empty-persistent-set
-                (get left "hash-function" nil)
-                (get left "key-equal-function" nil))
+                (persistent-set-hash-function left)
+                (persistent-set-key-equal-function left))
                candidates)))
         (if (= (persistent-set-count retained)
                (persistent-set-count left))

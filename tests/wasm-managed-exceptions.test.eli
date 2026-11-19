@@ -308,13 +308,13 @@
           (js-call assert :equal (funcall (get e "value-exception-pending") heap) 1)
           (funcall (get e "heap-collect") heap)
           (js-call assert :equal (funcall (get e "value-kind") heap value) 5)
-          (js-call assert :equal (funcall (get e "value-throw") heap 4294967295) 0)
+          (js-call assert :equal (funcall (get e "value-throw") heap (funcall globalThis.BigInt 4294967295)) (funcall globalThis.BigInt 0))
           (js-call assert :equal (funcall (get e "last-error")) 1)
           (js-call assert :equal (funcall (get e "value-exception-take") heap) value)
           (js-call assert :equal (funcall (get e "value-exception-pending") heap) 0)
           (funcall (get e "heap-collect") heap)
           (js-call assert :equal (funcall (get e "heap-live") heap) 0)
-          (js-call assert :equal (funcall (get e "value-exception-take") heap) 0)
+          (js-call assert :equal (funcall (get e "value-exception-take") heap) (funcall globalThis.BigInt 0))
           (js-call assert :equal (funcall (get e "last-error")) 3)))))
 
   (test "capacity failures during Error creation preserve caller frames and recover after released source objects are collected"
@@ -359,7 +359,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((faulty
                  (str (js-call source :slice 0 start)
-                      "  (defun value-cell-get (heap cell) (load-u32 4294967295))\n"
+                      "  (defun value-cell-get (heap cell) (memory-sig v64 u32 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                       (js-call source :slice end)))
                (r (js-call (get b :compiler) :compile_ir_string faulty "trap-exception-runtime.eli"))
                (a (instantiateManagedRuntime

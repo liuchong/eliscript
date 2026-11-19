@@ -245,7 +245,7 @@
                (identity
                  (js-object
                    :format "eliscript-original-case-sources"
-                   :version 1
+
                    :id (get snapshot :id)
                    :kind (get snapshot :kind)
                    :entry (get snapshot :entry)
@@ -291,7 +291,7 @@
            (body (Object/assign (js-object) identity)))
       (Reflect/deleteProperty body "sha256")
       (when (or (/= (get identity :format) "eliscript-original-case-sources")
-                (/= (get identity :version) 1)
+                nil
                 (/= sha256 (get (chunk-identity (lambda (consume) (json-chunks body consume))) :sha256))
                 (and (not (undefined? expected-identity))
                      (/= sha256 expected-identity)))

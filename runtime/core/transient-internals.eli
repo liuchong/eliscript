@@ -7,11 +7,21 @@
   (defconst TRANSIENT_ASSOC (protocolSlot I_TRANSIENT_COLLECTION "assoc!"))
   (defconst TRANSIENT_DISSOC (protocolSlot I_TRANSIENT_COLLECTION "dissoc!"))
   (defconst TRANSIENT_PERSISTENT (protocolSlot I_TRANSIENT_COLLECTION "persistent!"))
+  ;; Private whole-source identity `into` hook registered by the vector module
+  ;; at initialization. Keeping it in a module variable means no symbol is
+  ;; installed on any public transient prototype and custom transient Proxies
+  ;; are never probed for it.
+  (defvar transient-vector-conj-array undefined)
+  (defun registerTransientVectorConjArray (operation)
+    (setq transient-vector-conj-array operation))
+  (defun transientVectorConjArray ()
+    transient-vector-conj-array)
   (defconst dispatchEditableTransient (protocolMethod I_EDITABLE "transient"))
   (defconst dispatchTransientConj (protocolMethod I_TRANSIENT_COLLECTION "conj!"))
   (defconst dispatchTransientAssoc (protocolMethod I_TRANSIENT_COLLECTION "assoc!"))
   (defconst dispatchTransientDissoc (protocolMethod I_TRANSIENT_COLLECTION "dissoc!"))
   (defconst dispatchTransientPersistent (protocolMethod I_TRANSIENT_COLLECTION "persistent!"))
   (export I_EDITABLE I_TRANSIENT_COLLECTION EDITABLE_TRANSIENT TRANSIENT_CONJ TRANSIENT_ASSOC
-    TRANSIENT_DISSOC TRANSIENT_PERSISTENT dispatchEditableTransient dispatchTransientConj
+    TRANSIENT_DISSOC TRANSIENT_PERSISTENT registerTransientVectorConjArray
+    transientVectorConjArray dispatchEditableTransient dispatchTransientConj
     dispatchTransientAssoc dispatchTransientDissoc dispatchTransientPersistent))

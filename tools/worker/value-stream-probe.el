@@ -23,9 +23,6 @@
   "eliscript-worker-value-stream-probe"
   "Format identifier emitted by the large-value probe.")
 
-(defconst eliscript-value-stream-probe-version 1
-  "Report version emitted by the large-value probe.")
-
 (defconst eliscript-value-stream-probe--project-directory
   (expand-file-name
    "../.."
@@ -133,7 +130,9 @@ PREPARED is the freshly authenticated portable prepared stage3 identity."
   "Return portable prepared stage3 report IDENTITY or signal an error."
   (unless (and (listp identity)
                (equal (alist-get 'format identity) "eliscript-prepared-stage3")
-               (integerp (alist-get 'version identity))
+               (equal (sort (mapcar (lambda (entry) (symbol-name (car entry))) identity)
+                            #'string<)
+                      '("fixedPointFileCount" "format" "productSha256" "sourceSha256"))
                (integerp (alist-get 'fixedPointFileCount identity))
                (stringp (alist-get 'sourceSha256 identity))
                (stringp (alist-get 'productSha256 identity)))
@@ -200,10 +199,10 @@ diagnostics stay on standard error so warnings cannot corrupt it."
            "ELISCRIPT_VALUE_STREAM_PROBE_EMACS_BUDGET_MIB" 2048))
          (worker-budget-mib
           (eliscript-value-stream-probe--positive-environment
-           "ELISCRIPT_VALUE_STREAM_PROBE_WORKER_BUDGET_MIB" 1536))
+           "ELISCRIPT_VALUE_STREAM_PROBE_WORKER_BUDGET_MIB" 1024))
          (combined-budget-mib
           (eliscript-value-stream-probe--positive-environment
-           "ELISCRIPT_VALUE_STREAM_PROBE_COMBINED_BUDGET_MIB" 3072))
+           "ELISCRIPT_VALUE_STREAM_PROBE_COMBINED_BUDGET_MIB" 2560))
          (timeout-seconds
           (eliscript-value-stream-probe--positive-environment
            "ELISCRIPT_VALUE_STREAM_PROBE_TIMEOUT_SECONDS" 300))
@@ -356,9 +355,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                          (<= worker-peak (* worker-budget-mib 1024))
                          (<= combined-peak (* combined-budget-mib 1024)))))
               (setq report
-                    `((schemaVersion . 1)
-                      (format . ,eliscript-value-stream-probe-format)
-                      (version . ,eliscript-value-stream-probe-version)
+                    `((format . ,eliscript-value-stream-probe-format)
                       (verified . ,(if verified t :false))
                       (withinBudget . ,(if within-budget t :false))
                       (dataset

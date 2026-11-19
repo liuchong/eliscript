@@ -17,7 +17,7 @@
       :functionalDeadline 360000
       :nativeDeadlineTitle "Given actual provider values when the same phased graph executes native machine code then provider identities and comparator effects are preserved without host sorting"
       :nativeFunctionalDeadline 600000
-      :sha256 "426849575a415f0a8afbf82d10500a5b3a66cce0abf3d77893a3cd592ac4f779")
+      :sha256 "3d06c14341cea01b76696978bf81be42c60bba9027f5f683019d17468602b0df")
     (js-object :suite "tests/managed-stdlib-value-json.test.mjs" :resources false
       :sha256 "569a2bb8cd08c05b161c3f21b42480d8292066637d286639442ff993bd64fb12"
       :deadlineTitle "Given collection at every allocation when complete original stdlib modules execute then persistent callbacks identities and error recovery retain their roots"
@@ -101,7 +101,7 @@
       (js-call runtime :release error) decoded))
   (defun standardLibraryRuntimeFacade (runtime descriptor &rest proofs)
     (unless (and descriptor (= (get descriptor :format) "eliscript-managed-control")
-                 (= (get descriptor :version) 1) (Array/isArray (get descriptor :functions)))
+                 (Array/isArray (get descriptor :functions)))
       (throw (new globalThis.TypeError "standard library fixture requires actual export metadata")))
     (let* ((proof (aref proofs 0))
            (sorted-plan (js-call standardLibraryFixturePlans :find (lambda (item)

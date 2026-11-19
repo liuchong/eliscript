@@ -1,10 +1,10 @@
 (module eliscript.managed-runtime-transient
   (import "../../stdlib/managed-literal-protocols.eli"
-    I_EDITABLE I_TRANSIENT_COLLECTION managed-literal-transient managed-literal-conj-bang
+    managed-literal-protocol managed-literal-transient managed-literal-conj-bang
     managed-literal-assoc-bang managed-literal-dissoc-bang managed-literal-persistent-bang)
 
-  (defconst IEditable I_EDITABLE)
-  (defconst ITransientCollection I_TRANSIENT_COLLECTION)
+  (defconst IEditable (managed-literal-protocol "transient.IEditable"))
+  (defconst ITransientCollection (managed-literal-protocol "transient.ITransientCollection"))
   (defun transient (collection) (managed-literal-transient collection))
   (defun conjBang (collection &rest values)
     (apply managed-literal-conj-bang (js-call (js-array collection) :concat values)))

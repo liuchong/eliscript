@@ -33,8 +33,10 @@
        (report
         (eliscript-project-build-report
          (eliscript-project-build-result-create
-          :root root :out-dir (expand-file-name "dist" root) :entry (expand-file-name "main.eli" root)
-          :entry-output (expand-file-name "dist/main.mjs" root) :modules modules
+          :root root :out-dir (expand-file-name "dist" root)
+          :entries (list (expand-file-name "main.eli" root))
+          :entry-outputs (list (expand-file-name "dist/main.mjs" root))
+          :modules modules
           :manifest (expand-file-name "dist/eliscript-project.json" root)
           :digest "supplied-identity-unchanged" :compiled-count (length modules)
           :reused-count 0 :mode "standard" :cache-status "disabled"

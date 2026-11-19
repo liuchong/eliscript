@@ -175,7 +175,8 @@
                  (declared (get (get lowered :descriptor) :hostCapabilities)))
             (js-call assert :deepStrictEqual declared
               (js-call names :map (lambda (name)
-                (js-object :name name :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))))
+                (js-object :name name :module "eliscript.host" :arity 2
+                  :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call"))))
             (js-call assert :deepStrictEqual
               (js-call imports :map (lambda (item)
                 (js-object :module (get item :module) :name (get item :name) :kind (get item :kind))))
@@ -184,7 +185,7 @@
             (js-call imports :forEach (lambda (item)
               (when (Object/hasOwn item "type")
                 (js-call assert :deepStrictEqual (get item :type)
-                  (js-object :parameters (js-array "i32" "i32") :results (js-array "i32")))))))
+                  (js-object :parameters (js-array "i32" "i64") :results (js-array "i64")))))))
           (setq wasm-path (resolve directory "sequence-data.wasm")) (await (writeFile wasm-path bytes)))
         (when native-supported
           (setq native-path (resolve directory (if (= (get globalThis.process :platform) "linux") "sequence-data.so" "sequence-data.dylib")))
@@ -206,7 +207,7 @@
             (await (writeFile (resolve directory path) wire))
             (js-call literal-records :push (js-object :id (get record :id) :path path)))
           (setq index (1+ index)))
-        (let ((receipt (js-object :format "eliscript-sequence-build" :version 1
+        (let ((receipt (js-object :format "eliscript-sequence-build"
           :directory directory :producerPid (get globalThis.process :pid) :entry entry
           :canonicalRoundTrip t :runtimeIR "build-ir/runtime.json" :literalIR literal-records
           :oracleDirectory oracle-directory :wasmPath wasm-path :nativePath native-path

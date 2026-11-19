@@ -142,7 +142,6 @@
   (test "the published manifests follow the documented shape" (async () (let*
         ((root (join (get state :workspace) "_site")) (manifest (js-call globalThis.JSON :parse (await (readText root "_dogfood/build.json")))) (posts (js-call globalThis.JSON :parse (await (readText root "_dogfood/posts.json")))) (search (js-call globalThis.JSON :parse (await (readText root "search.json")))))
         (js-call (expect (get manifest :format)) :toBe "dogfood-build")
-        (js-call (expect (get manifest :version)) :toBe 1)
         (js-call (expect (get manifest :postCount)) :toBe 3)
         (js-call (expect (get manifest :routeCount)) :toBe 19)
         (js-call (expect (get manifest :contentFingerprint)) :toMatch (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))

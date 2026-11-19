@@ -154,7 +154,7 @@
 
   (defun validate-environment (contract errors)
     (unless (= (JSON/stringify (get contract :environment)) (JSON/stringify expected-environment))
-      (js-call errors :push "environment must match the version 1 local inventory"))
+      (js-call errors :push "environment must match the local inventory"))
     (unless (= (get contract :maximumActiveDurationMs) 900000)
       (js-call errors :push "maximumActiveDurationMs must be 900000")))
 
@@ -215,7 +215,7 @@
                                    (not (= (JSON/stringify (get step :argv)) (JSON/stringify (aref expected 1))))
                                    (not (= (get step :timeoutMs) (aref expected 2)))
                                    (not (= (get step :countsTowardActiveDuration) (aref expected 3)))))
-                      (js-call errors :push (str label " must match the version 1 " (aref expected 0) " step"))))
+                      (js-call errors :push (str label " must match the " (aref expected 0) " step"))))
                   (let ((command (if (Array/isArray (get step :argv)) (js-call (get step :argv) :join " ") "")))
                     (when (command-leaks-applications command)
                       (js-call errors :push (str label " leaks application validation into onboarding")))))))
@@ -280,10 +280,8 @@
                        (get options :contract)))
            (errors (js-array)))
       (when (or (not (plain-object? contract))
-                (not (= (get contract :schemaVersion) 1))
-                (not (= (get contract :format) "eliscript-local-onboarding"))
-                (not (= (get contract :version) 1)))
-        (js-call errors :push "contract must use eliscript-local-onboarding version 1"))
+                (not (= (get contract :format) "eliscript-local-onboarding")))
+        (js-call errors :push "contract must use eliscript-local-onboarding"))
       (validate-environment contract errors)
       (validate-steps (get contract :steps) errors)
       (when (or (not (Array/isArray (get contract :requiredDocumentation)))
@@ -292,7 +290,7 @@
         (js-call errors :push "requiredDocumentation must be a non-empty string array"))
       (unless (= (JSON/stringify (get contract :requiredDocumentation))
                  (JSON/stringify expected-documentation))
-        (js-call errors :push "requiredDocumentation must match the version 1 inventory"))
+        (js-call errors :push "requiredDocumentation must match the inventory"))
       (if (or (not (Array/isArray (get contract :sourceFiles)))
               (= (js-length (get contract :sourceFiles)) 0)
               (some-unsafe-path (get contract :sourceFiles)))
@@ -307,7 +305,7 @@
               (await (tracked-file root (aref files index) errors))
               (setq index (1+ index))))))
       (unless (= (JSON/stringify (get contract :sourceFiles)) (JSON/stringify expected-source-files))
-        (js-call errors :push "sourceFiles must match the version 1 inventory"))
+        (js-call errors :push "sourceFiles must match the inventory"))
       (let ((loaded (await (Promise/all (js-array
                             (readFile (js-call path :join root guide-file) "utf8")
                             (readFile (js-call path :join root "Makefile") "utf8")))))
@@ -338,9 +336,7 @@
                 (setq index (1+ index)))))))
       (when (> (js-length errors) 0)
         (throw (new OnboardingValidationError errors)))
-      (js-object :schemaVersion 1
-        :format "eliscript-local-onboarding-contract-report"
-        :version 1
+      (js-object :format "eliscript-local-onboarding-contract-report"
         :steps (js-length (get contract :steps))
         :activeSteps (js-length (js-call (get contract :steps) :filter
                                  (lambda (step) (get step :countsTowardActiveDuration))))
@@ -519,7 +515,7 @@
                  (contract-hash (sha256 (await (readFile (js-call path :join root contract-file)))))
                  (artifacts (await (Promise/all (js-call (get (get checked :contract) :sourceFiles) :map
                                                   (lambda (file) (artifact-record root file)))))))
-            (js-object :schemaVersion 1 :format "eliscript-local-onboarding-run" :version 1
+            (js-object :format "eliscript-local-onboarding-run"
               :generatedAt generated :contractSha256 contract-hash :source source
               :execution (js-object :provider "local" :sourceCommit (get source :commit))
               :environment environment :steps steps :artifacts artifacts
@@ -610,10 +606,8 @@
            (errors (js-array))
            (source (host-get report "source")))
       (when (or (not (plain-object? report))
-                (not (= (get report :schemaVersion) 1))
-                (not (= (get report :format) "eliscript-local-onboarding-run"))
-                (not (= (get report :version) 1)))
-        (js-call errors :push "run must use eliscript-local-onboarding-run version 1"))
+                (not (= (get report :format) "eliscript-local-onboarding-run")))
+        (js-call errors :push "run must use eliscript-local-onboarding-run"))
       (when (or (not (full-identity (host-get source "commit")))
                 (not (full-identity (host-get source "tree"))))
         (js-call errors :push "run source must contain full commit and tree identities"))

@@ -3,20 +3,29 @@
   (defconst persistent-list-max-count 2147483647)
 
   (defportable make-empty-persistent-list (metadata)
-    (js-object :kind persistent-list-kind
-            :count 0
-            :empty t
-            :value nil
-            :rest nil
-            :metadata metadata))
+    (if (nil? metadata)
+        (js-object :kind persistent-list-kind
+                :count 0
+                :value nil
+                :rest nil)
+      (js-object :kind persistent-list-kind
+              :count 0
+              :value nil
+              :rest nil
+              :metadata metadata)))
 
   (defportable make-persistent-list-node (value rest metadata)
-    (js-object :kind persistent-list-kind
-            :count (1+ (get rest "count" 0))
-            :empty false
-            :value value
-            :rest rest
-            :metadata metadata))
+    (let ((count (1+ (get rest "count" 0))))
+      (if (nil? metadata)
+          (js-object :kind persistent-list-kind
+                  :count count
+                  :value value
+                  :rest rest)
+        (js-object :kind persistent-list-kind
+                :count count
+                :value value
+                :rest rest
+                :metadata metadata))))
 
   (defportable persistent-list? (value)
     (and (not (nullish? value))

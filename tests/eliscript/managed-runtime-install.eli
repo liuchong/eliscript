@@ -8,7 +8,7 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/wasm-managed-runtime-test-ground.mjs")))
   (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-             "1d50a06b1361e377852efc29f90ed83ba5c7ed3ffd8d1ba4e83ed430fd2ffa7e")
+             "58978fdd759fa7eafbf5865a5304747e8e2a202335b8566ac6d02cb7cbe2cdac")
     (throw (new globalThis.TypeError "the complete original managed runtime suite source identity changed")))
   (defconst counts (new globalThis.Map))
   (defvar restored false)

@@ -30,15 +30,13 @@ acceptance evidence, or maturity credit.
 
 ## Compiler-owned Request Protocol
 
-The generated compiler exports `project-request-format`,
-`project-request-version`, `project-request`, and `project-configuration`.
+The generated compiler exports `project-request-format`, `project-request`, and `project-configuration`.
 Request normalization validates a complete effect-ready request and returns a
-frozen version 1 value:
+frozen value:
 
 ```json
 {
   "format": "eliscript-project-request",
-  "version": 1,
   "entry": "/project/src/main.eli",
   "outDir": "/project/dist",
   "root": "/project",
@@ -55,7 +53,7 @@ cache intent is boolean. Specification 0124 subsequently adds the two optional
 empty-by-default macro arrays shown above. Invalid requests fail with
 `ELI-B0001` in the `project-build` phase.
 
-Configuration normalization accepts the closed version 1 key set from
+Configuration normalization accepts the closed key set from
 specification 0106, applies defaults, validates contained relative paths, and
 returns a frozen normalized value. Unsupported versions, unknown keys,
 duplicate portable names, invalid booleans, and unsafe paths fail with
@@ -78,7 +76,7 @@ escape before macro expansion.
   functions
 - delegates graph, cache, emission, and report behavior to the self-hosted
   project service
-- renders human or versioned JSON diagnostics
+- renders human or JSON diagnostics
 
 No compiler rule depends on Bun-specific APIs. Compiler loading uses standard
 URL and path APIs; the same host modules execute under Bun and supported Node
@@ -103,7 +101,7 @@ references. Specification 0113 then completed multi-entry project identity.
 
 ## Compatibility
 
-Direct flags, versioned configuration, command-line overrides, cache disabling,
+Direct flags, configuration, command-line overrides, cache disabling,
 portable roots, reports, and structured diagnostics preserve the existing
 project command contract. Relative command-line paths retain current-directory
 semantics; configuration paths retain configuration-directory semantics.
@@ -129,7 +127,7 @@ implementation identities.
 
 ## Compatibility Freeze
 
-The version 1 request/configuration normalization, public Bun/Node project
+The request/configuration normalization, public Bun/Node project
 command behavior, host-effect boundary, explicit seed reference, path
 resolution, diagnostics, and output contracts are stable. Normal project
 commands continue through the generated service; seed entry points remain

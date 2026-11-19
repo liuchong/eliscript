@@ -129,7 +129,7 @@
   (defasync runOriginalManagedSuites (suites source-root module-records product)
     (when (> (js-length suites) 0)
       (let* ((original (await (readFile (resolve source-root "tools/backends/build.mjs") "utf8")))
-             (base (js-object :format "eliscript-original-managed-suite" :version 1
+             (base (js-object :format "eliscript-original-managed-suite"
                :product product :sourceRoot source-root :moduleRecords module-records
                :buildSha256 (digest original) :contents (selected-build-source source-root original)
                :transportModule (get (pathToFileURL (resolve source-root "tools/backends/compiler-data-transport.mjs")) :href)))

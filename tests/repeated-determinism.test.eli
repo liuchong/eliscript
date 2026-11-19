@@ -21,13 +21,13 @@
                :acceptance (js-object :criterionCount 35 :artifactCount 7 :corpusComplete t :operationalSuccess t :acceptancePass false :sha256 HEX_B)
                :identitySha256 identitySha256
                :observations (js-object :generatedAt (str "2026-09-08T00:00:" (js-call (funcall globalThis.String index) :padStart 2 "0") ".000Z") :commands (js-array)))))))
-      (js-object :schemaVersion 1 :format "eliscript-repeated-determinism-run" :version 1 :generatedAt "2026-09-08T00:01:00.000Z" :source source
+      (js-object :format "eliscript-repeated-determinism-run" :generatedAt "2026-09-08T00:01:00.000Z" :source source
         :parameters (js-object :iterations iterations :requiredIterations REQUIRED_ITERATIONS)
-        :identityProjection (js-object "format" "eliscript-repeated-determinism-identity" "version" 1 "excludedObservations" (js-array "acceptance.generatedAt" "acceptance.commands[].durationMs" "acceptance.commands[].outputSha256" "acceptance.commands[].summary" "compiler.temporaryDirectory"))
+        :identityProjection (js-object "format" "eliscript-repeated-determinism-identity" "excludedObservations" (js-array "acceptance.generatedAt" "acceptance.commands[].durationMs" "acceptance.commands[].outputSha256" "acceptance.commands[].summary" "compiler.temporaryDirectory"))
         :identity (js-object :sha256 identitySha256 :compilerSha256 HEX_A :acceptanceSha256 HEX_B :compilerArtifactCount 26 :acceptanceArtifactCount 7 :criterionCount 35)
         :runs runs :summary (js-object :allIdentical t :allOperational t :acceptanceQualified (= iterations REQUIRED_ITERATIONS))))))
   (describe "repeated core determinism evidence" (lambda ()
-    (test "twenty identical clean runs satisfy the versioned local contract" (lambda ()
+    (test "twenty identical clean runs satisfy the local contract" (lambda ()
       (let ((report (reportFixture)))
         (js-call (expect (validateRepeatedDeterminismReport report)) :toEqual report)
         (js-call (expect (humanRepeatedDeterminismReport report)) :toContain "Acceptance qualified: yes"))))

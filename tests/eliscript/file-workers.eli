@@ -2,6 +2,8 @@
   (import "bun:test" test)
   (import "node:assert/strict" :default assert)
   (import "node:path" resolve isAbsolute)
+  (import "node:url" pathToFileURL)
+  (import "node:fs" existsSync)
   (import "node:fs/promises" mkdtemp mkdir writeFile readFile rm symlink)
   (import "node:os" tmpdir)
   (import "node:child_process" spawnSync)
@@ -9,7 +11,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/testing/file-workers.mjs"
     FILE_WORKERS isExclusiveTestFile parseTestFileArgs partitionTestFiles scheduleTestFiles runTestFiles workerTestArguments parseSuiteArgs runSuiteCommand)
-  (import "../tools/testing/fixture-environment.mjs" fixtureChildArguments)
+  (import "../tools/testing/fixture-environment.mjs" fixtureChildArguments prepareFixtureEnvironment)
 
   (defasync tick ()
     (await (new globalThis.Promise (lambda (resolve reject) (funcall globalThis.setImmediate resolve)))))
@@ -373,4 +375,78 @@
                 (js-call assert :ok (= (value-type (get (get preserved-scope1 :passedFileDigests) script-a)) "string"))
                 (js-call assert :ok (= (value-type (get (get preserved-scope1 :passedFileDigests) script-c)) "string")))))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "formal Node children own package-scoped fixtures and clean success and failure without changing caller state"
+    (async ()
+      (let* ((workspace (prepareFixtureEnvironment root (get globalThis.process :env)))
+             (directory (get workspace :directory))
+             (script (resolve directory "fixture-child.test.mjs"))
+             (report-file (resolve directory "child-report.json"))
+             (caller-tmp (resolve directory "caller-owned"))
+             (preload (resolve root "tools/testing/fixture-environment.mjs"))
+             (node-bin (or (get (get globalThis.process :env) :NODE) "node"))
+             (environment (Object/assign (js-object) (get globalThis.process :env)
+               (js-object :TMPDIR caller-tmp :TMP caller-tmp :TEMP caller-tmp
+                 :ELISCRIPT_TEST_FIXTURE_ROOT root
+                 :ELISCRIPT_TEST_SUITE_LEDGER (resolve directory "suite.json")
+                 :ELISCRIPT_SUITE_RUN_ID "node-fixture-lifetime"
+                 :ELISCRIPT_FIXTURE_REPORT report-file)))
+             (before (JSON/stringify environment))
+             (previous undefined))
+        (try
+          (await (mkdir caller-tmp))
+          (await (writeFile script (compile-string
+            "(module fixture.node-child
+               (import \"node:test\" test)
+               (import \"node:assert/strict\" :default assert)
+               (import \"node:os\" tmpdir)
+               (import \"node:fs/promises\" writeFile)
+               (test \"actual Node fixture child\" (async ()
+                 (await (writeFile (get globalThis.process.env :ELISCRIPT_FIXTURE_REPORT)
+                   (JSON/stringify (js-object :directory (tmpdir)
+                     :root (get globalThis.process.env :ELISCRIPT_TEST_FIXTURE_ROOT)
+                     :argv (get globalThis.process :execArgv) :value (+ 20 22)))))
+                 (js-call assert :strictEqual (get globalThis.process.env :ELISCRIPT_FIXTURE_FAILURE) \"0\"))))"
+            "fixture-node-child.eli")))
+          (let ((index 0))
+            (while (< index 2)
+              (let* ((failed (= index 1))
+                     (env (Object/assign (js-object) environment
+                       (js-object :ELISCRIPT_FIXTURE_FAILURE (if failed "1" "0"))))
+                     (arguments (js-array "--suite-step" "fixture" (str "child-" index) "" "--" node-bin)))
+                ;; An existing native --import URL is already sufficient;
+                ;; successful and failing children retain that module identity.
+                (when failed (js-call arguments :push (str "--import=" (get (pathToFileURL preload) :href))))
+                (Reflect/apply (get arguments :push) arguments (js-array "--test" script))
+                (let* ((result (await (runSuiteCommand arguments (js-object :sourceRoot root :environment env))))
+                       (report (JSON/parse (await (readFile report-file "utf8"))))
+                       (owned (get report :directory))
+                       (imports (js-call (get report :argv) :filter (lambda (argument position)
+                         (or (= argument (str "--import=" (get (pathToFileURL preload) :href)))
+                           (= argument (str "--import=" preload))
+                           (and (> position 0) (= (aref (get report :argv) (1- position)) "--import")
+                             (= argument preload)))))))
+                  (js-call assert :strictEqual (get result :status) (if failed "failed" "passed"))
+                  (js-call assert :strictEqual (get result :exitCode) (if failed 1 0))
+                  (js-call assert :strictEqual (get report :root) root)
+                  (js-call assert :strictEqual (get report :value) 42)
+                  ;; Node's test worker may repeat a native import flag while
+                  ;; serializing its options. Compare actual module URLs.
+                  (js-call assert :ok (> (js-length imports) 0))
+                  (let ((modules (new globalThis.Set (js-call imports :map (lambda (argument)
+                    (let ((specifier (if (js-call argument :startsWith "--import=")
+                                      (js-call argument :slice 9) argument)))
+                      (if (js-call specifier :startsWith "file:") specifier
+                        (get (pathToFileURL specifier) :href))))))))
+                    (js-call assert :strictEqual (get modules :size) 1)
+                    (js-call assert :strictEqual (js-call modules :has (get (pathToFileURL preload) :href)) t))
+                  (js-call assert :notStrictEqual owned caller-tmp)
+                  (js-call assert :notStrictEqual owned previous)
+                  (js-call assert :ok (js-call owned :startsWith (str (resolve root ".eliscript-cache/test-fixtures") "/")))
+                  (js-call assert :strictEqual (existsSync owned) false)
+                  (js-call assert :strictEqual (existsSync caller-tmp) t)
+                  (js-call assert :strictEqual (JSON/stringify environment) before)
+                  (setq previous owned)))
+              (setq index (1+ index))))
+          (finally (js-call workspace :close))))))
 )

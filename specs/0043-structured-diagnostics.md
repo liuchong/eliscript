@@ -7,7 +7,7 @@
 
 ## Summary
 
-Eliscript compiler failures now carry a versioned, JSON-compatible diagnostic
+Eliscript compiler failures now carry a JSON-compatible diagnostic
 record while preserving the existing human-readable condition and terminal
 messages. The seed compiler, project builder, and self-hosted Bun driver expose
 the same schema through `--diagnostic-format json`.
@@ -18,12 +18,11 @@ prose. Human output remains the default.
 
 ## Schema
 
-A version 1 diagnostic is a JSON object with these required fields:
+A diagnostic is a JSON object with these required fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `format` | string | Always `eliscript-diagnostic` |
-| `version` | integer | Always `1` for this schema |
 | `code` | string | Stable diagnostic category identifier |
 | `severity` | string | `error` in the implemented compiler |
 | `phase` | string | Compiler or host phase that owns the failure |
@@ -39,7 +38,6 @@ Example:
 ```json
 {
   "format": "eliscript-diagnostic",
-  "version": 1,
   "code": "ELI-A0001",
   "severity": "error",
   "phase": "analysis",
@@ -104,7 +102,7 @@ The Emacs compiler module exposes these supported diagnostic interfaces:
 - `eliscript-diagnostic-to-json`
 - `eliscript-diagnostic-from-error` for a host fallback
 - `eliscript-diagnostic-signal` for compiler phases and adapters
-- `eliscript-diagnostic-format-name` and `eliscript-diagnostic-version`
+- `eliscript-diagnostic-format-name`
 
 Functions and variables containing `--` remain internal implementation
 details. In particular, the weak condition association and JSON location

@@ -1,14 +1,14 @@
 (module tests.helpers.response-events-contract
   (import "node:assert/strict" :default assert)
   (import "../../tools/backends/compiler-session.mjs" createCompilerSession encodeCompilerIR)
-  (defconst responseMode "events-v1")
-  (defconst graphResponseMode "graph-events-v1")
+  (defconst responseMode "events")
+  (defconst graphResponseMode "graph-events")
   (defun packet (events &rest __host_forwarded_arguments_1)
     (let* ((done (aref __host_forwarded_arguments_1 0)) (token (aref __host_forwarded_arguments_1 1)))
     (when (nullish? done) (setq done false)) (when (nullish? token) (setq token 1))
-    (js-object :format "eliscript-compiler-response-events" :version 1 :token token :events events :done done)))
+    (js-object :format "eliscript-compiler-response-events" :mode "events" :token token :events events :done done)))
   (defun graphPacket (events &rest __host_forwarded_arguments_2)
-    (let* ((done (aref __host_forwarded_arguments_2 0)) (token (aref __host_forwarded_arguments_2 1))) (Object/assign (packet events done token) (js-object :version 2))))
+    (let* ((done (aref __host_forwarded_arguments_2 0)) (token (aref __host_forwarded_arguments_2 1))) (Object/assign (packet events done token) (js-object))))
   ; Deliberate wire-protocol fixture, never used as a compiler oracle.
   (defun fakeDriver (respond)
     (let ((messages (js-array)))
@@ -22,7 +22,7 @@
       (try
         (let ((part (js-call unit :session_response_start state value mode undefined stringChunks)) (done false))
           (while (not done)
-            (js-call assert :equal (get part :version) (if (= mode graphResponseMode) 2 1))
+            (js-call assert :equal (get part :mode) (if (= mode graphResponseMode) graphResponseMode responseMode))
             (assert (and (> (js-length (get part :events)) 0) (<= (js-length (get part :events)) 256)))
             (let ((units (js-call (get part :events) :reduce (lambda (sum event) (+ sum (if (= (funcall (js* "(value) => typeof value") (aref event 1)) "string") (js-length (aref event 1)) 0))) 0)))
               (assert (or (<= units 32768) (= (js-length (get part :events)) 1))))

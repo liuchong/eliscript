@@ -36,7 +36,7 @@
               (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR compilerDirectory)))))
             (be (await (readFile outputPath "utf8")) seedJavaScript) (be (await (readFile mapPath "utf8")) seedSourceMap)
             (js-call (expect seedJavaScript) :toContain "((value$G2) =>")
-            (js-call (expect seedJavaScript) :toContain "let result$G3 = __eliscript_value_1;")
+            (js-call (expect seedJavaScript) :toContain "let result$G3 = counted(value);")
             (js-call (expect seedJavaScript) :toContain "__eliscript_symbol(\"slot$G4\"), __eliscript_symbol(\"slot$G5\")")
             (js-call (get (expect seedJavaScript) :not) :toContain "((value$G1) =>"))
           (let ((module (await (funcall (js* "(url) => import(url)") (str (get (pathToFileURL outputPath) :href) "?bun")))))

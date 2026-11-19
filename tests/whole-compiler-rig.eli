@@ -91,6 +91,7 @@
   (defun readCompilerValue (a value)
     (cond
       ((or (nil? value) (not (= (value-type value) "object"))) value)
+      ((= (value-type value) "number") value)
       ((= (get value :kind) 4) (js-call a :readNumber value))
       ((= (get value :kind) 5) (js-call a :readString value))
       ((= (get value :kind) 14)

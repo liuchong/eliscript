@@ -144,7 +144,7 @@
             :nativeLibraryLoader (js-object :bun "ffi" :node "bun-subprocess" :compilerBackend "native"))))
           (put capabilities :nativeProductTargets (value-or (at (get input :capabilities) "nativeProductTargets") (js-array (value-or (get input :nativeTarget) "arm64-macos"))))
           (put capabilities :seedRuntimeDependency false) (put capabilities :externalCompilerBackend false)
-          (setq manifest (js-object :format "eliscript-compiler-package" :version 1 :host (get input :host) :target (get input :target)
+          (setq manifest (js-object :format "eliscript-compiler-package" :host (get input :host) :target (get input :target)
             :artifact "artifact/compiler-artifact.json" :loader "compiler-loader.mjs" :worker "transport/backends/compiler-worker.mjs"
             :browser (if (eq (get input :host) "native") nil "transport/backends/compiler-browser.mjs") :runtime (str "artifact/" (get metadata :runtimePath))
             :capabilities capabilities :sourceIdentity (get input :sourceIdentity) :artifactIdentity (get input :artifactIdentity) :provenance (get input :provenance)

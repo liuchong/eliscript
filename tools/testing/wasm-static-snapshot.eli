@@ -10,7 +10,7 @@
     "make-wasm-validation-workspace" "validate-fresh-wasm-expression" "validate-fresh-typed-wasm-program"))
   (defun staticSnapshotSource (source numeric-url dependencies)
     (let* ((names (if dependencies (js-call original-names :concat
-                     (js-array "memory-f64-unary-opcode" "require-memory-f64-unary")) original-names))
+                     (js-array "valid-words64-record-p" "memory-f64-unary-opcode" "require-memory-f64-unary")) original-names))
            (forms (js-call names :map (lambda (name) (definition source (str name " "))))))
       (str "(module wasm.snapshot\n(import " (JSON/stringify numeric-url) " backend-fail)\n"
         (js-call forms :join "\n")

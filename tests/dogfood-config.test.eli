@@ -24,7 +24,7 @@
     (let* ((publishing (aref __host_forwarded_arguments_1 0)) (extra (aref __host_forwarded_arguments_1 1)))
     (let*
       ((pub (or publishing "{:owner {:login \"owner\" :id \"U_owner\"} :coauthors []}")) (ext (or extra "")))
-      (str "(module dogfood.config\n  (defconst config\n    {:schema-version 1\n     :site {:title \"T\" :base-url \"https://example.github.io/t/\" :language \"en\"}\n     :sources\n     " sources "\n     :publishing\n     " pub "\n     :identity {:conflict :fail :projections []}\n     :comments\n     {:presentation :tabs\n      :channels\n      [{:id :issue-native :kind :issue :enabled t :mode :live}]}\n     :refresh {:articles :push :comments :runtime :no-change :skip}\n     " ext "\n     :output {:directory \"_site\"}})\n  (export config))\n"))))
+      (str "(module dogfood.config\n  (defconst config\n    {\n     :site {:title \"T\" :base-url \"https://example.github.io/t/\" :language \"en\"}\n     :sources\n     " sources "\n     :publishing\n     " pub "\n     :identity {:conflict :fail :projections []}\n     :comments\n     {:presentation :tabs\n      :channels\n      [{:id :issue-native :kind :issue :enabled t :mode :live}]}\n     :refresh {:articles :push :comments :runtime :no-change :skip}\n     " ext "\n     :output {:directory \"_site\"}})\n  (export config))\n"))))
   (defconst
     MARKDOWN
     "{:id :posts :kind :markdown :enabled t :directory \"content/posts\"}")
@@ -105,7 +105,7 @@
         ((res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace "\"https://example.github.io/t/\"" "\"http://example.github.io/t/\"")))))
         (js-call (expect (get (get res :failure) :code)) :toBe "DOGFOOD-CONFIG-008"))))
   (test "an unknown configuration key fails" (async () (let*
-        ((res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace ":schema-version 1" ":schema-version 1 :mystery t")))))
+        ((res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace ":site" ":mystery t\n     :site")))))
         (js-call (expect (get (get res :failure) :code)) :toBe "DOGFOOD-CONFIG-006"))))
   (test "a configuration that is not data fails" (async () (let*
         ((res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace ":title \"T\"" ":title (str \"T\")")))))
@@ -170,7 +170,4 @@
           (let*
             ((policy (aref comment-policies (get cidx :j))) (res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace ":comments :runtime" (str ":comments :" policy))))))
             (js-call (expect (get res :failure)) :toBeUndefined))
-          (put cidx :j (+ (get cidx :j) 1))))))
-  (test "an unsupported schema version fails" (async () (let*
-        ((res (await (load (js-call (BASE (str "[" MARKDOWN "]")) :replace ":schema-version 1" ":schema-version 2")))))
-        (js-call (expect (get (get res :failure) :code)) :toBe "DOGFOOD-CONFIG-007")))))
+          (put cidx :j (+ (get cidx :j) 1)))))))

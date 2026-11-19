@@ -53,6 +53,7 @@
          "          (heap-regexp-property-name-copy table)\n"
          "          (store-u32 52 table))) table))\n"
          "  (defun heap-regexp-property-id-base (heap source start length)\n"
+         "    (memory-sig u32 u32 v64 u32 u32)\n"
          "    (if (= length 0) 0\n"
          "      (let ((table (heap-regexp-property-name-table)) (low 0) (high ${packed.count}) (found 0))\n"
          "        (when (/= table 0)\n"

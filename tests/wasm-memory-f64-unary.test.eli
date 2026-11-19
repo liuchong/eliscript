@@ -66,9 +66,13 @@
         (when (not (nullish? native-target))
           (let ((library (resolve directory (if (= native-target "arm64-macos") "unary.dylib" "unary.so")))
                 (arities (Object/assign
-                           (js-object :write_word 2 :read_word 1)
+                           (js-object :write_word (js-object :parameterTypes (js-array "u32" "u32") :resultType "u32")
+                                      :read_word (js-object :parameterTypes (js-array "u32") :resultType "u32"))
                            (Object/fromEntries
-                             (js-call names :flatMap (lambda (name) (js-array (js-array name 2) (js-array (str "effect_" name) 2))))))))
+                             (js-call names :flatMap (lambda (name)
+                               (js-array
+                                 (js-array name (js-object :parameterTypes (js-array "u32" "u32") :resultType "u32"))
+                                 (js-array (str "effect_" name) (js-object :parameterTypes (js-array "u32" "u32") :resultType "u32")))))))))
             (await (writeFile library (Uint8Array/from (js-call (get backend :native) :emit_native_memory_library ir native-target))))
             (setq native-rt
               (await (openNativeMemory library arities (Object/assign (js-object) options (js-object :nativeTarget native-target)))))))

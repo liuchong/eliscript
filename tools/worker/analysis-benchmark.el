@@ -350,7 +350,9 @@ PREPARED is the freshly authenticated portable prepared stage3 identity."
   "Return portable prepared stage3 report IDENTITY or signal an error."
   (unless (and (listp identity)
                (equal (alist-get 'format identity) "eliscript-prepared-stage3")
-               (integerp (alist-get 'version identity))
+               (equal (sort (mapcar (lambda (entry) (symbol-name (car entry))) identity)
+                            #'string<)
+                      '("fixedPointFileCount" "format" "productSha256" "sourceSha256"))
                (integerp (alist-get 'fixedPointFileCount identity))
                (stringp (alist-get 'sourceSha256 identity))
                (stringp (alist-get 'productSha256 identity)))
@@ -446,11 +448,8 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                 iterations warmups revision)
                crossover))
             (setq crossover (nreverse crossover))
-            `((schemaVersion . 1)
-              (format . "eliscript-emacs-analysis-benchmark")
-              (version . 2)
+            `((format . "eliscript-emacs-analysis-benchmark")
               (verified . t)
-              (protocolVersion . ,eliscript-worker-protocol-version)
               (setup
                . ((serviceStartMs . ,start-ms)))
               (selection

@@ -4,6 +4,17 @@
   (import "node:path" resolve)
   (import "node:url" fileURLToPath pathToFileURL)
   (import "./compiler-worker.mjs" errorData)
+  (import "./managed-layout.mjs" normalize-u64)
+
+  (defun wire-replacer (key value)
+    (cond
+      ((= (value-type value) "bigint") (js-object :__v64 (str (normalize-u64 value))))
+      ((and (= (value-type value) "number")
+            (or (not (Number/isFinite value)) (Object/is value (* -1 0))))
+       (let ((bits (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+         (js-call bits :setFloat64 0 value t)
+         (js-object :__f64 (js-array (js-call bits :getUint32 0 t) (js-call bits :getUint32 4 t)))))
+      (t value)))
 
   (defun worker-module-url ()
     (let* ((stack (str (get (new globalThis.Error) :stack)))
@@ -54,7 +65,18 @@
       (flush)))
 
   (defun deliver (message)
-    (js-call packets :push (js-call encoder :encode (JSON/stringify message)))
+    (js-call packets :push (js-call encoder :encode (JSON/stringify message wire-replacer)))
+    (Atomics/store control 2 (js-length packets))
+    (publish))
+  ;; The runner already encoded the response. JSON packets use the Val64
+  ;; replacer this parent revives, and R frames are the fast result line the
+  ;; parent parses. Copy those bytes through. Parsing every packet here rejects
+  ;; R frames and repeats the JSON work on the host-call path.
+  (defconst ready-packet (Buffer/from "{\"ready\":true}"))
+  (defun deliver-bytes (bytes)
+    (when (and (= (js-length bytes) (js-length ready-packet)) (js-call bytes :equals ready-packet))
+      (throw (new globalThis.Error "duplicate native process initialization")))
+    (js-call packets :push bytes)
     (Atomics/store control 2 (js-length packets))
     (publish))
 
@@ -108,15 +130,16 @@
                   (put received :length 0)
                   (setq received-bytes 0)
                   (setq start (1+ end))
-                  (let ((message (JSON/parse (js-call decoder :decode packet))))
-                    (if (and (not (nullish? message)) (get message :ready))
-                      (progn
-                        (when ready (throw (new globalThis.Error "duplicate native process initialization")))
-                        (setq ready t)
-                        (js-call parentPort :postMessage (js-object :ready t)))
-                      (progn
-                        (unless ready (throw (new globalThis.Error "native process responded before initialization")))
-                        (deliver message))))))
+                  (if ready
+                    (deliver-bytes packet)
+                    (let ((message (JSON/parse (js-call decoder :decode packet))))
+                      (if (and (not (nullish? message)) (get message :ready))
+                        (progn
+                          (setq ready t)
+                          (js-call parentPort :postMessage (js-object :ready t)))
+                        (progn
+                          (unless ready (throw (new globalThis.Error "native process responded before initialization")))
+                          (deliver message)))))))
               (setq end (js-call chunk :indexOf 10 start)))
             (when (< start (js-length chunk))
               (let ((tail (js-call chunk :subarray start)))
@@ -144,7 +167,7 @@
          (if failed
            (deliver (js-object :transportFailure (failure (new globalThis.Error "native process is unavailable"))))
            (try
-             (js-call (get child :stdin) :write (+ (JSON/stringify (get message :request)) "\n"))
+             (js-call (get child :stdin) :write (+ (get message :request) "\n"))
              (catch error (fail error))))))))
   (js-call parentPort :once "close"
     (lambda ()

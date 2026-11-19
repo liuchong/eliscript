@@ -8,7 +8,7 @@
   (defun tools-fail (message filename &optional code)
     (let ((error (new globalThis.Error message)))
       (put error :eliscriptDiagnostic
-        (js-object :format "eliscript-diagnostic" :version 1 :code (or code "ELI-T0001")
+        (js-object :format "eliscript-diagnostic" :code (or code "ELI-T0001")
           :severity "error" :phase "compiler-tools" :message message
           :location (js-object :file filename)))
       (throw error)))
@@ -401,7 +401,7 @@
           (setq hex (str hex (js-call digits :charAt (unsigned-bit-shift-right byte 4))
                             (js-call digits :charAt (bit-and byte 15)))))
         (setq index (1+ index)))
-      (js-object :format "eliscript-source-identity" :version 1
+      (js-object :format "eliscript-source-identity"
         :encoding "utf16le" :filename filename :units (js-length source) :sha256 hex)))
 
   (defun tools-check-source-identity (request identity filename required)
@@ -412,7 +412,6 @@
         (unless (and (not (nil? expected)) (= (value-type expected) "object")
                      (not (Array/isArray expected))
                      (= (get expected :format nil) "eliscript-source-identity")
-                     (= (get expected :version nil) 1)
                      (= (get expected :encoding nil) "utf16le")
                      (= (get expected :filename nil) (get identity :filename))
                      (= (get expected :units nil) (get identity :units))

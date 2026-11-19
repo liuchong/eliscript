@@ -473,7 +473,8 @@
         (catch error (unless (= (get error :code) "EEXIST") (throw error))))
       (js-call assert :strictEqual (await (realpath package-path)) (await (realpath root)))))
   (defun capabilities () (js-call names :map (lambda (name)
-    (js-object :name name :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))))
+    (js-object :name name :module "eliscript.host" :arity 2
+      :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call"))))
   (defasync services ()
     (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
            (source (await (js-call reader :text retained)))
@@ -867,7 +868,7 @@
                  (js-call assert :strictEqual (get request :operation) "project-plan")
                  (js-call assert :deepStrictEqual (get request :entries) (js-array "main.mjs"))
                  (js-call assert :deepStrictEqual (get request :modules) (get record :modules))
-                 (js-object :format "eliscript-project-plan" :version 1 :mode "standard"
+                 (js-object :format "eliscript-project-plan" :mode "standard"
                    :entries (js-array "main.mjs") :modules
                      (js-array (js-object :id "dep.mjs" :dependencies (js-array))
                                (js-object :id "main.mjs" :dependencies (js-array "dep.mjs"))))))))
@@ -958,7 +959,7 @@
               (js-call sources :push (js-object :id module-id :filename file :source source)))))
         (setq index (1+ index)))
       (js-call assert :deepStrictEqual (get (get record :original) :processHostDependency)
-        (js-object :version 1 :id id :sourceAssets proofs))
+        (js-object :id id :sourceAssets proofs))
       (Object/assign (js-object) (get old :request) (js-object :hostSources sources))))
 
   (test "sequence adapters retain original assertion bytes and all current source algorithms after Eli suite migration"
@@ -1216,10 +1217,13 @@
         (setq length (Math/floor (/ length 128))))
       (js-call bytes :push length) bytes))
   (defun import-image (labels arity)
+    ;; Real host-call import type: (i32 heap, i64 argv) -> i64.
     (let* ((encoder (new globalThis.TextEncoder)) (imports (js-array (js-length labels)))
            (signature (js-array 1 96 arity)) (index 0))
-      (while (< index arity) (js-call signature :push 127) (setq index (1+ index)))
-      (js-call signature :push 1 127)
+      (while (< index arity)
+        (js-call signature :push (if (= index 0) 127 126))
+        (setq index (1+ index)))
+      (js-call signature :push 1 126)
       (js-call labels :forEach (lambda (name)
         (let ((module (Array/from (js-call encoder :encode "eliscript.host")))
               (field (Array/from (js-call encoder :encode name))))
@@ -1392,10 +1396,14 @@
   (test "editable trie mirrors update changed paths without traversing unchanged sibling subtrees"
     (async ()
       (let* ((source (await (readFile (resolve root "stdlib/managed-literals.eli") "utf8")))
-             (names (js-array "literal-node-views" "literal-node-view-revisions"
-               "literal-object-freeze" "literal-object-has-own" "literal-has-transients" "literal-node-owner"
+             ;; The mirror set is the maintained top-level forms of
+             ;; `stdlib/managed-literals.eli`; the removed freeze/hasOwn wrappers
+             ;; are no longer present as named forms.
+             (names (js-array "literal-intrinsic-weak-map" "literal-private-weak-map"
+               "literal-node-views" "literal-node-view-revisions"
+               "literal-has-transients" "literal-node-owner"
                "VectorNode" "MapEntry" "BitmapIndexedNode" "ArrayNode" "HashCollisionNode"
-               "literal-vector-node-view" "literal-map-node-view" "literal-empty-bitmap"))
+               "literal-vector-node-view" "literal-map-node-view" "literal-empty-bitmap" "ensure-empty-bitmap"))
              (forms (js-call (get (aref (read-string source "stdlib/managed-literals.eli") 0) :items) :slice 2))
              (selected (js-call forms :filter (lambda (form)
                (let ((items (get form :items)))

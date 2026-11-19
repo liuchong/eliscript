@@ -10,7 +10,7 @@
 
 ## Summary
 
-Single-file and project commands now enter one versioned build-operation
+Single-file and project commands now enter one build-operation
 boundary owned by the generated compiler. The operation normalizes mode,
 paths, portable roots, Source Map intent, and cache intent before a shared host
 dispatcher selects the corresponding effectful service.
@@ -26,16 +26,15 @@ dependencies, or contribute core maturity evidence.
 
 ## Operation Schema
 
-The generated compiler exports `build-operation-format`,
-`build-operation-version`, and `build-operation-request`. Version 1 uses the
-format `eliscript-build-operation` and supports two explicit modes.
+The generated compiler exports `build-operation-format` and
+`build-operation-request`. The format is `eliscript-build-operation` and
+supports two explicit modes.
 
 A normalized single-file operation is:
 
 ```json
 {
   "format": "eliscript-build-operation",
-  "version": 1,
   "mode": "single",
   "input": "src/main.eli",
   "output": "dist/main.mjs",
@@ -55,7 +54,6 @@ A normalized project operation is:
 ```json
 {
   "format": "eliscript-build-operation",
-  "version": 1,
   "mode": "project",
   "entry": "src/main.eli",
   "outDir": "dist",
@@ -67,7 +65,7 @@ A normalized project operation is:
 }
 ```
 
-Project fields delegate to the existing version 1 project-request contract.
+Project fields delegate to the existing project-request contract.
 The optional macro arrays were subsequently added by specification 0124 and
 remain project-only; single-file operations keep their original shape.
 All normalized operation records and nested portable arrays are frozen.
@@ -116,7 +114,7 @@ explicit seed reference.
 
 The public single-file command preserves historical option parsing, stdout
 output, arbitrary output filenames, portable selection, external Source Maps,
-human diagnostics, and versioned JSON diagnostics. Cache and manifest behavior
+human diagnostics, and JSON diagnostics. Cache and manifest behavior
 remain project-only.
 
 Evidence proves:
@@ -137,13 +135,13 @@ Evidence proves:
 This specification completes normal single-file and project command routing
 through the self-hosted compiler and satisfies the narrow M9 exit statement
 that the seed is no longer the only implementation of a user-facing build
-capability. At this specification's boundary, version 1 project identity still
-had one entry. Specification 0113 subsequently added version 2 multi-entry
-identity and closed M9 without changing this version 1 operation.
+capability. Project identity uses the `entries` array; a single-entry build
+writes one element. Specification 0113 added multi-entry identity and closed M9
+without changing this operation.
 
 ## Compatibility Freeze
 
-The `eliscript-build-operation` version 1 single-file and project schemas,
+The `eliscript-build-operation` single-file and project schemas,
 frozen normalization results, shared host dispatch, public Bun/Node command
 routing, stdout and file outputs, Source Maps, diagnostics, and explicit seed
 bootstrap boundary are stable. Future operation modes or incompatible request
@@ -151,7 +149,7 @@ shapes require a new version.
 
 ## Acceptance Criteria
 
-- **UBO-01:** Single-file and project commands normalize through version 1
+- **UBO-01:** Single-file and project commands normalize through the
   `eliscript-build-operation` logic implemented in `.eli`.
 - **UBO-02:** Missing optional single-file fields normalize deterministically;
   all returned operation records and portable arrays are frozen.

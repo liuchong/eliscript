@@ -5,6 +5,8 @@
   ;; owned runtime. Explicit profile selection remains available below.
   ;; Tables are derived from the one maintained Unicode-3.0 region in memory.eli.
   (defconst installed (new globalThis.WeakMap))
+  (defconst apply-native Reflect/apply)
+  (defconst intrinsic-array-join (get (get globalThis.Array :prototype) :join))
   (defconst intrinsic-string globalThis.String)
   (defconst intrinsic-code-point (get (get intrinsic-string :prototype) :codePointAt))
   (defconst intrinsic-from-code-point (get intrinsic-string :fromCodePoint))
@@ -16,21 +18,41 @@
   (defun case-pattern? (pattern text)
     ;; RegExp.prototype.test would consult a replaceable .exec on every call.
     ;; String casing must not acquire that unrelated observable dependency.
-    (not (eq (Reflect/apply intrinsic-regexp-exec pattern (js-array text)) nil)))
+    (not (eq (funcall apply-native intrinsic-regexp-exec pattern (js-array text)) nil)))
 
   (defun point (text index)
-    (Reflect/apply intrinsic-code-point text (js-array index)))
+    (funcall apply-native intrinsic-code-point text (js-array index)))
   (defun characters (code)
-    (Reflect/apply intrinsic-from-code-point intrinsic-string (js-array code)))
+    (funcall apply-native intrinsic-from-code-point intrinsic-string (js-array code)))
   (defun tables (version)
-    (let ((suffix (cond ((= version 15.1) "151") ((= version 16) "160") ((= version 17) "17")
-                        (t (throw (new globalThis.TypeError "Unicode case profile must be 15.1, 16, or 17"))))))
-      (js-object :upper (js-array (get data (+ "unicode_case_data_upper_0_" suffix))
-          (get data (+ "unicode_case_data_upper_1_" suffix)) (get data (+ "unicode_case_data_upper_2_" suffix)))
-        :lower (js-array (get data (+ "unicode_case_data_lower_0_" suffix))
-          (get data (+ "unicode_case_data_lower_1_" suffix)) (get data (+ "unicode_case_data_lower_2_" suffix)))
-        :cased (get data (+ "unicode_case_data_cased_" suffix))
-        :ignorable (get data (+ "unicode_case_data_case_ignorable_" suffix)))))
+    ;; Static export references keep the table module's namespace out of every
+    ;; browser bundle while retaining each profile's exact function identities.
+    (cond
+      ((= version 15.1)
+        (js-object
+          :upper (js-array (get data :unicode_case_data_upper_0_151)
+            (get data :unicode_case_data_upper_1_151) (get data :unicode_case_data_upper_2_151))
+          :lower (js-array (get data :unicode_case_data_lower_0_151)
+            (get data :unicode_case_data_lower_1_151) (get data :unicode_case_data_lower_2_151))
+          :cased (get data :unicode_case_data_cased_151)
+          :ignorable (get data :unicode_case_data_case_ignorable_151)))
+      ((= version 16)
+        (js-object
+          :upper (js-array (get data :unicode_case_data_upper_0_160)
+            (get data :unicode_case_data_upper_1_160) (get data :unicode_case_data_upper_2_160))
+          :lower (js-array (get data :unicode_case_data_lower_0_160)
+            (get data :unicode_case_data_lower_1_160) (get data :unicode_case_data_lower_2_160))
+          :cased (get data :unicode_case_data_cased_160)
+          :ignorable (get data :unicode_case_data_case_ignorable_160)))
+      ((= version 17)
+        (js-object
+          :upper (js-array (get data :unicode_case_data_upper_0_17)
+            (get data :unicode_case_data_upper_1_17) (get data :unicode_case_data_upper_2_17))
+          :lower (js-array (get data :unicode_case_data_lower_0_17)
+            (get data :unicode_case_data_lower_1_17) (get data :unicode_case_data_lower_2_17))
+          :cased (get data :unicode_case_data_cased_17)
+          :ignorable (get data :unicode_case_data_case_ignorable_17)))
+      (t (throw (new globalThis.TypeError "Unicode case profile must be 15.1, 16, or 17")))))
 
   (defun final-sigma (text index before rules)
     (let ((result before) (done false))
@@ -58,7 +80,7 @@
             (setq before (funcall (get rules :cased) code)))
           (setq index (+ index step))))
       (when (> (js-length chunk) 0) (js-call pieces :push chunk))
-      (js-call pieces :join "")))
+      (funcall apply-native intrinsic-array-join pieces (js-array ""))))
 
   (defun convert (text upper rules)
     ;; Already-cased ASCII is an identity under every supported profile. Avoid
@@ -84,7 +106,7 @@
         ;; String prototype algorithms do not have that exception.
         (when (= (value-type receiver) "symbol")
           (throw (new type-error "Cannot convert a Symbol value to a string")))
-        (let ((text (Reflect/apply string-constructor undefined (js-array receiver))))
+        (let ((text (funcall apply-native string-constructor undefined (js-array receiver))))
           (convert text upper rules)))))))
 
   (defun installUnicodeCaseProfile (version &rest arguments)

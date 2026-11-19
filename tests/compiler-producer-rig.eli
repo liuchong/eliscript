@@ -97,7 +97,7 @@
             (funcall mark "bootstrap" (js-object :directory directory :budget budget :memory memory :auto auto))
             (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
                    (names (js-call (js-call (await (readdir "bootstrap/compiler")) :filter (lambda (name) (js-call name :endsWith ".eli"))) :sort)))
-              (js-call assert :equal (get names :length) 13) (js-call assert :equal (get backendModules :length) 8)
+              (js-call assert :equal (get names :length) 13) (js-call assert :equal (get backendModules :length) 13)
               (funcall mark "compile-real-module-ir")
               (let ((modules (await (Promise/all (js-call
                 (js-call names :map (async (name)
@@ -107,7 +107,7 @@
                   (js-object :id (str "backends/" name ".mjs")
                     :program (js-call (get backend :compiler) :compile_ir_string (await (readFile (resolve "bootstrap/backends" (str name ".eli")) "utf8")) (str name ".eli"))))))))))
                 (js-call modules :push (js-object :id "test-entry.mjs" :program (js-call (get backend :compiler) :compile_ir_string entrySource "test-entry.eli")))
-                (js-call assert :equal (get modules :length) 22)
+                (js-call assert :equal (get modules :length) 27)
                 (let* ((runtime (js-call (get backend :compiler) :compile_ir_string (await (readFile "bootstrap/runtime/memory.eli" "utf8")) "runtime.eli"))
                        (saved (JSON/stringify modules)) (runtimeWire (compilerInputWire runtime)) (runtimeJSON (get runtimeWire :text)))
                   (when (= (get runtimeWire :negativeZeroCount) 0) (js-call assert :equal runtimeJSON (JSON/stringify runtime) "the zero-free current runtime wire must retain the original JSON bytes"))

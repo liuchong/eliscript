@@ -21,19 +21,28 @@
             (js-call (js-array (Object/create nil) nil nil) :concat tail)))))))))
       ;; Reach a genuine caller-supplied export boundary to prove the defaults
       ;; rather than inferring them from a missing JS function's error text.
-      (js-call (js-array (js-array) (js-array undefined) (js-array (js-object)) (js-array (Object/create nil))) :forEach
-        (lambda (tail)
-          (js-call factories :forEach (lambda (factory)
-            (let* ((marker (new globalThis.Error "original heap allocation boundary")) (trace (js-array))
-                   (exports (js-object :heap-new (lambda (&rest values) (js-call trace :push values) (throw marker))))
-                   (failure (caught (lambda () (Reflect/apply factory undefined (js-call (js-array exports nil nil) :concat tail))))))
-              (js-call assert :strictEqual failure marker)
-              (js-call assert :deepStrictEqual trace (js-array (js-array 1024 65536 16777216))))))))
+      (let ((defaultSignatures (js-object
+              :exportSignatures (js-object
+                :heap-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")))))
+        (js-call (js-array (js-array) (js-array undefined) (js-array (js-object)) (js-array (Object/create nil))) :forEach
+          (lambda (tail)
+            (js-call factories :forEach (lambda (factory)
+              (let* ((marker (new globalThis.Error "original heap allocation boundary")) (trace (js-array))
+                     (exports (js-object :heap-new (lambda (&rest values) (js-call trace :push values) (throw marker))))
+                     (failure (caught (lambda () (Reflect/apply factory undefined (js-call (js-array exports defaultSignatures nil) :concat tail))))))
+                (js-call assert :strictEqual failure marker)
+                (js-call assert :deepStrictEqual trace (js-array (js-array 16777215 65536 16777216)))))))))
       (js-call factories :forEach (lambda (factory)
         (let* ((fields (js-array "maxSlots" "initialBytes" "maxBytes" "initializeModule" "unicodeVersion" "randomSeed"))
                (values (js-array 2048 8192 1048576 false 17 (js-array 1 2 3 4)))
                (options (js-object)) (reads (js-array)) (calls (js-array)) (abiCalls (js-array))
                (marker (new globalThis.Error "explicit heap allocation boundary"))
+               (descriptor (js-object
+                 :exportSignatures (js-object
+                   :last-error (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
+                   :runtime-case-version (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                   :runtime-random-seed (js-object :arity 4 :parameterTypes (js-array "u32" "u32" "u32" "u32") :resultType "u32")
+                   :heap-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32"))))
                (exports (js-object :last-error (lambda () 0)
                  :runtime-case-version (lambda (version) (js-call abiCalls :push (js-array "case" version)) 0)
                  :runtime-random-seed (lambda (&rest seed) (js-call abiCalls :push (js-call (js-array "seed") :concat seed)) 0)
@@ -41,7 +50,9 @@
           (js-call fields :forEach (lambda (field index)
             (Object/defineProperty options field (js-object :enumerable t :get (lambda ()
               (js-call reads :push field) (aref values index))))))
-          (let ((failure (caught (lambda () (funcall factory exports nil nil options)))))
+          (typeError (caught (lambda () (funcall factory exports nil nil options))))
+          (put reads :length 0)
+          (let ((failure (caught (lambda () (funcall factory exports descriptor nil options)))))
             (js-call assert :strictEqual failure marker)
             (js-call assert :deepStrictEqual reads fields)
             (js-call assert :deepStrictEqual calls (js-array (js-array 2048 8192 1048576)))
@@ -51,7 +62,7 @@
             (js-call fields :forEach (lambda (field index)
               (Object/defineProperty throwing field (js-object :get (lambda ()
                 (js-call observed :push field) (when (= field "maxBytes") (throw first)) (aref values index))))))
-            (let ((failure (caught (lambda () (funcall factory exports nil nil throwing)))))
+            (let ((failure (caught (lambda () (funcall factory exports descriptor nil throwing)))))
               (js-call assert :strictEqual failure first)
               (js-call assert :deepStrictEqual observed (js-array "maxSlots" "initialBytes" "maxBytes"))
               (js-call assert :strictEqual (js-length calls) 1))))))))

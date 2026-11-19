@@ -27,7 +27,7 @@
       (js-array "project-config" "project-configuration" "json" "project-config")
       (js-array "persistent-repl" "terminal-repl" "text" "repl")))
   (defconst expected-project-config
-    (js-object :schemaVersion 1 :sourceRoot "src" :entry "main.eli" :outDir "dist"))
+    (js-object :sourceRoot "src" :entries (js-array "main.eli") :outDir "dist"))
 
   (defun documentation-error-message (errors)
     (str "documentation validation failed:\n- " (js-call errors :join "\n- ")))
@@ -105,11 +105,9 @@
   (defun validateDocumentationContract (contract)
     (let ((errors (js-array)))
       (unless (and (plain-object? contract)
-                   (= (get contract :schemaVersion) 1)
-                   (= (get contract :format) "eliscript-documentation-contract")
-                   (= (get contract :version) 2))
+                   (= (get contract :format) "eliscript-documentation-contract"))
         (throw (new DocumentationValidationError
-                 (js-array "contract must use eliscript-documentation-contract version 2"))))
+                 (js-array "contract must use eliscript-documentation-contract"))))
       (if (or (not (Array/isArray (get contract :documents)))
               (not (json-equal (mapped (get contract :documents) document-pair) expected-documents)))
         (js-call errors :push "documents must contain the exact ordered AC-23 core inventory")
@@ -245,7 +243,7 @@
 
   (defun validate-project-configuration (source)
     (unless (json-equal (JSON/parse source) expected-project-config)
-      (throw (new globalThis.Error "project-config must match the documented version 1 request")))
+      (throw (new globalThis.Error "project-config must match the documented request")))
     1)
 
   (defasync execute-snippets (root contract sources)
@@ -400,7 +398,7 @@
                                (await (execute-snippets root contract sources))
                                (catch error
                                  (throw (new DocumentationValidationError (js-array (get error :message))))))))
-        (js-object :schemaVersion 1 :format "eliscript-documentation-report" :version 2
+        (js-object :format "eliscript-documentation-report"
           :documents (js-length documents)
           :sections section-count
           :requiredLiterals literal-count

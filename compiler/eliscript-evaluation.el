@@ -19,13 +19,9 @@
 
 (defconst eliscript-evaluation-operation-format
   "eliscript-evaluation-operation")
-(defconst eliscript-evaluation-operation-version 1)
 (defconst eliscript-evaluation-input-format "eliscript-evaluation-input")
-(defconst eliscript-evaluation-input-version 1)
 (defconst eliscript-evaluation-form-format "eliscript-evaluation-form")
-(defconst eliscript-evaluation-form-version 1)
 (defconst eliscript-evaluation-module-format "eliscript-evaluation-module")
-(defconst eliscript-evaluation-module-version 1)
 
 (defconst eliscript-evaluation--operation-keys
   '(id operation source filename root line column))
@@ -69,7 +65,6 @@
 (defun eliscript-evaluation--input-result (status filename)
   "Return an immutable-style input descriptor for STATUS and FILENAME."
   `((format . ,eliscript-evaluation-input-format)
-    (version . ,eliscript-evaluation-input-version)
     (status . ,status)
     (filename . ,filename)))
 
@@ -100,7 +95,7 @@
          (signal (car error-data) (cdr error-data)))))))
 
 (defun eliscript-evaluation-operation-request (input)
-  "Normalize version 1 evaluation operation INPUT."
+  "Normalize evaluation operation INPUT."
   (unless (eliscript-evaluation--object-p input)
     (eliscript-evaluation--fail
      "evaluation operation request must be an object"))
@@ -140,7 +135,6 @@
             (eliscript-evaluation--fail
              "evaluation column must be a positive safe integer" filename))
           `((format . ,eliscript-evaluation-operation-format)
-            (version . ,eliscript-evaluation-operation-version)
             (id . ,id)
             (operation . ,operation)
             (source . ,source)
@@ -154,7 +148,6 @@
          (format "%s evaluation operation does not accept source fields"
                  operation)))
       `((format . ,eliscript-evaluation-operation-format)
-        (version . ,eliscript-evaluation-operation-version)
         (id . ,id)
         (operation . ,operation)))))
 
@@ -189,7 +182,6 @@
          (format "%s evaluation form requires a symbol name" head)
          filename))
       `((format . ,eliscript-evaluation-form-format)
-        (version . ,eliscript-evaluation-form-version)
         (kind . ,(cond (definition "definition")
                        (module-form "module")
                        (t "expression")))
@@ -248,7 +240,6 @@
            (eliscript-evaluation--collect-macro-sources
             (eliscript-read-located-string source filename) source)))
       `((format . ,eliscript-evaluation-module-format)
-        (version . ,eliscript-evaluation-module-version)
         (filename . ,filename)
         (bindings . ,(vconcat binding-names))
         (exports . ,(vconcat export-names))

@@ -214,7 +214,7 @@
       (let* ((source "(defconst reserved-words 1) (setq reserved-words 2)")
              (message "cannot assign to immutable binding: reserved-words")
              (rendered (+ "constant-write.eli:1:35: " message))
-             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+             (diagnostic (js-object :format "eliscript-diagnostic"
                :code "ELI-A0001" :severity "error" :phase "analysis" :message message
                :location (js-object :file "constant-write.eli"
                  :start (js-object :offset 34 :line 1 :column 35)

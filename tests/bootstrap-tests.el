@@ -604,6 +604,53 @@
         (should (equal (eliscript-bootstrap-tests--field 'status result)
                        "ok"))))))
 
+(defun eliscript-bootstrap-tests--insert-json (value)
+  "Insert JSON for normalized oracle VALUE, decomposing past native depth caps."
+  (condition-case err
+      (insert (decode-coding-string
+               (json-serialize value :null-object nil :false-object :false)
+               'utf-8-unix))
+    (error
+     (cond
+      ((not (equal (cadr err) "Maximum JSON serialization depth exceeded"))
+       (signal (car err) (cdr err)))
+      ((vectorp value)
+       (insert "[")
+       (dotimes (index (length value))
+         (when (> index 0) (insert ","))
+         (eliscript-bootstrap-tests--insert-json (aref value index)))
+       (insert "]"))
+      ((consp value)
+       (insert "{")
+       (let ((first t) (seen (make-hash-table :test #'eq)))
+         (dolist (entry value)
+           (let ((key (car entry)))
+             (unless (gethash key seen)
+               (puthash key t seen)
+               (unless first (insert ","))
+               (setq first nil)
+               (eliscript-bootstrap-tests--insert-json
+                (if (keywordp key)
+                    (substring (symbol-name key) 1)
+                  (symbol-name key)))
+               (insert ":")
+               (eliscript-bootstrap-tests--insert-json (cdr entry))))))
+       (insert "}"))
+      (t (signal (car err) (cdr err)))))))
+
+(defun eliscript-bootstrap-tests-serialize-json (value)
+  "Serialize normalized oracle VALUE to a UTF-8 JSON string."
+  (condition-case err
+      (decode-coding-string
+       (json-serialize value :null-object nil :false-object :false)
+       'utf-8-unix)
+    (error
+     (if (equal (cadr err) "Maximum JSON serialization depth exceeded")
+         (with-temp-buffer
+           (eliscript-bootstrap-tests--insert-json value)
+           (buffer-string))
+       (signal (car err) (cdr err))))))
+
 (provide 'bootstrap-tests)
 
 ;;; bootstrap-tests.el ends here

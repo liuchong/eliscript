@@ -42,7 +42,7 @@
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
     list vector hash-map hash-set queue js-array car cdr cons js-cons nth js-nth aref
-    length js-length __eliscript_array_build
+    length js-length __eliscript_array_build __eliscript_array_copy_assoc
     object-keys object-has? object-assoc __eliscript_arity_error
     new print str funcall apply))
 
@@ -231,6 +231,37 @@
            child (car binding) 'local t))))
     (eliscript-analyzer--analyze-sequence body child)))
 
+(defun eliscript-analyzer--function-body (body parameter-count asynchronous)
+  "Validate a leading memory signature and return the executable BODY.
+The original forms remain intact for typed IR lowering."
+  (let* ((first (car body))
+         (items (and first (eliscript-form-value first))))
+    (if (not (and (consp items)
+                  (eq (eliscript-form-value (car items)) 'memory-sig)))
+        body
+      (let ((eliscript-analyzer--current-span
+             (or (eliscript-form-span first)
+                 eliscript-analyzer--current-span)))
+        (when asynchronous
+          (eliscript-analyzer--fail
+           "memory-sig is only permitted as the leading form of a synchronous function"))
+        (unless (= (length items) (+ parameter-count 2))
+          (eliscript-analyzer--fail
+           "memory-sig requires 1 result type and %d parameter types" parameter-count))
+        (unless (cdr body)
+          (eliscript-analyzer--fail "memory-sig requires a function body"))
+        (dolist (token (cdr items))
+          (let* ((value (eliscript-form-value token))
+                 (name (if (symbolp value) (symbol-name value) value)))
+            (unless (and (stringp name)
+                         (member name '("u32" "f64" "v64" "bits64")))
+              (let ((eliscript-analyzer--current-span
+                     (or (eliscript-form-span token)
+                         eliscript-analyzer--current-span)))
+                (eliscript-analyzer--fail
+                 "memory-sig requires explicit u32, f64, v64, or bits64 types")))))
+        (cdr body)))))
+
 (defun eliscript-analyzer--analyze-function
     (parameters body scope &optional asynchronous)
   "Analyze function PARAMETERS and BODY in SCOPE.
@@ -244,6 +275,7 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
                    (or (eliscript-form-span form)
                        eliscript-analyzer--current-span)))
               (eliscript-analyzer--fail "%s" message))))))
+    (setq body (eliscript-analyzer--function-body body (length parsed) asynchronous))
     (dolist (parameter parsed)
       (eliscript-analyzer--analyze-pattern-defaults
        (eliscript-parameter-form parameter) scope))
@@ -454,6 +486,9 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
          (operator (eliscript-form-value operator-form))
          (arguments (cdr items)))
     (pcase operator
+      ('memory-sig
+       (eliscript-analyzer--fail
+        "memory-sig is only permitted as the leading form of a synchronous function"))
       ((or 'lambda 'fn)
        (unless arguments
          (eliscript-analyzer--fail "%s requires an argument list" operator))
@@ -626,6 +661,7 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
                    (or (eliscript-form-span form)
                        eliscript-analyzer--current-span)))
               (eliscript-analyzer--fail "%s" message))))))
+    (setq body (eliscript-analyzer--function-body body (length parsed) asynchronous))
     (dolist (parameter parsed)
       (eliscript-analyzer--enqueue-defaults
        (eliscript-parameter-form parameter) scope))
@@ -779,6 +815,9 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
          (arguments (cdr items))
          (tail eliscript-analyzer--tail-position))
     (pcase operator
+      ('memory-sig
+       (eliscript-analyzer--fail
+        "memory-sig is only permitted as the leading form of a synchronous function"))
       ((or 'lambda 'fn 'async)
        (unless arguments
          (eliscript-analyzer--fail "%s requires an argument list" operator))

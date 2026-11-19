@@ -211,7 +211,7 @@
         (unless (and (= (js-length (js-call body :split opening)) 2) (source-head callback "lambda"))
           (throw (new globalThis.TypeError "original identity scalar setup changed")))
         (let ((helper (await (maintained-helper options suite
-          (js-array "js-typeof" "diag-code?" "read-val" "invoke-val" "finish-heap" "check-identities" "check-encounters" "check-heap-isolation")
+          (js-array "js-typeof" "diag-code?" "decoded-number-value" "read-val" "invoke-val" "finish-heap" "check-identities" "check-encounters" "check-heap-isolation")
           (str "(defun check-scalars (instance reference) (funcall " (js-call body :replace opening "instance") "))")
           (js-array "read-val" "invoke-val" "finish-heap" "check-identities" "check-encounters" "check-heap-isolation" "check-scalars")))))
           (js-call (get (get helper :maintainedSource) :sourceRegions) :push (source-node-proof source callback)) helper))))
@@ -647,7 +647,7 @@
                                :id "plain-descriptor"
                                :request (js-object :operation "emit-ir" :target "wasm" :ir (js-object :$compilerCorpusRef "plain-ir.ir"))
                                :expectFields (js-array
-                                               (js-object :path (js-array "descriptor" "abi") :value "managed-control-v1")
+                                               (js-object :path (js-array "descriptor" "abi") :value "managed-control")
                                                (js-object :path (js-array "descriptor" "module") :value undefined)))
                              (js-object
                                :id "recovered-ir"

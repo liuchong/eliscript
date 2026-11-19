@@ -320,7 +320,7 @@
           (js-call small :frameSet outer 0 retained)
           (while (and (< i 128) (not exhausted))
             (try
-              (js-call held :push (js-call small :number i))
+              (js-call held :push (js-call small :array))
               (catch e
                 (js-call assert :equal (get (get e :eliscriptDiagnostic) :code) "ELI-RT0002")
                 (setq exhausted t)))

@@ -81,8 +81,8 @@
            (descriptor-head "  (defun heap-source-descriptor-object (heap value getter setter flags frozen)\n    (memory-sig v64 u32 v64 v64 v64 u32 u32)\n")
            (descriptor-instrumented (js-call foreign-instrumented :replace descriptor-head
              (+ descriptor-head "    (store-u32 180 (1+ (load-u32 180)))\n")))
-           (weak-table-head "  (defun heap-weak-mark-table (base control p old-color)\n")
-           (weak-key-head "  (defun heap-weak-mark-key (base control key old-color)\n    (memory-sig u32 u32 u32 v64 u32)\n")
+           (weak-table-head "  (defun heap-weak-mark-table (base control slot-base slots p old-color)\n")
+           (weak-key-head "  (defun heap-weak-mark-key (base control slot-base slots entry old-color)\n    (memory-sig u32 u32 u32 u32 u32 u32 u32)\n")
            (weak-table-instrumented (js-call descriptor-instrumented :replace weak-table-head
              (+ weak-table-head "    (store-u32 184 (1+ (load-u32 184)))\n")))
            (weak-key-instrumented (js-call weak-table-instrumented :replace weak-key-head
@@ -137,6 +137,7 @@
                "        ((= code 9004) (value-function-capture-get heap function 0))"
                "        ((= code 9005) (store-u32 228 (1+ (load-u32 228))) (value-throw heap (v64-literal 1 0)) (v64-literal 0 0))"
                "        ((= code 9006) (v64-literal 1 0))"
+               "        ((= code 9007) (value-get heap arguments 0))"
                "        ((= code 1000) (heap-root heap 1296))"
                "        ((and (>= code 1001) (<= code 1005))"
                "          (value-collection-prototype-iterator-builtin heap (heap-root heap 1296) arguments count"
@@ -401,6 +402,33 @@
                "    (defun allocator-array-direct (heap object index mode child)"
                "      (memory-sig v64 u32 v64 u32 u32 v64)"
                "      (begin-operation) (heap-source-array-prototype-index-direct heap object index mode child))"
+               "    (defun allocator-function-flag-set (heap function value)"
+               "      (memory-sig u32 u32 v64 u32)"
+               "      (store-u32 (+ (heap-block heap function) 20) value) 0)"
+               "    (defun allocator-function-word16-set (heap function value)"
+               "      (memory-sig u32 u32 v64 u32)"
+               "      (store-u32 (+ (heap-block heap function) 16) value) 0)"
+               "    (defun allocator-function-meta-set (heap function value)"
+               "      (memory-sig u32 u32 v64 u32)"
+               "      (store-u32 (+ (heap-block heap function) 24) value) 0)"
+               "    (defun allocator-function-info-flag-or (heap function value)"
+               "      (memory-sig u32 u32 v64 u32)"
+               "      (let ((info (heap-function-info heap function)))"
+               "        (when (/= info (v64-literal 0 0))"
+               "          (store-u32 (+ (heap-info-block heap info) 16)"
+               "            (word-or (load-u32 (+ (heap-info-block heap info) 16)) value)))) 0)"
+               "    (defun allocator-capture-set-at (heap function index value)"
+               "      (memory-sig u32 u32 v64 u32 v64)"
+               "      (heap-function-native-capture-set heap function index value))"
+               "    (defun allocator-function-capture-get (heap function index)"
+               "      (memory-sig v64 u32 v64 u32)"
+               "      (value-function-capture-get heap function index))"
+               "    (defun allocator-slots-code (heap callee)"
+               "      (memory-sig u32 u32 v64)"
+               "      (heap-source-slots-code heap callee))"
+               "    (defun allocator-tail-finish (heap result)"
+               "      (memory-sig v64 u32 v64)"
+               "      (value-source-tail-finish heap result))"
                "    (export allocator-allocate allocator-free allocator-control allocator-object-limit"
                "      allocator-word allocator-v64-word allocator-slot-word allocator-slot-gen-set"
                "      allocator-base allocator-compact-next"
@@ -435,7 +463,10 @@
                "      allocator-fill-refs value-function-new value-function-named value-function-code heap-static-text"
                "      allocator-pair-code allocator-pair-prototype"
                "      allocator-initializer-scans allocator-reset-initializer-scans"
-               "      allocator-array-initializer allocator-function-initializer allocator-describe-builtin74))") :join "\n")))
+               "      allocator-array-initializer allocator-function-initializer allocator-describe-builtin74"
+               "      allocator-function-flag-set allocator-function-word16-set allocator-function-meta-set"
+               "      allocator-function-info-flag-or allocator-capture-set-at allocator-function-capture-get"
+               "      allocator-slots-code allocator-tail-finish))") :join "\n")))
            (enqueue (definition extended "heap-free-slot-append "))
            ;; Exact former sweep policy: the newly dead entry becomes head.
            ;; All generation/retirement, byte allocation and GC are unchanged.
@@ -1137,8 +1168,12 @@
                 (js-call assert :strictEqual (js-call r "allocator-root-count" heap receiver) 0)
                 (js-call assert :strictEqual (js-call r "allocator-root-count" heap previous) 0)
                 (js-call assert :strictEqual (js-call r "value-source-invoke-with-this" heap function receiver arguments 0) receiver)
-                (js-call assert :strictEqual (js-call r "allocator-callback-depth") 2)
-                (js-call assert :strictEqual (js-call r "allocator-frame-count") (1+ frames)))
+                ;; The generic VM guard now uses the same traced handle area,
+                ;; so neither invocation creates another public frame.
+                (js-call assert :strictEqual (js-call r "allocator-callback-depth") 1)
+                (js-call assert :strictEqual (js-call r "allocator-frame-count") frames)
+                (js-call assert :strictEqual (js-call r "root-scope-mark" heap) 0)
+                (js-call assert :strictEqual (js-call r "value-function-current-this" heap) previous))
               (js-call r "allocator-current-this-set" heap (v64 3)))))
         (js-call r "frame-pop" heap caller)
         (allocator-property-finish f))))
@@ -3805,6 +3840,106 @@
         (js-call assert :strictEqual (js-call r "last-error") 0)))
     120000)
 
+  (test "private root scopes reuse charged capacity and preserve absolute roots through moving growth and failed reserve"
+    (lambda ()
+      (let* ((r (fresh)) (heap (js-call r "heap-new" 64 65536 65536))
+             (zero (v64 0)) (frame (js-call r "frame-new" heap 0)))
+        (js-call r "heap-auto" heap 1)
+        (js-call assert :strictEqual (js-call r "root-scope-enter" heap 3) 1)
+        (let* ((base (js-call r "root-scope-base" heap))
+               (value (js-call r "value-object-new" heap zero)))
+          (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+          (js-call r "heap-collect" heap)
+          (let ((collections (js-call r "heap-collections" heap))
+                (bytes (js-call r "heap-used" heap)) (live (js-call r "heap-live" heap))
+                (index 0))
+            (while (< index 500)
+              (js-call assert :strictEqual (js-call r "root-scope-enter" heap 1) 1)
+              (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+              ;; The top scope belongs to the callee; the caller's base stays
+              ;; valid, so this write must not target the callee's metadata.
+              (js-call assert :strictEqual (js-call r "root-scope-set-abs" heap base value) 1)
+              (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap base) value)
+              (js-call assert :strictEqual (js-call r "root-scope-exit" heap) 1)
+              (setq index (1+ index)))
+            (js-call assert :strictEqual (js-call r "heap-collections" heap) collections)
+            (js-call assert :strictEqual (js-call r "heap-used" heap) bytes)
+            (js-call assert :strictEqual (js-call r "heap-live" heap) live))
+          (js-call r "allocator-compact-next")
+          (js-call assert :strictEqual (js-call r "root-scope-enter" heap 512) 1)
+          (let ((large (js-call r "root-scope-base" heap)) (index 0))
+            (while (< index 512)
+              (js-call assert :strictEqual (js-call r "root-scope-set" heap index value) 1)
+              (setq index (1+ index)))
+            (js-call r "heap-collect" heap)
+            (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap base) value)
+            (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap (+ large 511)) value)
+            (js-call assert :strictEqual (js-call r "root-scope-exit" heap) 1)
+            (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap large) zero)
+            (js-call assert :strictEqual (js-call r "last-error") 3))
+          ;; The original fixed 64 KiB budget cannot reserve this scope. OOM
+          ;; must leave the caller's checkpoint and live child intact.
+          (js-call assert :strictEqual (js-call r "root-scope-enter" heap 100000) 0)
+          (js-call assert :strictEqual (js-call r "last-error") 2)
+          (js-call assert :strictEqual (js-call r "root-scope-base" heap) base)
+          (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap base) value)
+          (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap (1- base)) zero)
+          (js-call assert :strictEqual (js-call r "last-error") 3)
+          (js-call assert :strictEqual (js-call r "root-scope-set-abs" heap base (invalid-v64)) 0)
+          (js-call assert :strictEqual (js-call r "last-error") 1)
+          (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap base) value)
+          (js-call assert :strictEqual (js-call r "root-scope-exit" heap) 1))
+        (js-call assert :strictEqual (js-call r "frame-pop" heap frame) 1)
+        (js-call r "heap-collect" heap)
+        (js-call assert :strictEqual (js-call r "heap-live" heap) 0)
+        (js-call assert :strictEqual (js-call r "frame-depth" heap) 0))))
+
+  (test "private root checkpoints unwind trapped reentry on shared public frames and release standalone anchors"
+    (lambda ()
+      (let* ((r (fresh)) (heap (js-call r "heap-new" 64 65536 65536))
+             (zero (v64 0)) (frame (js-call r "frame-new" heap 0)))
+        (js-call r "heap-auto" heap 1)
+        (js-call assert :strictEqual (js-call r "root-scope-enter" heap 1) 1)
+        (let* ((mark (js-call r "root-scope-mark" heap))
+               (value (js-call r "value-object-new" heap zero)))
+          (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+          (js-call assert :strictEqual (js-call r "root-scope-enter" heap 4) 1)
+          (let ((discarded (js-call r "root-scope-base" heap)))
+            (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+            ;; Physical unwind alone cannot pop an inner private scope when
+            ;; guest reentry did not create another public frame.
+            (js-call assert :strictEqual (js-call r "frame-unwind" heap frame) 1)
+            (js-call assert :notStrictEqual (js-call r "root-scope-mark" heap) mark)
+            (js-call assert :strictEqual (js-call r "root-scope-unwind" heap mark) 1)
+            (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap discarded) zero)
+            (js-call assert :strictEqual (js-call r "last-error") 3))
+          (js-call r "frame-new" heap 0)
+          (js-call assert :strictEqual (js-call r "root-scope-enter" heap 2) 1)
+          (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+          (js-call assert :strictEqual (js-call r "frame-unwind" heap frame) 1)
+          (js-call assert :strictEqual (js-call r "root-scope-mark" heap) mark)
+          (js-call r "heap-collect" heap)
+          (js-call assert :strictEqual (js-call r "root-scope-get-abs" heap mark) value)
+          (js-call assert :strictEqual (js-call r "root-scope-exit" heap) 1))
+        (js-call assert :strictEqual (js-call r "frame-pop" heap frame) 1)
+        (js-call assert :strictEqual (js-call r "root-scope-mark" heap) 0)
+        (js-call assert :strictEqual (js-call r "root-scope-unwind" heap 0) 1)
+        (js-call assert :strictEqual (js-call r "root-scope-enter" heap 1) 1)
+        (let ((value (js-call r "value-object-new" heap zero)))
+          (js-call assert :strictEqual (js-call r "root-scope-set" heap 0 value) 1)
+          (js-call r "heap-collect" heap)
+          (js-call assert :strictEqual
+            (js-call r "root-scope-get-abs" heap (js-call r "root-scope-base" heap)) value))
+        (js-call assert :strictEqual (js-call r "root-scope-unwind" heap 0) 1)
+        (js-call r "heap-collect" heap)
+        (js-call assert :strictEqual (js-call r "heap-live" heap) 0)
+        (js-call assert :strictEqual (js-call r "frame-depth" heap) 0)
+        (js-call assert :strictEqual (js-call r "root-scope-enter" heap 100000) 0)
+        (js-call assert :strictEqual (js-call r "last-error") 2)
+        (js-call r "heap-collect" heap)
+        (js-call assert :strictEqual (js-call r "heap-live" heap) 0)
+        (js-call assert :strictEqual (js-call r "frame-depth" heap) 0))))
+
   (test "identical repeated array-initializer registration skips the shared prototype scan while a late builtin-74 info inherits the initializer"
     (lambda ()
       (let* ((r (ro-fresh)) (heap (js-call r "heap-new" 512 262144 1048576)))
@@ -3836,4 +3971,141 @@
         (js-call assert :strictEqual (js-call r "allocator-pair-prototype" heap) 37)
         (js-call assert :strictEqual (js-call r "last-error") 0)))
     120000)
+
+  (test "source slot guard admits source closures and rejects special callables without state change or leaked roots"
+    (lambda ()
+      (let* ((f (allocator-property-fixture t)) (r (get f :r)) (heap (get f :heap))
+             (own (get f :own)) (text (get f :text)) (roots (get f :roots)) (static (get f :static))
+             (plain (funcall own (js-call r "allocator-described" heap 0 0 0 0)))
+             (capturing (funcall own (js-call r "allocator-described" heap 7001 0 0 2)))
+             (capture0 (funcall own (funcall text "guard")))
+             (capture1 (funcall own (js-call r "value-array-new" heap 0)))
+             (named (funcall own (js-call r "allocator-described" heap 7002 0 0 0)))
+             (meta (funcall own (js-call r "allocator-described" heap 7003 0 0 0)))
+             (class (funcall own (js-call r "allocator-described" heap 7004 0 0 0)))
+             (bound (funcall own (js-call r "allocator-described" heap 7005 0 1 0)))
+             (builtin (funcall own (js-call r "allocator-described" heap 7006 1 0 0)))
+             (method (funcall own (js-call r "allocator-described" heap 7007 0 0 0)))
+             (receiver-method (funcall own (js-call r "allocator-described" heap 7008 0 0 0)))
+             (foreign (funcall own (js-call r "allocator-foreign-block" heap 9)))
+             (inline (js-call r "value-number" heap 0 1072693248)))
+        (js-call r "allocator-capture-set-at" heap capturing 0 capture0)
+        (js-call r "allocator-capture-set-at" heap capturing 1 capture1)
+        (js-call r "allocator-function-word16-set" heap named 1)
+        (js-call r "allocator-function-meta-set" heap meta 1)
+        (js-call r "allocator-function-info-flag-or" heap class 16384)
+        (js-call r "allocator-function-flag-set" heap method 16)
+        (js-call r "allocator-function-flag-set" heap receiver-method 32)
+        (js-call r "allocator-function-word16-set" heap receiver-method 7009)
+        (let ((cases (js-array
+                       (js-array plain 1 "code zero")
+                       (js-array capturing 7002 "capturing source")
+                       (js-array named 7003 "named source")
+                       (js-array meta 7004 "static metadata source")
+                       (js-array class 0 "materialized class")
+                       (js-array bound 0 "bound marker")
+                       (js-array builtin 0 "builtin info")
+                       (js-array method 0 "method")
+                       (js-array receiver-method 0 "receiver method")
+                       (js-array foreign 0 "foreign")
+                       (js-array (v64 0) 0 "nil")
+                       (js-array inline 0 "inline number")
+                       (js-array (get static :key) 0 "rodata key")
+                       (js-array (invalid-v64) 0 "stale"))))
+          (js-call cases :forEach (lambda (entry)
+            (let* ((callee (aref entry 0)) (expected (aref entry 1)) (label (aref entry 2))
+                   (bytes (js-call r "heap-used" heap)) (live (js-call r "heap-live" heap))
+                   (collections (js-call r "heap-collections" heap))
+                   (frames (js-call r "allocator-frame-count")) (mark (js-call r "root-scope-mark" heap))
+                   (this (js-call r "value-function-current-this" heap))
+                   (rooted (js-call r "allocator-root-count" heap plain)))
+              (js-call r "value-error-restore" 7)
+              (js-call assert :strictEqual (js-call r "allocator-slots-code" heap callee) expected label)
+              (js-call assert :strictEqual (js-call r "last-error") 7 label)
+              (js-call assert :strictEqual (js-call r "heap-used" heap) bytes label)
+              (js-call assert :strictEqual (js-call r "heap-live" heap) live label)
+              (js-call assert :strictEqual (js-call r "heap-collections" heap) collections label)
+              (js-call assert :strictEqual (js-call r "allocator-frame-count") frames label)
+              (js-call assert :strictEqual (js-call r "root-scope-mark" heap) mark label)
+              (js-call assert :strictEqual (js-call r "value-function-current-this" heap) this label)
+              (js-call assert :strictEqual (js-call r "allocator-root-count" heap plain) rooted label)
+              (js-call r "value-exception-clear" heap)))))
+        (js-call assert :strictEqual (js-call r "value-function-code" heap capturing) 7001)
+        (js-call assert :strictEqual (js-call r "allocator-function-capture-get" heap capturing 0) capture0)
+        (js-call assert :strictEqual (js-call r "allocator-function-capture-get" heap capturing 1) capture1)
+        (js-call r "root-scope-enter" heap 2)
+        (let ((base (js-call r "root-scope-base" heap)))
+          (js-call r "root-scope-set-abs" heap base capturing)
+          (js-call r "root-scope-set-abs" heap (+ base 1) capture0)
+          (js-call r "heap-release" heap capturing)
+          (js-call r "heap-release" heap capture0)
+          (js-call r "heap-collect" heap)
+          (js-call r "allocator-compact" heap)
+          (js-call assert :strictEqual (js-call r "value-function-code" heap capturing) 7001)
+          (js-call assert :strictEqual (js-call r "allocator-function-capture-get" heap capturing 0) capture0)
+          (js-call assert :strictEqual (js-call r "allocator-function-capture-get" heap capturing 1) capture1)
+          (js-call assert :strictEqual (js-call r "allocator-slots-code" heap capturing) 7002)
+          (js-call r "heap-pin" heap capturing)
+          (js-call r "heap-pin" heap capture0))
+        (js-call r "root-scope-exit" heap)
+        (js-call assert :strictEqual (js-call r "root-scope-mark" heap) 0)
+        (allocator-property-finish f))))
+
+  (test "source tail finish preserves argv receiver throw identity and skips tails under an existing error"
+    (lambda ()
+      (let* ((f (allocator-property-fixture)) (r (get f :r)) (heap (get f :heap))
+             (own (get f :own)) (text (get f :text))
+             (receiver (funcall own (js-call r "value-array-new" heap 0)))
+             (receiver2 (funcall own (js-call r "value-object-new" heap (v64 0))))
+             (arguments (funcall own (js-call r "value-refs" heap 7 2)))
+             (first (funcall text "first"))
+             (second (funcall own (js-call r "value-array-new" heap 0)))
+             (one (funcall own (js-call r "allocator-described" heap 9001 0 0 0)))
+             (argv (funcall own (js-call r "allocator-described" heap 9007 0 0 0)))
+             (thrower (funcall own (js-call r "allocator-described" heap 9002 0 0 0)))
+             (relay (funcall own (js-call r "allocator-described" heap 9004 0 0 1))))
+        (js-call r "value-set" heap arguments 0 first)
+        (js-call r "value-set" heap arguments 1 second)
+        (js-call assert :strictEqual (js-call r "value-kind" heap arguments) 7)
+        (js-call r "allocator-reset-callbacks")
+        (let ((bytes (js-call r "heap-used" heap)) (live (js-call r "heap-live" heap))
+              (collections (js-call r "heap-collections" heap))
+              (frames (js-call r "allocator-frame-count")) (mark (js-call r "root-scope-mark" heap)))
+          (js-call assert :strictEqual (js-call r "allocator-tail-finish" heap receiver) receiver)
+          (js-call assert :strictEqual (js-call r "heap-used" heap) bytes)
+          (js-call assert :strictEqual (js-call r "heap-live" heap) live)
+          (js-call assert :strictEqual (js-call r "heap-collections" heap) collections)
+          (js-call assert :strictEqual (js-call r "allocator-frame-count") frames)
+          (js-call assert :strictEqual (js-call r "root-scope-mark" heap) mark)
+          (js-call assert :strictEqual (js-call r "allocator-callback-count") 0))
+        (js-call r "allocator-reset-callbacks")
+        (let ((record (js-call r "value-source-tail-call" heap argv receiver arguments 2)))
+          (js-call assert :strictEqual (js-call r "allocator-tail-finish" heap record) first)
+          (js-call assert :strictEqual (js-call r "allocator-callback-count") 1)
+          (js-call assert :strictEqual (js-call r "allocator-callback-receiver") receiver))
+        (js-call r "allocator-reset-callbacks")
+        (let* ((record2 (js-call r "value-source-tail-call" heap one receiver2 arguments 2)))
+          (js-call r "allocator-capture-set" heap relay record2)
+          (let ((record1 (js-call r "value-source-tail-call" heap relay receiver arguments 2)))
+            (js-call assert :strictEqual (js-call r "allocator-tail-finish" heap record1) receiver2)
+            (js-call assert :strictEqual (js-call r "allocator-callback-count") 2)
+            (js-call assert :strictEqual (js-call r "allocator-callback-receiver") receiver2)))
+        (js-call r "value-exception-clear" heap)
+        (js-call r "allocator-reset-callbacks")
+        (let ((record (js-call r "value-source-tail-call" heap thrower receiver arguments 2)))
+          (js-call assert :strictEqual (js-call r "allocator-tail-finish" heap record) (v64 0))
+          (js-call assert :strictEqual (js-call r "last-error") 11)
+          (js-call assert :strictEqual (js-call r "value-exception-take" heap) (v64 1))
+          (js-call assert :strictEqual (js-call r "allocator-callback-count") 1)
+          (js-call assert :strictEqual (js-call r "allocator-callback-receiver") receiver))
+        (js-call r "value-exception-clear" heap)
+        (js-call r "allocator-reset-callbacks")
+        (let ((record (js-call r "value-source-tail-call" heap one receiver arguments 2)))
+          (js-call r "value-error-restore" 2)
+          (js-call assert :strictEqual (js-call r "allocator-tail-finish" heap record) record)
+          (js-call assert :strictEqual (js-call r "last-error") 2)
+          (js-call assert :strictEqual (js-call r "allocator-callback-count") 0))
+        (js-call r "value-exception-clear" heap)
+        (js-call assert :strictEqual (js-call r "root-scope-mark" heap) 0)
+        (allocator-property-finish f))))
 )

@@ -8,7 +8,6 @@
 
   (defconst manifestFilename "eliscript-project.json")
   (defconst cacheFormat "eliscript-project-cache")
-  (defconst cacheVersion 2)
   (defconst hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst sha256-pattern (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))
 
@@ -22,7 +21,6 @@
     (let ((error (new globalThis.Error message))
           (diag (js-object
                   :format "eliscript-diagnostic"
-                  :version 1
                   :code "ELI-B0001"
                   :severity "error"
                   :phase "project-build"
@@ -417,20 +415,12 @@
     (if (or (not value) (not (Array/isArray (get value :modules))))
       undefined
       (let ((modules (js-call (get value :modules) :map cacheIdentityModule)))
-        (if (and (undefined? (get value :format)) (= (get value :version) 1))
-          (js-object
-            :version 1
-            :compilerDigest (get value :compilerDigest)
-            :mode (get value :mode)
-            :portableEntries (get value :portableEntries)
-            :modules modules)
-          (js-object
-            :format (get value :format)
-            :version (get value :version)
-            :compilerDigest (get value :compilerDigest)
-            :mode (get value :mode)
-            :portableEntries (get value :portableEntries)
-            :modules modules)))))
+        (js-object
+          :format (get value :format)
+          :compilerDigest (get value :compilerDigest)
+          :mode (get value :mode)
+          :portableEntries (get value :portableEntries)
+          :modules modules))))
 
   (defun writeManifest (entryOutputs modules root outDir mode portableEntries compilerDigest)
     (let* ((outputEntries
@@ -438,22 +428,14 @@
            (manifestModules
              (js-call modules :map (lambda (mod) (manifestRecord mod root outDir))))
            (identity
-             (if (= (js-length outputEntries) 1)
-               (js-object
-                 :format "eliscript-project"
-                 :version 1
-                 :entry (aref outputEntries 0)
-                 :modules manifestModules)
-               (js-object
-                 :format "eliscript-project"
-                 :version 2
-                 :entries outputEntries
-                 :modules manifestModules)))
+             (js-object
+               :format "eliscript-project"
+               :entries outputEntries
+               :modules manifestModules))
            (digest (digestBytes (JSON/stringify identity)))
            (cache
              (js-object
                :format cacheFormat
-               :version cacheVersion
                :compilerDigest compilerDigest
                :mode mode
                :portableEntries portableEntries
@@ -491,27 +473,16 @@
          (try
            (let* ((manifest (JSON/parse (readFileSync manifestPath "utf8")))
                   (graphIdentity
-                    (if (= (if manifest (get manifest :version) nil) 2)
-                      (js-object
-                        :format (if manifest (get manifest :format) undefined)
-                        :version (if manifest (get manifest :version) undefined)
-                        :entries (if manifest (get manifest :entries) undefined)
-                        :modules (if manifest (get manifest :modules) undefined))
-                      (js-object
-                        :format (if manifest (get manifest :format) undefined)
-                        :version (if manifest (get manifest :version) undefined)
-                        :entry (if manifest (get manifest :entry) undefined)
-                        :modules (if manifest (get manifest :modules) undefined))))
+                    (js-object
+                      :format (if manifest (get manifest :format) undefined)
+                      :entries (if manifest (get manifest :entries) undefined)
+                      :modules (if manifest (get manifest :modules) undefined)))
                   (privateIdentity (cacheIdentity (if manifest (get manifest :cache) undefined))))
              (js-call compiler :project_cache_lookup
                (js-object
                  :enabled t
                  :manifestStatus "readable"
                  :manifest manifest
-                 :expectedEntry
-                   (if (= (js-length entryOutputs) 1)
-                     (relative outDir (aref entryOutputs 0))
-                     undefined)
                  :expectedEntries
                    (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput)))
                  :graphDigestValid
@@ -737,33 +708,32 @@
   (defasync checkProject (options)
     (when (or (not options) (not (= (host-typeof options) "object")))
       (projectError "project check options must be an object"))
-    (when (and (undefined? (get options :entry))
-               (undefined? (get options :entries)))
-      (projectError "project check requires entry or entries"))
+    (when (undefined? (get options :entries))
+      (projectError "project check requires entries"))
     (let* ((moduleDirectory (compilerModuleDirectory (get options :moduleDirectory)))
            (compiler (if (not (undefined? (get options :compiler)))
                        (get options :compiler)
                        (await (loadCompiler moduleDirectory))))
-           (request
-             (js-call compiler :check_operation_request
-               (js-object
-                 :entry (get options :entry)
-                 :entries (get options :entries)
-                 :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
-                         nil
-                         (get options :root))
-                 :portableEntries
-                   (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
-                     (js-array)
-                     (get options :portableEntries))
-                 :macroCapabilities
-                   (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
-                     (js-array)
-                     (get options :macroCapabilities))
-                 :macroFileDependencies
-                   (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
-                     (js-array)
-                     (get options :macroFileDependencies)))))
+           (checkRequestInput
+             (js-object
+               :entries (get options :entries)
+               :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
+                       nil
+                       (get options :root))
+               :portableEntries
+                 (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
+                   (js-array)
+                   (get options :portableEntries))
+               :macroCapabilities
+                 (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
+                   (js-array)
+                   (get options :macroCapabilities))
+               :macroFileDependencies
+                 (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
+                   (js-array)
+                   (get options :macroFileDependencies))))
+           (_entryCheck (when (Object/hasOwn options "entry") (put checkRequestInput :entry (get options :entry))))
+           (request (js-call compiler :check_operation_request checkRequestInput))
            (entryPaths
              (js-call (get request :entries) :map
                (lambda (entry) (resolve (pathOption entry "entry"))))))
@@ -821,7 +791,6 @@
             (Object/freeze
               (js-object
                 :format "eliscript-project-check"
-                :version 1
                 :root root
                 :entries (Object/freeze entries)
                 :mode mode
@@ -835,44 +804,40 @@
     (let ((startedAt (js-call performance :now)))
       (when (or (not options) (not (= (host-typeof options) "object")))
         (projectError "project build options must be an object"))
-      (when (or (and (undefined? (get options :entry))
-                     (undefined? (get options :entries)))
+      (when (or (undefined? (get options :entries))
                 (undefined? (get options :outDir)))
-        (projectError "project build requires entry or entries and outDir"))
+        (projectError "project build requires entries and outDir"))
       (let* ((moduleDirectory (compilerModuleDirectory (get options :moduleDirectory)))
              (compiler (if (not (undefined? (get options :compiler)))
                          (get options :compiler)
                          (await (loadCompiler moduleDirectory))))
-             (request
-               (js-call compiler :build_operation_request
-                 (js-object
-                   :mode "project"
-                   :entry (get options :entry)
-                   :entries (get options :entries)
-                   :outDir (get options :outDir)
-                   :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
-                           nil
-                           (get options :root))
-                   :portableEntries
-                     (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
-                       (js-array)
-                       (get options :portableEntries))
-                   :macroCapabilities
-                     (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
-                       (js-array)
-                       (get options :macroCapabilities))
-                   :macroFileDependencies
-                     (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
-                       (js-array)
-                       (get options :macroFileDependencies))
-                   :useCache
-                     (if (undefined? (get options :useCache))
-                       t
-                       (get options :useCache)))))
-             (requestedEntries
-               (if (= (get request :version) 2)
-                 (Array/from (get request :entries))
-                 (js-array (get request :entry)))))
+             (buildRequestInput
+               (js-object
+                 :mode "project"
+                 :entries (get options :entries)
+                 :outDir (get options :outDir)
+                 :root (if (or (nil? (get options :root)) (undefined? (get options :root)))
+                         nil
+                         (get options :root))
+                 :portableEntries
+                   (if (or (nil? (get options :portableEntries)) (undefined? (get options :portableEntries)))
+                     (js-array)
+                     (get options :portableEntries))
+                 :macroCapabilities
+                   (if (or (nil? (get options :macroCapabilities)) (undefined? (get options :macroCapabilities)))
+                     (js-array)
+                     (get options :macroCapabilities))
+                 :macroFileDependencies
+                   (if (or (nil? (get options :macroFileDependencies)) (undefined? (get options :macroFileDependencies)))
+                     (js-array)
+                     (get options :macroFileDependencies))
+                 :useCache
+                   (if (undefined? (get options :useCache))
+                     t
+                     (get options :useCache))))
+             (_entryBuild (when (Object/hasOwn options "entry") (put buildRequestInput :entry (get options :entry))))
+             (request (js-call compiler :build_operation_request buildRequestInput))
+             (requestedEntries (Array/from (get request :entries))))
         (when (and (> (js-length requestedEntries) 1) (nil? (get request :root)))
           (projectError "multi-entry project builds require an explicit project root"))
         (let* ((entryPaths
@@ -1003,6 +968,8 @@
                          :mode (get plan :mode)
                          :root root
                          :outDir outDir
+                         :entries (js-call entries :map (lambda (entry) (relative root entry)))
+                         :entryOutputs (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput)))
                          :manifest (relative outDir (get manifestData :manifest))
                          :digest (get manifestData :digest)
                          :portableEntries normalizedPortableEntries
@@ -1014,25 +981,13 @@
                              :manifestWriteMs (- manifestFinishedAt workFinishedAt)
                              :totalMs (- manifestFinishedAt startedAt))
                          :modules
-                           (js-call modules :map (lambda (mod) (reportModule mod root outDir))))))
-                (if (= (js-length entries) 1)
-                  (progn
-                    (put reportInput :entry (relative root (aref entries 0)))
-                    (put reportInput :entryOutput (relative outDir (aref entryOutputs 0))))
-                  (progn
-                    (put reportInput :entries
-                      (js-call entries :map (lambda (entry) (relative root entry))))
-                    (put reportInput :entryOutputs
-                      (js-call entryOutputs :map (lambda (entryOutput) (relative outDir entryOutput))))))
-                (let ((report (js-call compiler :project_build_report reportInput)))
+                           (js-call modules :map (lambda (mod) (reportModule mod root outDir)))))
+                     (report (js-call compiler :project_build_report reportInput)))
                   (Object/freeze
                     (js-object
                       :format "eliscript-project-build"
-                      :version (if (= (js-length entries) 1) 1 2)
                       :root root
                       :outDir outDir
-                      :entry (if (= (js-length entries) 1) (aref entries 0) undefined)
-                      :entryOutput (if (= (js-length entries) 1) (aref entryOutputs 0) undefined)
                       :entries (Object/freeze entries)
                       :entryOutputs (Object/freeze entryOutputs)
                       :mode (get plan :mode)
@@ -1045,6 +1000,6 @@
                       :manifest (get manifestData :manifest)
                       :digest (get manifestData :digest)
                       :report report
-                      :plan plan))))))))))
+                      :plan plan)))))))))
 
   (export checkProject buildProject))

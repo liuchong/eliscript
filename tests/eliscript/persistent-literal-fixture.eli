@@ -84,7 +84,7 @@
             (js-call assert :deepStrictEqual (readFileSync first) bytes)
             (js-call assert :deepStrictEqual (readFileSync second) bytes)
             (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")
-              "6eb46cffdaf397d83b81227b4141111508f1e624beafc6d9468313a6e2e9515d")
+              "f8316c7a040636fabe87a9ffc3ef7f7fe77232ba36712eee3b236b0fe5853e85")
             (js-call (js-array "collection.mjs" "vector.mjs") :forEach (lambda (name)
               (js-call assert :strictEqual (realpathSync (resolve first ".." name)) (realpathSync (resolve root "runtime/core" name)))))
             (js-call assert :strictEqual (js-call left :isRegexPattern pattern) t)

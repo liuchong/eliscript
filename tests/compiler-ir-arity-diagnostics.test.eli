@@ -58,7 +58,7 @@
   (test "Given an existing Error at the real arity boundary When metadata is attached Then identity message and existing diagnostics remain intact" (lambda ()
     (let* ((program (js-call compiler :compile_ir_string source filename)) (node (aref (intrinsics program) 0)) (operand (aref (get node :children) 0)))
       (js-call (js-array false t) :forEach (lambda (frozen)
-        (let* ((diagnostic (js-object :format "eliscript-diagnostic" :version 1 :code "ORIGINAL" :phase "original" :message "original diagnostic"))
+        (let* ((diagnostic (js-object :format "eliscript-diagnostic" :code "ORIGINAL" :phase "original" :message "original diagnostic"))
                (original (Object/assign (new globalThis.Error "original arity-boundary error") (js-object :eliscriptDiagnostic diagnostic))))
           (when frozen (Object/freeze original))
           (let ((corrupted (copyHostRecord node (js-object :children (childrenProxy operand original)))))
@@ -94,7 +94,7 @@
                     :nativeTarget (if (= (get globalThis.process :platform) "linux") "arm64-linux" "arm64-macos") :nativeFormat "library")))
                     (lambda (error)
                       (js-call assert :equal (get error :message) message)
-                      (js-call assert :deepEqual (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-B0001" :severity "error" :phase "managed-backend" :message message
+                      (js-call assert :deepEqual (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic" :code "ELI-B0001" :severity "error" :phase "managed-backend" :message message
                         :location (js-object :file filename :start (js-object :offset (get span :start) :line (get span :line) :column (get span :column)) :end (js-object :offset (get span :end) :line (get span :endLine) :column (get span :endColumn))))) t))))
                 (setq countIndex (1+ countIndex))))
             (setq targetIndex (1+ targetIndex)))

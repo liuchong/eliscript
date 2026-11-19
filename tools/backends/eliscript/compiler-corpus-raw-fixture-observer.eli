@@ -5,7 +5,10 @@
   ;; or turns arbitrary host objects into managed capabilities.
   (defun raw-scope (runtime family)
     (let ((owned (js-array)))
-      (letfn ((keep (value) (js-call owned :push value) value)
+      (letfn ((keep (value)
+                (when (and (not (eq value nil)) (= (value-type value) "object"))
+                  (js-call owned :push value))
+                value)
               (box (value)
                 (cond ((= (value-type value) "number") (keep (js-call runtime :number value)))
                       ((= (value-type value) "bigint") (keep (js-call runtime :bigint value)))
@@ -26,7 +29,10 @@
               (read (value)
                 (let ((seen (js-array)))
                   (letfn ((visit (item)
-                    (if (or (eq item nil) (undefined? item) (= (value-type item) "boolean")) item
+                    ;; Scalar numbers reach host observers as plain JS numbers in
+                    ;; the current value ABI; only composite values carry a kind.
+                    (if (or (eq item nil) (undefined? item) (= (value-type item) "boolean")
+                            (= (value-type item) "number")) item
                       (let ((kind (get item :kind)))
                         (cond ((= kind 4) (js-call runtime :readNumber item))
                               ((= kind 5) (js-call runtime :readString item))

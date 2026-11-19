@@ -123,7 +123,7 @@
       (js-call values :forEach (lambda (value index) (js-call view :setUint32 (* index 4) value t))) bytes))
   (defun wordBufferDiagnostic (message) (lambda (error)
     (ae (get error :message) message)
-    (same (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-B0001" :severity "error" :phase "numeric-backend" :message message
+    (same (get error :eliscriptDiagnostic) (js-object :format "eliscript-diagnostic" :code "ELI-B0001" :severity "error" :phase "numeric-backend" :message message
       :location (js-object :file "<ir>" :start (js-object :line 1 :column 1)))) t))
   (defun captureFailure (operation)
     (let ((failed false) (failure undefined)) (try (funcall operation) (catch error (setq failed t failure error)))

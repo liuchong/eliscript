@@ -69,10 +69,8 @@
            (errors (js-array)))
       (await (checkPublicSurface (js-object :root root :surface surface :specIndex specIndex)))
       (when (or (not (isPlainObject metadata))
-                (/= (get metadata :schemaVersion) 1)
-                (/= (get metadata :format) "eliscript-library-api-metadata")
-                (/= (get metadata :version) 1))
-        (js-call errors :push "library API metadata must use eliscript-library-api-metadata version 1"))
+                (/= (get metadata :format) "eliscript-library-api-metadata"))
+        (js-call errors :push "library API metadata must use eliscript-library-api-metadata"))
       (let* ((raw-modules (if (isPlainObject metadata) (get metadata :modules) nil))
              (modules (if (Array/isArray raw-modules) raw-modules (js-array))))
         (unless (Array/isArray raw-modules)
@@ -148,7 +146,6 @@
                     0)))
               (js-object
                 :format "eliscript-library-api-index"
-                :version 1
                 :moduleCount (js-length generatedModules)
                 :exportCount exportCount
                 :modules generatedModules)))))))

@@ -685,7 +685,6 @@
     (if (and (not (nullish? error)) (not (nullish? (get error :eliscriptDiagnostic))))
       (get error :eliscriptDiagnostic)
       (js-object :format "eliscript-diagnostic"
-        :version 1
         :code "ELI-BROWSER-0001"
         :severity "error"
         :phase "browser-host"
@@ -708,7 +707,6 @@
     (new BrowserCompileError
       (js-array
         (js-object :format "eliscript-diagnostic"
-          :version 1
           :code code
           :severity "error"
           :phase "browser-host"

@@ -64,13 +64,47 @@
   ;; property, brand probe, or a trap on an unrelated host value.
   (defun isManagedSourceView (value) (js-call source-boundaries :has value))
 
+  (defun closed-source-classify (_value) -1)
+  (defun closed-source-view-invoke ()
+    (throw (new globalThis.Error "managed host value is closed")))
+
   ;; Only factory-created opaque owners and their original runtime/facade
   ;; aliases enter this registry. No property on an input view is inspected.
   (defun registerManagedSourceDecodeRuntime (runtime owner &rest classifiers)
     (let ((realm (if (> (js-length classifiers) 0)
-                   (js-object :classify (aref classifiers 0))
+                   (js-object :classify (aref classifiers 0) :records (js-array))
                    (js-call decode-realms :get owner))))
       (unless (undefined? realm) (js-call decode-realms :set runtime realm))) runtime)
+
+  (defun detachManagedDecodedSourceRecords (records &rest handlers)
+    (let ((closed-invoke (if (and (> (js-length handlers) 0) (= (value-type (aref handlers 0)) "function"))
+                           (aref handlers 0)
+                           closed-source-view-invoke)))
+      (when (Array/isArray records)
+        (let ((index 0))
+          (while (< index (js-length records))
+            (let ((record (js-call (aref records index) :deref)))
+              (when record
+                (put record :invoke closed-invoke)
+                (put record :state undefined)
+                (put record :observer undefined)
+                (put record :realm undefined)))
+            (setq index (1+ index))))
+        (put records :length 0))
+      undefined))
+
+  (defun closeManagedSourceDecodeRuntime (runtime &rest handlers)
+    (let ((realm (when (and (not (nullish? runtime))
+                            (or (= (value-type runtime) "object") (= (value-type runtime) "function")))
+                   (js-call decode-realms :get runtime)))
+          (closed-invoke (if (and (> (js-length handlers) 0) (= (value-type (aref handlers 0)) "function"))
+                           (aref handlers 0)
+                           closed-source-view-invoke)))
+      (when realm
+        (detachManagedDecodedSourceRecords (get realm :records) closed-invoke)
+        (put realm :classify closed-source-classify)
+        (put realm :records undefined))
+      undefined))
 
   (defun isManagedSourceViewForRuntime (value runtime)
     (let ((record (js-call source-boundaries :get value)) (realm (js-call decode-realms :get runtime)))
@@ -318,6 +352,46 @@
   ;; never enter this map: their operations/getter contract stays in ground.
   ;; Weak keys allow the private target/record/view cycle to be reclaimed.
   (defconst decoded-source-records (new globalThis.WeakMap))
+  ;; Host objects published for one raw cell keep that raw as their stable
+  ;; identity. A later decode of the same cell may be a different wrapper.
+  ;; The outer map is keyed by the host value. The inner map is keyed by the
+  ;; runtime that remembered it: a default provider publishes one canonical
+  ;; protocol object to every heap, and a bare raw is not unique across them.
+  ;; Lookup uses WeakMap.get only. typeof below does not read descriptors;
+  ;; value-type would, and must not be used on these private queries.
+  (defconst source-identity (new globalThis.WeakMap))
+  (defconst source-identity-owners (new globalThis.WeakMap))
+
+  (defun host-typeof (value)
+    (funcall (js* "(value) => typeof value") value))
+
+  (defun host-object-key? (value)
+    (and (not (nullish? value))
+         (let ((type (host-typeof value)))
+           (or (= type "object") (= type "function")))))
+
+  (defun registerManagedSourceIdentityOwner (runtime owner)
+    (when (and (host-object-key? runtime) (host-object-key? owner))
+      (js-call source-identity-owners :set runtime owner))
+    runtime)
+
+  (defun managedSourceIdentityOwner (runtime)
+    (if (host-object-key? runtime) (js-call source-identity-owners :get runtime) undefined))
+
+  (defun noteManagedSourceIdentity (value raw realm)
+    (when (and (host-object-key? value) (host-object-key? realm))
+      (let ((owners (js-call source-identity :get value)))
+        (when (undefined? owners)
+          (setq owners (new globalThis.WeakMap))
+          (js-call source-identity :set value owners))
+        (js-call owners :set realm raw)))
+    value)
+
+  (defun managedSourceIdentity (value &rest owners)
+    (let ((records (js-call source-identity :get value)))
+      (if (or (undefined? records) (= (js-length owners) 0) (not (host-object-key? (aref owners 0))))
+        undefined
+        (js-call records :get (aref owners 0)))))
 
   (defun decoded-source-call (record name arguments)
     ;; These two callbacks exist only for the synchronous operation. No view
@@ -469,6 +543,13 @@
                          :observer current-boundary :realm current-source-realm
                          :directGet (eq (get configuration :directGet) t)))
                (proxy (new globalThis.Proxy target decoded-source-handler)))
+          (when (= (value-type globalThis.WeakRef) "function")
+            (let ((ref (new globalThis.WeakRef record))
+                  (explicit (get configuration :records))
+                  (realm-records (when current-source-realm (get current-source-realm :records))))
+              (when (Array/isArray explicit) (js-call explicit :push ref))
+              (when (and (Array/isArray realm-records) (not (eq realm-records explicit)))
+                (js-call realm-records :push ref))))
           (js-call decoded-source-records :set target record)
           (js-call source-boundaries :set proxy record)
           ;; Deferred refresh deliberately omits the redundant all:true walk.
@@ -525,5 +606,7 @@
 
   (export createManagedLiteralHostProvider createManagedSourceView createManagedDecodedSourceView
     bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
-    registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime
-    isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher))
+    registerManagedSourceDecodeRuntime detachManagedDecodedSourceRecords closeManagedSourceDecodeRuntime isManagedSourceViewForRuntime
+    isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher
+    noteManagedSourceIdentity managedSourceIdentity
+    registerManagedSourceIdentityOwner managedSourceIdentityOwner))

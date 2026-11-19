@@ -40,7 +40,7 @@
       (js-object :exitCode (aref results 0) :stdout (aref results 1) :stderr (aref results 2)))))
   (defconst
     CONFIG
-    "(module demo.config\n  (defconst config\n    {:schema-version 1\n     :site {:title \"Action Demo\" :description \"Packaged build.\" :base-url \"https://example.github.io/demo/\" :language \"en\"}\n     :publishing {:owner {:login \"owner\"} :coauthors []}\n     :sources [{:id :local :kind :markdown :enabled t :directory \"content/posts\"}]\n     :identity {:conflict :fail :projections []}\n     :comments {:presentation :tabs :channels []}\n     :refresh {:articles :push :comments :runtime :no-change :skip}\n     :output {:directory \"_site\"}})\n  (export config))\n")
+    "(module demo.config\n  (defconst config\n    {\n     :site {:title \"Action Demo\" :description \"Packaged build.\" :base-url \"https://example.github.io/demo/\" :language \"en\"}\n     :publishing {:owner {:login \"owner\"} :coauthors []}\n     :sources [{:id :local :kind :markdown :enabled t :directory \"content/posts\"}]\n     :identity {:conflict :fail :projections []}\n     :comments {:presentation :tabs :channels []}\n     :refresh {:articles :push :comments :runtime :no-change :skip}\n     :output {:directory \"_site\"}})\n  (export config))\n")
   (defun
     post
     (id slug title &rest __host_forwarded_arguments_2)
@@ -204,7 +204,6 @@
   (test "the artifact manifest binds every source and the bundle" (async () (let*
         ((artifact (get state :artifact)) (sources (get artifact :sources)) (idx (js-object :i 0)))
         (js-call (expect (get artifact :format)) :toBe "dogfood-action-artifact")
-        (js-call (expect (get artifact :version)) :toBe 1)
         (js-call (expect (get artifact :runtime)) :toBe "node24")
         (js-call (expect (get sources :length)) :toBeGreaterThanOrEqual 10)
         (while
@@ -341,11 +340,11 @@
             (put idx :i (+ (get idx :i) 1)))
           (js-call (expect broken) :toEqual (js-array))))))
   (test "configuration that is not closed data is rejected" (async () (let*
-        ((directory (await (consumer (demoFiles (js-object "dogfood.config.eli" "(module demo.config\n  (defconst config\n    {:schema-version 1\n     :site {:title \"T\" :base-url \"https://example.github.io/d/\"\n            :description (str \"not-closed-data\")}\n     :sources [{:id :local :kind :markdown :enabled t :directory \"content/posts\"}]\n     :output {:directory \"_site\"}})\n  (export config))\n"))))) (result (await (run (js-array NODE ENTRY) (js-object :cwd directory)))))
+        ((directory (await (consumer (demoFiles (js-object "dogfood.config.eli" "(module demo.config\n  (defconst config\n    {\n     :site {:title \"T\" :base-url \"https://example.github.io/d/\"\n            :description (str \"not-closed-data\")}\n     :sources [{:id :local :kind :markdown :enabled t :directory \"content/posts\"}]\n     :output {:directory \"_site\"}})\n  (export config))\n"))))) (result (await (run (js-array NODE ENTRY) (js-object :cwd directory)))))
         (js-call (expect (get result :exitCode)) :toBe 1)
         (js-call (expect (get result :stdout)) :toContain "DOGFOOD-CONFIG-005"))))
   (test "an unknown configuration key is rejected" (async () (let*
-        ((directory (await (consumer (demoFiles (js-object "dogfood.config.eli" (js-call CONFIG :replace ":schema-version 1" ":schema-version 1\n     :unexpected t")))))) (result (await (run (js-array NODE ENTRY) (js-object :cwd directory)))))
+        ((directory (await (consumer (demoFiles (js-object "dogfood.config.eli" (js-call CONFIG :replace ":site" ":unexpected t\n     :site")))))) (result (await (run (js-array NODE ENTRY) (js-object :cwd directory)))))
         (js-call (expect (get result :exitCode)) :toBe 1)
         (js-call (expect (get result :stdout)) :toContain "DOGFOOD-CONFIG-006"))))
   (test "a missing config file is reported, not crashed" (async () (let*

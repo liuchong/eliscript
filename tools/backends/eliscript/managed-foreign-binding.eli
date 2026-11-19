@@ -1,5 +1,6 @@
 (module tools.backends.managed-foreign-binding
-  (import "./managed-host-ground.mjs" failManagedRuntime)
+  (import "./managed-host-ground.mjs" failManagedRuntime managedExportSignatures invokeManagedABIExport)
+  (import "./managed-layout.mjs" VAL64_NIL VAL64_UNDEFINED val64-dynamic-p val64-singleton-p bits64-u64-to-f64)
   (import "./managed-source-view.mjs" withManagedSourceDecode
     registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime)
   (import "../../runtime/core/collection.mjs" :as collection)
@@ -74,33 +75,13 @@
         (let* ((runtime undefined) (owner 0) (realm (js-object))
                (fn-last-error (aref functions "last-error"))
                (fn-exception-class (aref functions "value-exception-class"))
+               (signatures (managedExportSignatures descriptor))
                (raw (lambda (name &rest arguments)
-                 ;; The bridge consumes and returns u32 ABI words, even when
-                 ;; WASM exposes their high bit as a signed JavaScript i32.
-                 (let ((fn (aref functions name)) (argc (js-length arguments)))
-                   (unsigned-bit-shift-right
-                     (cond
-                       ((= argc 0) (funcall fn))
-                       ((= argc 1) (funcall fn (aref arguments 0)))
-                       ((= argc 2) (funcall fn (aref arguments 0) (aref arguments 1)))
-                       ((= argc 3) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2)))
-                       ((= argc 4) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2) (aref arguments 3)))
-                       (t (Reflect/apply fn exports arguments))) 0))))
+                 (invokeManagedABIExport functions signatures name arguments)))
                (checked (lambda (name &rest arguments)
-                 (let* ((fn (aref functions name)) (argc (js-length arguments))
-                        (value (unsigned-bit-shift-right
-                                 (cond
-                                   ((= argc 0) (funcall fn))
-                                   ((= argc 1) (funcall fn (aref arguments 0)))
-                                   ((= argc 2) (funcall fn (aref arguments 0) (aref arguments 1)))
-                                   ((= argc 3) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2)))
-                                   ((= argc 4) (funcall fn (aref arguments 0) (aref arguments 1) (aref arguments 2) (aref arguments 3)))
-                                   (t (Reflect/apply fn exports arguments))) 0))
-                        (code (unsigned-bit-shift-right (funcall fn-last-error) 0)))
-                   (when (/= code 0)
-                     (failManagedRuntime code
-                       (unsigned-bit-shift-right (funcall fn-exception-class owner) 0)))
-                   value)))
+                 (let* ((value (Reflect/apply raw undefined (js-call (js-array name) :concat arguments)))
+                        (code (funcall raw "last-error")))
+                   (when (/= code 0) (failManagedRuntime code (funcall raw "value-exception-class" owner))) value)))
                (new-heap (aref functions "heap-new"))
                (forwarded (Array/from tail))
                (binding-read (lambda (source key tag)
@@ -127,16 +108,16 @@
                   (funcall handler name heap arguments)
                   (let ((count (if supplied (get supplied :count) (funcall checked "value-length" heap arguments))))
                     (if (= count 0)
-                      (funcall handler name heap arguments (or supplied (js-object :count 0 :opcode 0 :opcodeNumber -1)))
+                      (funcall handler name heap arguments (or supplied (js-object :count 0 :opcode VAL64_NIL :opcodeNumber -1)))
                       (let* ((opcode (if supplied (get supplied :opcode) (funcall checked "value-get" heap arguments 0)))
                              (operation (if supplied (get supplied :opcodeNumber)
-                                          (if (and (> opcode 3) (= (funcall checked "value-kind" heap opcode) 4))
-                                            (js-call (js-call memory :view) :getFloat64 (funcall checked "value-data" heap opcode 4) t) -1))))
+                                          (if (and (not (val64-singleton-p opcode)) (= (funcall checked "value-kind" heap opcode) 4))
+                                            (bits64-u64-to-f64 (funcall checked "value-number-bits" heap opcode)) -1))))
                         (if (and (/= operation 32) (/= operation 33) (/= operation 34))
                           (funcall handler name heap arguments (or supplied (js-object :count count :opcode opcode :opcodeNumber operation)))
                         (progn
                           (unless (= count (if (= operation 32) 4 2)) (failManagedRuntime 3))
-                          (let ((frame undefined) (callee undefined) (result 0) (primary false)
+                          (let ((frame undefined) (callee undefined) (result VAL64_NIL) (primary false)
                                 (operand-count (if (= operation 32) 3 1))
                                 (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
                             (try
@@ -159,7 +140,7 @@
                                           (funcall checked "value-set" heap tuple 0 raw-number))
                                         (finally (js-call runtime :release number))))
                                     (funcall checked "value-set" heap tuple 1 (funcall checked "frame-get" heap frame-id 0))
-                                    (funcall checked "value-set" heap tuple 2 3)
+                                    (funcall checked "value-set" heap tuple 2 VAL64_UNDEFINED)
                                     (let ((index 0))
                                       (while (< index operand-count)
                                         (funcall checked "value-set" heap tuple (+ index 3)
@@ -205,8 +186,8 @@
                            (id (funcall checked "frame-get" owner frame-id 0))
                            (array (funcall checked "value-standard-prototype-existing" owner 1))
                            (object (funcall checked "value-standard-prototype-existing" owner 0)))
-                      (setq result (cond ((and (> array 3) (= id array)) 1)
-                                         ((and (> object 3) (= id object)) 0) (t -1)))))
+                      (setq result (cond ((and (val64-dynamic-p array) (= id array)) 1)
+                                         ((and (val64-dynamic-p object) (= id object)) 0) (t -1)))))
                   (catch error (setq primary t) (throw error))
                   (finally
                     (js-call (js-array

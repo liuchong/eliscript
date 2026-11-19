@@ -1,5 +1,6 @@
 (module platform.browser
   (import "../runtime/source-mapping.mjs" sourceMappedFailure)
+  (defconst apply-native Reflect/apply)
 
   (defconst host-error-class
     (js* "(init, name, arity, messageOf) => { const C = ({ [name]: class extends Error { constructor(...args) { super(messageOf(...args)); init(this, ...args); } } })[name]; Object.defineProperty(C, 'length', { value: arity, configurable: true }); return C; }"))
@@ -51,7 +52,7 @@
           (str "browser host does not provide " capability)
           capability))
       (lambda (&rest arguments_)
-        (Reflect/apply operation receiver arguments_))))
+        (funcall apply-native operation receiver arguments_))))
 
   (defun operationTable (scope grants)
     (let ((operations (Object/create nil))
@@ -86,7 +87,6 @@
       (let* ((normalized (normalizeGrants actual-grants))
              (capabilities (Object/freeze
                              (js-object :format "eliscript-browser-capabilities"
-                               :version 1
                                :grants (Object/freeze normalized)))))
         (js-call capabilityState :set capabilities (operationTable scope normalized))
         capabilities)))
@@ -108,7 +108,6 @@
     (stateFor capabilities)
     (Object/freeze
       (js-object :format (get capabilities :format)
-        :version (get capabilities :version)
         :grants (Object/freeze (Array/from (get capabilities :grants))))))
 
   (defun hasBrowserCapability (capabilities capability)
@@ -139,7 +138,7 @@
     (funcall (operationFor capabilities "randomness") values))
 
   (defun browserSetTimeout (capabilities callback delay &rest arguments_)
-    (Reflect/apply
+    (funcall apply-native
       (operationFor capabilities "setTimeout" "timers")
       undefined
       (js-call (js-array callback delay) :concat arguments_)))
@@ -162,7 +161,7 @@
                                  (funcall report (sourceMappedFailure error actual-maps) (aref arguments_ 0))
                                  undefined)))
             (try
-              (let ((result (Reflect/apply handler receiver arguments_)))
+              (let ((result (funcall apply-native handler receiver arguments_)))
                 (if (and (not (nil? result))
                          (or (= (host-typeof result) "object")
                              (= (host-typeof result) "function"))

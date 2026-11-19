@@ -97,7 +97,7 @@
             (grid-error "compiler session changed its recorded host"))
           (let ((capabilities (await (js-call session :request (js-object :operation "capabilities")))))
             (unless (and (= (get capabilities :format) "eliscript-compiler-capabilities")
-                         (= (get capabilities :version) 1) (Array/isArray (get capabilities :targets))
+                         (Array/isArray (get capabilities :targets))
                          (js-call compilerHosts :every
                            (lambda (host) (js-call (get capabilities :targets) :includes host))))
               (grid-error "initialized compiler does not expose the three product targets"))
@@ -115,7 +115,7 @@
     (let* ((metadata (await (readCompilerMetadata (resolve directory "bootstrap.json"))))
            (chains (get metadata :chains)) (hosts (new globalThis.Set)) (index 0))
       (unless (and (= (get metadata :format) "eliscript-independent-compiler-bootstrap")
-                   (= (get metadata :version) 1) (= (grid-source-sha metadata) (get source-identity :sha256))
+                   (= (grid-source-sha metadata) (get source-identity :sha256))
                    (= (get metadata :status) "constructed") (= (get (get metadata :fixedPoint) :status) "identical")
                    (Array/isArray chains) (= (js-length chains) 3))
         (grid-error "compiler grid requires three complete fixed-point self-host chains"))
@@ -131,7 +131,7 @@
           (js-call hosts :add host)
           (let* ((original (await (readCompilerMetadata (resolve chain-directory "bootstrap.json"))))
                  (records (get original :generations)) (fixed-point (get original :fixedPoint)))
-            (unless (and (= (get original :format) "eliscript-compiler-bootstrap") (= (get original :version) 1)
+            (unless (and (= (get original :format) "eliscript-compiler-bootstrap")
                          (= (grid-source-sha original) (get source-identity :sha256))
                          (= (get original :status) "constructed") (not (get original :cleanupFailure))
                          (Array/isArray records) (= (js-length records) (js-length sequence))
@@ -157,7 +157,7 @@
            (generations (await (grid-existing-generations (get (get plan :generations) :directory) source-identity))))
       (await (mkdir (get plan :outputRoot) (js-object :recursive t)))
       (let* ((directory (await (mkdtemp (resolve (get plan :outputRoot) "compiler-grid-"))))
-             (metadata (js-object :format "eliscript-independent-compiler-grid" :version 1
+             (metadata (js-object :format "eliscript-independent-compiler-grid"
                :status "building" :verification "unverified"
                :sourceIdentity (await (archiveCompilerSources sources (resolve directory "sources")))
                :cells (js-array) :comparisons (js-array) :generations generations :producers (js-array)))
@@ -273,7 +273,7 @@
   (defun grid-chain-shape (metadata host count source-identity)
     (let ((sequence (get metadata :hosts)) (records (get metadata :generations))
           (fixed (get metadata :fixedPoint)))
-      (unless (and (= (get metadata :format) "eliscript-compiler-bootstrap") (= (get metadata :version) 1)
+      (unless (and (= (get metadata :format) "eliscript-compiler-bootstrap")
                    (= (grid-source-sha metadata) (get source-identity :sha256))
                    (= (get metadata :status) "constructed") (not (get metadata :cleanupFailure))
                    (Array/isArray sequence) (>= (js-length sequence) count)
@@ -469,7 +469,7 @@
     ;; completed cell is archived and initialized before its scope exits.
     (await (mkdir output (js-object :recursive t)))
     (let* ((directory (await (mkdtemp (resolve output "compiler-grid-"))))
-           (metadata (js-object :format "eliscript-independent-compiler-grid" :version 1
+           (metadata (js-object :format "eliscript-independent-compiler-grid"
              :status "building" :verification "unverified"
              :sourceIdentity (await (archiveCompilerSources sources (resolve directory "sources")))
              :cells (js-array) :comparisons (js-array)))
@@ -581,7 +581,7 @@
       (grid-abort plan)
       (when stage (await (funcall stage (js-object :phase "compiler-reuse" :host host :target target))))
       (let* ((receipt (await (readCompilerMetadata receipt-path))) (old (get receipt :build)))
-        (unless (and (= (get receipt :format) "eliscript-compiler-matrix-cell-execution") (= (get receipt :version) 1)
+        (unless (and (= (get receipt :format) "eliscript-compiler-matrix-cell-execution")
                      (= (get receipt :host) host) (= (get receipt :target) target)
                      (= (grid-source-sha receipt) (get (compilerSourceIdentity sources) :sha256))
                      old (= (get old :host) host) (= (get old :target) target)
@@ -624,7 +624,7 @@
       (let* ((directory (await (mkdtemp (resolve (get plan :outputRoot)
                          (+ "compiler-matrix-cell-" selected-host "-to-" selected-target "-")))))
              (manifest (resolve directory "execution.json"))
-             (metadata (js-object :format "eliscript-compiler-matrix-cell-execution" :version 1
+             (metadata (js-object :format "eliscript-compiler-matrix-cell-execution"
                :host selected-host :target selected-target :profile "full-compiler"
                :status "building" :verification "unverified"
                :finalGridVerification "unverified" :crossCellVerification "unverified"
@@ -681,9 +681,9 @@
              (generation-directory (resolve (get plan :outputRoot) "generations"))
              (generation-path (resolve generation-directory "bootstrap.json"))
              (manifest (resolve directory "execution.json"))
-             (generations (js-object :format "eliscript-independent-compiler-bootstrap" :version 1
+             (generations (js-object :format "eliscript-independent-compiler-bootstrap"
                :status "building" :verification "unverified" :sourceIdentity source-identity :chains (js-array)))
-             (metadata (js-object :format "eliscript-compiler-matrix-execution" :version 1
+             (metadata (js-object :format "eliscript-compiler-matrix-execution"
                :status "building" :verification "unverified" :sourceIdentity source-identity
                :generationsDirectory generation-directory))
              (producers (js-array)))

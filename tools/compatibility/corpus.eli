@@ -180,8 +180,7 @@
             (let* ((ordered (js-call (Array/from source-files) :sort))
                    (sources (await (source-digests root ordered errors)))
                    (ready (= (js-length provisional-features) 0))
-                   (derived (js-object :baselineVersion (get baseline :version)
-                              :stableCoreSpecificationIds stable-specs
+                   (derived (js-object :stableCoreSpecificationIds stable-specs
                               :stableCoreFeatureIds stable-features
                               :provisionalCoreFeatureIds provisional-features
                               :excludedApplicationFeatureIds excluded-ids
@@ -201,10 +200,9 @@
     (let* ((state (await (derive-corpus root)))
            (errors (Array/from (get state :errors)))
            (derived (get state :derived)))
-      (when (or (not (plain-object? contract)) (not (= (get contract :schemaVersion) 1))
-                (not (= (get contract :format) "eliscript-stable-compatibility-corpus"))
-                (not (= (get contract :version) 1)))
-        (js-call errors :push "contract must use eliscript-stable-compatibility-corpus version 1"))
+      (when (or (not (plain-object? contract))
+                (not (= (get contract :format) "eliscript-stable-compatibility-corpus")))
+        (js-call errors :push "contract must use eliscript-stable-compatibility-corpus"))
       (unless (json-equal (get contract :execution) execution)
         (js-call errors :push "execution must remain direct local make test-core without application evidence"))
       (unless (json-equal (get contract :deferredFixtures) deferred-fixtures)
@@ -219,8 +217,7 @@
                    (= (get contract :identity) (get state :identity)))
         (js-call errors :push "identity must bind the complete stable compatibility corpus"))
       (js-object :errors errors :identity (get state :identity)
-        :report (js-object :schemaVersion 1
-                  :stableSpecifications (js-length (get derived :stableCoreSpecificationIds))
+        :report (js-object :stableSpecifications (js-length (get derived :stableCoreSpecificationIds))
                   :stableFeatures (js-length (get derived :stableCoreFeatureIds))
                   :provisionalFeatures (js-length (get derived :provisionalCoreFeatureIds))
                   :excludedApplicationFeatures (js-length (get derived :excludedApplicationFeatureIds))
@@ -255,7 +252,7 @@
       (when (> (js-length (get state :errors)) 0)
         (throw (new StableCompatibilityCorpusError (get state :errors))))
       (let ((contract (js-call globalThis.Object :assign
-                        (js-object :schemaVersion 1 :format "eliscript-stable-compatibility-corpus" :version 1
+                        (js-object :format "eliscript-stable-compatibility-corpus"
                           :execution execution :deferredFixtures deferred-fixtures)
                         (get state :derived)
                         (js-object :identity (get state :identity)))))

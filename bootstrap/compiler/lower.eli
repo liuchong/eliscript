@@ -12,8 +12,17 @@
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
      "nullish?" "car" "cdr" "cons" "js-cons" "nth" "js-nth"
-     "aref" "length" "js-length" "__eliscript_array_build"
+     "aref" "length" "js-length" "__eliscript_array_build" "__eliscript_array_copy_assoc"
      "object-keys" "object-has?" "object-assoc" "__eliscript_arity_error"))
+  (defconst intrinsic-set (new globalThis.Set intrinsics))
+  (defconst lower-special-set
+    (new globalThis.Set
+      (js-call intrinsics :concat
+        (js-array
+          "quote" "lambda" "fn" "async" "await" "throw" "try" "if" "when" "unless"
+          "cond" "progn" "do" "let" "let*" "loop" "recur" "setq" "set!" "while"
+          "and" "or" "vector" "hash-map" "hash-set" "queue" "list" "js-array"
+          "js-object" "get" "put" "js-call" "new" "js*" "print" "str" "funcall" "apply"))))
 
   (defconst fail
     (lambda (message)
@@ -430,131 +439,134 @@
           :async (if asynchronous t false)))))
 
   (defun lower-expression (form)
-    (cond
-      ((or (= (node-kind form) "literal")
-           (= (node-kind form) "undefined")
-           (= (node-kind form) "keyword"))
-       (lower-literal form))
-      ((= (node-kind form) "symbol")
-       (make-node "reference" (node-span form) (node-name form) (js-array) nil))
-      ((= (node-kind form) "vector")
-       (make-node
-         "persistent-vector-literal" (node-span form) nil
-         (lower-sequence (node-items form)) nil))
-      ((= (node-kind form) "list")
+    (let ((kind (node-kind form)))
+      (cond
+        ((eq kind "symbol")
+         (make-node "reference" (node-span form) (node-name form) (js-array) nil))
+        ((or (eq kind "literal")
+             (eq kind "undefined")
+             (eq kind "keyword"))
+         (lower-literal form))
+        ((eq kind "vector")
+         (make-node
+           "persistent-vector-literal" (node-span form) nil
+           (lower-sequence (node-items form)) nil))
+        ((eq kind "list")
        (let* ((items (node-items form))
-              (operator-node (js-nth 0 items))
+              (operator-node (aref items 0))
               (operator (and (symbol-node-p operator-node)
-                             (node-name operator-node)))
-              (args (js-call items :slice 1)))
-         (cond
-           ((= operator "quote")
-            (make-node
-              "quoted-literal" (node-span form)
-              (syntax-datum (js-nth 0 args)) (js-array) nil))
-           ((or (= operator "lambda") (= operator "fn")
-                (= operator "async"))
-            (lower-function
-              "function-expression" form nil
-              (js-nth 0 args) (js-call args :slice 1)
-              (= operator "async")))
-           ((= operator "await")
-            (make-node
-              "await-expression" (node-span form) nil
-              (js-array (lower-expression (js-nth 0 args))) nil))
-           ((= operator "throw")
-            (make-node
-              "throw-expression" (node-span form) nil
-              (js-array (lower-expression (js-nth 0 args))) nil))
-           ((= operator "try") (lower-try form args))
-           ((= operator "if")
-            (lower-call-node "conditional" form "if" args))
-           ((or (= operator "when") (= operator "unless"))
-            (lower-call-node "conditional-sugar" form operator args))
-           ((= operator "cond") (lower-cond form args))
-           ((or (= operator "progn") (= operator "do"))
-            (lower-call-node "sequence" form operator args))
-           ((or (= operator "let") (= operator "let*"))
-            (lower-let form operator args))
-           ((= operator "loop")
-            (let ((bindings (js-array))
-                  (children (js-array))
-                  (previous-targets recur-targets)
-                  (targets (js-array "loop")))
-              (js-call (list-items (js-nth 0 args)) :forEach
-                (lambda (binding)
-                  (js-call bindings :push (lower-binding binding))))
-              (js-call previous-targets :forEach
-                (lambda (target) (js-call targets :push target)))
-              (setq recur-targets targets)
-              (append-nodes children bindings)
-              (append-nodes children
-                (lower-sequence (js-call args :slice 1)))
-              (setq recur-targets previous-targets)
-              (make-node
-                "binding-loop" (node-span form) nil children
-                (js-object :bindingCount (get bindings :length)))))
-           ((= operator "recur")
-            (make-node
-              "recur" (node-span form) nil (lower-sequence args)
-              (js-object :targetKind (js-nth 0 recur-targets))))
-           ((or (= operator "setq") (= operator "set!"))
-            (lower-assignments form operator args))
-           ((= operator "while")
-            (lower-call-node "loop" form "while" args))
-           ((or (= operator "and") (= operator "or"))
-            (lower-call-node "short-circuit" form operator args))
-           ((= operator "vector")
-            (make-node
-              "persistent-vector-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((= operator "hash-map")
-            (make-node
-              "persistent-map-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((= operator "hash-set")
-            (make-node
-              "persistent-set-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((= operator "queue")
-            (make-node
-              "persistent-queue-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((= operator "list")
-            (make-node
-              "persistent-list-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((= operator "js-array")
-            (make-node
-              "array-literal" (node-span form) nil
-              (lower-sequence args) nil))
-           ((js-call intrinsics :includes operator)
-            (lower-call-node "intrinsic" form operator args))
-           ((= operator "js-object")
-            (lower-object form args))
-           ((= operator "get")
-            (lower-call-node "property-read" form "get" args))
-           ((= operator "put")
-            (lower-call-node "property-write" form "put" args))
-           ((= operator "js-call")
-            (lower-call-node "method-call" form "js-call" args))
-           ((= operator "new")
-            (lower-call-node "constructor-call" form "new" args))
-           ((= operator "js*")
-            (lower-call-node "raw-javascript" form "js*" args))
-           ((= operator "print")
-            (lower-call-node "print" form "print" args))
-           ((= operator "str")
-            (lower-call-node "string-concat" form "str" args))
-           ((= operator "funcall")
-            (lower-call-node "invoke" form "funcall" args))
-           ((= operator "apply")
-            (lower-call-node "apply-call" form "apply" args))
-           (t
-            (make-node
-              "call" (node-span form) nil (lower-sequence items) nil)))))
-      (t
-       (fail (str "cannot lower syntax kind: " (node-kind form))))))
+                             (node-name operator-node))))
+         (if (or (not operator) (not (js-call lower-special-set :has operator)))
+             (make-node "call" (node-span form) nil (lower-sequence items) nil)
+           (if (eq operator "quote")
+               (make-node
+                 "quoted-literal" (node-span form)
+                 (syntax-datum (aref items 1)) (js-array) nil)
+             (let ((args (js-call items :slice 1)))
+               (cond
+                 ((js-call intrinsic-set :has operator)
+                  (lower-call-node "intrinsic" form operator args))
+                 ((or (eq operator "let") (eq operator "let*"))
+                  (lower-let form operator args))
+                 ((eq operator "if")
+                  (lower-call-node "conditional" form "if" args))
+                 ((or (eq operator "when") (eq operator "unless"))
+                  (lower-call-node "conditional-sugar" form operator args))
+                 ((or (eq operator "setq") (eq operator "set!"))
+                  (lower-assignments form operator args))
+                 ((eq operator "js-call")
+                  (lower-call-node "method-call" form "js-call" args))
+                 ((eq operator "get")
+                  (lower-call-node "property-read" form "get" args))
+                 ((eq operator "put")
+                  (lower-call-node "property-write" form "put" args))
+                 ((or (eq operator "progn") (eq operator "do"))
+                  (lower-call-node "sequence" form operator args))
+                 ((or (eq operator "and") (eq operator "or"))
+                  (lower-call-node "short-circuit" form operator args))
+                 ((eq operator "cond") (lower-cond form args))
+                 ((or (eq operator "lambda") (eq operator "fn")
+                      (eq operator "async"))
+                  (lower-function
+                    "function-expression" form nil
+                    (aref args 0) (js-call args :slice 1)
+                    (eq operator "async")))
+                 ((eq operator "js-array")
+                  (make-node
+                    "array-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "js-object")
+                  (lower-object form args))
+                 ((eq operator "funcall")
+                  (lower-call-node "invoke" form "funcall" args))
+                 ((eq operator "str")
+                  (lower-call-node "string-concat" form "str" args))
+                 ((eq operator "while")
+                  (lower-call-node "loop" form "while" args))
+                 ((eq operator "new")
+                  (lower-call-node "constructor-call" form "new" args))
+                 ((eq operator "js*")
+                  (lower-call-node "raw-javascript" form "js*" args))
+                 ((eq operator "await")
+                  (make-node
+                    "await-expression" (node-span form) nil
+                    (js-array (lower-expression (aref args 0))) nil))
+                 ((eq operator "throw")
+                  (make-node
+                    "throw-expression" (node-span form) nil
+                    (js-array (lower-expression (aref args 0))) nil))
+                 ((eq operator "try") (lower-try form args))
+                 ((eq operator "loop")
+                  (let ((bindings (js-array))
+                        (children (js-array))
+                        (previous-targets recur-targets)
+                        (targets (js-array "loop")))
+                    (js-call (list-items (aref args 0)) :forEach
+                      (lambda (binding)
+                        (js-call bindings :push (lower-binding binding))))
+                    (js-call previous-targets :forEach
+                      (lambda (target) (js-call targets :push target)))
+                    (setq recur-targets targets)
+                    (append-nodes children bindings)
+                    (append-nodes children
+                      (lower-sequence (js-call args :slice 1)))
+                    (setq recur-targets previous-targets)
+                    (make-node
+                      "binding-loop" (node-span form) nil children
+                      (js-object :bindingCount (get bindings :length)))))
+                 ((eq operator "recur")
+                  (make-node
+                    "recur" (node-span form) nil (lower-sequence args)
+                    (js-object :targetKind (js-nth 0 recur-targets))))
+                 ((eq operator "vector")
+                  (make-node
+                    "persistent-vector-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "hash-map")
+                  (make-node
+                    "persistent-map-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "hash-set")
+                  (make-node
+                    "persistent-set-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "queue")
+                  (make-node
+                    "persistent-queue-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "list")
+                  (make-node
+                    "persistent-list-literal" (node-span form) nil
+                    (lower-sequence args) nil))
+                 ((eq operator "print")
+                  (lower-call-node "print" form "print" args))
+                 ((eq operator "apply")
+                  (lower-call-node "apply-call" form "apply" args))
+                 (t
+                  (make-node
+                    "call" (node-span form) nil (lower-sequence items) nil))))))))
+        (t
+         (fail (str "cannot lower syntax kind: " kind))))))
 
   (defun lower-import (form args portable)
     (let ((source (node-value (js-nth 0 args)))

@@ -143,8 +143,10 @@
       words))
 
   (defun validate-declaration (value)
-    (unless (and value (= (get value :format) "eliscript-unicode-property-ranges")
-                 (= (get value :version) 1) (= (get value :license) "Unicode-3.0")
+    (unless (and value (= (value-type value) "object") (not (Array/isArray value))
+                 (= (js-length (Object/keys value)) 4)
+                 (= (get value :format) "eliscript-unicode-property-ranges")
+                 (= (get value :license) "Unicode-3.0")
                  (= (get value :licenseUrl) license-url)
                  (Array/isArray (get value :rows)) (= (js-length (get value :rows)) row-count))
       (throw (new globalThis.Error "invalid complete Unicode property declaration")))
@@ -259,7 +261,6 @@
               (throw (new globalThis.Error "range declaration exists; refusing to replace its provenance")))
             (setq declaration (js-object
               :format "eliscript-unicode-property-ranges"
-              :version 1
               :license "Unicode-3.0"
               :licenseUrl license-url
               :rows (extractRangeRows source))))

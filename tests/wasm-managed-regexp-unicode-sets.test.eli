@@ -201,8 +201,14 @@
              (heap (funcall (get e "heap-new") 256 16384 1048576))
              (saved (JSON/stringify raw-program))
              (call-raw (lambda (name &rest args)
-                         (let ((value (unsigned-bit-shift-right (apply (get e name) heap args) 0))
-                               (err (funcall (get e "last-error"))))
+                         (let* ((raw (apply (get e name) heap args))
+                                ;; `u32` results stay host Numbers; `v64` results
+                                ;; are unsigned BigInt and cannot be folded with
+                                ;; `>>>`. Both domains are normalized here.
+                                (value (if (= (value-type raw) "bigint")
+                                         (globalThis.BigInt.asUintN 64 raw)
+                                         (unsigned-bit-shift-right raw 0)))
+                                (err (funcall (get e "last-error"))))
                            (when (/= err 0)
                              (js-call assert :fail
                                (str name ": "
@@ -259,7 +265,8 @@
         (funcall assert (< (funcall call-raw "heap-live") 256))
         (funcall call-raw "heap-auto" 1)
         (let ((result (funcall call-raw "value-regexp-run" regex input 0)))
-          (js-call assert :equal result 2))
+          ;; `value-regexp-run` returns `v64`; success is the exact 2n status.
+          (js-call assert :equal result (globalThis.BigInt 2)))
         (let ((indices (new globalThis.Map)))
           (js-call raw-code :forEach
             (lambda (row index)

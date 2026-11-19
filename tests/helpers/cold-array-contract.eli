@@ -1,12 +1,11 @@
 (module tests.helpers.cold-array-contract
   (import "node:assert/strict" :default assert)
-  (defconst hostTypeof (js* "(value) => typeof value"))
   (defun assertEqual (a b &rest __host_forwarded_arguments_1)
     (let* ((label (aref __host_forwarded_arguments_1 0))) (js-call assert :equal a b label)))
   (defun same (a b &rest __host_forwarded_arguments_2)
     (let* ((label (aref __host_forwarded_arguments_2 0))) (js-call assert :deepEqual a b label)))
   (defun readColdArrayValue (a value)
-    (if (or (eq value nil) (not (= (funcall hostTypeof value) "object"))) value
+    (if (or (eq value nil) (not (= (value-type value) "object"))) value
       (if (= (get value :kind) 4) (js-call a :readNumber value)
         (progn (assertEqual (get value :kind) 14)
           (Array/from (js-object :length (js-call a :length value)) (lambda (unused index)
@@ -17,7 +16,7 @@
     (let* ((runtime (aref __host_default_arguments_1 0)))
     (when (= runtime undefined) (setq runtime "wasm"))
     (js-call a :auto 1) (js-call a :initializeModule)
-    (let* ((keep (js-call a :number (js* "-0"))) (caller (js-call a :frame 1)) (held (js-array keep)))
+    (let* ((keep (js-call a :number -0.0)) (caller (js-call a :frame 1)) (held (js-array keep)))
       (js-call a :frameSet caller 0 keep)
       (try
         (cond ((js-call name :startsWith "cold-boxed-")
@@ -25,7 +24,7 @@
                  (label (aref parts 2)) (first (aref parts 3)) (labels (js-array "number" "string" "boolean" "symbol" "bigint"))
                  (phases (js-array "first" "pair" "proto" "valueof-read")) (phaseIndex (js-call phases :indexOf phase))
                  (brand (js-call a :number (js-call labels :indexOf label))) (objectFirst (= first "object"))
-                 (expectedInput (cond ((= label "number") (js* "-0")) ((= label "string") "ab") ((= label "boolean") false) (t (js* "1n"))))
+                 (expectedInput (cond ((= label "number") -0.0) ((= label "string") "ab") ((= label "boolean") false) (t (funcall globalThis.BigInt 1))))
                  (input (cond ((= label "number") keep) ((= label "string") (js-call a :string expectedInput)) ((= label "boolean") false)
                               ((= label "bigint") (js-call a :bigint expectedInput)) (t undefined))))
             (js-call held :push brand) (unless (= input keep) (js-call held :push input))
@@ -68,11 +67,11 @@
                 (let* ((seven (js-call a :number 7)) (input (js-call a :sourceArray (js-array keep seven))))
                   (js-call held :push seven input) (js-call args :push input)))
               (let* ((expected (Reflect/apply (get reference (js-call name :replaceAll "-" "_")) undefined
-                                (if (js-call (js-array "cold-host" "argv-lifetime") :includes name) (js-array (js-array (js* "-0") 7)) (js-array))))
+                                (if (js-call (js-array "cold-host" "argv-lifetime") :includes name) (js-array (js-array -0.0 7)) (js-array))))
                      (result (js-call a :invoke name args)))
                 (js-call held :push result) (same (readColdArrayValue a result) expected) (js-call a :collect)))))
         (assertEqual (get (js-call a :stats) :frameDepth) 1)
-        (let ((saved (js-call a :frameGet caller 0))) (try (assert (Object/is (js-call a :readNumber saved) (js* "-0"))) (finally (js-call a :release saved))))
+        (let ((saved (js-call a :frameGet caller 0))) (try (assert (Object/is (js-call a :readNumber saved) -0.0)) (finally (js-call a :release saved))))
         (catch error (js-call globalThis.console :error "[cold-array-case-failure]" (JSON/stringify (js-object :name name :runtime runtime :stats (js-call a :stats)))) (throw error))
         (finally (js-call a :leaveFrame caller) (js-call held :forEach (lambda (value) (js-call a :release value))))))))
   (export readColdArrayValue checkColdArray))

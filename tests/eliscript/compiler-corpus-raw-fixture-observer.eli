@@ -63,7 +63,7 @@
                  (matches (js-call plans :filter (lambda (plan) (= (get plan :family) "callables"))))
                  (plan (aref matches 0)) (reference (resolve directory "callables.mjs")))
             (js-call assert :strictEqual (js-length matches) 1)
-            (js-call assert :strictEqual (get plan :requiredABI) "managed-module-v1")
+            (js-call assert :strictEqual (get plan :requiredABI) "managed-module")
             (js-call assert :strictEqual
               (js-length (js-call plans :filter (lambda (item) (not (undefined? (get item :requiredABI)))))) 1)
             (await (writeFile reference (js-call compiler :emit_ir_string program)))
@@ -104,7 +104,7 @@
                                   (js-call runtime :release again))))
                             (js-call runtime :collect) (setq repeat (1+ repeat)))))
                       (progn
-                        (js-call assert :strictEqual (get descriptor :abi) "managed-control-v1")
+                        (js-call assert :strictEqual (get descriptor :abi) "managed-control")
                         (js-call assert :strictEqual (get descriptor :module) undefined)
                         (js-call assert :throws (lambda () (js-call runtime :getExport "ordered-values"))
                           (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-RT0003")))))
@@ -189,9 +189,10 @@
                       (catch error (setq seen t caught error)))
                     (js-call assert :strictEqual seen t)
                     (js-call assert :strictEqual caught (if (get scenario :primary) (get scenario :value) secondary))
-                    ;; The interrupted observation owns precisely its input
-                    ;; text and trace, or its input text and successful size.
-                    (js-call assert :strictEqual released 2)
+                    ;; The interrupted observation owns its dynamic handles:
+                    ;; input text and trace (primary), or input text alone
+                    ;; because size returns an inline Val64 Number.
+                    (js-call assert :strictEqual released (if (get scenario :primary) 2 1))
                     (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)
                     (finally
                       (js-call runtime :closeModule) (js-call runtime :collect)

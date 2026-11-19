@@ -161,9 +161,9 @@
             (js-call errors :push (str label " cannot be stable before it is implemented")))))))
 
   (defasync validate-spec-index (root spec-index errors)
-    (if (or (not (plain-object? spec-index)) (not (= (get spec-index :schemaVersion) 1)))
+    (if (not (plain-object? spec-index))
       (progn
-        (js-call errors :push "spec index must use schemaVersion 1")
+        (js-call errors :push "spec index must be an object")
         (new globalThis.Map))
       (if (not (Array/isArray (get spec-index :specifications)))
         (progn
@@ -252,9 +252,9 @@
             (js-call errors :push (str label " must declare at least one evidence item")))))))
 
   (defasync validate-manifest (root manifest specs-by-id application-feature-ids errors)
-    (if (or (not (plain-object? manifest)) (not (= (get manifest :schemaVersion) 1)))
+    (if (not (plain-object? manifest))
       (progn
-        (js-call errors :push "conformance manifest must use schemaVersion 1")
+        (js-call errors :push "conformance manifest must be an object")
         (js-object :features 0 :evidence 0 :coveredSpecs (new globalThis.Set)))
       (if (not (Array/isArray (get manifest :features)))
         (progn
@@ -360,11 +360,9 @@
     (let ((empty (js-object :stableSpecifications 0 :provisionalSpecifications 0 :planningSpecifications 0
                    :supersededSpecifications 0 :stableFeatures 0 :provisionalFeatures 0)))
       (if (or (not (plain-object? baseline))
-              (not (= (get baseline :schemaVersion) 1))
-              (not (= (get baseline :format) "eliscript-compatibility-baseline"))
-              (not (= (get baseline :version) 2)))
+              (not (= (get baseline :format) "eliscript-compatibility-baseline")))
         (progn
-          (js-call errors :push "compatibility baseline must use eliscript-compatibility-baseline version 2")
+          (js-call errors :push "compatibility baseline must use eliscript-compatibility-baseline")
           empty)
         (if (or (not (plain-object? (get baseline :specifications)))
                 (not (plain-object? (get baseline :features))))
@@ -463,8 +461,7 @@
           (lambda (spec)
             (bump-count specification-statuses (get spec :status))
             (bump-count implementation-statuses (get spec :implementation))))
-        (js-object :schemaVersion 1
-          :specifications (js-object :total (get specs-by-id :size)
+        (js-object :specifications (js-object :total (get specs-by-id :size)
                             :statuses specification-statuses
                             :implementations implementation-statuses
                             :coveredImplemented (js-length

@@ -203,7 +203,7 @@
                 (lambda (e) (diag-code? e "ELI-RT0008")))
               (js-call a :collect)
               (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-              (js-call assert :equal (js-call a :live) 2)
+              (js-call assert :equal (js-call a :live) 1)
               (setq i (+ i 1)))
             (js-call a :leaveFrame frame)
             (finish a (js-array keep)))))))
@@ -408,7 +408,7 @@
     (async ()
       (let* ((p (await (make-project
                          (js-object
-                           "lib.mjs" "(defconst value (js-array 1 2 3)) (export value)"
+                           "lib.mjs" "(defconst value (js-array (js-object) (js-object) (js-object) (js-object))) (export value)"
                            "main.mjs" "(import \"./lib.mjs\" :as ns) (export ns)"))))
              (bytes (emit-project p))
              (small (instantiateManagedRuntime bytes (js-object :maxSlots 8 :initialBytes 4096 :maxBytes 8192 :initializeModule false))))
@@ -421,7 +421,7 @@
             (lambda (e) (diag-code? e "ELI-RT0002")))
           (js-call small :collect)
           (js-call assert :equal (get (js-call small :stats) :frameDepth) 1)
-          (js-call assert :equal (js-call small :live) 2)
+          (js-call assert :equal (js-call small :live) 1)
           (js-call small :leaveFrame frame)
           (finish small (js-array keep)))
         (let* ((source (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")))
@@ -429,7 +429,7 @@
                (end (js-call source :indexOf "  (defun " (+ start 10))))
           (funcall assert (and (>= start 0) (> end start)))
           (let* ((faulty (str (js-call source :slice 0 start)
-                              "  (defun value-module-namespace-bind (heap object key kind index) (load-u32 4294967295))\n"
+                              "  (defun value-module-namespace-bind (heap object key kind index) (memory-sig u32 u32 v64 v64 u32 u32) (load-u32 4294967295))\n"
                               (js-call source :slice end)))
                  (rt (js-call (get b :compiler) :compile_ir_string faulty "namespace-trap.eli"))
                  (a (instantiateManagedRuntime
@@ -444,7 +444,7 @@
                 globalThis.WebAssembly.RuntimeError)
               (js-call a :collect)
               (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-              (js-call assert :equal (js-call a :live) 2)
+              (js-call assert :equal (js-call a :live) 1)
               (let ((out (js-call a :frameGet caller 0)))
                 (funcall assert (Object/is (js-call a :readNumber out) -0.0))
                 (js-call a :leaveFrame caller)
@@ -508,16 +508,16 @@
             (command (resolve root "tools/backends/compile.mjs")))
         (await (writeFile request (JSON/stringify (js-object :mode "project" :entry "main.mjs" :files live-sources))))
         (let ((result (spawnSync "bun"
-                        (js-array command "--abi" "managed-module-v1" "--target" "wasm" "--project" "-o" output request)
+                        (js-array command "--abi" "managed-module" "--target" "wasm" "--project" "-o" output request)
                         (js-object :cwd root :encoding "utf8" :timeout 30000))))
           (js-call assert :equal (get result :status) 0 (get result :stderr)))
         (let ((a (instantiateManagedRuntime (await (readFile output)))))
           (js-call assert :equal (call-number a "advance") 1)
           (finish a))
         (let ((pairs (js-array
-                       (js-array "managed-control-v1" "wasm")
+                       (js-array "managed-control" "wasm")
                        (js-array "numeric-f64" "wasm")
-                       (js-array "managed-module-v1" "js")))
+                       (js-array "managed-module" "js")))
               (i 0))
           (while (< i (length pairs))
             (let* ((pair (aref pairs i))
@@ -630,7 +630,7 @@
              (end (js-call source :indexOf "  (defun " (+ start 10))))
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((faulty (str (js-call source :slice 0 start)
-                            "  (defun heap-module-cell-read (heap cell) (load-u32 4294967295))\n"
+                            "  (defun heap-module-cell-read (heap cell) (memory-sig v64 u32 v64 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                             (js-call source :slice end)))
                (rt (js-call (get b :compiler) :compile_ir_string faulty "namespace-copy-trap.eli"))
                (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_project_wasm (get p :modules) (get p :entry) rt)))))

@@ -25,6 +25,10 @@
 
   (defconst MISSING (funcall globalThis.Symbol "eliscript.collection.missing"))
   (defconst iterator-symbol globalThis.Symbol.iterator)
+  (defconst array-prototype (get globalThis.Array :prototype))
+  (defconst default-array-iterator (aref array-prototype iterator-symbol))
+  (defconst array-iterator-prototype (Object/getPrototypeOf (js-call (js-array) iterator-symbol)))
+  (defconst default-array-iterator-next (aref array-iterator-prototype "next"))
   (defconst host-generator
     (js* "(stepFactory) => (function* () { const next = stepFactory(); for (;;) { const item = next(); if (item.done) return; yield item.value; } })()"))
 
@@ -217,6 +221,32 @@
                                    :done false))))))))
           (lambda () (js-length (Object/keys value)))))))
 
+  (defun reduceArrayValues (values reducer &rest initial)
+    (if (and (eq (typeof-value reducer) "function")
+             (Array/isArray values)
+             (eq (Object/getPrototypeOf values) array-prototype)
+             (not (Object/hasOwn values iterator-symbol))
+             (eq (aref array-prototype iterator-symbol) default-array-iterator)
+             (eq (aref array-iterator-prototype "next") default-array-iterator-next)
+             (undefined? (aref array-iterator-prototype "return")))
+        (let ((accumulator (if (= (js-length initial) 0) MISSING (aref initial 0)))
+              (index 0)
+              (early false))
+          (while (and (< index (js-length values)) (not early))
+            (let ((value (aref values index)))
+              (if (eq accumulator MISSING)
+                  (setq accumulator value)
+                  (progn
+                    (setq accumulator (funcall reducer accumulator value))
+                    (when (isReducedValue accumulator)
+                      (setq accumulator (unreducedValue accumulator)
+                            early t)))))
+            (setq index (1+ index)))
+          (when (eq accumulator MISSING)
+            (throw (new globalThis.TypeError "cannot reduce an empty collection without an initial value")))
+          accumulator)
+        (apply reduceIterable values reducer initial)))
+
   (defun reduceIndexedValues (values reducer initial)
     (let ((result initial)
           (index 0)
@@ -333,7 +363,7 @@
   (extendProtocolType I_SEQABLE globalThis.Array
     (js-object :seq arraySequence))
   (extendProtocolType I_REDUCE globalThis.Array
-    (js-object :reduce reduceIterable))
+    (js-object :reduce reduceArrayValues))
   (extendProtocolType I_KV_REDUCE globalThis.Array
     (js-object :reduceKV reduceIndexedValues))
   (extendProtocolType I_STACK globalThis.Array

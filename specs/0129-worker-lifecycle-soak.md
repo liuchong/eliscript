@@ -63,7 +63,7 @@ The acceptance process performs these phases in order:
 4. an explicit restart advances generation 1 to generation 2, which completes
    20,000 requests
 5. recompiling the temporary Eliscript module as revision 2 causes the client
-   module-version guard to restart generation 2 as generation 3, which completes
+   module-digest guard to restart generation 2 as generation 3, which completes
    20,000 requests with revision 2 behavior
 6. synchronous blocking JavaScript exceeds its 25 ms timeout and cannot process
    remote cancellation, so the client completes it once with `timeout`, drains

@@ -45,7 +45,6 @@
                  (portable (- total (get plan :subtract))))
             (finishOriginalFixtureObservation (configuration family) total groups)
             (let ((receipt (JSON/parse (readFileSync (get state :path) "utf8"))))
-              (js-call assert :strictEqual (get receipt :version) 1)
               (js-call assert :strictEqual (get receipt :family) family)
               (js-call assert :strictEqual (get receipt :target) "wasm")
               (js-call assert :strictEqual (get receipt :originalHostSha256) host-sha)

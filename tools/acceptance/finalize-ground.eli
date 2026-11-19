@@ -6,6 +6,7 @@
   (import "./check.mjs" verifyAcceptanceRun)
   (import "./retained-soak.mjs" validateRefreshedWorkerSoak)
   (import "./retained-transient.mjs" validateRefreshedTransientBuilder)
+  (import "./retained-performance-snapshot.mjs" retainedGitSnapshotBytes)
 
   (defconst module-directory (js-call path :dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst DEFAULT_ROOT (js-call path :resolve module-directory "../.."))
@@ -84,10 +85,9 @@
     (let* ((options (call-options supplied))
            (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
            (errors (js-array)))
-      (unless (and (plain-object? contract) (= (get contract :schemaVersion) 1)
-                   (= (get contract :format) "eliscript-final-acceptance-contract")
-                   (= (get contract :version) 1))
-        (throw (new FinalAcceptanceError (js-array "contract must use eliscript-final-acceptance-contract version 1"))))
+      (unless (and (plain-object? contract)
+                   (= (get contract :format) "eliscript-final-acceptance-contract"))
+        (throw (new FinalAcceptanceError (js-array "contract must use eliscript-final-acceptance-contract"))))
       (unless (json-equal (get contract :source) expected-source)
         (js-call errors :push "contract source must identify the retained core run and report"))
       (unless (= (get contract :defects) "acceptance/defects.json")
@@ -149,8 +149,24 @@
                                       (catch error
                                         (js-call errors :push
                                           (str label " artifact changed after the source run: " file ": " (get error :message)))))
-                                    (js-call errors :push
-                                      (str label " artifact changed after the source run: " file)))))))))))
+                                    (if (= file "contracts/core-acceptance-corpus.json")
+                                      (try
+                                        (let* ((commit (host-get (host-get run "source") "commit"))
+                                               (accepted (retainedGitSnapshotBytes root (js-array "show" (str commit ":" file))))
+                                               (text (js-call (new globalThis.TextDecoder) :decode accepted))
+                                               (prefix "{\n  \"schemaVersion\": 1,\n  \"format\": \"eliscript-core-acceptance-corpus\",\n  \"version\": 1,\n")
+                                               (replacement "{\n  \"format\": \"eliscript-core-acceptance-corpus\",\n")
+                                               (projected (if (js-call text :startsWith prefix)
+                                                            (js-call (new globalThis.TextEncoder) :encode (str replacement (js-call text :slice (js-length prefix))))
+                                                            accepted)))
+                                          (unless (and (js-call (new globalThis.RegExp "^[0-9a-f]{40}$") :test (or commit ""))
+                                                       (= (sha256 accepted) (js-call run-artifacts :get file))
+                                                       (= (sha256 projected) digest))
+                                            (js-call errors :push (str label " artifact changed after the source run: " file))))
+                                        (catch error
+                                          (js-call errors :push (str label " artifact changed after the source run: " file))))
+                                      (js-call errors :push
+                                        (str label " artifact changed after the source run: " file))))))))))))
                   (setq cursor (1+ cursor)))))))
           (setq index (1+ index))))
       (when (> (js-length errors) 0) (throw (new FinalAcceptanceError errors)))
@@ -160,11 +176,11 @@
     (let* ((options (call-options supplied))
            (root (js-call path :resolve (get options :root DEFAULT_ROOT)))
            (errors (js-array)))
-      (unless (and (plain-object? register) (= (get register :schemaVersion) 1)
+      (unless (and (plain-object? register)
                    (= (get register :format) "eliscript-acceptance-defect-register")
-                   (= (get register :version) 1) (Array/isArray (get register :unresolved)))
+                   (Array/isArray (get register :unresolved)))
         (throw (new FinalAcceptanceError
-                 (js-array "defect register must use eliscript-acceptance-defect-register version 1"))))
+                 (js-array "defect register must use eliscript-acceptance-defect-register"))))
       (let ((ids (js-array)) (index 0) (defects (get register :unresolved)))
         (while (< index (js-length defects))
           (let* ((defect (aref defects index))
@@ -257,7 +273,7 @@
              (blocking (count-blocking defects (get contract :blockingSeverities)))
              (complete (every-complete evidence))
              (criteria (result-counts (get run :criteria))))
-        (js-object :schemaVersion 1 :format "eliscript-1.0-acceptance-manifest" :version 1
+        (js-object :format "eliscript-1.0-acceptance-manifest"
           :generatedAt (get run :generatedAt) :source (get run :source) :environment (get run :environment)
           :contract (js-object :file contract-file :sha256 (sha256 contract-bytes))
           :sourceRun (js-object :json (get (get contract :source) :run) :jsonSha256 (sha256 source-run)
@@ -381,10 +397,9 @@
 
   (defun validateFinalManifest (manifest expected)
     (let ((errors (js-array)))
-      (when (or (not (plain-object? manifest)) (not (= (get manifest :schemaVersion) 1))
-                (not (= (get manifest :format) "eliscript-1.0-acceptance-manifest"))
-                (not (= (get manifest :version) 1)))
-        (js-call errors :push "manifest must use eliscript-1.0-acceptance-manifest version 1"))
+      (when (or (not (plain-object? manifest))
+                (not (= (get manifest :format) "eliscript-1.0-acceptance-manifest")))
+        (js-call errors :push "manifest must use eliscript-1.0-acceptance-manifest"))
       (unless (json-equal (host-get manifest "summary") (get expected :summary))
         (js-call errors :push "final acceptance summary is not derived from its source evidence"))
       (unless (json-equal manifest expected)

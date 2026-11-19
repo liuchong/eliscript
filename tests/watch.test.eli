@@ -4,7 +4,7 @@
   (import "node:os" tmpdir)
   (import "node:path" join resolve dirname)
   (import "node:url" fileURLToPath)
-  (import "../bootstrap/host/watch.mjs" ProjectWatcher watchEventFormat watchEventVersion)
+  (import "../bootstrap/host/watch.mjs" ProjectWatcher watchEventFormat)
   (import "../bootstrap/host/watch-cli.mjs" parseArguments)
 
   (defconst projectDirectory (resolve (dirname (fileURLToPath (js* "import.meta.url"))) ".."))
@@ -87,7 +87,9 @@
       (setq compilerDirectory (resolve directory "compiler"))
       (let ((built (await (run (js-array bootstrapPath)
                             (js-object :env (Object/assign (js-object) (get globalThis.process :env)
-                                              (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR compilerDirectory)))))))
+                                              (js-object :LC_ALL "en_US.UTF-8"
+                                                         :LANG "en_US.UTF-8"
+                                                         :ELISCRIPT_BOOTSTRAP_OUT_DIR compilerDirectory)))))))
         (js-call (expect (get built :exitCode)) :toBe 0)
         (js-call (expect (get built :stderr)) :toBe "")))
     30000)
@@ -110,7 +112,6 @@
               (js-call (expect (js-call watcher :ready)) :toMatchObject
                 (js-object
                   :format watchEventFormat
-                  :version watchEventVersion
                   :sequence 0
                   :event "ready"
                   :root canonicalRoot
@@ -160,7 +161,6 @@
           (js-call (expect event) :toMatchObject
             (js-object
               :format watchEventFormat
-              :version watchEventVersion
               :sequence 1
               :event "error"
               :root (await (realpath root))
@@ -196,9 +196,8 @@
              (config (lambda (cache)
                        (JSON/stringify
                          (js-object
-                           :schemaVersion 1
                            :sourceRoot "src"
-                           :entry "main.eli"
+                           :entries (js-array "main.eli")
                            :outDir "build"
                            :portableEntries (js-array)
                            :cache cache)))))

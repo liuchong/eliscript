@@ -134,7 +134,7 @@
                       (let ((idx 0)
                             (limit (* max-slots 2)))
                         (while (< idx limit)
-                          (js-call padding :push (js-call a :number idx))
+                          (js-call padding :push (js-call a :array))
                           (setq idx (+ idx 1)))))
                     (lambda (error)
                       (let ((diag (get error :eliscriptDiagnostic)))

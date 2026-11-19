@@ -1,0 +1,198 @@
+(module tests.fixtures.transducer-completion-forward
+  (import "eliscript/runtime/core/transducer.mjs" :as T)
+  (import "eliscript/runtime/core/collection.mjs" sequenceView)
+
+  ;; These fixtures run inside the managed target. They exercise the real
+  ;; managed transducer implementation, including the completion path that is
+  ;; not reachable from the public JavaScript runtime.
+
+  ;; 1. Mapping completion: called once per reduction, its return value is the
+  ;; reduction result.
+  (defun mapping-completion ()
+    (let ((completions 0) (mapped (js-array)))
+      (let ((result (T/transduce (T/mapping (lambda (value)
+                                    (js-call mapped :push value)
+                                    (* value 2)))
+                      (T/completing (lambda (result value) (+ result value))
+                        (lambda (result)
+                          (setq completions (1+ completions))
+                          (+ result 100)))
+                      0 (js-array 1 2 3))))
+        (js-array result completions mapped))))
+
+  (defun partition-into-array (partition)
+    (T/into (js-array) partition))
+
+  ;; 2. PartitioningAll still flushes a short tail both through transduce and
+  ;; through the memoized transform iterator produced by sequence.
+  (defun partitioning-all-tail ()
+    (let ((transduced (js-array)) (empty-result (js-array)))
+      (T/transduce (T/partitioningAll 2)
+        (lambda (result partition)
+          (js-call result :push (partition-into-array partition))
+          result)
+        transduced (js-array 1 2 3 4 5))
+      (T/transduce (T/partitioningAll 2)
+        (lambda (result partition)
+          (js-call result :push (partition-into-array partition))
+          result)
+        empty-result (js-array))
+      (let ((sequence (T/sequence (T/partitioningAll 2) (js-array 1 2 3 4 5)))
+            (parts (js-array)))
+        (let ((iterator (js-call (get sequence (get globalThis/Symbol :iterator)) :call sequence))
+              (done false))
+          (while (not done)
+            (let ((next (js-call iterator :next)))
+              (if (get next :done)
+                (setq done t)
+                (js-call parts :push (partition-into-array (get next :value)))))))
+        (js-array transduced empty-result parts))))
+
+  (defun observable-source (counter)
+    (let* ((source (js-object
+             :next (lambda ()
+               (put counter :nexts (1+ (or (get counter :nexts) 0)))
+               (js-object :value (get counter :nexts) :done false))
+             :return (lambda ()
+               (put counter :closes (1+ (or (get counter :closes) 0)))
+               (js-object :value undefined :done t)))))
+      (put source (get globalThis/Symbol :iterator) (lambda () source))
+      source))
+
+  ;; 3. taking 0 pulls and closes nothing, through transduce and sequence.
+  (defun taking-zero ()
+    (let* ((counter (js-object :nexts 0 :closes 0))
+           (source (observable-source counter))
+           (result (T/transduce (T/taking 0)
+                     (lambda (result value) (+ result value)) 7 source))
+           (after-transduce-nexts (or (get counter :nexts) 0))
+           (after-transduce-closes (or (get counter :closes) 0))
+           (values (T/into (js-array) (T/sequence (T/taking 0) source))))
+      (js-array result after-transduce-nexts after-transduce-closes
+        (or (get counter :nexts) 0) (or (get counter :closes) 0) values)))
+
+  ;; 4a. A completion error propagates unchanged instead of becoming a
+  ;; capacity error.
+  (defun completion-error ()
+    (let ((marker (new globalThis/Error "transducer completion marker"))
+          (calls 0) (caught undefined))
+      (try
+        (T/transduce (T/mapping (lambda (value) value))
+          (T/completing (lambda (result value) (+ result value))
+            (lambda (result) (setq calls (1+ calls)) (throw marker)))
+          0 (js-array 1 2 3))
+        (catch error (setq caught error)))
+      (js-array (eq caught marker) (get caught :message) calls
+        (get caught :name) (not (undefined? caught)))))
+
+  ;; 4b. The same error survives the completion that sequence runs while the
+  ;; transform iterator finishes.
+  (defun sequence-completion-error ()
+    (let ((marker (new globalThis/Error "sequence completion marker"))
+          (calls 0) (caught undefined))
+      (let ((transducer (lambda (reducer)
+              (T/completing
+                (lambda (result value) (funcall reducer result value))
+                (lambda (result)
+                  (setq calls (1+ calls))
+                  (throw marker))))))
+        (try
+          (T/into (js-array) (T/sequence transducer (js-array 1 2 3)))
+          (catch error (setq caught error)))
+        (js-array (eq caught marker) (get caught :message) calls
+          (get caught :name) (not (undefined? caught))))))
+
+  (defun counting-transducer (counter)
+    (lambda (reducer)
+      (T/completing
+        (lambda (result value) (funcall reducer result value))
+        (lambda (result)
+          (put counter :completions (1+ (or (get counter :completions) 0)))
+          result))))
+
+  (defun finite-source (counter)
+    (let* ((source (js-object
+             :next (lambda ()
+               (put counter :nexts (1+ (or (get counter :nexts) 0)))
+               (if (> (get counter :nexts) 1)
+                 (js-object :value undefined :done t)
+                 (js-object :value 10 :done false)))
+             :return (lambda ()
+               (put counter :closes (1+ (or (get counter :closes) 0)))
+               (js-object :value undefined :done t)))))
+      (put source (get globalThis/Symbol :iterator) (lambda () source))
+      source))
+
+  (defun sequence-source (counter iterator)
+    (sequenceView (lambda ()
+      (put counter :opens (1+ (or (get counter :opens) 0)))
+      iterator) 1))
+
+  ;; Return before next closes the transform without opening the source.
+  ;; A later next still initializes it once, but cannot pull or complete.
+  (defun iterator-return-before-next ()
+    (let* ((counter (js-object :nexts 0 :closes 0 :completions 0 :opens 0))
+           (iterator (T/transformed-iterator
+             (counting-transducer counter) (sequence-source counter (finite-source counter))))
+           (first (js-call iterator :return "first"))
+           (second (js-call iterator :return "second"))
+           (before (js-array (get first :value) (get first :done)
+                     (get second :value) (get second :done)
+                     (get counter :completions) (get counter :nexts) (get counter :closes)
+                     (get counter :opens)))
+           (resumed (js-call iterator :next))
+           (after-resume (js-array (get resumed :value) (get resumed :done)
+                           (get counter :opens) (get counter :completions)
+                           (get counter :nexts) (get counter :closes)))
+           (again (js-call iterator :next))
+           (after-again (js-array (get again :done) (get counter :opens)
+                          (get counter :completions) (get counter :nexts) (get counter :closes))))
+      (js-array before after-resume after-again)))
+
+  ;; 5b. return after initialization and a repeated return still never call
+  ;; completion and close the input only once.
+  (defun iterator-return-after-next ()
+    (let* ((counter (js-object :nexts 0 :closes 0 :completions 0))
+           (iterator (T/transformed-iterator
+             (counting-transducer counter) (sequence-source counter (finite-source counter))))
+           (value (js-call iterator :next))
+           (first (js-call iterator :return "a"))
+           (second (js-call iterator :return "b"))
+           (after (js-call iterator :next)))
+      (js-array (get value :value) (get first :value) (get first :done)
+        (get second :value) (get second :done) (get after :done)
+        (get counter :completions) (get counter :nexts) (get counter :closes))))
+
+  ;; 5c. A throwing return raises that same error again; it is not wrapped and
+  ;; completion is not invoked.
+  (defun iterator-return-throws ()
+    (let* ((marker (new globalThis/Error "iterator return marker"))
+           (counter (js-object :nexts 0 :closes 0 :completions 0))
+           (source (finite-source counter)))
+      (put source :return (lambda ()
+        (put counter :closes (1+ (or (get counter :closes) 0)))
+        (throw marker)))
+      (let* ((iterator (T/transformed-iterator
+                (counting-transducer counter) (sequence-source counter source)))
+             (value (js-call iterator :next))
+             (first undefined)
+             (second undefined))
+        (try (js-call iterator :return) (catch error (setq first error)))
+        (try (js-call iterator :return) (catch error (setq second error)))
+        (js-array (get value :value) (eq first marker) (eq second marker)
+          (get first :message) (get second :message)
+          (get counter :completions)))))
+
+  (defun report ()
+    (JSON/stringify
+      (js-object
+        :mappingCompletion (mapping-completion)
+        :partitioningAllTail (partitioning-all-tail)
+        :takingZero (taking-zero)
+        :completionError (completion-error)
+        :sequenceCompletionError (sequence-completion-error)
+        :iteratorReturnBeforeNext (iterator-return-before-next)
+        :iteratorReturnAfterNext (iterator-return-after-next)
+        :iteratorReturnThrows (iterator-return-throws))))
+
+  (export report))

@@ -1,6 +1,6 @@
 ;;; bootstrap-parity.el --- Compare serial and batch bootstrap bytes -*- lexical-binding: t; -*-
 
-;; Run in a source checkout after `make clean-all'. Both arms consume the
+;; Run in a source checkout after `make clean'. Both arms consume the
 ;; current maintained inventory and compiler sources. Only the tool-process
 ;; boundary changes; the reference uses the original per-file CLI entry.
 
@@ -43,7 +43,7 @@
   (let ((default-directory eliscript-bootstrap-parity-root)
         (started (float-time)) serial-seconds batch-seconds reference actual)
     (when (eliscript-bootstrap-parity-files)
-      (error "bootstrap parity requires absent generated modules; run make clean-all first"))
+      (error "bootstrap parity requires absent generated modules; run make clean first"))
     (message "Bootstrap parity: serial reference from maintained sources")
     (cl-letf (((symbol-function 'eliscript-backend-compile-tool-batch)
                (lambda (runtime _driver tools)
@@ -56,7 +56,7 @@
     (setq serial-seconds (- (float-time) started)
           reference (eliscript-bootstrap-parity-files))
     (with-temp-buffer
-      (unless (zerop (call-process (expand-file-name "bin/eliscript-clean") nil t nil "--all"))
+      (unless (zerop (call-process (expand-file-name "bin/eliscript-clean") nil t nil))
         (error "cannot clean serial reference outputs: %s" (buffer-string))))
     (message "Bootstrap parity: batch build; serial %.3fs, %d generated files"
              serial-seconds (length reference))
@@ -75,7 +75,7 @@
                         collect (car record)))))
     (princ (concat (json-serialize
                     `((format . "eliscript-bootstrap-process-parity")
-                      (version . 1) (verification . "identical")
+                      (verification . "identical")
                       (files . ,(length actual))
                       (serialSeconds . ,serial-seconds)
                       (batchSeconds . ,batch-seconds)

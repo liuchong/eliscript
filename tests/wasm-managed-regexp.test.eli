@@ -10,6 +10,10 @@
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
+  (defun normalize-u64 (x)
+    (if (= (value-type x) "bigint")
+      (globalThis.BigInt.asUintN 64 x)
+      (if (= (value-type x) "number") (uint32 x) x)))
   (defconst js-typeof (js* "(v) => typeof v"))
   (defconst uint32 (js* "(v) => v >>> 0"))
   (defconst dynamic-import (js* "(specifier) => import(specifier)"))
@@ -86,6 +90,32 @@
           (finish a)
           c))))
 
+  (test "owned memory emission matches public bytes and consumes only transferred machine bodies" (lambda ()
+    (letfn ((program ()
+              (js-object :abi "memory-u32" :filename "owned-memory.eli"
+                :exports (js-array "seven")
+                :functions (js-array (js-object :name "seven" :index 0 :arity 0
+                  :parameterTypes (js-array) :resultType "u32" :locals (js-array)
+                  :body (js-object :kind "literal" :type "u32" :value 7 :children (js-array)))))))
+      (let* ((public (funcall program)) (before (JSON/stringify public))
+             (expected (Uint8Array/from (js-call (get b :wasm) :emit_typed_memory_wasm public)))
+             (owned (funcall program))
+             (actual (Uint8Array/from (js-call (get b :wasm) :emit_owned_memory_wasm owned))))
+        (js-call assert :equal (JSON/stringify public) before)
+        (js-call assert :deepEqual actual expected)
+        (js-call assert :equal (get (aref (get owned :functions) 0) :body) nil)
+        (js-call assert :equal (js-call (get (new globalThis.WebAssembly.Instance
+          (new globalThis.WebAssembly.Module actual)) :exports) :seven) 7))
+      (let* ((bad (funcall program)) (first (aref (get bad :functions) 0)) (body (get first :body))
+             (cycle (js-object :kind "sequence" :type "u32" :value nil :children (js-array))))
+        (js-call (get cycle :children) :push cycle)
+        (js-call (get bad :functions) :push
+          (Object/assign (js-object) first (js-object :name "cycle" :index 1 :body cycle)))
+        (js-call assert :throws
+          (lambda () (js-call (get b :wasm) :emit_owned_memory_wasm bad))
+          (lambda (error) (= (get (get error :eliscriptDiagnostic) :code) "ELI-B0001")))
+        (js-call assert :strictEqual (get first :body) body)))))
+
   (test "compiler numeric and gensym patterns execute from original source in WASM" (async ()
     (await (check "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$" ""
              (js-array "0" "-0" "+1" ".5" "1." "1.e2" "1e-2" "+1e" "0x10" "x" "" "1\n" nil t 65 globalThis.NaN globalThis.Infinity)))
@@ -151,6 +181,7 @@
                       (js-call assert :equal
                         (cond
                           ((undefined? v) undefined)
+                          ((= (value-type v) "number") v)
                           ((= (get v :kind) 4) (js-call a :readNumber v))
                           (t (js-call a :readString v)))
                         (get expected key))
@@ -248,6 +279,7 @@
                 (js-call assert :equal
                   (cond
                     ((undefined? value) undefined)
+                    ((= (value-type value) "number") value)
                     ((= (get value :kind) 4) (js-call a :readNumber value))
                     (t (js-call a :readString value)))
                   (get expected name))
@@ -347,7 +379,7 @@
     (let ((read-val nil))
       (setq read-val (lambda (a value)
                        (cond
-                         ((or (nullish? value) (= (funcall js-typeof value) "boolean")) value)
+                         ((or (nullish? value) (= (funcall js-typeof value) "boolean") (= (funcall js-typeof value) "number")) value)
                          ((= (get value :kind) 4) (js-call a :readNumber value))
                          ((= (get value :kind) 5) (js-call a :readString value))
                          (t
@@ -437,8 +469,14 @@
     30000)
 
   (test "backtracking capacity failure and actual matching traps preserve caller frames and live source text" (async ()
+    ;; Full-owned budget: 3560 Control + three 32B arena headers +
+    ;; 129*24 slot bytes + align8(5*4) bitmap bytes = 6776 fixed bytes.
+    ;; The original module, input and caller frame reach an object cursor of
+    ;; 23960B before the first backtracking stack growth (56 u32 words).
+    ;; Provision exactly that setup; the larger stack must fail inside exec.
     (let* ((c (await (compile "(a|aa)*b")))
-           (a (instantiateManagedRuntime (js-call c :emit) (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384))))
+           (tight-bytes (+ 6776 23960))
+           (a (instantiateManagedRuntime (js-call c :emit) (js-object :maxSlots 128 :initialBytes tight-bytes :maxBytes tight-bytes))))
       (js-call a :auto 1)
       (let* ((text (str (js-call "a" :repeat 4096) "b"))
              (input (js-call a :string text))
@@ -458,7 +496,7 @@
         (funcall assert (and (>= start 0) (> end start)))
         (let* ((rt (js-call (get b :compiler) :compile_ir_string
                      (str (js-call source :slice 0 start)
-                          "  (defun heap-regexp-point (heap text position flags) (load-u32 4294967295))\n"
+                          "  (defun heap-regexp-point (heap text position flags) (memory-sig u32 u32 v64 u32 u32) (load-u32 4294967295))\n"
                           (js-call source :slice end))
                      "regexp-trap.eli"))
                (tr (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm (get c :p) rt)))))
@@ -466,7 +504,9 @@
           (let ((original (js-call tr :string "ab"))
                 (saved (js-call tr :number -0.0))
                 (frame (js-call tr :frame 1))
-                (object (js-call tr :sourceObject (js-object))))
+                ;; Both conversion hooks are non-callable: native ToString
+                ;; must fail before the deliberately trapping matcher runs.
+                (object (js-call tr :sourceObject (js-object :toString false :valueOf false))))
             (js-call tr :frameSet frame 0 saved)
             (js-call assert :throws
               (lambda () (js-call tr :invoke "test-value" (js-array object)))
@@ -484,9 +524,9 @@
   (test "raw programs are privately copied, rooted and structurally checked before VM execution" (async ()
     (let* ((c (await (compile "^a$")))
            (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (js-call c :emit))) :exports))
-           (h (funcall uint32 (js-call e "heap-new" 128 4096 1048576)))
+           (h (funcall uint32 (js-call e "heap-new" 128 8192 1048576)))
            (call (lambda (name &rest args)
-                   (let ((v (funcall uint32 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
+                   (let ((v (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
                      (js-call assert :equal (js-call e "last-error") 0 name)
                      v)))
            (mk-string (lambda (txt)
@@ -527,7 +567,7 @@
         (funcall call "heap-release" code)
         (funcall call "heap-release" source)
         (funcall call "heap-collect")
-        (js-call assert :equal (funcall call "value-regexp-run" regex text 0) 2)
+        (js-call assert :equal (funcall call "value-regexp-run" regex text 0) (globalThis.BigInt 2))
         (js-call
           (js-array
             (js-array (js-array 14 0 0 0))

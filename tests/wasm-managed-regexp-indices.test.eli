@@ -165,7 +165,7 @@
   (test "indices allocation capacity and input-conversion throws preserve caller roots and permit later execution"
     (async ()
       (await (each-target (lambda (a _kind) (failure-recovery a reference))))
-      (let ((rejected-options (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384 :maximumPages 32)))
+      (let ((rejected-options (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384 :maximumPages 32)))
         (await (each-target
                  (lambda (a _kind)
                    (js-call assert :throws
@@ -178,11 +178,14 @@
                  rejected-options))
         (await (each-target
                  (lambda (a _kind)
-                   (let* ((baseline (js-call a :stats))
-                          (input (js-call a :string (str (js-call "a" :repeat 4096) "b")))
-                          (zero (js-call a :number -0))
-                          (frame (js-call a :frame 1)))
-                     (js-call a :frameSet frame 0 zero)
+                   (let* ((zero (js-call a :number -0))
+                          (frame (js-call a :frame 1))
+                          (_root (js-call a :frameSet frame 0 zero))
+                          ;; The caller frame remains live across the refusal;
+                          ;; compare the same rooted graph before and after.
+                          (_collected (js-call a :collect))
+                          (baseline (js-call a :stats))
+                          (input (js-call a :string (str (js-call "a" :repeat 4096) "b"))))
                      (try
                        (js-call assert :throws
                          (lambda () (js-call a :invoke "capacity" (js-array input)))

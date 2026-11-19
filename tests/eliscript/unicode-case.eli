@@ -169,4 +169,91 @@
                 :sourceRoot root :directory (resolve directory "wrong") :options (js-object)))))
             (js-call assert :strictEqual (get (get globalThis.String :prototype) :toUpperCase) original-upper)
             (js-call assert :strictEqual (get (get globalThis.String :prototype) :toLowerCase) original-lower))
-          (finally (await (rm directory (js-object :recursive t :force t)))))))))
+          (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "chunked case conversion never consults a later Array.prototype.join edit in either realm"
+    (async ()
+      (let* ((module (await (runtime))) (host (realm))
+             (state (funcall (get module :installUnicodeCaseProfile) 17 host))
+             (upper (get state :upper)) (lower (get state :lower))
+             (mixed (js-call "aΣ" :repeat 2500)) (sharp (js-call "ß" :repeat 2500))
+             (mixed-upper (Reflect/apply upper mixed (js-array)))
+             (mixed-lower (Reflect/apply lower mixed (js-array)))
+             (sharp-upper (Reflect/apply upper sharp (js-array)))
+             (sharp-lower (Reflect/apply lower sharp (js-array)))
+             (global-prototype (get globalThis.Array :prototype))
+             (realm-prototype (get (get host :Array) :prototype))
+             (global-join (get global-prototype :join))
+             (realm-join (get realm-prototype :join))
+             (poison (lambda () (throw (new globalThis.Error "a later Array.prototype.join was invoked"))))
+             (observed-upper undefined) (observed-lower undefined)
+             (observed-sharp-upper undefined) (observed-sharp-lower undefined))
+        ;; Both inputs really cross the 4096-unit chunk push, including the
+        ;; doubled "ß" uppercase output.
+        (js-call assert :ok (> (js-length mixed) 4096))
+        (js-call assert :ok (> (js-length sharp-upper) 4096))
+        (try
+          (progn
+            (put global-prototype :join poison) (put realm-prototype :join poison)
+            (setq observed-upper (Reflect/apply upper mixed (js-array)))
+            (setq observed-lower (Reflect/apply lower mixed (js-array)))
+            (setq observed-sharp-upper (Reflect/apply upper sharp (js-array)))
+            (setq observed-sharp-lower (Reflect/apply lower sharp (js-array))))
+          (finally
+            (put global-prototype :join global-join) (put realm-prototype :join realm-join)))
+        (js-call assert :strictEqual observed-upper mixed-upper)
+        (js-call assert :strictEqual observed-lower mixed-lower)
+        (js-call assert :strictEqual observed-sharp-upper sharp-upper)
+        (js-call assert :strictEqual observed-sharp-lower sharp-lower))))
+
+  (test "each versioned case table export keeps its own identity and the sparse 15.1 16 17 differences stay exact"
+    (async ()
+      (let* ((data (await (load-module (resolve root "runtime/unicode-case-data.mjs"))))
+             (names (js-call (js-call (Object/keys data) :filter
+                             (lambda (name) (js-call name :startsWith "unicode_case_data_"))) :sort))
+             (distinct (new globalThis.Set)))
+        (js-call assert :strictEqual (js-length names) 24)
+        (js-call names :forEach (lambda (name)
+          (let ((fn (get data name)))
+            (js-call assert :strictEqual (value-type fn) "function")
+            (js-call assert :strictEqual (get fn :length) 1)
+            (js-call assert :strictEqual (get fn :name) name)
+            (js-call distinct :add fn))))
+        (js-call assert :strictEqual (get distinct :size) 24)
+        (let* ((module (await (runtime))) (install (get module :installUnicodeCaseProfile))
+               (versions (js-array 15.1 16 17))
+               ;; Real sparse differences taken from runtime/unicode-case-data.eli:
+               ;; U+019B gains its uppercase mapping in 16, U+A7CF/U+A7CE move in
+               ;; 17, and U+1C8A becomes cased in 16.
+               (upper-cases (js-array (js-array 411 (js-array 411 42972 42972))
+                                      (js-array 42959 (js-array 42959 42959 42958))))
+               (lower-cases (js-array (js-array 42958 (js-array 42958 42958 42959))))
+               (sigma-input (str (js-call globalThis.String :fromCodePoint 913)
+                                 (js-call globalThis.String :fromCodePoint 931)
+                                 (js-call globalThis.String :fromCodePoint 7306)))
+               (sigma-expected (js-array
+                                 (str (js-call globalThis.String :fromCodePoint 945)
+                                      (js-call globalThis.String :fromCodePoint 962)
+                                      (js-call globalThis.String :fromCodePoint 7306))
+                                 (str (js-call globalThis.String :fromCodePoint 945)
+                                      (js-call globalThis.String :fromCodePoint 963)
+                                      (js-call globalThis.String :fromCodePoint 7306))
+                                 (str (js-call globalThis.String :fromCodePoint 945)
+                                      (js-call globalThis.String :fromCodePoint 963)
+                                      (js-call globalThis.String :fromCodePoint 7306))))
+               (index 0))
+          (while (< index 3)
+            (let* ((host (realm)) (state (funcall install (aref versions index) host)))
+              (js-call upper-cases :forEach (lambda (entry)
+                (js-call assert :strictEqual
+                  (Reflect/apply (get state :upper)
+                    (js-call globalThis.String :fromCodePoint (aref entry 0)) (js-array))
+                  (js-call globalThis.String :fromCodePoint (aref (aref entry 1) index)))))
+              (js-call lower-cases :forEach (lambda (entry)
+                (js-call assert :strictEqual
+                  (Reflect/apply (get state :lower)
+                    (js-call globalThis.String :fromCodePoint (aref entry 0)) (js-array))
+                  (js-call globalThis.String :fromCodePoint (aref (aref entry 1) index)))))
+              (js-call assert :strictEqual
+                (Reflect/apply (get state :lower) sigma-input (js-array)) (aref sigma-expected index)))
+            (setq index (1+ index))))))))

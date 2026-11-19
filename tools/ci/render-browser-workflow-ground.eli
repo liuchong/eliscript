@@ -31,9 +31,7 @@
 
   (defun validateBrowserCompatibility (contract matrix)
     (let ((core (validateCompatibilityMatrix matrix)))
-      (unless (and (= (host-get contract "schemaVersion") 1)
-                   (= (host-get contract "version") 1)
-                   (= (host-get contract "format") "eliscript-browser-compatibility")
+      (unless (and (= (host-get contract "format") "eliscript-browser-compatibility")
                    (= (host-get contract "workflow") ".github/workflows/browser-compatibility.yml"))
         (throw (new BrowserCompatibilityError "invalid browser compatibility contract")))
       (unless (= (JSON/stringify (host-get contract "browserEngines")) (JSON/stringify browser-engines))

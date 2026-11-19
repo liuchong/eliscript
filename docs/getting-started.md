@@ -84,12 +84,11 @@ mkdir -p hello-eliscript/src
 cd hello-eliscript
 ```
 
-Use a version 2 project request so the source root, entry set, output directory,
+Use a project request so the source root, entry set, output directory,
 and cache policy are explicit:
 
 ```json
 {
-  "schemaVersion": 2,
   "sourceRoot": "src",
   "entries": ["main.eli"],
   "outDir": "dist",

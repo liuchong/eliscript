@@ -4,7 +4,7 @@
   (defasync main ()
     (let* ((arguments (get globalThis.process :argv)) (library (aref arguments 2))
            (signatures (JSON/parse (aref arguments 3))) (configuration (JSON/parse (aref arguments 4)))
-           (a (await (openNativeMemory library signatures (Object/assign (js-object) configuration (js-object :hostCall (lambda () 0)))))))
+           (a (await (openNativeMemory library signatures (Object/assign (js-object) configuration (js-object :hostCall (lambda () (globalThis.BigInt 0))))))))
       (js-call assert :strictEqual (get (get globalThis.process :versions) :bun) undefined)
       (try
         (js-call (js-array undefined nil false (js-object) "1" (globalThis.BigInt 1) globalThis.NaN globalThis.Infinity -1 0.5 4294967296) :forEach
@@ -29,7 +29,7 @@
         (js-call assert :strictEqual (js-call a :invoke "read32" 0) 42)
         (finally (js-call a :close)))
       (await (js-call assert :rejects (openNativeMemory library signatures (Object/assign (js-object) configuration
-        (js-object :hostCall (lambda () 0) :bunExecutable (str library ".missing-runtime"))))
+        (js-object :hostCall (lambda () (globalThis.BigInt 0)) :bunExecutable (str library ".missing-runtime"))))
         (lambda (error) (= (get error :code) "ENOENT"))))
       (js-call (get globalThis.process :stdout) :write "native-node-verified\n")))
   (js-call (main) :catch (lambda (error) (console/error error) (put globalThis.process :exitCode 1))))

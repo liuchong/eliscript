@@ -11,6 +11,7 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
   (defconst js-typeof (js* "(v) => typeof v"))
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
 
   (defvar directory nil)
@@ -171,7 +172,7 @@
                    (out (js-call a :invoke "f" (js-array n)))
                    (txt (js-call a :get out 0))
                    (calls (js-call a :get out 1)))
-              (js-call assert :deepEqual (js-array (js-call a :readString txt) (js-call a :readNumber calls)) (js-call js :f sz))
+              (js-call assert :deepEqual (js-array (js-call a :readString txt) (funcall num-val a calls)) (js-call js :f sz))
               (js-call (js-array n out txt calls) :forEach (lambda (x) (js-call a :release x)))
               (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))
         (finish-heap a))))
@@ -205,7 +206,7 @@
             (let* ((out (js-call a :invoke "f" (js-array fallback)))
                    (txt (js-call a :get out 0))
                    (cnt (js-call a :get out 1)))
-              (js-call assert :deepEqual (js-array (js-call a :readString txt) (js-call a :readNumber cnt)) (js-call js :f fallback))
+              (js-call assert :deepEqual (js-array (js-call a :readString txt) (funcall num-val a cnt)) (js-call js :f fallback))
               (js-call (js-array out txt cnt) :forEach (lambda (x) (js-call a :release x))))))
         (finish-heap a))))
 
@@ -217,7 +218,7 @@
              (out (js-call a :invoke "f" (js-array false)))
              (txt (js-call a :get out 0))
              (cnt (js-call a :get out 1)))
-        (js-call assert :deepEqual (js-array (js-call a :readString txt) (js-call a :readNumber cnt)) (js-call js :f false))
+        (js-call assert :deepEqual (js-array (js-call a :readString txt) (funcall num-val a cnt)) (js-call js :f false))
         (js-call (js-array out txt cnt) :forEach (lambda (x) (js-call a :release x)))
         (js-call assert :throws (lambda () (js-call js :f t)) globalThis.TypeError)
         (js-call assert :throws
@@ -236,7 +237,7 @@
              (lower (js-call a :get out 1))
              (cnt (js-call a :get out 2)))
         (js-call assert :deepEqual
-          (js-array (js-call a :readString upper) (js-call a :readString lower) (js-call a :readNumber cnt))
+          (js-array (js-call a :readString upper) (js-call a :readString lower) (funcall num-val a cnt))
           (js-call js :f))
         (js-call (js-array out upper lower cnt) :forEach (lambda (x) (js-call a :release x)))
         (finish-heap a))))
@@ -278,7 +279,7 @@
           (js-call small :frameSet outer 0 input)
           (while (and (< i 128) (not exhausted))
             (try
-              (js-call held :push (js-call small :number i))
+              (js-call held :push (js-call small :array))
               (catch e
                 (js-call assert :equal (if (nullish? (get e :eliscriptDiagnostic)) undefined (get (get e :eliscriptDiagnostic) :code)) "ELI-RT0002")
                 (setq exhausted t)))
@@ -331,7 +332,7 @@
                        (out (js-call a :invoke "f" (js-array input key)))
                        (res (js-call a :get out 0))
                        (calls (js-call a :get out 1)))
-                  (js-call assert :deepEqual (js-array (js-call a :readString res) (js-call a :readNumber calls)) (js-call js :f txt search))
+                  (js-call assert :deepEqual (js-array (js-call a :readString res) (funcall num-val a calls)) (js-call js :f txt search))
                   (js-call (js-array input key out res calls) :forEach (lambda (x) (js-call a :release x)))
                   (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))))))
         (finish-heap a))))
@@ -347,7 +348,7 @@
                    (out (js-call a :invoke "f" (js-array input)))
                    (res (js-call a :get out 0))
                    (calls (js-call a :get out 1)))
-              (js-call assert :deepEqual (js-array (js-call a :readString res) (js-call a :readNumber calls)) (js-call js :f txt))
+              (js-call assert :deepEqual (js-array (js-call a :readString res) (funcall num-val a calls)) (js-call js :f txt))
               (js-call (js-array input out res calls) :forEach (lambda (x) (js-call a :release x))))))
         (finish-heap a))))
 
@@ -402,7 +403,7 @@
                    (out (js-call a :invoke "f" (js-array cnt)))
                    (parts (js-call a :get out 0))
                    (calls (js-call a :get out 1)))
-              (js-call assert :deepEqual (js-array (read-strings a parts) (js-call a :readNumber calls)) (js-call js :f sz))
+              (js-call assert :deepEqual (js-array (read-strings a parts) (funcall num-val a calls)) (js-call js :f sz))
               (js-call (js-array cnt out parts calls) :forEach (lambda (x) (js-call a :release x))))))
         (finish-heap a))))
 
@@ -573,7 +574,7 @@
           (js-call assert :equal (funcall (aref e "runtime-case-version") 150) 0)
           (js-call assert :equal (funcall (aref e "last-error")) 3)
           (js-call assert :equal (funcall (aref e "runtime-case-version") 160) 160)
-          (let ((heap (funcall (aref e "heap-new") 32 1024 65536)))
+          (let ((heap (funcall (aref e "heap-new") 32 16384 65536)))
             (funcall assert heap)
             (js-call assert :equal (funcall (aref e "runtime-case-version") 170) 0)
             (js-call assert :equal (funcall (aref e "last-error")) 3)

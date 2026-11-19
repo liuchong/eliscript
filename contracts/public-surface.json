@@ -1,5 +1,4 @@
 {
-  "schemaVersion": 1,
   "language": {
     "groups": [
       {
@@ -202,103 +201,75 @@
       "id": "build-operation",
       "spec": "0112",
       "format": "eliscript-build-operation",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/project.eli", "contains": ["build-operation-format \"eliscript-build-operation\"", "build-operation-version 1", "build-operation-request"]},
-        {"file": "specs/0112-unified-self-hosted-build-operation.md", "contains": ["\"format\": \"eliscript-build-operation\"", "\"version\": 1"]}
-      ]
-    },
-    {
-      "id": "build-operation-v2",
-      "spec": "0113",
-      "format": "eliscript-build-operation",
-      "version": 2,
-      "evidence": [
-        {"file": "bootstrap/compiler/project.eli", "contains": ["build-operation-format \"eliscript-build-operation\"", "build-operation-multi-version 2", "(get request :entries)"]},
-        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["version 2 build-operation", "frozen `entries` array"]}
+        {"file": "bootstrap/compiler/project.eli", "contains": ["build-operation-format \"eliscript-build-operation\"", "build-operation-request", "(get request :entries)"]},
+        {"file": "specs/0112-unified-self-hosted-build-operation.md", "contains": ["\"format\": \"eliscript-build-operation\""]},
+        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["frozen `entries` array"]}
       ]
     },
     {
       "id": "build-report",
       "spec": "0032",
       "format": "eliscript-build-report",
-      "version": 1,
       "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-build-report\")", "eliscript-project-build-report-version 1"]},
-        {"file": "bootstrap/compiler/project.eli", "contains": ["project-build-report-format \"eliscript-build-report\"", "project-build-report-version 1", "project-build-report"]}
-      ]
-    },
-    {
-      "id": "build-report-v2",
-      "spec": "0113",
-      "format": "eliscript-build-report",
-      "version": 2,
-      "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-build-report-multi-version 2", "entryOutputs"]},
-        {"file": "bootstrap/compiler/project.eli", "contains": ["project-build-report-multi-version 2", ":entryOutputs entry-outputs"]}
+        {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-build-report\")", "entryOutputs"]},
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-build-report-format \"eliscript-build-report\"", "project-build-report", ":entryOutputs entry-outputs"]}
       ]
     },
     {
       "id": "check-operation",
       "spec": "0116",
       "format": "eliscript-check-operation",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/project.eli", "contains": ["check-operation-format \"eliscript-check-operation\"", "check-operation-version 1", "check-operation-request"]},
-        {"file": "specs/0116-read-only-project-check-and-emacs-diagnostics.md", "contains": ["\"format\": \"eliscript-check-operation\"", "\"version\": 1"]}
+        {"file": "bootstrap/compiler/project.eli", "contains": ["check-operation-format \"eliscript-check-operation\"", "check-operation-request"]},
+        {"file": "specs/0116-read-only-project-check-and-emacs-diagnostics.md", "contains": ["\"format\": \"eliscript-check-operation\""]}
       ]
     },
     {
       "id": "check-report",
       "spec": "0116",
       "format": "eliscript-check-report",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/project.eli", "contains": ["project-check-report-format \"eliscript-check-report\"", "project-check-report-version 1", "project-check-report"]},
-        {"file": "specs/0116-read-only-project-check-and-emacs-diagnostics.md", "contains": ["\"format\": \"eliscript-check-report\"", "\"version\": 1"]}
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-check-report-format \"eliscript-check-report\"", "project-check-report"]},
+        {"file": "specs/0116-read-only-project-check-and-emacs-diagnostics.md", "contains": ["\"format\": \"eliscript-check-report\""]}
       ]
     },
     {
       "id": "compatibility-baseline",
       "spec": "0046",
       "format": "eliscript-compatibility-baseline",
-      "version": 2,
       "evidence": [
-        {"file": "contracts/compatibility-baseline.json", "contains": ["\"format\": \"eliscript-compatibility-baseline\"", "\"version\": 2"]},
-        {"file": "tools/conformance/check.eli", "contains": ["(not (= (get baseline :format) \"eliscript-compatibility-baseline\"))", "(not (= (get baseline :version) 2))"]}
+        {"file": "contracts/compatibility-baseline.json", "contains": ["\"format\": \"eliscript-compatibility-baseline\""]},
+        {"file": "tools/conformance/check.eli", "contains": ["(not (= (get baseline :format) \"eliscript-compatibility-baseline\"))"]}
       ]
     },
     {
       "id": "compatibility-matrix",
       "spec": "0045",
       "format": "eliscript-compatibility-matrix",
-      "version": 1,
       "evidence": [
-        {"file": "contracts/compatibility-matrix.json", "contains": ["\"format\": \"eliscript-compatibility-matrix\"", "\"version\": 1"]},
-        {"file": "tools/ci/render-workflow-ground.eli", "contains": ["\"eliscript-compatibility-matrix\"", "(not (= (get matrix :version) 1))"]}
+        {"file": "contracts/compatibility-matrix.json", "contains": ["\"format\": \"eliscript-compatibility-matrix\""]},
+        {"file": "tools/ci/render-workflow-ground.eli", "contains": ["\"eliscript-compatibility-matrix\""]}
       ]
     },
     {
       "id": "compiler-diagnostic",
       "spec": "0043",
       "format": "eliscript-diagnostic",
-      "version": 1,
       "evidence": [
-        {"file": "compiler/eliscript-diagnostic.el", "contains": ["eliscript-diagnostic-format-name \"eliscript-diagnostic\"", "eliscript-diagnostic-version 1"]},
-        {"file": "bootstrap/host/bun.mjs", "contains": ["diagnosticFormat = \"eliscript-diagnostic\"", "diagnosticVersion = 1"]}
+        {"file": "compiler/eliscript-diagnostic.el", "contains": ["eliscript-diagnostic-format-name \"eliscript-diagnostic\""]},
+        {"file": "bootstrap/host/bun.mjs", "contains": ["diagnosticFormat = \"eliscript-diagnostic\""]}
       ]
     },
     {
       "id": "compiler-ir",
       "spec": "0108",
       "format": "eliscript-ir",
-      "version": 1,
       "evidence": [
         {
           "file": "bootstrap/compiler/ir.eli",
           "contains": [
             "ir-format \"eliscript-ir\"",
-            "ir-version 1",
             "serialize-program",
             "deserialize-program"
           ]
@@ -306,8 +277,7 @@
         {
           "file": "specs/0108-versioned-canonical-ir.md",
           "contains": [
-            "\"format\": \"eliscript-ir\"",
-            "\"version\": 1"
+            "\"format\": \"eliscript-ir\""
           ]
         }
       ]
@@ -316,13 +286,11 @@
       "id": "compiler-parity-corpus",
       "spec": "0146",
       "format": "eliscript-compiler-parity-corpus",
-      "version": 1,
       "evidence": [
         {
           "file": "contracts/compiler-parity-corpus.json",
           "contains": [
             "\"format\": \"eliscript-compiler-parity-corpus\"",
-            "\"version\": 1",
             "\"identity\":"
           ]
         },
@@ -330,7 +298,6 @@
           "file": "tools/parity/check.eli",
           "contains": [
             "(= (get contract :format) \"eliscript-compiler-parity-corpus\")",
-            "(= (get contract :version) 1)",
             "checkCompilerParityCorpus"
           ]
         }
@@ -340,79 +307,71 @@
       "id": "evaluation-form",
       "spec": "0119",
       "format": "eliscript-evaluation-form",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-form-format \"eliscript-evaluation-form\"", "evaluation-form-version 1", "evaluation-form-description"]},
-        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-form-format", "eliscript-evaluation-form-version 1", "eliscript-evaluation-form-description"]}
+        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-form-format \"eliscript-evaluation-form\"", "evaluation-form-description"]},
+        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-form-format", "eliscript-evaluation-form-description"]}
       ]
     },
     {
       "id": "evaluation-input",
       "spec": "0120",
       "format": "eliscript-evaluation-input",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-input-format \"eliscript-evaluation-input\"", "evaluation-input-version 1", "evaluation-input-description"]},
-        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-input-format", "eliscript-evaluation-input-version 1", "eliscript-evaluation-input-description"]}
+        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-input-format \"eliscript-evaluation-input\"", "evaluation-input-description"]},
+        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-input-format", "eliscript-evaluation-input-description"]}
       ]
     },
     {
       "id": "evaluation-module",
       "spec": "0119",
       "format": "eliscript-evaluation-module",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-module-format \"eliscript-evaluation-module\"", "evaluation-module-version 1", "evaluation-module-description"]},
-        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-module-format", "eliscript-evaluation-module-version 1", "eliscript-evaluation-module-description"]}
+        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-module-format \"eliscript-evaluation-module\"", "evaluation-module-description"]},
+        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-module-format", "eliscript-evaluation-module-description"]}
       ]
     },
     {
       "id": "evaluation-operation",
       "spec": "0119",
       "format": "eliscript-evaluation-operation",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-operation-format \"eliscript-evaluation-operation\"", "evaluation-operation-version 1", "evaluation-operation-request"]},
-        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-operation-format", "eliscript-evaluation-operation-version 1", "eliscript-evaluation-operation-request"]}
+        {"file": "bootstrap/compiler/compiler.eli", "contains": ["evaluation-operation-format \"eliscript-evaluation-operation\"", "evaluation-operation-request"]},
+        {"file": "compiler/eliscript-evaluation.el", "contains": ["eliscript-evaluation-operation-format", "eliscript-evaluation-operation-request"]}
       ]
     },
     {
       "id": "evaluation-result",
       "spec": "0119",
       "format": "eliscript-evaluation-result",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/host/evaluation.mjs", "contains": ["evaluationResultFormat = \"eliscript-evaluation-result\"", "evaluationResultVersion = 1"]},
-        {"file": "editor/eliscript-repl.el", "contains": ["eliscript-repl--result-format \"eliscript-evaluation-result\"", "eliscript-repl--result-version 1"]}
+        {"file": "bootstrap/host/evaluation.mjs", "contains": ["evaluationResultFormat = \"eliscript-evaluation-result\""]},
+        {"file": "editor/eliscript-repl.el", "contains": ["eliscript-repl--result-format \"eliscript-evaluation-result\""]}
       ]
     },
     {
       "id": "formatter",
       "spec": "0114",
       "format": "eliscript-formatter",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/compiler/formatter.eli", "contains": ["formatter-format \"eliscript-formatter\"", "formatter-version 1", "format-source"]},
-        {"file": "specs/0114-deterministic-concrete-syntax-formatter.md", "contains": ["`formatter_format`: `\"eliscript-formatter\"`", "`formatter_version`: `1`"]}
+        {"file": "bootstrap/compiler/formatter.eli", "contains": ["formatter-format \"eliscript-formatter\"", "format-source"]},
+        {"file": "specs/0114-deterministic-concrete-syntax-formatter.md", "contains": ["`formatter_format`: `\"eliscript-formatter\"`"]}
       ]
     },
     {
       "id": "local-compatibility-cell",
       "spec": "0045",
       "format": "eliscript-local-compatibility-cell",
-      "version": 1,
       "evidence": [
         {
           "file": "tools/compatibility/matrix.eli",
           "contains": [
-            "(defconst REPORT_FORMAT \"eliscript-local-compatibility-cell\")",
-            "(eq (get report :version) 1)"
+            "(defconst REPORT_FORMAT \"eliscript-local-compatibility-cell\")"
           ]
         },
         {
           "file": "specs/0045-continuous-compatibility-matrix.md",
           "contains": [
-            "`eliscript-local-compatibility-cell` version 1"
+            "`eliscript-local-compatibility-cell`."
           ]
         }
       ]
@@ -421,40 +380,26 @@
       "id": "project-manifest",
       "spec": "0030",
       "format": "eliscript-project",
-      "version": 1,
       "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-project\")", "(version . 1)"]},
-        {"file": "runtime/worker.eli", "contains": ["(not (eq (get manifest :format) \"eliscript-project\"))", "(not (eq (get manifest :version) 1))"]}
-      ]
-    },
-    {
-      "id": "project-manifest-v2",
-      "spec": "0113",
-      "format": "eliscript-project",
-      "version": 2,
-      "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["(version . 2)", "(entries . ,(vconcat relative-entries))"]},
-        {"file": "runtime/worker.eli", "contains": ["(not (eq (get manifest :version) 2))", "(get manifest :entries)"]}
+        {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-project\")", "(entries . ,(vconcat relative-entries))"]},
+        {"file": "runtime/worker.eli", "contains": ["(not (eq (get manifest :format) \"eliscript-project\"))", "(get manifest :entries)", "project manifest has an unsupported field"]}
       ]
     },
     {
       "id": "project-plan",
       "spec": "0107",
       "format": "eliscript-project-plan",
-      "version": 1,
       "evidence": [
         {
           "file": "bootstrap/compiler/project.eli",
           "contains": [
-            "project-plan-format \"eliscript-project-plan\"",
-            "project-plan-version 1"
+            "project-plan-format \"eliscript-project-plan\""
           ]
         },
         {
           "file": "specs/0107-self-hosted-project-graph-planning.md",
           "contains": [
-            "\"format\": \"eliscript-project-plan\"",
-            "\"version\": 1"
+            "\"format\": \"eliscript-project-plan\""
           ]
         }
       ]
@@ -463,31 +408,19 @@
       "id": "project-request",
       "spec": "0106",
       "format": "eliscript-project-request",
-      "version": 1,
       "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-format \"eliscript-project-request\"", "eliscript-project-configuration-version 1"]},
-        {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-format \"eliscript-project-request\"", "project-request-version 1", "project-configuration"]},
-        {"file": "specs/0106-versioned-project-request.md", "contains": ["\"schemaVersion\": 1", "unknown key rejects"]}
-      ]
-    },
-    {
-      "id": "project-request-v2",
-      "spec": "0113",
-      "format": "eliscript-project-request",
-      "version": 2,
-      "evidence": [
-        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-multi-version 2", "eliscript-project-request-entries"]},
-        {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-multi-version 2", ":entries entries"]},
-        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["\"schemaVersion\": 2", "\"entries\""]}
+        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-format \"eliscript-project-request\"", "eliscript-project-request-entries"]},
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-format \"eliscript-project-request\"", "project-configuration", ":entries entries"]},
+        {"file": "specs/0106-versioned-project-request.md", "contains": ["unknown key rejects"]},
+        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["\"entries\": ["]}
       ]
     },
     {
       "id": "protocol-definition",
       "spec": "0091",
       "format": "eliscript-protocol-definition",
-      "version": 1,
       "evidence": [
-        {"file": "stdlib/core/protocol.eli", "contains": ["protocol-definition-format \"eliscript-protocol-definition\"", "protocol-definition-version 1"]},
+        {"file": "stdlib/core/protocol.eli", "contains": ["protocol-definition-format \"eliscript-protocol-definition\""]},
         {"file": "runtime/core/protocol.eli", "contains": ["(defconst defineProtocolFromDefinition define_protocol_from_definition)", "(defconst protocolDefinition protocol_definition)"]}
       ]
     },
@@ -495,13 +428,11 @@
       "id": "stable-compatibility-corpus",
       "spec": "0147",
       "format": "eliscript-stable-compatibility-corpus",
-      "version": 1,
       "evidence": [
         {
           "file": "contracts/stable-compatibility-corpus.json",
           "contains": [
             "\"format\": \"eliscript-stable-compatibility-corpus\"",
-            "\"version\": 1",
             "\"readyForAc02\":"
           ]
         },
@@ -509,7 +440,6 @@
           "file": "tools/compatibility/corpus.eli",
           "contains": [
             "(not (= (get contract :format) \"eliscript-stable-compatibility-corpus\"))",
-            "(not (= (get contract :version) 1))",
             "checkStableCompatibilityCorpus"
           ]
         }
@@ -519,9 +449,8 @@
       "id": "watch-event",
       "spec": "0121",
       "format": "eliscript-watch-event",
-      "version": 1,
       "evidence": [
-        {"file": "bootstrap/host/watch.mjs", "contains": ["watchEventFormat = \"eliscript-watch-event\"", "watchEventVersion = 1", "class ProjectWatcher"]},
+        {"file": "bootstrap/host/watch.mjs", "contains": ["watchEventFormat = \"eliscript-watch-event\"", "class ProjectWatcher"]},
         {"file": "editor/eliscript-mode.el", "contains": ["\"eliscript-watch-event\"", "eliscript-mode--watch-event-from-json", "eliscript-mode--watch-filter"]}
       ]
     },
@@ -529,40 +458,36 @@
       "id": "worker-protocol",
       "spec": "0020",
       "format": "eliscript-worker-ndjson",
-      "version": 1,
       "evidence": [
-        {"file": "runtime/worker.eli", "contains": ["(defconst protocolVersion 1)"]},
-        {"file": "tools/worker/eliscript-worker.el", "contains": ["eliscript-worker-protocol-version 1"]}
+        {"file": "runtime/worker.eli", "contains": ["(export capabilities loadSourceMap runWorker)", "unknown protocol message field"]},
+        {"file": "tools/worker/eliscript-worker.el", "contains": ["(cl-defun eliscript-worker-call"]}
       ]
     },
     {
       "id": "worker-value-codec",
       "spec": "0088",
-      "format": "eliscript-value-v1",
-      "version": 1,
+      "format": "eliscript-value",
       "evidence": [
-        {"file": "runtime/worker-value-codec.mjs", "contains": ["workerValueEncoding = \"eliscript-value-v1\""]},
-        {"file": "tools/worker/eliscript-value-codec.el", "contains": ["eliscript-worker-value-encoding \"eliscript-value-v1\""]}
+        {"file": "runtime/worker-value-codec.eli", "contains": ["workerValueEncoding \"eliscript-value\""]},
+        {"file": "tools/worker/eliscript-value-codec.el", "contains": ["eliscript-worker-value-encoding \"eliscript-value\""]}
       ]
     },
     {
       "id": "worker-value-stream",
       "spec": "0089",
-      "format": "eliscript-value-chunks-v1",
-      "version": 1,
+      "format": "eliscript-value-chunks",
       "evidence": [
-        {"file": "runtime/worker-value-stream.mjs", "contains": ["workerValueFraming = \"eliscript-value-chunks-v1\""]},
-        {"file": "tools/worker/eliscript-value-stream.el", "contains": ["eliscript-worker-value-framing \"eliscript-value-chunks-v1\""]}
+        {"file": "runtime/worker-value-stream.eli", "contains": ["workerValueFraming \"eliscript-value-chunks\""]},
+        {"file": "tools/worker/eliscript-value-stream.el", "contains": ["eliscript-worker-value-framing \"eliscript-value-chunks\""]}
       ]
     },
     {
       "id": "worker-value-stream-probe",
       "spec": "0090",
       "format": "eliscript-worker-value-stream-probe",
-      "version": 1,
       "evidence": [
-        {"file": "tools/worker/value-stream-probe.el", "contains": ["eliscript-value-stream-probe-format", "eliscript-value-stream-probe-version 1"]},
-        {"file": "benchmarks/worker-value-stream-macos-arm64.json", "contains": ["\"format\": \"eliscript-worker-value-stream-probe\"", "\"version\": 1"]}
+        {"file": "tools/worker/value-stream-probe.el", "contains": ["eliscript-value-stream-probe-format"]},
+        {"file": "benchmarks/worker-value-stream-macos-arm64.json", "contains": ["\"format\": \"eliscript-worker-value-stream-probe\"", "\"transport\""]}
       ]
     }
   ],
@@ -630,7 +555,7 @@
       "id": "worker-runtime",
       "spec": "0020",
       "file": "runtime/worker.mjs",
-      "namedExports": ["capabilities", "loadSourceMap", "protocolVersion", "runWorker"],
+      "namedExports": ["capabilities", "loadSourceMap", "runWorker"],
       "defaultExport": false
     }
   ],
@@ -908,7 +833,7 @@
       "spec": "0080",
       "visibility": "internal",
       "file": "runtime/core/protocol-impl.mjs",
-      "namedExports": ["define_protocol", "define_protocol_from_definition", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "materialize_protocol_from_definition", "protocol_QMARK_", "protocol_definition", "protocol_host_category", "protocol_method", "protocol_slot", "read_external_protocol_method", "read_protocol_method_owner", "read_protocol_operations_owner"],
+      "namedExports": ["define_protocol", "define_protocol_from_definition", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "flush_protocol_extension_loaders", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "materialize_protocol_from_definition", "protocol_QMARK_", "protocol_definition", "protocol_host_category", "protocol_method", "protocol_slot", "read_external_protocol_method", "read_protocol_method_owner", "read_protocol_operations_owner", "register_protocol_extension_loader"],
       "defaultExport": false
     },
     {
@@ -1005,7 +930,7 @@
     {"module": "core-metadata", "spec": "0068", "file": "stdlib/core/metadata.eli", "exports": ["IMeta", "IWithMeta", "meta", "supports-metadata?", "vary-meta", "with-meta"]},
     {"module": "core-object", "spec": "0081", "file": "stdlib/core/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "core-order", "spec": "0066", "file": "stdlib/core/order.eli", "exports": ["IComparable", "comparator", "compare-values", "max-key", "min-key", "reverse-comparator", "sort", "sort-by"]},
-    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "materialize-protocol-from-definition", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot", "protocol?", "read-external-protocol-method", "read-protocol-method-owner", "read-protocol-operations-owner"]},
+    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "flush-protocol-extension-loaders", "implements-protocol-operation?", "implements-protocol?", "materialize-protocol-from-definition", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot", "protocol?", "read-external-protocol-method", "read-protocol-method-owner", "read-protocol-operations-owner", "register-protocol-extension-loader"]},
     {"module": "core-record", "spec": "0168", "file": "stdlib/core/record.eli", "exports": ["define-record-type", "record-field-names", "record-type", "record-type-name", "record-type?", "record?"]},
     {"module": "core-regex", "spec": "0178", "file": "stdlib/core/regex.eli", "exports": ["re-find", "re-matches", "re-replace", "re-seq", "regex", "regex-flags", "regex-source", "regex?"]},
     {"module": "core-sequence", "spec": "0066", "file": "stdlib/core/seq.eli", "exports": ["butlast", "concat", "cycle", "dedupe", "distinct", "drop", "drop-last", "drop-while", "every?", "ffirst", "filter", "find", "first", "flatten", "fnext", "generate", "interleave", "interleave-all", "interpose", "iterate", "keep", "keep-indexed", "last", "map", "map-indexed", "mapcat", "next", "nfirst", "nnext", "not-any?", "not-every?", "nth-next", "nth-rest", "partition", "partition-all", "partition-by", "prepend", "range", "reductions", "remove", "repeat", "repeatedly", "rest", "reverse", "second", "sequence-nth", "some", "split-at", "split-with", "take", "take-last", "take-nth", "take-while", "tree-seq"]},

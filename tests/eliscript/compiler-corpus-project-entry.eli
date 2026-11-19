@@ -4,12 +4,12 @@
   (import "node:assert" AssertionError)
   (import "../tools/backends/compiler-corpus-program-driver.mjs" recordOriginalWireFailure loadOriginalProgramBody)
   (import "../tools/backends/managed-source-view.mjs" createManagedSourceView withManagedSourceDecode)
-  (import "node:fs/promises" mkdtemp mkdir readFile writeFile rm symlink)
+  (import "node:fs/promises" mkdir readFile writeFile symlink)
   (import "node:path" resolve dirname basename posix)
   (import "node:buffer" Buffer)
   (import "node:url" pathToFileURL)
   (import "node:child_process" spawnSync)
-  (import "node:os" tmpdir)
+  (import "../tools/testing/fixture-environment.mjs" prepareFixtureEnvironment)
   (import "node:module" createRequire)
   (import "node:crypto" createHash)
   (import "../tools/backends/build.mjs" root buildBackends)
@@ -44,9 +44,9 @@
         (js-call assert :throws (lambda () (loadOriginalRawLanguageModels
           (js-object :source (str source "\n") :sourceSha256 (hash source)))) globalThis.TypeError))))
   (defasync workspace (run)
-    (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-project-entry-replay-")))))
-      (try (await (funcall run directory))
-        (finally (await (rm directory (js-object :recursive t :force t)))))))
+    (let ((fixture (prepareFixtureEnvironment root (get globalThis.process :env))))
+      (try (await (funcall run (get fixture :directory)))
+        (finally (js-call fixture :close)))))
   (defasync deploy-observer (path)
     (let* ((reader (createOriginalCorpusSourceReader (js-object :sourceRoot root)))
            (dependency (await (readOriginalProcessHostDependency reader)))
@@ -239,7 +239,7 @@
                          (process-proofs (js-array))
                          (process-id (js-call posix :join
                            (js-call posix :dirname (get (get record :execution) :host)) "compiler-corpus-process.mjs"))
-                         (expected-marker (js-object :version 1 :id process-id :sourceAssets process-proofs))
+                         (expected-marker (js-object :id process-id :sourceAssets process-proofs))
                          (expected-sources (js-call (or (get (get old :request) :hostSources) (js-array)) :slice))
                          (process-index 0))
                     ;; Construct the marker from all six physical sources,
@@ -273,7 +273,7 @@
                     (Reflect/deleteProperty metadata "sourceAssets")
                     (let* ((archive-file "tests/direct-wasm-backend-test-ground.mjs")
                            (bytes (await (readFile (resolve root archive-file))))
-                           (sha "047710045f8b6cb080553f5cd34ca27fcec0b68be71bba5b44782fec89f1fba7")
+                           (sha "d9f520891835b132da32e6a57426f064b73dea8288340ffd19c6ca886edf91cc")
                            (proof (js-object :file archive-file :bytes (js-length bytes) :sourceSha256 sha
                              :region (js-object :start 0 :end (js-length (js-call bytes :toString "utf8"))
                                :byteStart 0 :byteEnd (js-length bytes) :sha256 sha)))
@@ -301,7 +301,7 @@
                         (Object/fromEntries (js-call (Object/entries (get old :original)) :filter (lambda (entry) (/= (aref entry 0) "sourceAssets"))))
                         (js-object :suite "tests/direct-wasm-backend-test-ground.mjs"
                           :processHostDependency expected-marker
-                          :sourceSha256 "047710045f8b6cb080553f5cd34ca27fcec0b68be71bba5b44782fec89f1fba7")))))
+                          :sourceSha256 "d9f520891835b132da32e6a57426f064b73dea8288340ffd19c6ca886edf91cc")))))
                 (js-call assert :deepStrictEqual record old)))
             (setq index (1+ index)))
           (js-call assert :strictEqual changed 2)))))
@@ -400,7 +400,7 @@
   (test "raw language failure evidence retains the actual family operation and completed ordinal without replacing the first error"
     (lambda ()
       (let* ((failure (new globalThis.Error "actual raw operation failure")) (released 0)
-             (runtime (js-object :number (lambda (value) (js-object :kind 4 :value value))
+             (runtime (js-object :number (lambda (value) value)
                :invoke (lambda (&rest ignored) (throw failure))
                :release (lambda (value) (setq released (1+ released)))
                :collect (lambda () undefined) :stats (lambda () (js-object :frameDepth 0)))))

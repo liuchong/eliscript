@@ -6,7 +6,7 @@
   (import "./core/queue.eli" persistentQueue)
   (import "./core/identifier.eli" keyword eliscriptSymbol)
 
-  (defconst symbol eliscriptSymbol)
+  (defun symbol (&rest values) (apply eliscriptSymbol values))
   (defun list (&rest values) (apply persistentList values))
   (defun vector (&rest values) (apply persistentVector values))
   (defun hashMap (&rest keyValues)

@@ -1,7 +1,5 @@
 {
-  "schemaVersion": 1,
   "format": "eliscript-maturity-progress",
-  "version": 1,
   "implementation": {
     "milestones": [
       {
@@ -32,10 +30,10 @@
         "units": [
           { "id": "M9-01", "title": "Self-hosted project graph and portable planning", "status": "complete", "features": ["bootstrap.self-hosted-project-planning"] },
           { "id": "M9-02", "title": "Unified project build operation", "status": "complete", "features": ["bootstrap.unified-build-operation"] },
-          { "id": "M9-03", "title": "Versioned project configuration", "status": "complete", "features": ["toolchain.versioned-project-request-v1"] },
+          { "id": "M9-03", "title": "Project configuration", "status": "complete", "features": ["toolchain.project-request"] },
           { "id": "M9-04", "title": "Maintained Bun and Node hosts", "status": "complete", "features": ["bootstrap.self-hosted-project-command"] },
           { "id": "M9-05", "title": "Canonical phase and IR schemas", "status": "complete", "features": ["bootstrap.canonical-ir-serialization", "bootstrap.self-hosted-build-reports"] },
-          { "id": "M9-06", "title": "Reproducible multi-entry project artifacts", "status": "complete", "features": ["toolchain.versioned-multi-entry-project-identity"] }
+          { "id": "M9-06", "title": "Reproducible multi-entry project artifacts", "status": "complete", "features": ["toolchain.multi-entry-project-identity"] }
         ]
       },
       {
@@ -55,7 +53,7 @@
           { "id": "M11-01", "title": "Core persistent and utility modules", "status": "complete", "features": ["stdlib.portable-json-values", "stdlib.portable-numeric-foundation", "stdlib.portable-result-values", "stdlib.sequence", "stdlib.text"] },
           { "id": "M11-02", "title": "Protocols transients and transducers", "status": "complete", "features": ["runtime.collection-capability-protocols", "runtime.collection-transducers", "runtime.owner-token-transient-collections"] },
           { "id": "M11-03", "title": "Generated module and export index", "status": "complete", "features": ["quality.generated-library-api-index", "quality.public-surface-registry"] },
-          { "id": "M11-04", "title": "Browser and worker capability packages", "status": "complete", "features": ["platform.explicit-host-capability-packages", "worker.protocol-v1"] },
+          { "id": "M11-04", "title": "Browser and worker capability packages", "status": "complete", "features": ["platform.explicit-host-capability-packages", "worker.protocol"] },
           { "id": "M11-05", "title": "Replaceable application adapter boundary", "status": "complete", "features": ["language.framework-neutral-library-interop"] },
           { "id": "M11-06", "title": "Dependency-prunable portable core closures", "status": "complete", "features": ["portable.function-closure", "portable.module-composition"] }
         ]
@@ -65,7 +63,7 @@
         "units": [
           { "id": "M12-01", "title": "Grammar-aware and mutation fuzz suites", "status": "complete", "features": ["quality.deterministic-reader-program-fuzz"] },
           { "id": "M12-02", "title": "Project scale and invalidation suite", "status": "complete", "features": ["quality.project-scale-invalidation"] },
-          { "id": "M12-03", "title": "Worker soak and recovery suite", "status": "complete", "features": ["worker.accelerated-operation-service-v1", "worker.lifecycle-soak-recovery"] },
+          { "id": "M12-03", "title": "Worker soak and recovery suite", "status": "complete", "features": ["worker.accelerated-operation-service", "worker.lifecycle-soak-recovery"] },
           { "id": "M12-04", "title": "Macro and worker capability security model", "status": "complete", "features": ["quality.hostile-boundary-security"] },
           { "id": "M12-05", "title": "Source-bound benchmark corpus and thresholds", "status": "complete", "features": ["quality.source-bound-core-performance-baseline"] },
           { "id": "M12-06", "title": "Dependency and generated-artifact audits", "status": "complete", "features": ["quality.repository-integrity-audits"] }
@@ -90,9 +88,9 @@
       { "id": "AC-03", "sourceSpec": "0040", "status": "complete", "features": ["compiler.structured-diagnostics", "quality.complete-negative-diagnostic-corpus"] },
       { "id": "AC-04", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.self-hosted-driver", "quality.continuous-compatibility-matrix"] },
       { "id": "AC-05", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.canonical-ir-serialization", "bootstrap.self-hosted-driver", "quality.complete-compiler-parity-corpus"] },
-      { "id": "AC-06", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.unified-build-operation", "toolchain.versioned-multi-entry-project-identity"] },
+      { "id": "AC-06", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.unified-build-operation", "toolchain.multi-entry-project-identity"] },
       { "id": "AC-07", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.self-hosted-driver", "quality.repeated-core-determinism"] },
-      { "id": "AC-08", "sourceSpec": "0040", "status": "complete", "features": ["editor.project-check-diagnostics", "quality.clean-configured-project-workflow", "toolchain.deterministic-concrete-syntax-formatter", "toolchain.host-neutral-project-watch", "toolchain.versioned-project-request-v1"] },
+      { "id": "AC-08", "sourceSpec": "0040", "status": "complete", "features": ["editor.project-check-diagnostics", "quality.clean-configured-project-workflow", "toolchain.deterministic-concrete-syntax-formatter", "toolchain.host-neutral-project-watch", "toolchain.project-request"] },
       { "id": "AC-09", "sourceSpec": "0040", "status": "complete", "features": ["project.incremental-builds", "quality.project-scale-invalidation"] },
       { "id": "AC-10", "sourceSpec": "0040", "status": "complete", "features": ["bootstrap.self-hosted-project-command", "language.esm-import-contract", "language.framework-neutral-library-interop"] },
       { "id": "AC-11", "sourceSpec": "0040", "status": "complete", "features": ["toolchain.deterministic-concrete-syntax-formatter"] },
@@ -100,7 +98,7 @@
       { "id": "AC-13", "sourceSpec": "0040", "status": "complete", "features": ["editor.persistent-evaluation", "toolchain.interactive-terminal-repl"] },
       { "id": "AC-14", "sourceSpec": "0040", "status": "complete", "features": ["compiler.source-maps", "editor.persistent-evaluation", "runtime.source-level-failure-mapping"] },
       { "id": "AC-15", "sourceSpec": "0040", "status": "complete", "features": ["quality.public-surface-registry", "stdlib.eliscript-core-protocol-algorithms"] },
-      { "id": "AC-16", "sourceSpec": "0040", "status": "complete", "features": ["worker.accelerated-operation-service-v1", "worker.emacs-integration", "worker.protocol-v1"] },
+      { "id": "AC-16", "sourceSpec": "0040", "status": "complete", "features": ["worker.accelerated-operation-service", "worker.emacs-integration", "worker.protocol"] },
       { "id": "AC-17", "sourceSpec": "0040", "status": "complete", "features": ["worker.emacs-analysis-performance-reinvestment"] },
       { "id": "AC-18", "sourceSpec": "0040", "status": "complete", "features": ["quality.deterministic-reader-program-fuzz"] },
       { "id": "AC-19", "sourceSpec": "0040", "status": "complete", "features": ["quality.project-scale-invalidation", "worker.lifecycle-soak-recovery"] },
@@ -116,8 +114,8 @@
       { "id": "PD-05", "sourceSpec": "0041", "status": "complete", "features": ["compiler.static-transient-ownership", "runtime.owner-token-transient-collections"] },
       { "id": "PD-06", "sourceSpec": "0041", "status": "complete", "features": ["runtime.collection-transducers", "stdlib.transient-builder-performance"] },
       { "id": "PD-07", "sourceSpec": "0041", "status": "complete", "features": ["quality.javascript-package-interop", "stdlib.javascript-container-interop"] },
-      { "id": "PD-08", "sourceSpec": "0041", "status": "complete", "features": ["worker.chunked-persistent-value-stream-v1", "worker.large-value-memory-probe", "worker.persistent-value-codec-v1"] },
-      { "id": "PD-09", "sourceSpec": "0041", "status": "complete", "features": ["worker.accelerated-operation-service-v1"] },
+      { "id": "PD-08", "sourceSpec": "0041", "status": "complete", "features": ["worker.chunked-persistent-value-stream", "worker.large-value-memory-probe", "worker.persistent-value-codec"] },
+      { "id": "PD-09", "sourceSpec": "0041", "status": "complete", "features": ["worker.accelerated-operation-service"] },
       { "id": "PD-10", "sourceSpec": "0041", "status": "complete", "features": ["worker.emacs-analysis-performance-reinvestment"] },
       { "id": "PD-11", "sourceSpec": "0041", "status": "complete", "features": ["stdlib.atomic-state-references"] }
     ]

@@ -36,11 +36,7 @@
     (error "ELISCRIPT_IR_FIXTURE is required"))
   (princ
    (eliscript-bootstrap-ir-oracle--ascii-json
-    (decode-coding-string
-     (json-serialize
-      (eliscript-bootstrap-tests-ir-results fixture)
-      :null-object nil
-      :false-object :false)
-     'utf-8-unix))))
+    (eliscript-bootstrap-tests-serialize-json
+     (eliscript-bootstrap-tests-ir-results fixture)))))
 
 ;;; bootstrap-ir-oracle.el ends here

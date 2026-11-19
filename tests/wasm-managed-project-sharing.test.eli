@@ -10,6 +10,8 @@
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/compiler/controlled-baseline.mjs" definition)
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
 
   (defconst dynamic-import (js* "(specifier) => import(specifier)"))
   (defconst receiver-fn (js* "(impl) => function (...args) { return impl(this, args); }"))
@@ -115,9 +117,9 @@
                              :frame (js-object :index 1)
                              :error (js-object :index 2)
                              :roots 0
-                             :runtime (js-array (js-object :name "frame-set" :index 0)
-                                                (js-object :name "last-error" :index 1)
-                                                (js-object :name "frame-clear-range" :index 2)))))
+                             :runtime (js-array (js-object :name "frame-set" :index 0 :resultType "u32")
+                                                (js-object :name "last-error" :index 1 :resultType "u32")
+                                                (js-object :name "frame-clear-range" :index 2 :resultType "u32")))))
              (first (funcall make-state))
              (expression (js-object :kind "literal" :type "u32" :children (js-array) :value 7))
              (stable (js-call literal-aliases :managed_result first expression t))
@@ -269,7 +271,7 @@
             (letfn ((unpack (value)
                       (if (and (not (nullish? value)) (= (value-type value) "object"))
                         (cond
-                          ((= (get value :kind) 4) (js-call a :readNumber value))
+                          ((= (get value :kind) 4) (decoded-number-value a value))
                           ((= (get value :kind) 5) (js-call a :readString value))
                           ((= (get value :kind) 14)
                            (globalThis.Array.from (js-object :length (js-call a :length value))
@@ -316,7 +318,7 @@
                           (js-call assert :deepEqual (unpack trace) (js-array 0))
                           (js-call a :collect)
                           (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-                          (funcall assert (Object/is (js-call a :readNumber input) -0.0))
+                          (funcall assert (Object/is (decoded-number-value a input) -0.0))
                           (js-call assert :equal (js-call a :readString text) "held"))))
                     (setq round (1+ round))))
                 (finally
@@ -378,7 +380,7 @@
     (let* ((args (aref __host_default_arguments_1 0)))
                             (let ((value (js-call a :invoke name (if (undefined? args) (js-array) args))))
                               (try
-                                (js-call a :readNumber value)
+                                (decoded-number-value a value)
                                 (finally (js-call a :release value)))))))
                  (four (funcall keep (js-call a :number 4)))
                  (five (funcall keep (js-call a :number 5)))
@@ -408,7 +410,7 @@
                   (js-call a :collect)
                   (js-call assert :equal (funcall numeric "apply-zero" (js-array current)) (funcall (aref oracle 1)))
                   (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-                  (funcall assert (Object/is (js-call a :readNumber zero) -0.0))
+                  (funcall assert (Object/is (decoded-number-value a zero) -0.0))
                   (setq index (1+ index))))
               (js-call (js-array (js-array "outer-write" (funcall (js-call reference :outer_write 4)))
                                  (js-array "shadow" (funcall (js-call reference :shadow 4)))
@@ -434,7 +436,7 @@
                   (funcall numeric "apply-one" (js-array rec six))
                   (funcall (js-call reference :recursive) 6)))
               (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-              (funcall assert (Object/is (js-call a :readNumber zero) -0.0))
+              (funcall assert (Object/is (decoded-number-value a zero) -0.0))
               (finally
                 (js-call a :leaveFrame caller)
                 (js-call retained :forEach (lambda (value) (js-call a :release value)))
@@ -695,8 +697,8 @@
 
   (test "binding finalization is idempotent on shared guard leaves and changes only the guarded binding expression"
     (lambda ()
-      (let* ((state (js-object :error (js-object :index 0) :locals (js-array) :roots 0))
-             (entry (js-object :index 9 :captured false))
+      (let* ((state (js-object :error (js-object :index 0 :type "u32") :locals (js-array) :roots 0))
+             (entry (js-object :index 9 :type "u32" :captured false))
              (binding (js-object :kind "binding-get" :type "u32" :children (js-array) :value nil :binding entry))
              (first (js-call guards :managed_guard state binding))
              (second (js-call guards :managed_guard state
@@ -1163,7 +1165,7 @@
                         (finally (js-call a :release result))))
                     (js-call a :collect)
                     (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-                    (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+                    (funcall assert (Object/is (decoded-number-value a held) -0.0))
                     (js-call assert :equal (js-call a :readString text) "held")))
                 (setq round (1+ round))))
             (js-call assert :throws
@@ -1173,11 +1175,11 @@
                   (and (not (nullish? diag)) (= (get diag :code) "ELI-RT0002")))))
             (js-call a :collect)
             (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-            (funcall assert (Object/is (js-call a :readNumber held) -0.0))
+            (funcall assert (Object/is (decoded-number-value a held) -0.0))
             (js-call assert :equal (js-call a :readString text) "held")
             (let ((recovered (js-call a :invoke "run" (js-array held))))
               (try
-                (funcall assert (Object/is (js-call a :readNumber recovered) -0.0))
+                (funcall assert (Object/is (decoded-number-value a recovered) -0.0))
                 (finally (js-call a :release recovered))))
             (finally
               (js-call a :leaveFrame caller)
@@ -1311,7 +1313,7 @@
                       (span (get (aref (get invalid :body) 0) :span)))
                   (js-call assert :equal (get error :message) message)
                   (js-call assert :deepEqual (get error :eliscriptDiagnostic)
-                    (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-B0001"
+                    (js-object :format "eliscript-diagnostic" :code "ELI-B0001"
                                :severity "error" :phase "managed-backend" :message message
                                :location (js-object :file "sharing-persistent.eli"
                                                     :start (js-object :line (get span :line)

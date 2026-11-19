@@ -13,6 +13,7 @@
     (funcall (js* "(specifier) => import(specifier)") specifier))
 
   (defconst js-boolean (js* "(value) => !!value"))
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
 
   (defvar directory undefined)
   (defvar b undefined)
@@ -73,7 +74,7 @@
                 (expected (funcall js-boolean value)))
             (js-call assert :equal (js-call a :invoke "truth" (js-array v)) expected)
             (let ((branch (js-call a :invoke "branch" (js-array v))))
-              (js-call assert :equal (js-call a :readNumber branch) (if expected 1 0))
+              (js-call assert :equal (funcall num-val a branch) (if expected 1 0))
               (js-call a :release branch))
             (let ((out (js-call a :invoke "shadow" (js-array v)))
                   (i 0))
@@ -179,7 +180,7 @@
         (lambda () (js-call a :invoke "truth" (js-array (globalThis.BigInt 1))))
         (lambda (e) (let ((diag (get e :eliscriptDiagnostic))) (and diag (= (get diag :code) "ELI-RT0001")))))
       (js-call assert :equal (get (js-call a :stats) :frameDepth) 1)
-      (funcall assert (Object/is (js-call a :readNumber value) -0.0))
+      (funcall assert (Object/is (funcall num-val a value) -0.0))
       (js-call a :leaveFrame frame)
       (finish a (js-array value)))))
 
@@ -218,4 +219,47 @@
                                  wasm)
                        (js-object :encoding "utf8" :timeout 30000))))
           (js-call assert :equal (get child :status) 0 (get child :stderr))))))
-    30000))
+    30000)  (test "TRUTHINESS-09 Lisp truth and JS ToBoolean stay separate across branches, raw primitives and array predicates" (lambda ()
+    (let* ((p (js-call (get b :compiler) :compile_ir_string
+                (str "(defun lisp-if (x) (if x 1 0))\n"
+                  "(defun js-bool (x) (js* \"!!x\"))\n"
+                  "(defun keep-length (arr) (get (js-call arr :filter (lambda (x) x)) :length))\n"
+                  "(export lisp-if js-bool keep-length)") "truthiness.eli"))
+           (out (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime)))
+           (a (instantiateManagedRuntime out))
+           (check (lambda (value managed expected)
+             (let ((v (funcall box a managed)))
+               (js-call assert :equal (funcall num-val a (js-call a :invoke "lisp-if" (js-array v)))
+                 (if (or (eq value nil) (eq value false) (undefined? value)) 0 1))
+               (js-call assert :equal (js-call a :invoke "js-bool" (js-array v)) expected)
+               (let* ((arr (js-call a :sourceArray (js-array v)))
+                      (kept (js-call a :invoke "keep-length" (js-array arr))))
+                 (js-call assert :equal (funcall num-val a kept) (if expected 1 0))
+                 (js-call a :release kept) (js-call a :release arr) (js-call a :release v))))))
+      (js-call a :auto 1)
+      (js-call (js-array
+        (js-array nil nil false) (js-array false false false) (js-array t t t)
+        (js-array undefined undefined false) (js-array 0 0 false) (js-array -0.0 -0.0 false)
+        (js-array globalThis.NaN globalThis.NaN false) (js-array "" "" false)
+        (js-array "0" "0" t) (js-array "false" "false" t)) :forEach
+        (lambda (row) (funcall check (aref row 0) (aref row 1) (aref row 2))))
+      ;; Objects and arrays are always truthy for both models.
+      (let ((object (js-call a :sourceObject (js-object)))
+            (array (js-call a :sourceArray (js-array))))
+        (try
+          (progn
+            (js-call assert :equal (funcall num-val a (js-call a :invoke "lisp-if" (js-array object))) 1)
+            (js-call assert :equal (js-call a :invoke "js-bool" (js-array object)) t)
+            (js-call assert :equal (funcall num-val a (js-call a :invoke "lisp-if" (js-array array))) 1)
+            (js-call assert :equal (js-call a :invoke "js-bool" (js-array array)) t)
+            (let* ((boxed (js-call a :sourceArray (js-array object array)))
+                   (kept (js-call a :invoke "keep-length" (js-array boxed))))
+              (js-call assert :equal (funcall num-val a kept) 2)
+              (js-call a :release kept) (js-call a :release boxed)))
+          (finally (js-call a :release array) (js-call a :release object))))
+      ;; The same samples agree with the host reference across every model.
+      (js-call (js-array nil false t undefined 0 -0.0 globalThis.NaN "" "0" "false" (js-object) (js-array)) :forEach
+        (lambda (value)
+          (js-call assert :equal (funcall js-boolean value) (if (funcall (js* "(v) => !!v") value) t false))))
+      (finish a))))
+)

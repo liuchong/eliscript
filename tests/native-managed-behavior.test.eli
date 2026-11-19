@@ -13,7 +13,7 @@
   (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
   (defconst sourceRoot (resolve (let ((value (get (get globalThis.process :env) :ELISCRIPT_NATIVE_MANAGED_SOURCE_ROOT))) (if (nullish? value) root value))))
   (defconst catalog (JSON/parse (readFileSync (resolve sourceRoot "tests/fixtures/wasm-managed-behavior.json") "utf8")))
-  (js-call assert :equal (get catalog :format) "eliscript-managed-bdd") (js-call assert :equal (get catalog :version) 1)
+  (js-call assert :equal (get catalog :format) "eliscript-managed-bdd")
   (defconst scenarios (js-call (get catalog :features) :flatMap (lambda (feature) (get feature :scenarios))))
   (js-call assert :equal (get scenarios :length) 101 "reuse every accepted managed BDD scenario")
   (js-call assert :equal (get (new globalThis.Set (js-call scenarios :map (lambda (scenario) (get scenario :id)))) :size) (get scenarios :length))

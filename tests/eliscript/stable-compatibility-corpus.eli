@@ -76,8 +76,8 @@
             (setq match (js-call pairs :exec bootstrap)))
           (js-call (expect (js-call mapped :has "tests/eliscript/stable-compatibility-corpus.eli")) :toBe t))
         (js-call (expect (await (checkStableCompatibilityCorpus (js-object :root root)))) :toEqual
-          (js-object :schemaVersion 1 :stableSpecifications 173 :stableFeatures 173
-            :provisionalFeatures 1 :excludedApplicationFeatures 2 :migrations 3
+          (js-object :stableSpecifications 173 :stableFeatures 173
+            :provisionalFeatures 1 :excludedApplicationFeatures 2 :migrations 2
             :fixtures (js-length (get value :fixtureFiles)) :evidenceLocators 682 :evidenceFiles 136
             :sourceFiles (get source-files :size) :readyForAc02 false
             :identity (js-call expect :stringMatching (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))))

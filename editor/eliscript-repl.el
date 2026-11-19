@@ -24,7 +24,6 @@
 (defvar eliscript-mode-eval-command)
 
 (defconst eliscript-repl--result-format "eliscript-evaluation-result")
-(defconst eliscript-repl--result-version 1)
 
 (defconst eliscript-repl--compilation-regexp
   '(eliscript-evaluation
@@ -185,7 +184,6 @@
 (defun eliscript-repl--synthetic-restart-result (pending revision)
   "Return a restart failure result for PENDING at REVISION."
   `((format . ,eliscript-repl--result-format)
-    (version . ,eliscript-repl--result-version)
     (id . ,(eliscript-repl--pending-id pending))
     (operation . ,(alist-get 'operation
                              (eliscript-repl--pending-payload pending)))
@@ -193,7 +191,6 @@
     (status . "error")
     (diagnostic
      (format . "eliscript-diagnostic")
-     (version . 1)
      (code . "ELI-E0003")
      (severity . "error")
      (phase . "evaluation-session")
@@ -227,7 +224,6 @@
   "Return non-nil when RESULT has the supported protocol identity."
   (and (listp result)
        (string-equal (alist-get 'format result) eliscript-repl--result-format)
-       (= (or (alist-get 'version result) -1) eliscript-repl--result-version)
        (integerp (alist-get 'id result))))
 
 (defun eliscript-repl--handle-result (session result)
@@ -236,7 +232,6 @@
       (eliscript-repl--insert-result
        session
        `((format . ,eliscript-repl--result-format)
-         (version . ,eliscript-repl--result-version)
          (id . 0) (operation . "unknown") (revision . 0)
          (status . "error")
          (diagnostic
@@ -277,7 +272,6 @@
                (eliscript-repl--insert-result
                 session
                 `((format . ,eliscript-repl--result-format)
-                  (version . ,eliscript-repl--result-version)
                   (id . 0) (operation . "unknown") (revision . 0)
                   (status . "error")
                   (diagnostic
@@ -318,7 +312,6 @@
           (eliscript-repl--insert-result
            session
            `((format . ,eliscript-repl--result-format)
-             (version . ,eliscript-repl--result-version)
              (id . 0) (operation . "restart") (revision . 0)
              (status . "error")
              (diagnostic

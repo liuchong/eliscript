@@ -15,7 +15,7 @@
            (criteria (get run :criteria)) (tally (js-object :pass 0 :incomplete 0 :fail 0 :total (get criteria :length))))
       (js-call criteria :forEach (lambda (criterion)
         (let ((key (get criterion :result))) (put tally key (1+ (get tally key))))))
-      (js-call (expect manifest) :toMatchObject (js-object :schemaVersion 1 :format "eliscript-1.0-acceptance-manifest" :version 1
+      (js-call (expect manifest) :toMatchObject (js-object :format "eliscript-1.0-acceptance-manifest"
         :summary (js-object :criteria tally :corpusComplete t :operationalSuccess t :evidenceComplete t :blockingDefects 0
           :acceptancePass (and (= (get tally :incomplete) 0) (= (get tally :fail) 0)))))
       (same (js-call (get manifest :evidence) :map (lambda (group) (get group :id))) (js-array "benchmark" "fuzz" "scale" "soak" "test"))

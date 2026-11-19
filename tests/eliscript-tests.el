@@ -143,7 +143,7 @@
     (should (= (eliscript-source-span-end-column span) 10))
     (should (string-match-p
              (regexp-quote
-              "\"format\":\"eliscript-diagnostic\",\"version\":1")
+              "\"format\":\"eliscript-diagnostic\",\"code\":\"ELI-A0001\"")
              json))
     (should (string-match-p
              (regexp-quote
@@ -3165,6 +3165,68 @@ already nested suffix, or use either production emitter to build the oracle."
                     "(defun invalid () (loop ((value 0)) (try (recur 1) (finally))))"))
     (should-error (eliscript-compile-string source "try-invalid.eli") :type 'eliscript-compile-error)
     (should-error (eliscript-tests--ground-compile-string source "try-invalid.eli") :type 'eliscript-compile-error)))
+
+(ert-deftest eliscript-proven-number-ast-ir-boundaries-match ()
+  "AST and IR proven-number traversal agree on vectors, quotes, and nesting.
+
+Unquoted vector literals are executable code, quoted forms are data, `let`
+initializers introduce their own scopes, `loop` bindings count as loops, and
+an inner operand keeps its own conversions even when the outer operator is
+proved."
+  (cl-labels
+      ((marker-p (output marker)
+         (and (string-match-p (regexp-quote marker) output) t))
+       (function-body (output)
+         (substring output (or (string-match "function f(" output) 0)))
+       (assert-case (source present markers)
+         (let* ((ir (eliscript-compile-string source "proven-boundary.eli"))
+                (ast (eliscript-tests--ground-compile-string
+                      source "proven-boundary.eli"))
+                (ir-body (function-body ir))
+                (ast-body (function-body ast)))
+           (should (equal ir ast))
+           (dolist (marker markers)
+             (should (eq present (marker-p ir-body marker)))
+             (should (eq present (marker-p ast-body marker)))))))
+    ;; Unquoted vector elements are executable: the reassignment disqualifies
+    ;; the private Number proof in both emitters.
+    (assert-case
+     "(defun f (s) (let ((i 0)) (while (< i 1) [(setq i s)]) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    ;; Same for vectors that carry a lambda or raw JavaScript element.
+    (assert-case
+     "(defun f () (let ((i 0)) (while (< i 1) [(lambda () i)] (setq i (1+ i))) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    (assert-case
+     "(defun f () (let ((i 0)) (while (< i 1) [(js* \"0\")] (setq i (1+ i))) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    ;; Quoted forms are data: they never disqualify the proof.
+    (assert-case
+     "(defun f () (let ((i 0)) (while (< i 3) '(setq i \"x\") '[(setq i \"x\")] (setq i (1+ i))) (* i 2)))"
+     nil '("__eliscript_numeric_mul" "__eliscript_numeric_relation"))
+    ;; A `let` initializer opens its own scope, so the inner `i` shadows.
+    (assert-case
+     "(defun f (s) (let ((i 0) (b (let ((i s)) i))) (while (< i 1) (setq i 1)) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    ;; Raw JavaScript inside the loop body disqualifies the whole proof.
+    (assert-case
+     "(defun f () (let ((i 0)) (while (< i 1) (js* \"0\") (setq i 1)) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    ;; `loop` bindings are loops too, and a fresh `k` does not disturb `acc`.
+    (assert-case
+     "(defun f () (let ((acc 0)) (loop ((k 0)) (when (< k 3) (setq acc (+ acc 1)) (recur (1+ k)))) (* acc 2)))"
+     nil '("__eliscript_numeric_mul"))
+    ;; A nested assignment to a candidate propagates through the outer `setq`.
+    (assert-case
+     "(defun f (p s) (let ((i 0)) (while (< i 1) (setq p (setq i s))) (* i 2)))"
+     t '("__eliscript_numeric_mul"))
+    ;; Proved outer operators keep the inner operand conversions.
+    (assert-case
+     "(defun f (s) (let ((i 0)) (while (< i 2) (setq i (1+ i))) (- i (1- s))))"
+     t '("__eliscript_numeric_decrement"))
+    (assert-case
+     "(defun f (s) (let ((i 0)) (while (< i 2) (setq i (1+ i))) (- i (- i (int32 s)))))"
+     t '("__eliscript_numeric_int32"))))
 
 (provide 'eliscript-tests)
 

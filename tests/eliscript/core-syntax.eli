@@ -110,7 +110,9 @@
                               (lambda (entry) (js-object :id (get entry :id) :code (get entry :code)
                                                         :extension (= (get entry :extension) t))))))
            (environment (Object/assign (js-object) (get globalThis.process :env)
-                                       (js-object :ELISCRIPT_ORACLE_CASES payload
+                                       (js-object :LC_ALL "en_US.UTF-8"
+                                                  :LANG "en_US.UTF-8"
+                                                  :ELISCRIPT_ORACLE_CASES payload
                                                   :ELISCRIPT_ORACLE_PROVIDE (JSON/stringify provide)
                                                   :ELISCRIPT_ORACLE_LOAD (JSON/stringify load))))
            (child (spawnSync emacs-program

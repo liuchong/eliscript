@@ -36,11 +36,7 @@
     (error "ELISCRIPT_EXPANDER_FIXTURE is required"))
   (princ
    (eliscript-bootstrap-expander-oracle--ascii-json
-    (decode-coding-string
-     (json-serialize
-      (eliscript-bootstrap-tests-expander-results fixture)
-      :null-object nil
-      :false-object :false)
-     'utf-8-unix))))
+    (eliscript-bootstrap-tests-serialize-json
+     (eliscript-bootstrap-tests-expander-results fixture)))))
 
 ;;; bootstrap-expander-oracle.el ends here

@@ -24,6 +24,27 @@
         (throw error))))
   (defconst number-pattern
     (new globalThis.RegExp "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$"))
+  (defconst reader-delim-table
+    (let ((t8 (new globalThis.Array 128))
+          (idx 0))
+      (while (< idx 128)
+        (put t8 idx 0)
+        (setq idx (+ idx 1)))
+      ;; 0 = ordinary ASCII token char
+      ;; 1 = non-whitespace/non-comment delimiter
+      ;; 3 = horizontal whitespace (9, 12, 13, 32)
+      ;; 4 = newline (10)
+      ;; 5 = comment semicolon (59)
+      (put t8 9 3) (put t8 12 3) (put t8 13 3) (put t8 32 3)
+      (put t8 10 4)
+      (put t8 59 5)
+      (put t8 34 1) (put t8 39 1) (put t8 40 1) (put t8 41 1) (put t8 44 1)
+      (put t8 91 1) (put t8 93 1) (put t8 96 1) (put t8 123 1) (put t8 125 1)
+      t8))
+  (defmacro r< (a b) `(funcall (js* "(a, b) => a < b") ,a ,b))
+  (defmacro r<= (a b) `(funcall (js* "(a, b) => a <= b") ,a ,b))
+  (defmacro r>= (a b) `(funcall (js* "(a, b) => a >= b") ,a ,b))
+  (defmacro r| (a b) `(funcall (js* "(a, b) => a | b") ,a ,b))
   ;; One strict-identity rule per character class, shared by the two scanning
   ;; loops and the public predicate entries. The operand is always an
   ;; already-bound value (a parameter or a loop local), so it is read, never
@@ -45,33 +66,33 @@
   (defun reader-atom-name (state name)
     ;; This table belongs only to the private read-string state. Syntax nodes
     ;; keep immutable names directly, never the state or the table itself.
-    (let ((names (get state :atomNames nil)))
-      (if (nil? names) name
+    (let ((names (aref state "atomNames")))
+      (if (nullish? names) name
         (let ((existing (js-call names :get name)))
-          (if (undefined? existing)
+          (if (eq existing undefined)
               (progn (js-call names :set name name) name)
             existing)))))
   (defun mark
     (state)
     (js-object
       :index
-      (get state :index)
+      (aref state "index")
       :offset
-      (get state :offset)
+      (aref state "offset")
       :line
-      (get state :line)
+      (aref state "line")
       :column
-      (get state :column)))
+      (aref state "column")))
   (defun span-from
     (state start)
     (make-span
-      (get state :filename)
-      (get start :offset)
-      (get state :offset)
-      (get start :line)
-      (get start :column)
-      (get state :line)
-      (get state :column)))
+      (aref state "filename")
+      (aref start "offset")
+      (aref state "offset")
+      (aref start "line")
+      (aref start "column")
+      (aref state "line")
+      (aref state "column")))
   (defun fail-at
     (state position message &optional width)
     (let ((span-width (or width 1)))
@@ -79,8 +100,6 @@
         (js-object
           :format
           "eliscript-diagnostic"
-          :version
-          1
           :code
           "ELI-R0001"
           :severity
@@ -146,7 +165,7 @@
       (= code 59)
       (= code 96)))
   (defun delimiter-code-p (code) (delimiter-code? code))
-  (defun closing-code-p (code) (or (= code 41) (= code 93) (= code 125)))
+  (defun closing-code-p (code) (or (eq code 41) (eq code 93) (eq code 125)))
   (defun code-character (code) (js-call globalThis.String :fromCodePoint code))
   (defun invalid-closing
     (state position code)
@@ -170,26 +189,36 @@
                (advance state)))
             (t (setq done t)))))))
 
+  (defconst fast-skip-fn
+    (let ((table reader-delim-table))
+      (js* "/* @eliscript-js-host-fastpath */ (state, source) => { const len = source.length | 0; let index = state.index | 0; if (index >= len) return null; let unit = source.charCodeAt(index); if (unit >= 128) return null; let tag = table[unit]; if (tag < 3) return null; let offset = state.offset | 0, column = state.column | 0, line = -1; for (;;) { if (tag === 3) { const run_start = index; index = (index + 1) | 0; while (index < len) { const u2 = source.charCodeAt(index); if (u2 >= 128 || table[u2] !== 3) break; index = (index + 1) | 0; } const step = (index - run_start) | 0; offset = (offset + step) | 0; column = (column + step) | 0; } else if (tag === 4) { if (line === -1) line = state.line | 0; index = (index + 1) | 0; offset = (offset + 1) | 0; line = (line + 1) | 0; column = 1; } else if (tag === 5) { index = (index + 1) | 0; offset = (offset + 1) | 0; column = (column + 1) | 0; const nl = source.indexOf('\\n', index); const end = nl === -1 ? len : nl; const c_start = index; let pairs = 0; while (index < end) { unit = source.charCodeAt(index); if (unit >= 55296 && unit <= 56319 && ((index + 1) | 0) < end) { const low = source.charCodeAt((index + 1) | 0); if (low >= 56320 && low <= 57343) { index = (index + 2) | 0; pairs = (pairs + 1) | 0; continue; } } index = (index + 1) | 0; } const c_step = ((end - c_start) - pairs) | 0; offset = (offset + c_step) | 0; column = (column + c_step) | 0; } else { break; } if (index >= len) break; unit = source.charCodeAt(index); if (unit >= 128) break; tag = table[unit]; } state.index = index; state.offset = offset; if (line !== -1) state.line = line; state.column = column; return null; }")))
+
   (defun skip-space-and-comments
     (state)
-    (let* ((source (aref state "source")) (index (aref state "index"))
-           (offset (aref state "offset")) (line (aref state "line"))
-           (column (aref state "column")) (done false))
-      (while (and (eq done false) (< index (aref source "length")))
-        (let ((code (js-call source :codePointAt index)))
-          (if (whitespace-code? code)
-            (progn
-              (setq index (+ index 1)) (setq offset (+ offset 1))
-              (if (eq code 10) (progn (setq line (+ line 1)) (setq column 1))
-                (setq column (+ column 1))))
-            (if (eq code 59)
-              (while (and (< index (aref source "length"))
-                          (not (eq (js-call source :charCodeAt index) 10)))
-                (setq index (+ index (if (> (js-call source :codePointAt index) 65535) 2 1)))
-                (setq offset (+ offset 1)) (setq column (+ column 1)))
-              (setq done t)))))
-      (put state :index index) (put state :offset offset)
-      (put state :line line) (put state :column column) nil))
+    (let ((source (aref state "source")))
+      (if (and (not (nil? fast-skip-fn)) (eq (js* "typeof source") "string"))
+          (funcall fast-skip-fn state source)
+        (let ((index (aref state "index"))
+              (offset (aref state "offset"))
+              (line (aref state "line"))
+              (column (aref state "column"))
+              (done false))
+          (while (and (eq done false) (< index (aref source "length")))
+            (let ((code (js-call source :codePointAt index)))
+              (if (whitespace-code? code)
+                  (progn
+                    (setq index (+ index 1)) (setq offset (+ offset 1))
+                    (if (eq code 10) (progn (setq line (+ line 1)) (setq column 1))
+                      (setq column (+ column 1))))
+                (if (eq code 59)
+                    (while (and (< index (aref source "length"))
+                                (not (eq (js-call source :charCodeAt index) 10)))
+                      (setq index (+ index (if (> (js-call source :codePointAt index) 65535) 2 1)))
+                      (setq offset (+ offset 1)) (setq column (+ column 1)))
+                  (setq done t)))))
+          (put state :index index) (put state :offset offset)
+          (put state :line line) (put state :column column) nil))))
+
   (defun reference-read-token (state start)
     (while (not (delimiter-code-p (peek-code state)))
       (advance state))
@@ -199,19 +228,29 @@
       (get start :index)
       (get state :index)))
 
+  (defconst fast-token-fn
+    (let ((table reader-delim-table))
+      (js* "/* @eliscript-js-host-fastpath */ (state, start, source) => { const len = source.length | 0; const init_index = state.index | 0; let index = init_index, surrogate_pairs = 0; const len4 = (len - 3) | 0; while (index < len4) { const u0 = source.charCodeAt(index); if (u0 >= 128 || table[u0] !== 0) break; const u1 = source.charCodeAt((index + 1) | 0); if (u1 >= 128 || table[u1] !== 0) { index = (index + 1) | 0; break; } const u2 = source.charCodeAt((index + 2) | 0); if (u2 >= 128 || table[u2] !== 0) { index = (index + 2) | 0; break; } const u3 = source.charCodeAt((index + 3) | 0); if (u3 >= 128 || table[u3] !== 0) { index = (index + 3) | 0; break; } index = (index + 4) | 0; } while (index < len) { const unit = source.charCodeAt(index); if (unit < 128) { if (table[unit] !== 0) break; index = (index + 1) | 0; } else if (unit >= 55296 && unit <= 56319 && ((index + 1) | 0) < len) { const low = source.charCodeAt((index + 1) | 0); if (low >= 56320 && low <= 57343) { index = (index + 2) | 0; surrogate_pairs = (surrogate_pairs + 1) | 0; } else { index = (index + 1) | 0; } } else { index = (index + 1) | 0; } } const consumed = ((index - init_index) - surrogate_pairs) | 0; state.index = index; state.offset = ((state.offset | 0) + consumed) | 0; state.column = ((state.column | 0) + consumed) | 0; return source.slice(start.index | 0, index); }")))
+
   (defun read-token
     (state start)
-    (let* ((source (aref state "source")) (index (aref state "index"))
-           (consumed 0) (done false))
-      (while (eq done false)
-        (let ((code (js-call source :codePointAt index)))
-          (if (delimiter-code? code) (setq done t)
-            (progn (setq index (+ index (if (> code 65535) 2 1)))
-                   (setq consumed (1+ consumed))))))
-      (put state :index index)
-      (put state :offset (+ (aref state "offset") consumed))
-      (put state :column (+ (aref state "column") consumed))
-      (js-call source :slice (aref start "index") index)))
+    (let ((source (aref state "source")))
+      (if (and (not (nil? fast-token-fn)) (eq (js* "typeof source") "string"))
+          (funcall fast-token-fn state start source)
+        (let ((start-index (aref start "index"))
+              (index (aref state "index"))
+              (consumed 0)
+              (done false))
+          (while (eq done false)
+            (let ((code (js-call source :codePointAt index)))
+              (if (delimiter-code? code) (setq done t)
+                (progn
+                  (setq index (+ index (if (> code 65535) 2 1)))
+                  (setq consumed (+ consumed 1))))))
+          (put state :index index)
+          (put state :offset (+ (aref state "offset") consumed))
+          (put state :column (+ (aref state "column") consumed))
+          (js-call source :slice start-index index)))))
   (defun queue-opening-index
     (state)
     (let*
@@ -251,12 +290,14 @@
             (= (js-call name :indexOf "/" (1+ separator)) -1))))))
   (defun read-atom
     (state start)
-    (let* ((token (read-token state start)) (span (span-from state start)))
-      (cond ((= token "nil") (literal-node nil span))
-        ((= token "t") (literal-node t span))
-        ((= token "false") (literal-node false span))
-        ((= token "undefined") (undefined-node span))
-        ((js-call token :startsWith ":")
+    (let* ((token (read-token state start))
+           (span (span-from state start))
+           (c0 (if (> (aref token "length") 0) (string-code-unit-at token 0) 0)))
+      (cond ((eq token "nil") (literal-node nil span))
+        ((eq token "t") (literal-node t span))
+        ((eq token "false") (literal-node false span))
+        ((eq token "undefined") (undefined-node span))
+        ((eq c0 58)
           (let ((name (js-call token :slice 1)))
             (unless (valid-keyword-name-p name)
               (fail-at
@@ -265,7 +306,8 @@
                 (str "invalid keyword literal: " token)
                 (- (get state :offset) (get start :offset))))
             (keyword-node (reader-atom-name state name) span)))
-        ((number-token-p token) (literal-node (funcall globalThis.Number token) span))
+        ((and (<= c0 57) (>= c0 43) (number-token-p token))
+         (literal-node (funcall globalThis.Number token) span))
         (t (symbol-node (reader-atom-name state token) span)))))
 
   (defun string-escape-digit (code radix)
@@ -466,37 +508,37 @@
     (state start closing kind &optional tagged-opening-span)
     (advance state)
     (let ((opening-span (span-from state start)) (items (js-array)) (done false))
-      (while (not done)
+      (while (eq done false)
         (skip-space-and-comments state)
         (let ((code (peek-code state)))
           (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
-            ((= code closing) (advance state) (setq done t))
+            ((eq code closing) (advance state) (setq done t))
             ((closing-code-p code) (invalid-closing state start code))
             (t (js-call items :push (read-node state))))))
       (let ((span (span-from state start)))
         (cond
-          ((= kind "map")
-            (when (= (% (get items :length) 2) 1)
+          ((eq kind "map")
+            (when (eq (% (aref items "length") 2) 1)
               (fail-at
                 state
                 start
                 "map literal must contain an even number of forms"
-                (- (get state :offset) (get start :offset))))
+                (- (aref state "offset") (aref start "offset"))))
             (let ((form-items (js-array (symbol-node (reader-atom-name state "hash-map") opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
-          ((= kind "set")
+          ((eq kind "set")
             (let ((form-items (js-array (symbol-node (reader-atom-name state "hash-set") opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
-          ((= kind "queue")
+          ((eq kind "queue")
             (let
               (
                 (form-items
                   (js-array (symbol-node (reader-atom-name state "queue") (or tagged-opening-span opening-span)))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
-          ((and (= kind "list") (= (get items :length) 0)) (literal-node nil span))
+          ((and (eq kind "list") (eq (aref items "length") 0)) (literal-node nil span))
           (t (collection-node kind items span))))))
   (defun read-queue
     (state start opening)
@@ -524,18 +566,18 @@
     (skip-space-and-comments state)
     (let ((start (mark state)) (code (peek-code state)))
       (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
-        ((= code 40) (read-collection state start 41 "list"))
-        ((= code 91) (read-collection state start 93 "vector"))
-        ((= code 123) (read-collection state start 125 "map"))
+        ((eq code 40) (read-collection state start 41 "list"))
+        ((eq code 91) (read-collection state start 93 "vector"))
+        ((eq code 123) (read-collection state start 125 "map"))
         ((closing-code-p code) (invalid-closing state start code))
-        ((= code 34) (read-string-literal state start))
-        ((= code 39) (read-prefix state start "quote" 1))
-        ((= code 96) (read-prefix state start "`" 1))
-        ((= code 44)
-          (if (= (peek-code-ahead state 1) 64)
+        ((eq code 34) (read-string-literal state start))
+        ((eq code 39) (read-prefix state start "quote" 1))
+        ((eq code 96) (read-prefix state start "`" 1))
+        ((eq code 44)
+          (if (eq (peek-code-ahead state 1) 64)
             (read-prefix state start ",@" 2)
             (read-prefix state start "," 1)))
-        ((= code 35) (read-dispatch state start))
+        ((eq code 35) (read-dispatch state start))
         (t (read-atom state start)))))
   (defun read-string
     (source filename)

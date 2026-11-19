@@ -12,7 +12,6 @@
 
   (defconst projectDirectory root)
   (defconst VERSION_COMPARISON_FORMAT "eliscript-version-comparison-benchmark")
-  (defconst VERSION_COMPARISON_VERSION 1)
 
   (defconst VERSION_COMPARISON_DIMENSIONS
     (Object/freeze (js-array "emacsLisp" "previousMajor" "previousMinor" "latest")))
@@ -366,8 +365,7 @@
 
   (defun validateVersionComparisonReport (report)
     (when (or (not report)
-              (/= (get report :format) VERSION_COMPARISON_FORMAT)
-              (/= (get report :version) VERSION_COMPARISON_VERSION))
+              (/= (get report :format) VERSION_COMPARISON_FORMAT))
       (throw (new globalThis.TypeError "invalid version comparison benchmark report identity")))
     (let ((dimIdx 0))
       (while (< dimIdx (js-length VERSION_COMPARISON_DIMENSIONS))
@@ -530,7 +528,6 @@
       (let ((report
               (js-object
                 :format VERSION_COMPARISON_FORMAT
-                :version VERSION_COMPARISON_VERSION
                 :generatedAt (js-call (new globalThis.Date) :toISOString)
                 :host (js-object
                         :platform (get process :platform)
@@ -830,7 +827,6 @@
 
   (export
     VERSION_COMPARISON_FORMAT
-    VERSION_COMPARISON_VERSION
     VERSION_COMPARISON_DIMENSIONS
     VERSION_COMPARISON_WORKLOADS
     parseSemver

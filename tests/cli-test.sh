@@ -93,7 +93,7 @@ fi
 DIAGNOSTIC_FILE="$TEMP_DIR/diagnostic.json" bun -e '
   const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
   if (diagnostic.format !== "eliscript-diagnostic" ||
-      diagnostic.version !== 1 ||
+      "version" in diagnostic ||
       diagnostic.code !== "ELI-A0001" ||
       diagnostic.severity !== "error" ||
       diagnostic.phase !== "analysis" ||

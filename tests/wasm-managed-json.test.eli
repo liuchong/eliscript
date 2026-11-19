@@ -471,7 +471,7 @@
           (funcall assert (Object/is (js-call a :readNumber held) -0.0))
           (js-call a :leaveFrame frame)
           (finish a (js-array text held))))
-      (let* ((small (get (instance (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384)) :a))
+      (let* ((small (get (instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)) :a))
              (nums (Array/from (js-object :length 1000) (lambda (_v i) i)))
              (many (js-call small :string (str "[" (js-call nums :join ",") "]")))
              (saved (js-call small :number -0.0))
@@ -493,21 +493,22 @@
       (let ((source (await (readFile "bootstrap/runtime/memory.eli" "utf8"))))
         (js-call
           (js-array
-            (js-array "heap-json-take" "heap text state" "parse-value" "1")
-            (js-array "heap-json-write" "heap builder unit" "stringify-value" "x"))
+            (js-array "heap-json-take" "heap text state" "parse-value" "1" "(memory-sig u32 u32 v64 v64) ")
+            (js-array "heap-json-write" "heap builder unit" "stringify-value" "x" "(memory-sig u32 u32 v64 u32) "))
           :forEach
           (lambda (quad)
             (let* ((helper (aref quad 0))
                    (args (aref quad 1))
                    (entry (aref quad 2))
                    (input (aref quad 3))
+                   (signature (aref quad 4))
                    (start (js-call source :indexOf (str "  (defun " helper " ")))
                    (end (js-call source :indexOf "  (defun " (+ start 3))))
               (funcall assert (and (>= start 0) (> end start)))
               (let* ((injected
                        (js-call (get b :compiler) :compile_ir_string
                          (str (js-call source :slice 0 start)
-                              "(defun " helper " (" args ") (load-u32 4294967295))\n"
+                              "(defun " helper " (" args ") " signature "(load-u32 4294967295))\n"
                               (js-call source :slice end))
                          "json-trap.eli"))
                      (a (instantiateManagedRuntime

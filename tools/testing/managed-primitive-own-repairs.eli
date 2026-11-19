@@ -37,7 +37,7 @@
   (defun transformOriginalPrimitiveRuntimeSuite (source relative)
     (let* ((primitive (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs"))
            (operand (= relative "tests/wasm-managed-operand-conversion.test.mjs"))
-           (expected (if primitive "9594c226bd13e1b921a98be0a285d192620df1760e26ce5ccef6bb95be4f7541" "8200a307bdca1f2c63d687866061b21e39e4a5f977220e0c70681fd8b39fc23b")))
+           (expected (if primitive "c7d2dded926763c5fdc69257457849d47e7fcbb675d7b0881cbf8e6640c15a61" "3ad8ba6485f6d7b18de0eee6cdb7bfded1708eae7cad370f85747ba2db4c65de")))
       (unless (and (or primitive operand) (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") expected))
         (throw (new globalThis.TypeError "complete original primitive runtime source identity changed")))
       (let* ((maintained (maintainedSuiteSource root relative source)) (seen (new globalThis.Set))
@@ -46,10 +46,10 @@
                  (let ((text (funcall node-text node)) (replacement undefined) (kind undefined))
                    (cond
                      ((and primitive (= (value-type (get node :value)) "string")
-                           (js-call (get node :value) :includes "(when (and (= value 2) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"))
+                           (js-call (get node :value) :includes "(when (and (= value (v64-literal 2 0)) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"))
                        (setq kind "trap" replacement (JSON/stringify (js-call (get node :value) :replace
-                         "(when (and (= value 2) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"
-                         "(when (= value 2) (load-u32 4294967295))"))))
+                         "(when (and (= value (v64-literal 2 0)) (= (load-u32 20) 0)) (store-u32 20 1) (load-u32 4294967295))"
+                         "(when (= value (v64-literal 2 0)) (load-u32 4294967295))"))))
                      ((and primitive (sourceCall node "js-call") (js-call text :startsWith "(js-call assert :equal")
                            (js-call text :includes "(js-call a :invoke \"own\" (js-array t field))"))
                        (setq kind "own" replacement "(js-call assert :equal (js-call a :invoke \"own\" (js-array false field)) false)"))

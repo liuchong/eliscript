@@ -206,7 +206,7 @@
                 (js-object :cwd directory :input "(defun value () 42) (export value)" :encoding "utf8" :timeout 10000 :env env))))
                 (eqv (get child :error) undefined (get child :stderr)) (eqv (get child :status) 1 (get child :stderr)) (eqv (get child :stdout) "")
                 (let ((record (JSON/parse (get child :stderr))))
-                  (eqv (get record :format) "eliscript-compiler-cli-error") (eqv (get record :version) 1) (eqv (get (get record :error) :code) (get item :code))
+                  (eqv (get record :format) "eliscript-compiler-cli-error") (eqv (get (get record :error) :code) (get item :code))
                   (each (js-array "name" "message" "stack") (lambda (key) (eqv (funcall hostTypeof (get (get record :error) key)) "string")))
                   (when (= (get item :code) "ENOENT") (assert (js-call (get (get record :error) :message) :includes "不存在😀.json")))))
               (setq j (1+ j)))

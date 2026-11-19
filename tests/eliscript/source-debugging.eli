@@ -8,6 +8,7 @@
   (import "../tools/backends/build.mjs" root)
   (import "../tools/backends/compiler-corpus-debugging.mjs" transportOriginalSourceDebuggingCorpus)
   (import "../tools/testing/source-debugging.mjs" runSourceDebuggingCase presentDebuggingCommandResult)
+  (import "../runtime/source-mapping.mjs" SourceMappingError decodeSourceMappings sourceMapDescriptor parseJavaScriptStack mapSourceFrames sourceMappedFailure)
   (defun hash (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defasync original-document ()
     (let* ((file "tests/source-debugging.test.mjs") (source (await (readFile (resolve root file) "utf8"))))
@@ -68,4 +69,61 @@
             (let ((document (await (original-document))))
               (funcall (aref mutations index) (aref (get document :records) 0))
               (await (js-call assert :rejects (transportOriginalSourceDebuggingCorpus document (js-object :sourceRoot root)) globalThis.TypeError)))
-            (setq index (1+ index))))))))
+            (setq index (1+ index)))))))
+  (defun source-mapping-error-p (error code)
+    (and (js-call SourceMappingError (get globalThis.Symbol :hasInstance) error)
+         (= (get error :code) code)))
+  (defun source-mapping-lines (segment)
+    (js-object :generatedFile "generated.js" :sources (js-array "source.eli")
+      :lines (js-array (js-array segment))))
+  (test "source mapping public surface keeps its arity, error taxonomy and numeric boundaries"
+    (lambda ()
+      (js-call assert :strictEqual (get SourceMappingError :length) 2)
+      (js-call assert :strictEqual (get decodeSourceMappings :length) 1)
+      (js-call assert :strictEqual (get sourceMapDescriptor :length) 1)
+      (js-call assert :strictEqual (get parseJavaScriptStack :length) 1)
+      (js-call assert :strictEqual (get mapSourceFrames :length) 2)
+      (js-call assert :strictEqual (get sourceMappedFailure :length) 2)
+      (let ((error (new SourceMappingError "code" "message")))
+        (js-call assert :ok (js-call globalThis.Error (get globalThis.Symbol :hasInstance) error))
+        (js-call assert :ok (js-call SourceMappingError (get globalThis.Symbol :hasInstance) error))
+        (js-call assert :strictEqual (get error :name) "SourceMappingError")
+        (js-call assert :strictEqual (get error :code) "code")
+        (js-call assert :strictEqual (get error :message) "message"))
+      ;; Negative zero is a legal generated column; every non-integral,
+      ;; infinite or negative number is rejected in each numeric field.
+      (let ((descriptor (sourceMapDescriptor (source-mapping-lines (js-object :generatedColumn -0)))))
+        (js-call assert :ok (Object/is (get (aref (aref (get descriptor :lines) 0) 0) :generatedColumn) -0)))
+      (js-call (js-array globalThis.NaN globalThis.Infinity (- globalThis.Infinity) -1 1.5) :forEach
+        (lambda (bad)
+          (js-call assert :throws
+            (lambda () (sourceMapDescriptor (source-mapping-lines (js-object :generatedColumn bad))))
+            (lambda (error) (source-mapping-error-p error "invalid-source-map")))
+          (js-call assert :throws
+            (lambda () (sourceMapDescriptor (source-mapping-lines
+                       (js-object :generatedColumn 0 :source bad :originalLine 0 :originalColumn 0))))
+            (lambda (error) (source-mapping-error-p error "invalid-source-map")))
+          (js-call assert :throws
+            (lambda () (sourceMapDescriptor (source-mapping-lines
+                       (js-object :generatedColumn 0 :source 0 :originalLine bad :originalColumn 0))))
+            (lambda (error) (source-mapping-error-p error "invalid-source-map")))
+          (js-call assert :throws
+            (lambda () (sourceMapDescriptor (source-mapping-lines
+                       (js-object :generatedColumn 0 :source 0 :originalLine 0 :originalColumn bad))))
+            (lambda (error) (source-mapping-error-p error "invalid-source-map")))))
+      (js-call assert :throws (lambda () (decodeSourceMappings 42))
+        (lambda (error) (source-mapping-error-p error "invalid-mappings")))
+      (js-call assert :throws (lambda () (decodeSourceMappings "!"))
+        (lambda (error) (source-mapping-error-p error "invalid-vlq")))
+      (js-call assert :throws (lambda () (decodeSourceMappings "ggggggggggggA"))
+        (lambda (error) (source-mapping-error-p error "invalid-vlq")))
+      (js-call assert :throws (lambda () (decodeSourceMappings "AA"))
+        (lambda (error) (source-mapping-error-p error "invalid-segment")))
+      ;; A value without a stack still yields a frozen failure with no location.
+      (js-call (js-array nil undefined -0 globalThis.NaN) :forEach
+        (lambda (cause)
+          (let ((result (sourceMappedFailure cause (js-array))))
+            (js-call assert :strictEqual (Object/isFrozen result) t)
+            (js-call assert :strictEqual (get result :name) "Error")
+            (js-call assert :strictEqual (js-length (get result :frames)) 0)
+            (js-call assert :strictEqual (Object/hasOwn result "location") false)))))))

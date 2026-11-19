@@ -145,10 +145,8 @@
           (historical (and (> (js-length configuration) 0) (get (aref configuration 0) :historical))))
       (unless (plain-object? matrix)
         (throw (new CompatibilityMatrixError (js-array "matrix must be an object"))))
-      (when (or (not (= (get matrix :schemaVersion) 1))
-                (not (= (get matrix :format) "eliscript-compatibility-matrix"))
-                (not (= (get matrix :version) 1)))
-        (js-call errors :push "matrix must use eliscript-compatibility-matrix version 1"))
+      (when (not (= (get matrix :format) "eliscript-compatibility-matrix"))
+        (js-call errors :push "matrix must use eliscript-compatibility-matrix"))
       (unless (= (get matrix :workflow) ".github/workflows/compatibility.yml")
         (js-call errors :push "workflow must be .github/workflows/compatibility.yml"))
       (when (and (not (undefined? (get matrix :performanceAcceptance)))
@@ -251,8 +249,7 @@
                 (js-call errors :push "localEvidence timeoutsMs must cover every command with bounded values"))
               (when (> (js-length errors) 0)
                 (throw (new CompatibilityMatrixError errors)))
-              (js-object :schemaVersion 1
-                :systems systems
+              (js-object :systems systems
                 :acceptanceSystems acceptance-systems
                 :emacsVersions emacs-versions
                 :emacsInstall (if (plain-object? (get matrix :emacsInstall))
@@ -480,8 +477,7 @@
         (throw (new CompatibilityMatrixError
                  (js-array (str (get validated :workflow)
                                 " differs from the compatibility matrix; run the renderer with --write")))))
-      (js-object :schemaVersion 1
-        :systems (let ((parts (js-array)) (index 0) (systems (get validated :systems)))
+      (js-object :systems (let ((parts (js-array)) (index 0) (systems (get validated :systems)))
                    (while (< index (js-length systems))
                      (let ((system (aref systems index)))
                        (js-call parts :push (js-object :id (get system :id)

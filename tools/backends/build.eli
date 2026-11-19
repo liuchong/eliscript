@@ -14,7 +14,9 @@
   (defun module-names (entries)
     (js-call (js-call (js-call entries :filter (lambda (name) (js-call module-pattern :test name))) :sort)
       :map (lambda (name) (js-call name :slice 0 -4))))
-  (defconst backendModules (Object/freeze (module-names (readdirSync (resolve root "bootstrap/backends")))))
+  ;; Avoid Object.freeze on dynamic .map() arrays at module load: in JavaScriptCore,
+  ;; freezing an over-allocated JSArray butterfly triggers JSGlobalObject::haveABadTime.
+  (defconst backendModules (module-names (readdirSync (resolve root "bootstrap/backends"))))
   (defun options-from (supplied)
     (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0))) (js-object) (aref supplied 0)))
   (defun source-record (id filename) (js-object :id id :filename filename))

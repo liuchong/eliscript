@@ -192,7 +192,7 @@
     (let* ((transport (get (get record :original) :observationTransport))
            (kind (and transport (get transport :kind))) (id (get record :id))
            (selected
-             (and (= (and transport (get transport :version)) 1)
+             (and transport
               (or (and (= kind "original-managed-standard-identities-host")
                       (js-call id :startsWith "original-managed:sequence-data-standard-identities:"))
                  (and (= kind "original-managed-sequence-host")
@@ -235,7 +235,7 @@
               :execution (Object/assign (js-object) execution (js-object :hostSource
                 (str (js-call host :slice 0 end) program (js-call host :slice end))))
               :original (Object/assign (js-object) original (js-object :sourceAssets combined
-                :observationTransport (js-object :kind "original-managed-observation" :version 1
+                :observationTransport (js-object :kind "original-managed-observation"
                   :originalHostSource host :originalHostSha256 (hash host)
                   :calls 2
                   :installation (js-object :filename filename :source declaration :sourceSha256 (hash declaration)
@@ -298,7 +298,8 @@
           (lambda (record) (funcall add (transient-transport-record record assets))))))))
   (defun required-imports ()
     (js-call (js-array "source-operation" "console-log-capture" "console-log") :map
-      (lambda (name) (js-object :name name :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))))
+      (lambda (name) (js-object :name name :module "eliscript.host" :arity 2
+        :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call"))))
   (defun linker-refusal-record (record)
     (if (/= (get record :id) "original-managed:core-modules:missing-private-graph") record
       (Object/assign (js-object) record (js-object :steps
@@ -399,7 +400,7 @@
         (Object/assign (js-object) record (js-object :execution
           (Object/assign (js-object) (get record :execution) (js-object :hostSource javascript))
           :original (Object/assign (js-object) (get record :original) (js-object
-            :observationTransport (js-object :kind "original-managed-standard-identities-host" :version 1
+            :observationTransport (js-object :kind "original-managed-standard-identities-host"
               :originalHostSource host :originalHostSha256 (hash host) :calls 0)))))) record))
 
   (defun sequence-observation-record (record inputs helper-url)
@@ -424,7 +425,7 @@
             :execution (Object/assign (js-object) (get record :execution)
               (js-object :hostSource (compile-string host-source "original-sequence-observation-host.eli")))
             :original (Object/assign (js-object) original (js-object :sourceAssets assets
-              :observationTransport (js-object :kind "original-managed-sequence-host" :version 1
+              :observationTransport (js-object :kind "original-managed-sequence-host"
                 :originalHostSource (get (get record :execution) :hostSource)
                 :originalHostSha256 (hash (get (get record :execution) :hostSource))
                 :sourceFile (get input :file) :sourceSha256 (get input :sourceSha256))))))))))
@@ -452,6 +453,8 @@
                      "tools/backends/eliscript/managed-source-view.eli" "tools/backends/managed-source-view.mjs"
                "tools/backends/eliscript/compiler-corpus-host-context.eli" "tools/backends/compiler-corpus-host-context.mjs"
                "tools/backends/eliscript/managed-foreign-binding.eli" "tools/backends/managed-foreign-binding.mjs"
+               "bootstrap/backends/managed-layout.eli"
+               "tools/backends/managed-layout.mjs" "tools/backends/managed-layout.mjs.map"
                "tools/backends/eliscript/managed-host.eli"
                "tools/backends/managed-host.mjs" "tools/backends/managed-host-ground.mjs"
                "tools/backends/eliscript/managed-host-runtime.eli" "tools/backends/managed-host-runtime.mjs" "tools/backends/managed-host-runtime.mjs.map"

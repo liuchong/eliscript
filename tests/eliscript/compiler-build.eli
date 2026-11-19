@@ -340,7 +340,7 @@
                        :source (await (readFile (resolve "runtime/math.mjs") "utf8"))))
                      :modules (js-array
                        (js-object :id "main.mjs" :filename "main.eli"
-                         :source "(module main (defun answer () 7) (export answer))")
+                         :source "(module main (defconst host-fast (js* \"/* @eliscript-js-host-fastpath */ () => 9\")) (defun answer () (if (and (nil? host-fast) (funcall (js* \"(a, b) => a >= b\") 7 0)) 7 0)) (export answer))")
                        (js-object :id "unused.mjs" :filename "unused.eli"
                          :source "(module unused (defun bad () (js* \"unreachable-foreign-operation\")) (export bad))"))))
            (before (JSON/stringify request))
@@ -382,7 +382,8 @@
           (js-call assert :deepStrictEqual
             (get (get response :descriptor) :hostCapabilities (js-array))
             (if (eq flag t)
-              (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))
+              (js-array (js-object :name "source-operation" :module "eliscript.host" :arity 2
+                :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call"))
               (js-array))))))
       (js-call (js-array nil 0 1 "true" (js-array) (js-object)) :forEach (lambda (invalid)
         (let* ((input (Object/assign (js-object) request (js-object :foreignEntry invalid)))
@@ -566,7 +567,7 @@
 
   (defun compiler-response-segment-events (producer state value size)
     (let ((events (js-array))
-          (batch (js-call producer :session_response_start state value "graph-events-v1" size)))
+          (batch (js-call producer :session_response_start state value "graph-events" size)))
       (while batch
         (js-call (get batch :events) :forEach (lambda (event) (js-call events :push event)))
         (if (get batch :done) (setq batch nil)
@@ -643,7 +644,7 @@
                   (js-call producer :session_response_find_identity identities (aref values item)) (1+ item))
                 (setq item (1+ item))))
             ;; Closing a partial response drops its graph and all map segments.
-            (let* ((batch (js-call producer :session_response_start session graph "graph-events-v1" 2))
+            (let* ((batch (js-call producer :session_response_start session graph "graph-events" 2))
                    (cursor (get session :responseCursor)) (identities (get cursor :identities)))
               (js-call assert :strictEqual (get batch :done) false)
               (js-call producer :session_response_control session (js-object :token (get batch :token)) "response-close")
@@ -658,7 +659,7 @@
             (let ((cycle (js-object)))
               (put cycle :self cycle)
               (js-call assert :throws
-                (lambda () (js-call producer :session_response_start session cycle "graph-events-v1" 1))
+                (lambda () (js-call producer :session_response_start session cycle "graph-events" 1))
                 (lambda (error) (and (= (get error :name) "TypeError")
                   (= (get error :message) "compiler IR cannot contain cycles"))))
               (let* ((cursor (get session :responseCursor)) (identities (get cursor :identities)))
@@ -863,7 +864,7 @@
       ;; does not turn earlier ground capacity or performance failures into
       ;; passing evidence under the old resource configuration.
       (let* ((expected (js-object
-                :budget (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824 :extendedHeap t)
+                :budget (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824)
                 :memory (js-object :initialPages 4096 :maximumPages 65535) :auto 16777216))
              (profile (get independentCompilerProfiles "full-compiler"))
              (actual (independentCompilerResources (js-object :profile "full-compiler")))
@@ -879,7 +880,7 @@
         (js-call assert :notStrictEqual (get actual :budget) (get profile :budget))
         (js-call assert :notStrictEqual (get actual :memory) (get profile :memory))
         (js-call assert :deepStrictEqual (get overridden :budget)
-          (js-object :maxSlots 8388607 :initialBytes 67108864 :maxBytes 1073741824 :extendedHeap t))
+          (js-object :maxSlots 8388607 :initialBytes 67108864 :maxBytes 1073741824))
         (js-call assert :deepStrictEqual (get overridden :memory)
           (js-object :initialPages 4096 :maximumPages 32768))
         (js-call assert :strictEqual (get overridden :auto) 0)
@@ -909,7 +910,7 @@
         (let ((layouts (js-array 1048575 2097151 4194303 8388607)) (index 0))
           (while (< index (js-length layouts))
             (let* ((input (js-object :maxSlots (aref layouts index) :initialBytes 268435456
-                           :maxBytes 1073741824 :extendedHeap t))
+                           :maxBytes 1073741824))
                    (snapshot (funcall globalThis.structuredClone input))
                    (actual (independentCompilerResources (js-object :profile "full-compiler" :budget input))))
               (js-call assert :deepStrictEqual (get actual :budget) snapshot)
@@ -935,7 +936,7 @@
                      (js-call calls :push request)
                      (cond
                        ((= (get request :operation) "runtime") (js-object :ready t :revision 1))
-                       ((= (get request :operation) "capabilities") (js-object :responseModes (js-array "events-v1")))
+                       ((= (get request :operation) "capabilities") (js-object :responseModes (js-array "events")))
                        ((= (get request :operation) "project") (throw marker))
                        (t (throw (new globalThis.Error "unexpected producer operation"))))))))
               (await (js-call assert :rejects (buildIndependentCompiler
@@ -1147,9 +1148,9 @@
                :modules (js-array (js-object :id "entry.mjs" :filename "entry.eli" :source "(module entry)"))
                :runtime (js-object :filename "runtime.eli" :source "(module runtime)")))
              (configurations (js-array
-               (js-object :modes (js-array "events-v1" "graph-events-v1") :debug t :expected "graph-events-v1")
-               (js-object :modes (js-array "events-v1" "graph-events-v1") :debug false :expected "events-v1")
-               (js-object :modes (js-array "events-v1") :debug t :expected "events-v1")))
+               (js-object :modes (js-array "events" "graph-events") :debug t :expected "graph-events")
+               (js-object :modes (js-array "events" "graph-events") :debug false :expected "events")
+               (js-object :modes (js-array "events") :debug t :expected "events")))
              (index 0))
         (try
           (while (< index (js-length configurations))
@@ -1162,10 +1163,10 @@
                        (cond
                          ((= (get request :operation) "runtime") (js-object :ready t :revision 1))
                          ((= (get request :operation) "capabilities")
-                          (js-object :format "eliscript-compiler-capabilities" :version 1 :responseModes (get configuration :modes)))
+                          (js-object :format "eliscript-compiler-capabilities" :responseModes (get configuration :modes)))
                          ((= (get request :operation) "project")
                           (js-object :target "wasm" :bytes (js-array 0 97 115 109 1 0 0 0)
-                            :descriptor (js-object :format "eliscript-managed-control" :version 1)))
+                            :descriptor (js-object :format "eliscript-managed-control")))
                          (t (throw (new globalThis.Error "unexpected producer operation")))))))
                    (artifact (await (buildIndependentCompiler
                      (js-object :host "wasm" :sources sources :session producer :debug (get configuration :debug)
@@ -1201,7 +1202,7 @@
                "bootstrap/source-map.mjs" "bootstrap/symbol.mjs" "bootstrap/syntax.mjs"
                "bootstrap/transient-analysis.mjs"
                "backends/async.mjs" "backends/binary.mjs" "backends/capabilities.mjs"
-               "backends/elf.mjs" "backends/managed.mjs" "backends/memory.mjs"
+               "backends/elf.mjs" "backends/managed.mjs" "backends/managed-layout.mjs" "backends/memory.mjs"
                "backends/native.mjs" "backends/numeric.mjs" "backends/optimize.mjs"
                "backends/regexp.mjs" "backends/sha256.mjs" "backends/wasm.mjs"
                "host/compiler-session.mjs" "host/compiler-tools.mjs" "runtime/array-text.mjs"
@@ -1210,7 +1211,7 @@
              (sorted-module-ids (js-call (js-call module-ids :slice) :sort)))
         (try
           (progn
-            (js-call assert :strictEqual (js-length module-ids) 35)
+            (js-call assert :strictEqual (js-length module-ids) 36)
             (js-call assert :deepStrictEqual
               (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
             (js-call assert :strictEqual (js-length (get sources :literalSources)) 53)

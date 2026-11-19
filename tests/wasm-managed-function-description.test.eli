@@ -8,8 +8,10 @@
   (import "node:child_process" spawnSync)
   (import "../tools/backends/build.mjs" buildBackends)
   (import "../tools/backends/compiler-build.mjs" decodeCompilerBinary)
-  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
+  (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime readManagedAllocatorSnapshot)
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
+
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
 
   (defconst platform
     (if (and (= (get globalThis.process :arch) "arm64")
@@ -43,7 +45,14 @@
         :forEach
         (lambda (name)
           (unless (js-call (get (get lowered :typed) :exports) :includes name)
-            (js-call (get (get lowered :typed) :exports) :push name))))
+            (js-call (get (get lowered :typed) :exports) :push name))
+          (unless (Object/hasOwn (get (get lowered :descriptor) :exportSignatures) name)
+            (let ((fn (js-call (get (get lowered :typed) :functions) :find (lambda (item) (= (get item :name) name)))))
+              (when fn
+                (put (get (get lowered :descriptor) :exportSignatures) name
+                  (js-object :arity (get fn :arity)
+                    :parameterTypes (js-call (get fn :parameterTypes) :slice)
+                    :resultType (get fn :resultType))))))))
       (let ((output (js-call (get b :wasm) :emit_typed_memory_wasm (get lowered :typed) (js-object :initialPages 1 :maximumPages 32))))
         (setq bytes
           (Uint8Array/from
@@ -102,6 +111,29 @@
     (when (= (value-type (get a :close)) "function")
       (js-call a :close)))
 
+  ;; Fixed owned bytes are the Control block plus the separated slot and bitmap
+  ;; arenas; only the object arena is reachable through `stats().usedBytes`.
+  ;; A native instance is not registered with the WASM allocator snapshot, so a
+  ;; mirrored WASM instance opened from the same options measures the same
+  ;; fixed bytes exactly.
+  (defasync pressure-fixed-bytes (nativeHost a)
+    (if (not nativeHost)
+      (let ((snap (readManagedAllocatorSnapshot a)))
+        (- (get snap :usedBytes) (get snap :objectCapacity)))
+      (let* ((probe (await (open false)))
+             (pf (js-call probe :invoke "reference"))
+             (pheld (js-call probe :number -0.0))
+             (pframe (js-call probe :frame 1)))
+        (try
+          (progn
+            (js-call probe :frameSet pframe 0 pheld)
+            (js-call probe :collect)
+            (let ((snap (readManagedAllocatorSnapshot probe)))
+              (- (get snap :usedBytes) (get snap :objectCapacity))))
+          (finally
+            (js-call probe :leaveFrame pframe)
+            (finish probe (js-array pf pheld)))))))
+
   (defasync pressure (nativeHost)
     (let* ((a (await (open nativeHost)))
            (f (js-call a :invoke "reference"))
@@ -110,12 +142,13 @@
       (js-call a :frameSet frame 0 held)
       (js-call a :collect)
       (let* ((room 4096)
-             (count (* (Math/floor (/ (- (get options :maxBytes) (get (js-call a :stats) :usedBytes) room 32) 8)) 8)))
+             (fixed (await (pressure-fixed-bytes nativeHost a)))
+             (count (* (Math/floor (/ (- (get options :maxBytes) fixed (get (js-call a :stats) :usedBytes) room 32) 8)) 8)))
         (assert (> count 0))
         (let ((filler (js-call a :bytes (new globalThis.Uint8Array count))))
           (try
             (let ((before (js-call a :stats)))
-              (assert (<= (- (get options :maxBytes) (get before :usedBytes)) (+ room 8))))
+              (assert (<= (- (get options :maxBytes) fixed (get before :usedBytes)) (+ room 8))))
             (let ((index 0))
               (while (< index 128)
                 (let ((again (js-call a :invoke "reference")))
@@ -235,17 +268,17 @@
                           (value (aref entry 1)))
                       (js-array (js-call name :replaceAll "-" "_")
                                 (if (= (value-type value) "function")
-                                  (lambda (&rest args) (uint32 (Reflect/apply value exports args)))
+                                  (lambda (&rest args) (funcall normalize-u64 (Reflect/apply value exports args)))
                                   value)))))))
            (heap (js-call r :heap_new 64 8192 65536))
            (f (js-call r :value_function_new heap 0 0)))
-      (assert (> f 3))
+      (assert (> f (funcall globalThis.BigInt 3)))
       (js-call r :heap_pin heap f)
       (let ((query (lambda (mode) (js-call r :value_function_description_state heap f mode)))
             (make-string (lambda (text)
                            (let ((value (js-call r :value_string heap (js-length text)))
                                  (index 0))
-                             (assert (> value 3))
+                             (assert (> value (funcall globalThis.BigInt 3)))
                              (js-call r :heap_pin heap value)
                              (while (< index (js-length text))
                                (js-call assert :equal (js-call r :value_unit_set heap value index (js-call text :charCodeAt index)) 1)
@@ -258,14 +291,14 @@
           (js-call assert :equal (js-call r :value_function_describe heap f name 1 0 0 1) f)
           (js-call assert :equal (funcall query 0) 1)
           (js-call assert :equal (funcall query 1) 0)
-          (js-call assert :equal (js-call r :value_string heap 65536) 0)
+          (js-call assert :equal (js-call r :value_string heap 65536) (funcall globalThis.BigInt 0))
           (js-call assert :equal (js-call r :last_error) 2)
           (js-call assert :equal (funcall query 0) 1)
           (js-call assert :equal (funcall query 1) 0 "description success is not source success")
           (let ((text (js-call r :value_string heap 3)))
-            (assert (> text 3))
+            (assert (> text (funcall globalThis.BigInt 3)))
             (js-call r :heap_pin heap text)
-            (js-call assert :equal (js-call r :value_function_source_text heap f text) 0)
+            (js-call assert :equal (js-call r :value_function_source_text heap f text) (funcall globalThis.BigInt 0))
             (js-call assert :equal (js-call r :last_error) 6)
             (js-call assert :equal (funcall query 1) 0)
             (js-call r :value_unit_set heap text 0 55296)
@@ -291,7 +324,7 @@
             (js-call assert :equal (js-call r :value_function_description_state 0 f 0) 0)
             (js-call assert :equal (js-call r :last_error) 1)
             (let ((wrong (js-call r :value_number heap 0 2147483648)))
-              (assert (> wrong 3))
+              (assert (> wrong (funcall globalThis.BigInt 3)))
               (js-call r :heap_pin heap wrong)
               (js-call assert :equal (js-call r :value_function_description_state heap wrong 0) 0)
               (js-call assert :equal (js-call r :last_error) 1)

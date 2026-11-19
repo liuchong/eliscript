@@ -44,8 +44,6 @@
                (:constructor eliscript-project-build-result-create))
   root
   out-dir
-  entry
-  entry-output
   entries
   entry-outputs
   modules
@@ -68,8 +66,7 @@
   records
   sources
   manifest
-  digest
-  source-version)
+  digest)
 
 (cl-defstruct (eliscript-project-cache-lookup
                (:constructor eliscript-project-cache-lookup-create))
@@ -83,7 +80,6 @@
 
 (cl-defstruct (eliscript-project-request
                (:constructor eliscript-project-request-create))
-  entry
   entries
   out-dir
   root
@@ -99,39 +95,24 @@
 (defconst eliscript-project-cache-format "eliscript-project-cache"
   "Stable identity of private incremental project metadata.")
 
-(defconst eliscript-project-cache-version 2
-  "Version of private incremental metadata in the project manifest.")
-
-(defconst eliscript-project-cache-ground-version 1
-  "Oldest private cache version accepted for read-only migration.")
-
-(defconst eliscript-project-build-report-version 1
-  "Version of the public project build decision report.")
-
-(defconst eliscript-project-build-report-multi-version 2
-  "Version of the multi-entry project build decision report.")
-
-(defconst eliscript-project-configuration-version 1
-  "Current version of the public `eliscript.json' request schema.")
-
-(defconst eliscript-project-configuration-multi-version 2
-  "Version of the public multi-entry project request schema.")
-
 (defconst eliscript-project-configuration-format "eliscript-project-request"
-  "Stable identity of the versioned project request schema family.")
+  "Stable identity of the project request schema.")
 
 (defconst eliscript-project-configuration-filename "eliscript.json"
   "Conventional filename for an Eliscript project request.")
 
-(defconst eliscript-project--configuration-keys-v1
-  '(schemaVersion sourceRoot entry outDir portableEntries
+(defconst eliscript-project--configuration-keys
+  '(sourceRoot entries outDir portableEntries
     macroCapabilities macroFileDependencies cache)
-  "Complete top-level key set accepted by configuration version 1.")
+  "Complete top-level key set accepted by `eliscript.json'.")
 
-(defconst eliscript-project--configuration-keys-v2
-  '(schemaVersion sourceRoot entries outDir portableEntries
-    macroCapabilities macroFileDependencies cache)
-  "Complete top-level key set accepted by configuration version 2.")
+(defconst eliscript-project--manifest-keys
+  '(format entries modules digest cache)
+  "Complete top-level key set accepted by `eliscript-project.json'.")
+
+(defconst eliscript-project--cache-keys
+  '(format compilerDigest mode portableEntries modules digest)
+  "Complete key set accepted by private project cache metadata.")
 
 (defvar eliscript-project-use-cache t
   "When non-nil, project builds may reuse verified manifest artifacts.")
@@ -204,7 +185,7 @@ FILENAME and KEY identify invalid values in diagnostics."
         (signal 'json-error '("trailing content after JSON value"))))))
 
 (defun eliscript-project-read-configuration (filename)
-  "Read and validate a versioned project request from FILENAME."
+  "Read and validate a project request from FILENAME."
   (let* ((expanded (expand-file-name filename))
          (canonical
           (if (file-regular-p expanded)
@@ -233,38 +214,20 @@ FILENAME and KEY identify invalid values in diagnostics."
       (when duplicate
         (eliscript-project--configuration-fail
          canonical "duplicate configuration key: %s" duplicate)))
-    (let* ((version
-            (eliscript-project--configuration-field
-             configuration 'schemaVersion nil))
-           (configuration-keys
-            (cond
-             ((equal version eliscript-project-configuration-version)
-              eliscript-project--configuration-keys-v1)
-             ((equal version eliscript-project-configuration-multi-version)
-              eliscript-project--configuration-keys-v2)
-             (t
-              (eliscript-project--configuration-fail
-               canonical "unsupported schemaVersion: %s" version))))
-           (unknown
+    (let ((unknown
            (sort
             (cl-remove-if
              (lambda (key)
-               (memq key configuration-keys))
+               (memq key eliscript-project--configuration-keys))
              (mapcar #'car configuration))
             (lambda (left right)
               (string-lessp (symbol-name left) (symbol-name right))))))
       (when unknown
         (eliscript-project--configuration-fail
          canonical "unknown configuration key: %s" (car unknown))))
-    (let* ((version
-            (eliscript-project--configuration-field
-             configuration 'schemaVersion nil))
-           (source-root
+    (let* ((source-root
             (eliscript-project--configuration-field
              configuration 'sourceRoot "."))
-           (entry
-            (eliscript-project--configuration-field
-             configuration 'entry nil))
            (entries
             (eliscript-project--configuration-field
              configuration 'entries nil))
@@ -332,45 +295,36 @@ FILENAME and KEY identify invalid values in diagnostics."
       (unless (memq cache '(t :false))
         (eliscript-project--configuration-fail
          canonical "cache must be a boolean"))
-      (when (equal version eliscript-project-configuration-multi-version)
-        (unless (and (listp entries) entries
-                     (cl-every #'eliscript-project--safe-relative-path-p
-                               entries))
-          (eliscript-project--configuration-fail
-           canonical
-           "entries must be an array of contained relative paths"))
-        (unless (= (length entries)
-                   (length (delete-dups (copy-sequence entries))))
-          (eliscript-project--configuration-fail
-           canonical "entries must not contain duplicates"))
-        (when (and (> (length entries) 1) portable-entries)
-          (eliscript-project--configuration-fail
-           canonical
-           "multi-entry portable project configurations are not supported")))
+      (unless (and (listp entries) entries
+                   (cl-every #'eliscript-project--safe-relative-path-p
+                             entries))
+        (eliscript-project--configuration-fail
+         canonical
+         "entries must be an array of contained relative paths"))
+      (unless (= (length entries)
+                 (length (delete-dups (copy-sequence entries))))
+        (eliscript-project--configuration-fail
+         canonical "entries must not contain duplicates"))
+      (when (and (> (length entries) 1) portable-entries)
+        (eliscript-project--configuration-fail
+         canonical
+         "multi-entry portable project configurations are not supported"))
       (let* ((root
               (eliscript-project--configuration-path
                canonical directory 'sourceRoot source-root))
              (entry-paths
-              (if (equal version
-                         eliscript-project-configuration-multi-version)
-                  (sort
-                   (mapcar
-                    (lambda (source)
-                      (eliscript-project--configuration-path
-                       canonical root 'entries source))
-                    entries)
-                   #'string-lessp)
-                (list
-                 (eliscript-project--configuration-path
-                  canonical root 'entry entry))))
+              (sort
+               (mapcar
+                (lambda (source)
+                  (eliscript-project--configuration-path
+                   canonical root 'entries source))
+                entries)
+               #'string-lessp))
              (output-path
               (eliscript-project--configuration-path
                canonical directory 'outDir out-dir)))
         (eliscript-project-request-create
-         :entry (and (= (length entry-paths) 1) (car entry-paths))
-         :entries (and (equal version
-                              eliscript-project-configuration-multi-version)
-                       entry-paths)
+         :entries entry-paths
          :out-dir output-path
          :root root
          :portable-entries portable-entries
@@ -384,9 +338,7 @@ FILENAME and KEY identify invalid values in diagnostics."
   "Execute validated project build REQUEST through the shared operation."
   (unless (eliscript-project-request-p request)
     (eliscript-project--fail nil nil "project request is invalid"))
-  (let* ((entry (eliscript-project-request-entry request))
-         (requested-entries (eliscript-project-request-entries request))
-         (entries (or requested-entries (and entry (list entry))))
+  (let* ((entries (eliscript-project-request-entries request))
          (out-dir (eliscript-project-request-out-dir request))
          (root (eliscript-project-request-root request))
          (portable-entries
@@ -746,32 +698,30 @@ artifacts onto an input, another artifact, or outside OUT-DIR."
        entry))
    record))
 
-(defun eliscript-project--cache-version-kind (cache)
-  "Return the supported version kind of CACHE, or nil."
-  (cond
-   ((and (equal (alist-get 'format cache) eliscript-project-cache-format)
-         (equal (alist-get 'version cache) eliscript-project-cache-version))
-    'current)
-   ((and (null (alist-get 'format cache))
-         (equal (alist-get 'version cache)
-                eliscript-project-cache-ground-version))
-    'ground)))
+(defun eliscript-project--record-keys-allowed-p (record allowed)
+  "Return non-nil when alist RECORD contains only keys in ALLOWED."
+  (and (consp record)
+       (cl-every (lambda (pair)
+                   (and (consp pair) (memq (car pair) allowed)))
+                 record)))
 
-(defun eliscript-project--cache-identity (cache cache-modules version-kind)
-  "Normalize CACHE and CACHE-MODULES for VERSION-KIND digest verification."
-  (let ((identity
-         `((version . ,(alist-get 'version cache))
-           (compilerDigest . ,(alist-get 'compilerDigest cache))
-           (mode . ,(alist-get 'mode cache))
-           (portableEntries . ,(vconcat (alist-get 'portableEntries cache)))
-           (modules
-            . ,(vconcat
-                (mapcar
-                 #'eliscript-project--cache-identity-module
-                 cache-modules))))))
-    (if (eq version-kind 'current)
-        (cons `(format . ,(alist-get 'format cache)) identity)
-      identity)))
+(defun eliscript-project--cache-valid-format-p (cache)
+  "Return non-nil when CACHE uses the supported project cache format."
+  (and (eliscript-project--record-keys-allowed-p
+        cache eliscript-project--cache-keys)
+       (equal (alist-get 'format cache) eliscript-project-cache-format)))
+
+(defun eliscript-project--cache-identity (cache cache-modules)
+  "Normalize CACHE and CACHE-MODULES for digest verification."
+  `((format . ,(alist-get 'format cache))
+    (compilerDigest . ,(alist-get 'compilerDigest cache))
+    (mode . ,(alist-get 'mode cache))
+    (portableEntries . ,(vconcat (alist-get 'portableEntries cache)))
+    (modules
+     . ,(vconcat
+         (mapcar
+          #'eliscript-project--cache-identity-module
+          cache-modules)))))
 
 (defun eliscript-project--cache-miss (reason)
   "Return a cache lookup miss with stable REASON."
@@ -798,58 +748,44 @@ artifacts onto an input, another artifact, or outside OUT-DIR."
                  (cache (alist-get 'cache manifest))
                  (identity-modules (alist-get 'modules manifest))
                  (cache-modules (alist-get 'modules cache))
-                 (cache-version-kind
+                 (valid-cache
                   (and (consp cache)
-                       (eliscript-project--cache-version-kind cache)))
+                       (eliscript-project--cache-valid-format-p cache)))
                  (expected-entries
                   (mapcar
                    (lambda (entry-output)
                      (file-relative-name entry-output out-dir))
                    entry-outputs)))
             (cond
-             ((or (not (equal (alist-get 'format manifest)
+             ((or (not (eliscript-project--record-keys-allowed-p
+                        manifest eliscript-project--manifest-keys))
+                  (not (equal (alist-get 'format manifest)
                               "eliscript-project"))
-                  (not (memq (alist-get 'version manifest) '(1 2)))
+                  (not (listp (alist-get 'entries manifest)))
                   (not (listp identity-modules)))
-              (eliscript-project--cache-miss "manifest-version-changed"))
-             ((and (equal (alist-get 'version manifest) 1)
-                   (not (equal (list (alist-get 'entry manifest))
-                               expected-entries)))
-              (eliscript-project--cache-miss "entry-changed"))
-             ((and (equal (alist-get 'version manifest) 2)
-                   (not (equal (alist-get 'entries manifest)
-                               expected-entries)))
+              (eliscript-project--cache-miss "manifest-format-invalid"))
+             ((not (equal (alist-get 'entries manifest)
+                          expected-entries))
               (eliscript-project--cache-miss "entries-changed"))
              ((let ((graph-identity
-                     (if (equal (alist-get 'version manifest) 1)
-                         `((format . ,(alist-get 'format manifest))
-                           (version . 1)
-                           (entry . ,(alist-get 'entry manifest))
-                           (modules
-                            . ,(vconcat
-                                (mapcar
-                                 #'eliscript-project--manifest-identity-module
-                                 identity-modules))))
-                       `((format . ,(alist-get 'format manifest))
-                         (version . 2)
-                         (entries . ,(vconcat (alist-get 'entries manifest)))
-                         (modules
-                          . ,(vconcat
-                              (mapcar
-                               #'eliscript-project--manifest-identity-module
-                               identity-modules)))))))
+                     `((format . ,(alist-get 'format manifest))
+                       (entries . ,(vconcat (alist-get 'entries manifest)))
+                       (modules
+                        . ,(vconcat
+                            (mapcar
+                             #'eliscript-project--manifest-identity-module
+                             identity-modules))))))
                 (not (equal (alist-get 'digest manifest)
                             (eliscript-project--json-digest graph-identity))))
               (eliscript-project--cache-miss "graph-digest-invalid"))
              ((not (consp cache))
               (eliscript-project--cache-miss "cache-missing"))
-             ((not cache-version-kind)
-              (eliscript-project--cache-miss "cache-version-changed"))
+             ((not valid-cache)
+              (eliscript-project--cache-miss "cache-format-invalid"))
              ((not (listp cache-modules))
               (eliscript-project--cache-miss "cache-records-invalid"))
              ((let ((cache-identity
-                     (eliscript-project--cache-identity
-                      cache cache-modules cache-version-kind)))
+                     (eliscript-project--cache-identity cache cache-modules)))
                 (not (equal (alist-get 'digest cache)
                             (eliscript-project--json-digest cache-identity))))
               (eliscript-project--cache-miss "cache-digest-invalid"))
@@ -888,8 +824,7 @@ artifacts onto an input, another artifact, or outside OUT-DIR."
                       :records records
                       :sources (sort sources #'string-lessp)
                       :manifest (file-truename manifest-path)
-                      :digest (alist-get 'digest manifest)
-                      :source-version (alist-get 'version cache))
+                      :digest (alist-get 'digest manifest))
                      :reason "verified")
                   (eliscript-project--cache-miss
                    "cache-records-invalid"))))))
@@ -991,9 +926,7 @@ must match their current project-relative paths and content digests."
   "Return a fully reused result for ENTRIES from CACHE, or nil.
 
 STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
-  (when (and cache
-             (= (eliscript-project-cache-source-version cache)
-                eliscript-project-cache-version))
+  (when cache
     (let (modules valid)
       (setq valid t)
       (dolist (relative (eliscript-project-cache-sources cache))
@@ -1027,10 +960,6 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
           (eliscript-project-build-result-create
            :root root
            :out-dir out-dir
-           :entry (and (= (length entries) 1) (car entries))
-           :entry-output
-           (and (= (length entries) 1)
-                (eliscript-project--source-output (car entries) root out-dir))
            :entries entries
            :entry-outputs
            (mapcar
@@ -1120,21 +1049,14 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
              (file-relative-name entry-output out-dir))
            entry-outputs))
          (identity
-          (if (= (length relative-entries) 1)
-              `((format . "eliscript-project")
-                (version . 1)
-                (entry . ,(car relative-entries))
-                (modules . ,records))
-            `((format . "eliscript-project")
-              (version . 2)
-              (entries . ,(vconcat relative-entries))
-              (modules . ,records))))
+          `((format . "eliscript-project")
+            (entries . ,(vconcat relative-entries))
+            (modules . ,records)))
          (digest (eliscript-project--json-digest identity))
          (manifest-path
           (expand-file-name eliscript-project-manifest-filename out-dir))
          (cache-identity
           `((format . ,eliscript-project-cache-format)
-            (version . ,eliscript-project-cache-version)
             (compilerDigest . ,compiler-digest)
             (mode . ,mode)
             (portableEntries . ,(vconcat portable-entries))
@@ -1201,8 +1123,6 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
     (eliscript-project-build-result-create
      :root root
      :out-dir out-dir
-     :entry (and (= (length entries) 1) (car entries))
-     :entry-output (and (= (length entries) 1) (car entry-outputs))
      :entries entries
      :entry-outputs entry-outputs
      :modules modules
@@ -1242,34 +1162,21 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
   (let* ((root (eliscript-project-build-result-root result))
          (out-dir (eliscript-project-build-result-out-dir result))
          (entries (eliscript-project-build-result-entries result))
-         (entry-outputs (eliscript-project-build-result-entry-outputs result))
-         (multi (> (length entries) 1)))
+         (entry-outputs (eliscript-project-build-result-entry-outputs result)))
     `((format . "eliscript-build-report")
-      (version
-       . ,(if multi
-              eliscript-project-build-report-multi-version
-            eliscript-project-build-report-version))
       (mode . ,(eliscript-project-build-result-mode result))
       (root . ,(directory-file-name root))
       (outDir . ,(directory-file-name out-dir))
-      ,@(if multi
-            `((entries
-               . ,(vconcat
-                   (mapcar (lambda (entry)
-                             (file-relative-name entry root))
-                           entries)))
-              (entryOutputs
-               . ,(vconcat
-                   (mapcar (lambda (entry-output)
-                             (file-relative-name entry-output out-dir))
-                           entry-outputs))))
-          `((entry
-             . ,(file-relative-name
-                 (eliscript-project-build-result-entry result) root))
-            (entryOutput
-             . ,(file-relative-name
-                 (eliscript-project-build-result-entry-output result)
-                 out-dir))))
+      (entries
+       . ,(vconcat
+           (mapcar (lambda (entry)
+                     (file-relative-name entry root))
+                   entries)))
+      (entryOutputs
+       . ,(vconcat
+           (mapcar (lambda (entry-output)
+                     (file-relative-name entry-output out-dir))
+                   entry-outputs)))
       (manifest
        . ,(file-relative-name
            (eliscript-project-build-result-manifest result) out-dir))

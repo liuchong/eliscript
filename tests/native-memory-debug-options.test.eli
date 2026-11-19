@@ -13,7 +13,7 @@
   (defconst hostInstanceof (js* "(value, constructor) => value instanceof constructor"))
   (defconst target (if (= (get process :arch) "arm64") (if (= (get process :platform) "darwin") "arm64-macos" (if (= (get process :platform) "linux") "arm64-linux" undefined)) undefined))
   (defconst nativeTest (js-call test :skipIf (not target)))
-  (defconst signatures (js-object :safe 0 :crash 0))
+  (defconst signatures (js-object :safe (js-object :parameterTypes (js-array) :resultType "u32") :crash (js-object :parameterTypes (js-array) :resultType "u32")))
   (defconst filename "loader/原生输入😀.eli")
   (defvar directory undefined) (defvar library undefined) (defvar bytes undefined) (defvar debug undefined) (defvar machineFrames undefined)
   (beforeAll (async ()

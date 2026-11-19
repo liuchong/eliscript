@@ -69,7 +69,12 @@
                   (progn
                     (js-call assert :equal (get sidecar :nativeTarget) (get input :nativeTarget)) (js-call assert :equal (get sidecar :nativeFormat) "library")
                     (let ((native (await (funcall load (get (pathToFileURL (resolve (get input :transport) "native-memory.mjs")) :href)))))
-                      (setq runtime (await (js-call native :openNativeMemory path (js-object :read32 1 :set32 2 :grow 1 :size 0 :zero64 1)
+                      (setq runtime (await (js-call native :openNativeMemory path (js-object
+                        :read32 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                        :set32 (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
+                        :grow (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
+                        :size (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
+                        :zero64 (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32"))
                         (js-object :initialPages 1 :maximumPages 2 :nativeTarget (get input :nativeTarget) :debug debug :trapSites (get debug :trapSites))))))
                     (js-call assert :equal (funcall unsigned (js-call runtime :invoke "set32" 8 4294967295)) 4294967295)
                     (js-call assert :equal (funcall unsigned (js-call runtime :invoke "read32" 8)) 4294967295)
@@ -98,8 +103,10 @@
               (try
                 (js-call runtime :auto 1)
                 (let ((value (js-call runtime :invoke "run")))
-                  (try (assert (Object/is (js-call runtime :readNumber value) (js* "-0"))) (finally (js-call runtime :release value))))
+                  (if (= (value-type value) "number")
+                    (assert (Object/is value (js* "-0")))
+                    (try (assert (Object/is (js-call runtime :readNumber value) (js* "-0"))) (finally (js-call runtime :release value)))))
                 (js-call runtime :closeModule) (js-call runtime :collect) (js-call assert :equal (js-call runtime :live) 0) (js-call assert :equal (get (js-call runtime :stats) :frameDepth) 0)
-                (finally (js-call runtime :close)))
+                (finally (when (= (value-type (get runtime :close)) "function") (js-call runtime :close))))
               (js-call (get process :stdout) :write (str (JSON/stringify (js-object :target target :negativeZero t :live 0 :frameDepth 0)) "\n"))))))))
   (main))

@@ -20,7 +20,7 @@
     (let* ((deferred (= (get (get process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1"))
            (report (await (checkRepositoryIntegrity (js-object :root ROOT :compiler compiler :deferPerformanceAcceptance deferred))))
            (contract (await (readJson "contracts/repository-integrity.json"))))
-      (js-call (expect report) :toMatchObject (js-object :schemaVersion 1 :format "eliscript-repository-integrity-report" :version 1
+      (js-call (expect report) :toMatchObject (js-object :format "eliscript-repository-integrity-report"
         :dependency (js-object :packages (get (get contract :packages) :length) :localPackages 2 :lockfile "frozen" :coreExternalImports 0)
         :artifacts (js-object :deterministicArtifacts 4 :deterministicOutputs 7 :derivedArtifacts 4 :benchmarkArtifacts 14 :benchmarkSources (if deferred 0 291))))
       (js-call (expect (get (get report :dependency) :scannedJavaScript)) :toBe 0)

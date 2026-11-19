@@ -15,7 +15,7 @@ packages. A caller supplies a concrete host object and an exact grant list;
 package import and token construction never read ambient browser, worker,
 process, network, clock, randomness, or document globals.
 
-Capability tokens are frozen, versioned data descriptors whose executable
+Capability tokens are frozen data descriptors whose executable
 operations remain in a package-private `WeakMap`. Copying or reconstructing the
 descriptor does not copy authority. This completes the M11-04 implementation
 unit without adding a framework, bundler, UI runtime, or compiler intrinsic.
@@ -28,7 +28,7 @@ Both packages use the same lifecycle:
 2. reject duplicate, unknown, or unavailable grants
 3. normalize grant names into lexical order
 4. bind only those host operations into private package state
-5. return a frozen token containing only `format`, `version`, and `grants`
+5. return a frozen token containing only `format` and `grants`
 6. require the original token for every operation
 
 A JSON round trip, object spread, structured clone, or hand-written lookalike
@@ -75,12 +75,12 @@ fields remain compatible views over the same request-owned operations. The
 context object and token are frozen; a token cannot be reused to acquire a
 different request, process, filesystem, network, or module authority.
 
-The worker ready frame advertises `operation-capabilities-v1`. Temporary
+The worker ready frame advertises `operation-capabilities`. Temporary
 request modules may resolve `eliscript/platform/` imports through the same
 package-confined resolver used for `eliscript/runtime/`; traversal outside the
 platform directory is rejected.
 
-The worker package also re-exports the existing versioned value-codec and
+The worker package also re-exports the existing value codec and
 chunk-stream APIs. It does not define a second encoding, framing grammar, or
 limit set; the canonical runtime modules remain the implementation owners.
 
@@ -99,11 +99,11 @@ this specification.
 
 ## Compatibility Freeze
 
-The version 1 browser and worker capability descriptors, closed grant sets,
+The browser and worker capability descriptors, closed grant sets,
 original-token authority, private operation storage, request ownership,
 receiver preservation, cancellation error, package-confined resolution, and
 ambient-authority prohibition are stable. New authority requires a new
-explicit grant or versioned package contract; descriptor-compatible lookalikes
+explicit grant or package contract; descriptor-compatible lookalikes
 must never acquire executable authority.
 
 ## Acceptance Criteria

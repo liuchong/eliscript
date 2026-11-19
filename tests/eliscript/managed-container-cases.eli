@@ -4,7 +4,7 @@
   (import "node:path" resolve)
   (import "node:os" tmpdir)
   (import "../../tools/backends/build.mjs" buildBackends root)
-  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime readManagedModuleMetadata)
+  (import "../../tools/backends/managed-runtime.mjs" instantiateManagedRuntime readManagedModuleMetadata readManagedAllocatorSnapshot)
   (import "../../tools/backends/compiler-build.mjs" independentCompilerResources)
   (import "../../dist/bootstrap/ir.mjs" validate-serializable-program)
   (import "./managed-numeric-selfhosted.mjs" loadReference)
@@ -90,7 +90,7 @@
       (js-call assert :deepStrictEqual actual expected label)))
   (defasync object-failures ()
     (let* ((injected (replace-runtime-function "  (defun heap-object-key-index "
-                      "  (defun heap-object-key-index (heap key) (load-u32 4294967295))" "trap-runtime.eli"))
+                      "  (defun heap-object-key-index (heap key) (memory-sig u32 u32 v64) (load-u32 4294967295))" "trap-runtime.eli"))
            (a (instantiateManagedRuntime (emit program injected)))
            (o (js-call a :invoke "make" (js-array t false)))
            (bad (js-call a :sourceObject (js-object :toString false :valueOf false)))
@@ -109,7 +109,7 @@
       (let ((retained (js-call a :frameGet frame 0)))
         (js-call assert :ok (js-call a :keyEqual retained o)) (js-call a :release retained))
       (js-call a :leaveFrame frame) (finish a (js-array o bad good)))
-    (let* ((a (make (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 4096)))
+    (let* ((a (make (js-object :maxSlots 64 :initialBytes 6000 :maxBytes 6000)))
            (original (js-call a :invoke "empty" (js-array))) (keys (js-array)) (failed false) (index 0) (fillers (js-array)))
       (js-call a :auto 1)
       (while (and (< index 128) (not failed))
@@ -124,7 +124,7 @@
       ;; Exhaust the same bounded heap explicitly before requiring copy OOM.
       (setq failed false)
       (while (not failed)
-        (try (js-call fillers :push (js-call a :number 7))
+        (try (js-call fillers :push (js-call a :bytes (new globalThis.Uint8Array 8)))
           (catch error (js-call assert :strictEqual (get (get error :eliscriptDiagnostic) :code) "ELI-RT0002") (setq failed t))))
       (js-call assert :throws (lambda () (js-call a :objectCopy original)) (code "ELI-RT0002"))
       (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0)
@@ -193,7 +193,7 @@
         (check-refusal copy "objects.eli")))))
   (defun object-reader-trap ()
     (let* ((rt (replace-runtime-function "  (defun value-object-get-with-receiver (heap object key receiver)"
-                "  (defun value-object-get-with-receiver (heap object key receiver) (load-u32 4294967295))" "trap-runtime.eli"))
+                "  (defun value-object-get-with-receiver (heap object key receiver) (memory-sig v64 u32 v64 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))" "trap-runtime.eli"))
            (a (instantiateManagedRuntime (emit program rt)))
            (o (js-call a :sourceObject (js-object "0" t :x false)))
            (key (js-call a :string "x")) (number (js-call a :number 0)) (frame (js-call a :frame 1)))
@@ -219,7 +219,7 @@
           (performance-check (+ name " must allocate only its invocation frame") (- (get (js-call a :stats) :collections) before) 16))))
       (finish a (js-array object))))
   (defasync array-capabilities ()
-    (let* ((a (make)) (b (make)) (array (js-call a :invoke "empty" (js-array))) (foreign (js-call b :number 1)))
+    (let* ((a (make)) (b (make)) (array (js-call a :invoke "empty" (js-array))) (foreign (js-call b :string "1")))
       (js-call (js-array -1 0.5 globalThis.NaN globalThis.Infinity 4294967296) :forEach (lambda (value)
         (let ((n (js-call a :number value)))
           (try (progn (js-call assert :throws (lambda () (js-call a :invoke "truncate" (js-array array n))))
@@ -378,6 +378,62 @@
             (js-array (get before :usedBytes) (get before :collections)))
           (js-call assert :strictEqual (get after :frameDepth) 0)))
       (finish a (js-array array number text missing length))))
+  (defun array-bulk-source-construction ()
+    (let* ((a (make)) (b (make)) (x (js-call a :number -0.0))
+           (head (js-call a :string "head")) (y (js-call a :string "中😀"))
+           (input (js-array x head)))
+      (js-call a :auto 1)
+      (Object/defineProperty input 2
+        (js-object :get (lambda () (js-call a :release head) (js-call a :collect) y) :enumerable t))
+      (put input 3 undefined)
+      (let ((arr (js-call a :sourceArray input)))
+        (js-call assert :strictEqual (get arr :kind) 14)
+        (let ((values (read a arr)))
+          (js-call assert :ok (Object/is (aref values 0) -0.0))
+          (js-call assert :deepStrictEqual values (js-array -0.0 "head" "中😀" undefined)))
+        (let ((zero (js-call a :number 0)) (copied nil))
+          (js-call assert :strictEqual (invoke a "append" (js-array arr zero t)) 6)
+          (setq copied (js-call a :invoke "copy" (js-array arr)))
+          (let ((copied-values (read a copied)))
+            (js-call assert :ok (Object/is (aref copied-values 0) -0.0))
+            (js-call assert :deepStrictEqual copied-values (js-array -0.0 "head" "中😀" undefined 0 t)))
+          (release a (js-array copied zero y arr))
+          (js-call a :collect)
+          (js-call assert :strictEqual (js-call a :live) 0)))
+      (let ((foreign (js-call b :string "1")))
+        (js-call assert :throws (lambda () (js-call a :sourceArray (js-array foreign))) (code "ELI-RT0001"))
+        (finish b (js-array foreign))
+        (js-call assert :strictEqual (js-call a :live) 0))
+      (js-call assert :throws (lambda () (js-call a :sourceArray (js-object))) (code "ELI-RT0003"))
+      (let ((raw (js-call a :array (js-array t))))
+        (js-call assert :strictEqual (get raw :kind) 7)
+        (finish a (js-array raw)))))
+  (defun array-lookup-trap ()
+    (let ((specs (js-array
+            (js-array "  (defun value-array-method-check "
+                      "  (defun value-array-method-check (heap value method) (memory-sig u32 u32 v64 u32) (load-u32 4294967295))")
+            (js-array "  (defun value-property-put "
+                      "  (defun value-property-put (heap object key child) (memory-sig v64 u32 v64 v64 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))")))
+          (idx 0))
+      (while (< idx (js-length specs))
+        (let* ((spec (aref specs idx))
+               (injected (replace-runtime-function (aref spec 0) (aref spec 1) "array-trap-runtime.eli"))
+               (a (instantiateManagedRuntime (emit program injected)))
+               (input (js-array)))
+          (js-call a :auto 1)
+          (put input "push" false)
+          (let* ((target (js-call a :sourceArray input))
+                 (marker (js-call a :sourceArray (js-array false)))
+                 (frame (js-call a :frame 1)))
+            (js-call a :frameSet frame 0 target)
+            (js-call assert :throws
+              (lambda () (js-call a :invoke "append-shadow" (js-array target marker)))
+              globalThis.WebAssembly.RuntimeError)
+            (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 1)
+            (js-call assert :strictEqual (js-call a :get marker 0) false)
+            (js-call a :leaveFrame frame)
+            (finish a (js-array target marker))))
+        (setq idx (1+ idx)))))
   (defasync shadow-images (source filename names)
     (let* ((compiler (get backend :compiler)) (p (js-call compiler :compile_ir_string source filename))
            (original (JSON/stringify p))
@@ -478,9 +534,10 @@
       (let* ((original (js-call (js-call runtime-source :slice start end) :replace signature
                          "  (defun fixture-original-builtin-primitive (heap input count operation)"))
              (wrapper (str "  (defun value-builtin-primitive (heap input count operation)"
-                " (if (and (= operation 0) (= count 1) (> input 3) (= (value-kind heap input) 5)"
+                " (memory-sig v64 u32 v64 u32 u32)"
+                " (if (and (= operation 0) (= count 1) (> input (v64-literal 3 0)) (= (value-kind heap input) 5)"
                 " (= (heap-key-is heap input 2 3276852 0 0 0 0 0 0 0 0 0) 1))"
-                " (load-u32 4294967295) (fixture-original-builtin-primitive heap input count operation)))\n"))
+                " (progn (load-u32 4294967295) (v64-literal 0 0)) (fixture-original-builtin-primitive heap input count operation)))\n"))
              (rt (js-call (get backend :compiler) :compile_ir_string
                    (+ (js-call runtime-source :slice 0 start) original wrapper (js-call runtime-source :slice end)) "trap.eli"))
              (a (instantiateManagedRuntime (emit program rt))) (x (js-call a :string "42"))
@@ -492,7 +549,14 @@
         (js-call assert :ok (Object/is (js-call a :readNumber saved) -0.0))
         (js-call a :leaveFrame outer) (finish a (js-array x saved)))))
   (defun builtin-capacity ()
-    (let* ((original (js-object :maxSlots 128 :initialBytes 4096 :maxBytes 16384))
+    ;; Under honest full-heap accounting (Control + slot/bitmap + aux + 40B Val64
+    ;; module bindings + arena coexistence), 16 KiB deterministically refuses
+    ;; module setup; 48 KiB (keeping the identical 128-slot hard limit) runs the
+    ;; complete 2002-unit conversion exhaustion, root-preservation and recovery.
+    (js-call assert :throws
+      (lambda () (make (js-object :maxSlots 128 :initialBytes 6840 :maxBytes 16384)))
+      (code "ELI-RT0002"))
+    (let* ((original (js-object :maxSlots 128 :initialBytes 6840 :maxBytes 49152))
            (environment (get globalThis.process :env))
            (deferred (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
                           (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")))
@@ -507,8 +571,13 @@
       (when deferred (js-call globalThis.console :error (JSON/stringify
         (js-object :case "builtin conversion capacity" :originalCapacityAcceptance "DEFERRED / NOT ACCEPTED"
           :originalRuntimeOptions original :effectiveRuntimeOptions effective))))
-      (js-call a :auto 1) (js-call a :frameSet frame 0 saved)
-      (let* ((remaining (- (get effective :maxBytes) (get (js-call a :stats) :usedBytes) 512))
+      (js-call a :auto 1) (js-call a :frameSet frame 0 saved) (js-call a :collect)
+      (let* ((snap (readManagedAllocatorSnapshot a))
+             (tail-p (= (+ (get snap :objectBase) (get snap :objectCapacity)) (get snap :rawCursorBytes)))
+             (headroom (- (get snap :maxBytes) (get snap :usedBytes)))
+             (slack (- (get snap :objectCapacity) (get snap :objectUsed)))
+             (usable (if tail-p (+ slack headroom) (Math/max slack (- headroom (get snap :objectUsed)))))
+             (remaining (* (Math/floor (/ (- usable 512 32) 8)) 8))
              (_positive (js-call assert :ok (> remaining 0)))
              (pressure (js-call a :bytes (new globalThis.Uint8Array remaining))))
         (js-call assert :throws (lambda () (js-call a :invoke "number-call" (js-array text))) (code "ELI-RT0002"))
@@ -593,7 +662,9 @@
       ((= kind "arrays") (js-object
         "array operations refuse invalid lengths, missing capabilities and stale/foreign handles without weakening input identity" array-capabilities
         "exact index boundaries, absent numeric keys and primitive length semantics agree without truncating or wrapping" array-boundaries
-        "indexed source-array reads and existing string-key presence queries allocate no frames, text or collections" array-read-performance))
+        "indexed source-array reads and existing string-key presence queries allocate no frames, text or collections" array-read-performance
+        "bulk source-array construction keeps earlier getter operands alive and refuses foreign operands without changing the raw-array ABI" array-bulk-source-construction
+        "real array lookup and argument traps retain caller frames and precede shadowed-method callability failure" array-lookup-trap))
       ((= kind "builtins") (js-object
         "shadowed static methods capture lookup before argument effects and preserve nullish failure order" builtin-shadow
         "unsupported object conversion and actual builtin traps preserve effects, caller roots and original failures" builtin-trap

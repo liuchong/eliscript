@@ -66,7 +66,7 @@
                         :emit_ir_string (lambda (program) (get program :source))) false)))
         (js-call assert :deepStrictEqual (js-call (get recovered :modules) :map (lambda (record) (get record :javascript))) (js-array "first" "second")))))
   (defun rendering-case ()
-    (let* ((diagnostic (js-object :format "eliscript-diagnostic" :version 1 :code "ELI-B0001" :severity "error" :phase "managed-backend"
+    (let* ((diagnostic (js-object :format "eliscript-diagnostic" :code "ELI-B0001" :severity "error" :phase "managed-backend"
                          :message "unsupported source operation" :location (js-object :file "original.eli" :start (js-object :line 3 :column 7))))
            (rendered (JSON/parse (renderCompilerCLIError (js-object :message (get diagnostic :message) :eliscriptDiagnostic diagnostic)))))
       (js-call assert :strictEqual (get rendered :message) (get diagnostic :message))

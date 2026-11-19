@@ -141,6 +141,8 @@
                      (sequence-call-phase name "failed" arguments)
                      (when (= name "prepare")
                        (sequence-allocation-phase runtime "prepare-failed-before-loader-cleanup"))
+                     (when (= name "invoke")
+                       (sequence-allocation-phase runtime "invoke-failed"))
                      (throw error))))))
           (Object/defineProperties wrapped (js-object
             :name (js-object :value (get method :name)) :length (js-object :value (get method :length))))
@@ -403,6 +405,7 @@
           (when runtime (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0)))
         (catch error
           (setq failed t)
+          (when runtime (sequence-allocation-phase runtime "invoke-failed"))
           (capture-sequence-source-failure runtime error)
           (throw error))
         (finally

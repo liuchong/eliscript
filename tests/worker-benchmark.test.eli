@@ -31,7 +31,6 @@
                      (js-call stderr :trim)
                      (js-call stdout :trim)))))
         (let ((report (JSON/parse stdout)))
-          (js-call (expect (get report :protocolVersion)) :toBe 1)
           (js-call (expect (get report :workload)) :toMatchObject
             (js-object :name "score-values" :size 200 :rounds 2 :iterations 3))
           (js-call (expect (get (get report :workload) :checksum)) :toBeNumber)

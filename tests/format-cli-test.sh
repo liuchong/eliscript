@@ -34,7 +34,7 @@ fi
 DIAGNOSTIC_FILE="$TEMP_DIR/check.json" bun --eval '
   const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
   if (diagnostic.format !== "eliscript-diagnostic" ||
-      diagnostic.version !== 1 ||
+      "version" in diagnostic ||
       diagnostic.code !== "ELI-F0002" ||
       diagnostic.phase !== "formatter" ||
       diagnostic.message !== "file is not formatted" ||

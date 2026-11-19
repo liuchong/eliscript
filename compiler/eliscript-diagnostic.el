@@ -21,9 +21,6 @@
 (defconst eliscript-diagnostic-format-name "eliscript-diagnostic"
   "Public format identifier for structured compiler diagnostics.")
 
-(defconst eliscript-diagnostic-version 1
-  "Current public structured diagnostic schema version.")
-
 (cl-defstruct (eliscript-diagnostic
                (:constructor eliscript-diagnostic-create))
   code
@@ -95,7 +92,6 @@
   "Return public JSON-compatible data for DIAGNOSTIC."
   (append
    `((format . ,eliscript-diagnostic-format-name)
-     (version . ,eliscript-diagnostic-version)
      (code . ,(eliscript-diagnostic-code diagnostic))
      (severity . ,(eliscript-diagnostic-severity diagnostic))
      (phase . ,(eliscript-diagnostic-phase diagnostic))

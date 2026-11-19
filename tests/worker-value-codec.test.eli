@@ -28,7 +28,7 @@
                       metadata))
              (encoded (encodeWorkerValue value))
              (decoded (decodeWorkerValue encoded)))
-        (js-call (expect workerValueEncoding) :toBe "eliscript-value-v1")
+        (js-call (expect workerValueEncoding) :toBe "eliscript-value")
         (js-call (expect (equalValues decoded value)) :toBe t)
         (js-call (expect (equalValues (meta decoded) metadata)) :toBe t)
         (js-call (expect (equalValues (meta (js-call decoded :nth 1)) metadata)) :toBe t)

@@ -75,7 +75,8 @@
              (names (js-array
                       "managed-fail" "word-node" "word-constant" "word-local" "word-set" "word-sequence"
                       "word-compare" "word-if" "append-managed" "runtime-call" "runtime-arguments" "capture-error"
-                      "managed-guard" "checked-control" "managed-temporary-root-count" "managed-temporary-root-barrier-p"
+                      "managed-guard" "checked-control" "managed-private-roots-p" "managed-raw-binary"
+                      "managed-root-set" "managed-root-clear-except" "managed-temporary-root-count" "managed-temporary-root-barrier-p"
                       "enter-managed-temporary-root-rhs" "clear-managed-temporary-roots"))
              (helpers (str "(module root.cleanup.helpers\n(import "
                            (JSON/stringify (get (pathToFileURL (resolve directory "backends/numeric.mjs")) :href))
@@ -219,22 +220,37 @@
           (funcall assert (not (nullish? fn)))
           fn))))
 
+  (defun zero-literal-p (node)
+    (and (not (nullish? node)) (= (get node :kind) "literal")
+      (let ((val (get node :value)))
+        (or (= val 0)
+            (and (not (nullish? val)) (= (get val :low) 0) (= (get val :high) 0))))))
+
   (test "actual nested let-star lowering emits each completed private root cleanup once and grows linearly with nesting depth"
     (lambda ()
-      (let ((frame-set (get (js-call (get (get lowered :typed) :functions) :find (lambda (fn) (= (get fn :name) "frame-set"))) :index))
-            (previous nil))
+      (let* ((functions (get (get lowered :typed) :functions))
+             (frame-set (get (js-call functions :find (lambda (fn) (= (get fn :name) "frame-set"))) :index))
+             (set-abs (get (js-call functions :find (lambda (fn) (= (get fn :name) "root-scope-set-abs"))) :index))
+             (previous nil))
         (js-call depths :forEach
           (lambda (depth)
             (let* ((cleared (new globalThis.Map))
                    (nodes (walk-ir (get (exported-function (str "cleanup-depth-" depth)) :body)
                             (lambda (node)
-                              (let ((c3 (if (and (= (get node :kind) "call") (= (get node :value) frame-set))
-                                          (aref (get node :children) 3)
-                                          nil)))
-                                (when (and (not (nullish? c3)) (= (get c3 :kind) "literal") (= (get c3 :value) 0))
-                                  (let* ((root (get (aref (get node :children) 2) :value))
-                                         (prev (js-call cleared :get root)))
-                                    (js-call cleared :set root (+ (if (nullish? prev) 0 prev) 1)))))))))
+                              (when (= (get node :kind) "call")
+                                (let ((callee (get node :value)) (root nil))
+                                  (cond
+                                    ((= callee frame-set)
+                                      (let ((value (aref (get node :children) 3)))
+                                        (when (zero-literal-p value)
+                                          (setq root (get (aref (get node :children) 2) :value)))))
+                                    ((= callee set-abs)
+                                      (let ((value (aref (get node :children) 2)))
+                                        (when (zero-literal-p value)
+                                          (setq root (get (aref (get (aref (get node :children) 1) :children) 1) :value))))))
+                                  (when (not (nullish? root))
+                                    (let ((prev (js-call cleared :get root)))
+                                      (js-call cleared :set root (+ (if (nullish? prev) 0 prev) 1))))))))))
               (funcall assert (>= (get cleared :size) depth) "every initialized private array temporary is still cleared")
               (js-call (Array/from cleared) :forEach
                 (lambda (entry)

@@ -88,7 +88,7 @@ bun tools/compatibility/matrix.mjs --run \
 
 Reports live under `acceptance/matrix/`. Each report retains command status,
 duration, output digests, exact environment versions, and the source commit and
-tree. Reports use format `eliscript-local-compatibility-cell` version 1.
+tree. Reports use format `eliscript-local-compatibility-cell`.
 `--verify-all` validates every present report, rejects duplicates or
 mixed source-content identities, and marks historical reports stale when
 tracked source outside the report directory has changed. Report-only commits

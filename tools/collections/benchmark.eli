@@ -12,7 +12,6 @@
   (import "../compiler/controlled-baseline.mjs" compilerBenchmarkSourceDigest)
 
   (defconst LAYOUT_SUITE_FORMAT "eliscript-hamt-layout-benchmark")
-  (defconst LAYOUT_SUITE_VERSION 1)
   (defconst BROWSER_PORT 8740)
   (defconst BROWSER_DEBUG_PORT 8741)
 
@@ -446,9 +445,8 @@
 
   (defun validateLayoutSuiteReport (report)
     (when (or (nullish? report)
-              (/= (get report :format) LAYOUT_SUITE_FORMAT)
-              (/= (get report :version) LAYOUT_SUITE_VERSION))
-      (throw (new globalThis.TypeError "invalid HAMT layout benchmark suite format or version")))
+              (/= (get report :format) LAYOUT_SUITE_FORMAT))
+      (throw (new globalThis.TypeError "invalid HAMT layout benchmark suite format")))
     (let ((hosts (get report :hosts)))
       (unless (and (Array/isArray hosts) (= (js-length hosts) 3))
         (throw (new globalThis.TypeError "HAMT layout benchmark requires exactly three host reports")))
@@ -506,7 +504,6 @@
                         (await (run-browser-benchmark environment temporary-directory)))))
           (validateLayoutSuiteReport (js-object
             :format LAYOUT_SUITE_FORMAT
-            :version LAYOUT_SUITE_VERSION
             :generatedAt (js-call (new globalThis.Date) :toISOString)
             :sourceDigest (await (benchmarkSourceDigest))
             :runtimeThresholds (js-object :promotion 32 :demotion 24)
@@ -534,6 +531,6 @@
       (js-call globalThis.console :error error)
       (put process :exitCode 1))))
 
-  (export LAYOUT_SUITE_FORMAT LAYOUT_SUITE_VERSION BROWSER_PORT BROWSER_DEBUG_PORT
+  (export LAYOUT_SUITE_FORMAT BROWSER_PORT BROWSER_DEBUG_PORT
           BROWSER_MODULE_FILES validateBrowserModuleFiles
           benchmarkSourceDigest analyzeLayoutSuite validateLayoutSuiteReport runLayoutSuiteBenchmark))

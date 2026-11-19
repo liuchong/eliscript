@@ -1,5 +1,6 @@
 (module tests.helpers.direct-fixed-point
   (import "node:assert/strict" :default assert)
+  (defun num-val (a value) (if (= (value-type value) "number") value (js-call a :readNumber value)))
   (defun managedOutputs (generations source runtime filename &rest __host_forwarded_arguments_1)
     (let* ((options (aref __host_forwarded_arguments_1 0)) (snapshots (aref __host_forwarded_arguments_1 1)))
     (let* ((programs (js-call generations :map (lambda (g) (js-call (get g :compiler) :compile_ir_string source filename))))
@@ -16,7 +17,7 @@
     (js-call assert :deepEqual (aref (get records :programs) 0) (aref (get records :programs) 2)) (equalAll (get records :lowered)) (equalAll (get records :bytes)))
   (defun readValue (runtime value)
     (if (or (nullish? value) (not (= (funcall (js* "(value) => typeof value") value) "object"))) value
-      (cond ((= (get value :kind) 4) (js-call runtime :readNumber value)) ((= (get value :kind) 5) (js-call runtime :readString value))
+      (cond ((= (value-type value) "number") value) ((= (get value :kind) 4) (js-call runtime :readNumber value)) ((= (get value :kind) 5) (js-call runtime :readString value))
         (t (Array/from (js-object :length (js-call runtime :length value)) (lambda (_ index)
           (let ((child (js-call runtime :get value index))) (try (readValue runtime child) (finally (js-call runtime :release child))))))))))
   (defun assertSeedGeneration (generations records i seed)
@@ -27,10 +28,10 @@
   (defun numberResult (a name &rest __host_forwarded_arguments_2)
     (let* ((args (aref __host_forwarded_arguments_2 0)))
     (when (nullish? args) (setq args (js-array)))
-    (let ((out (js-call a :invoke name args))) (try (js-call a :readNumber out) (finally (js-call a :release out))))))
+    (let ((out (js-call a :invoke name args))) (try (funcall num-val a out) (finally (js-call a :release out))))))
   (defun readSparseValue (a x)
     (if (or (nullish? x) (not (= (funcall (js* "(value) => typeof value") x) "object"))) x
-      (cond ((= (get x :kind) 4) (js-call a :readNumber x)) ((= (get x :kind) 5) (js-call a :readString x))
+      (cond ((= (value-type x) "number") x) ((= (get x :kind) 4) (js-call a :readNumber x)) ((= (get x :kind) 5) (js-call a :readString x))
         (t (let ((result (new globalThis.Array (js-call a :length x))))
           (let ((__eli_iteration_1_index 0) (__eli_iteration_1_limit (js-length result)))
   (while (< __eli_iteration_1_index __eli_iteration_1_limit)

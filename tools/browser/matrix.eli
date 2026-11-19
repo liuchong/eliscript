@@ -223,7 +223,7 @@
       (let ((server (await (serveTree site port)))
             (failures (js-array)))
         (try
-          (let ((report (js-object :format "dogfood-browser-matrix" :version 1
+          (let ((report (js-object :format "dogfood-browser-matrix"
                           :viewports (js-call VIEWPORTS :map (lambda (entry) (get entry :name)))
                           :siteFingerprint (await (fingerprintTree site))
                           :engines (js-array)))

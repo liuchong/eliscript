@@ -16,10 +16,10 @@ reader prefixes, literal spelling, collection delimiters, and raw JavaScript
 strings remain represented in the output. Bun and Node invoke the same generated
 formatter module through a narrow filesystem adapter.
 
-Formatter version 1 fixes two-space indentation, an 88-column preferred width,
+The formatter fixes two-space indentation, an 88-column preferred width,
 LF line endings, no trailing horizontal whitespace, and exactly one final
 newline for non-empty source. Empty or whitespace-only source becomes empty.
-These values are part of the versioned contract; command options cannot create
+These values are part of the contract; command options cannot create
 host-specific style dialects.
 
 Application frameworks, UI libraries, bundlers, publishing systems, site
@@ -39,7 +39,7 @@ The formatter tokenizes these source categories without evaluating them:
 Whitespace is trivia and is reconstructed by the layout operation. Comments are
 nodes in the concrete tree rather than discarded reader trivia. A prefix owns
 the next non-comment node, including a nested prefix or collection. Delimiter
-nesting is validated even though the normal entry first invokes the versioned
+nesting is validated even though the normal entry first invokes the
 reader, making formatter failures deterministic if the two concrete models ever
 diverge.
 
@@ -75,7 +75,6 @@ because source positions correctly follow the formatted input.
 The generated compiler exports:
 
 - `formatter_format`: `"eliscript-formatter"`
-- `formatter_version`: `1`
 - `format_source(source, filename)`: return the canonical source string
 
 `source` must be a string. `filename` is used for reader and formatter
@@ -89,13 +88,13 @@ process, editor, watcher, or application work.
 - no mutation option: write canonical source to stdout
 - `--write`: atomically replace `INPUT` only when bytes changed
 - `--check`: write nothing and fail when canonical bytes differ
-- `--diagnostic-format human|json`: select human or version 1 structured
+- `--diagnostic-format human|json`: select human or structured
   diagnostics
 - `--help`: print command usage
 
 `--write` and `--check` are mutually exclusive. Version 1 accepts one input
 file so stdout and diagnostics have one unambiguous source identity. Project
-enumeration belongs to the separately versioned project-aware check operation
+enumeration belongs to the separate project-aware check operation
 defined by specification 0116 and cannot be silently inferred by this command.
 
 An unformatted file fails with diagnostic code `ELI-F0002`, phase `formatter`,
@@ -110,15 +109,15 @@ deliverable of M10. At that slice it did not claim the Emacs major mode,
 project-aware check, interactive evaluation, REPL, watch API, installation
 audit, or complete M10 exit gate. Specifications 0115 through 0121 and 0133
 subsequently completed those implementation units and the M10 exit audit
-without changing formatter version 1.
+without changing the formatter.
 
 ## Compatibility Freeze
 
-Formatter version 1 token preservation, fixed two-space and 88-column layout,
+Formatter token preservation, fixed two-space and 88-column layout,
 LF and final-newline rules, byte idempotence, generated-ESM equivalence,
 Bun/Node command behavior, atomic write/check semantics, and structured
-diagnostics are stable. Style options cannot reinterpret version 1; an
-incompatible layout requires a separately versioned formatter contract.
+diagnostics are stable. Style options cannot reinterpret the layout; an
+incompatible layout requires a separate formatter contract.
 
 ## Acceptance Criteria
 
@@ -146,4 +145,4 @@ incompatible layout requires a separately versioned formatter contract.
   framework or application-tool dependency.
 - **FMT-12:** This formatter slice did not itself complete M10; subsequent
   specifications independently supplied the remaining deliverables and exit
-  audit without changing formatter version 1.
+  audit without changing the formatter.

@@ -17,14 +17,15 @@
   (defvar reference undefined)
   (defvar private-helpers undefined)
   (defconst options
-    (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384 :initializeModule false))
+    (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 20480 :initializeModule false))
   (defconst families (js-array "method" "conditional" "cond" "short" "sugar"))
 
   (defun compile-private-helpers (backend production)
     (let* ((names (js-array "managed-fail" "word-node" "word-constant" "word-local" "word-set"
-              "word-sequence" "word-compare" "word-if" "append-managed" "new-managed-local"
+              "word-sequence" "word-compare" "word-if" "managed-raw-binary" "append-managed" "new-managed-local"
               "new-managed-temporary-local" "runtime-call" "runtime-arguments" "capture-error"
-              "managed-guard" "checked-control" "root-local" "managed-immediate-result-p" "managed-result"
+              "managed-guard" "checked-control" "managed-private-roots-p" "managed-root-set"
+              "managed-root-clear-except" "root-local" "managed-immediate-result-p" "managed-result"
               "clear-managed-temporary-roots" "snapshot-managed"))
            (parts (js-array "(module tests.private.root.epochs"
              (str "(import " (JSON/stringify (get (pathToFileURL (resolve directory "backends/numeric.mjs")) :href))

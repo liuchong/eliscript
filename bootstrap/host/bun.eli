@@ -25,7 +25,6 @@
          "  -h, --help         Show this help\n"))
 
   (defconst diagnosticFormat "eliscript-diagnostic")
-  (defconst diagnosticVersion 1)
 
   (defun requestedDiagnosticFormat (arguments_)
     (let ((index 0)
@@ -91,11 +90,9 @@
   (defun diagnosticFromError (error)
     (let ((diag (if (nullish? error) undefined (get error :eliscriptDiagnostic))))
       (if (and (not (nullish? diag))
-               (= (get diag :format) diagnosticFormat)
-               (= (get diag :version) diagnosticVersion))
+               (= (get diag :format) diagnosticFormat))
         diag
         (js-object :format diagnosticFormat
-          :version diagnosticVersion
           :code "ELI-C0001"
           :severity "error"
           :phase "cli"

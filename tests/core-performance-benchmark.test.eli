@@ -72,7 +72,7 @@
              (failure undefined))
         (try
           (put environment :EMACS (resolve directory "missing-emacs"))
-          (try (await (runCoreBenchmarkSample CORE_BENCHMARK_PARAMETERS))
+          (try (await (runCoreBenchmarkSample (js-object :baselineRuns 3 :warmupRounds 1 :timingSamples 1 :workerSize 100 :workerRounds 1 :workloadSize 1000 :workloadKeyCount 100)))
             (catch error (setq failure error)))
           (js-call (expect failure) :toBeInstanceOf globalThis.AggregateError)
           (same (get failure :completedPhases) (js-array "compiler" "build" "workload"))
@@ -90,7 +90,7 @@
           ;; rather than selecting an empty string through Lisp `or`.
           (setq failure undefined)
           (put environment :EMACS "false")
-          (try (await (runCoreBenchmarkSample CORE_BENCHMARK_PARAMETERS))
+          (try (await (runCoreBenchmarkSample (js-object :baselineRuns 3 :warmupRounds 1 :timingSamples 1 :workerSize 100 :workerRounds 1 :workloadSize 1000 :workloadKeyCount 100)))
             (catch error (setq failure error)))
           (js-call (expect failure) :toBeInstanceOf globalThis.AggregateError)
           (same (get failure :completedPhases) (js-array "compiler" "build" "workload"))

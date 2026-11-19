@@ -67,7 +67,7 @@ verification have consumed the complete argument list. It must return a list.
 This supports persistent worker snapshots without weakening the reference
 contract or forcing unchanged bulk values across the process boundary.
 
-The service passes progress, timing, timeout, project-manifest, module-version,
+The service passes progress, timing, timeout, project-manifest, module-digest,
 value-codec, and chunking concerns to the existing worker implementation. These
 remain service options and callbacks rather than operation-specific protocol
 code in Emacs packages.

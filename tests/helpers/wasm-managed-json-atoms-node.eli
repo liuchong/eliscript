@@ -27,7 +27,7 @@
         (js-call parsed :forEach
           (lambda (n i)
             (let ((item (js-call a :get value i)))
-              (funcall assert (Object/is (js-call a :readNumber item) n))
+              (funcall assert (Object/is (if (= (value-type item) "number") item (js-call a :readNumber item)) n))
               (js-call a :release item))))
         (js-call a :release s)
         (js-call a :release value)

@@ -159,6 +159,8 @@
     (let* ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-lazy-sequence-"))))
            (bootstrapDirectory (resolve directory "bootstrap")) (seedDirectory (resolve directory "seed")) (selfHostedDirectory (resolve directory "self-hosted")))
       (try
+        (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+        (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
         (await (compileFamily seedCompiler seedDirectory))
         (await (seedCompilerFixture bootstrapDirectory))
         (await (compileFamily portableCompiler selfHostedDirectory (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR bootstrapDirectory)))

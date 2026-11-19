@@ -1,9 +1,10 @@
 ;; Whole text pipeline executes inside WASM. Frames are explicit until automatic
 ;; compiler root insertion is implemented; no host codec or string import.
 (defun text-pipeline (heap input rounds)
+  (memory-sig v64 u32 v64 u32)
   (heap-pin heap input)
   (let ((frame (frame-new heap 6)) (i 0))
-    (if (= frame 0) (progn (heap-release heap input) (fail 2))
+    (if (= frame (v64-literal 0 0)) (progn (heap-release heap input) (fail-v64 2))
       (progn
         (frame-set heap frame 0 input)
         (heap-release heap input)
@@ -23,7 +24,7 @@
                              (= (value-string-find heap joined right 0) (1- length))
                              (= (value-string-code-point heap joined 2) 128512))
                       (frame-set heap frame 0 joined)
-                      (progn (frame-pop heap frame) (fail 3))))))))
+                      (progn (frame-pop heap frame) (fail-v64 3))))))))
           (setq i (1+ i)))
         (frame-return heap frame (frame-get heap frame 0))))))
 (export text-pipeline)
@@ -31,11 +32,12 @@
 ;; Repeated managed key operations stay inside the module across allocation
 ;; safepoints. Map key NaN equality is separate from arithmetic IEEE equality.
 (defun key-pressure (heap rounds)
+  (memory-sig v64 u32 u32)
   (let ((frame (frame-new heap 2)) (index 0) (ok 1))
     (while (and (< index rounds) (= ok 1))
       (let ((left (value-number heap index 2146959360)))
         (frame-set heap frame 0 left)
-        (let ((right (value-number heap (word-xor index 255) 2146959360)))
+        (let ((right (value-number heap (word-xor index 255) 4294443008)))
           (frame-set heap frame 1 right)
           (when (not (and (= (value-key-equal heap left right) 1)
                          (= (value-number-compare heap left right 0) 0)
@@ -43,5 +45,5 @@
                          (= (value-key-hash heap right) 1490037359))) (setq ok 0))))
       (setq index (1+ index)))
     (if (= ok 1) (frame-return heap frame (frame-get heap frame 0))
-      (progn (frame-pop heap frame) (fail 3)))))
+      (progn (frame-pop heap frame) (fail-v64 3)))))
 (export key-pressure)

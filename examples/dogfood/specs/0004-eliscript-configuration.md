@@ -44,7 +44,7 @@ configuration values or executable forms.
 ```elisp
 (module dogfood.config
   (defconst config
-    {:schema-version 1
+    {
      :site
      {:title "dogfood"
       :base-url "https://owner.github.io/repository/"

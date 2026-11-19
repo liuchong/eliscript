@@ -35,7 +35,7 @@
     (let* ((root (resolve directory name)) (parts (js-array "tools/compiler" "runtime" "compiler" "bootstrap/compiler" "contracts")) (i 0)
            (old (js-array "data:text/javascript;base64,b2xkLWNhcHN1bGUtMQ==" "data:text/javascript;base64,b2xkLWNhcHN1bGUtMg=="))
            (declarations (js-array (js-array "compiler/eliscript-emitter.el" "eliscript-emitter--array-text-import") (js-array "bootstrap/compiler/emitter.eli" "array-text-import")))
-           (contract (js-object :schemaVersion 1 :preserved (js-object :value "original contract field") :imports (js-object :specialSpecifiers
+           (contract (js-object :preserved (js-object :value "original contract field") :imports (js-object :specialSpecifiers
              (js-array (js-object :prefix "node:" :allowedRoots (js-array "tools/")) (js-object :specifier "z-last" :allowedRoots (js-array "tests/"))
                (js-object :specifier (aref old 0) :allowedRoots capsuleConsumers) (js-object :prefix "aaa:" :allowedRoots (js-array "runtime/"))
                (js-object :specifier "a-first" :allowedRoots (js-array "runtime/")) (js-object :specifier (aref old 1) :allowedRoots capsuleConsumers))))))

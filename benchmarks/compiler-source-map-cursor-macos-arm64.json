@@ -1,7 +1,6 @@
 {
   "format": "eliscript-compiler-source-map-cursor-benchmark",
-  "version": 1,
-  "generatedAt": "2026-10-15T10:37:48.229Z",
+  "generatedAt": "2026-11-19T17:21:49.811Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
@@ -18,10 +17,38 @@
       "bootstrap/compiler/emitter.eli",
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli",
+      "tools/compiler/source-map-cursor-benchmark.eli",
       "tools/compiler/source-map-cursor-benchmark.mjs",
-      "tools/compiler/controlled-baseline.mjs"
+      "tools/compiler/controlled-baseline.mjs",
+      "runtime/array-text.eli",
+      "runtime/array-text.mjs",
+      "runtime/binding.eli",
+      "runtime/binding.mjs",
+      "runtime/errors.eli",
+      "runtime/errors.mjs",
+      "runtime/math.eli",
+      "runtime/math.mjs",
+      "runtime/number-radix.eli",
+      "runtime/number-radix.mjs",
+      "runtime/prelude.eli",
+      "runtime/prelude.mjs",
+      "runtime/primitives.eli",
+      "runtime/primitives.mjs",
+      "runtime/unicode-case.eli",
+      "runtime/unicode-case.mjs",
+      "runtime/unicode-case-data.eli",
+      "runtime/unicode-case-data.mjs",
+      "bootstrap/runtime/memory.eli",
+      "tools/runtime/unicode-case-runtime.el",
+      "tools/compiler/controlled-baseline.eli"
     ],
-    "value": "ea91455377c222ab80b4f6f9e284886184dd8a788cb825225734f928890764e3"
+    "value": "715eaa5daee89afa2b110e46f9f7c920ae7530754627aec3d47a0291caab0c70",
+    "preparedCompiler": {
+      "format": "eliscript-prepared-stage3",
+      "fixedPointFileCount": 343,
+      "sourceSha256": "320221cbb403e6f14bb1412ca16ff7f270c1b2529b5d0eec5fb8f03b20ba96f8",
+      "productSha256": "abfcb8ec686bd766216a2bc014255cf793677ed5222d885835c1841b924ff232"
+    }
   },
   "host": {
     "runtime": "bun",
@@ -29,11 +56,11 @@
     "engine": "JavaScriptCore",
     "platform": "darwin",
     "architecture": "arm64",
-    "operatingSystem": "Darwin 25.6.0"
+    "operatingSystem": "Darwin 27.2.0"
   },
   "baseline": {
     "revision": "a6013833226af047622aceca42d687b6e33e3701",
-    "root": "eliscript-primitive-source-map-baseline",
+    "root": "smap",
     "control": {
       "mode": "current-compiler-with-historical-functions",
       "target": "bootstrap/compiler/source-map.eli",
@@ -48,126 +75,126 @@
           "sha256": "83f7e0cceb000a251452af627048c0cb1477065fc296efbcad787dae80f00994"
         }
       ],
-      "controlSourceSha256": "1161579a865373b209171317ea99249f24beb24a22fa86c7a81caa32e637c8be",
+      "controlSourceSha256": "73f2049ed12ea3d71629865dc721d7b182d0ed2fb0f08a329a49fcb921318a3f",
       "inputs": [
         {
           "path": "bootstrap/compiler/symbol.eli",
-          "sha256": "cf43e027a44fa419f8934255b3847263585c3d3b9651f983c738666abdefcf38"
+          "sha256": "837615796ffabc7aaf97b42133ab4c3afaa747593e646aaa66af856bb9fe9c3c"
         },
         {
           "path": "bootstrap/compiler/syntax.eli",
-          "sha256": "b64225ce5ac44c20aa190594906fc242c5c192aa4d64bf5dad80a9cfcb48a0f0"
+          "sha256": "a75ef5facca5236bb511bb63ebf5d4737536b2928017ac578a5f244fa59dae40"
         },
         {
           "path": "bootstrap/compiler/reader.eli",
-          "sha256": "5d1de9578c621c4ae1c5f99691645e02046084e4134b0d4284316940f40ba2d1"
+          "sha256": "517c71ffbc82f8acb6237b0adf01fdc4b174d04f63c9c889e5fd3accf41731dc"
         },
         {
           "path": "bootstrap/compiler/formatter.eli",
-          "sha256": "80f52ffe33c0e3fd6153034a578474972168e0740a0947f149c0f1dfa47c5ef4"
+          "sha256": "41a720c6b560cabca83df9075b14bfa69f158b5af9229bd18031a5b5364625d4"
         },
         {
           "path": "bootstrap/compiler/expander.eli",
-          "sha256": "03e58a0bc33f315b4b3fc2291b8bffeb718fbc606945ae567dd19147e46c79ee"
+          "sha256": "8b1580b979a719e2fd6326adda3faca7ba4fc2f317f0a1e95880f472b09f27ae"
         },
         {
           "path": "bootstrap/compiler/transient-analysis.eli",
-          "sha256": "f91891f4259ea1f0764e03aabb3b8b280c5ab49bb01630e697bc89ad20b268c1"
+          "sha256": "e7b1b3a7368c001813eb04194a07597ce14f69963d2b1c00b91ec7a15d19bf97"
         },
         {
           "path": "bootstrap/compiler/analyzer.eli",
-          "sha256": "7bb84e17d5d2e622a2a8d801b5b6da79eb9f67b275f3d1a3df2aab31e2df4f86"
+          "sha256": "85c2e9f56c4df09835e26ff6235331f90593eda71c23c3d207d7b9bbec4c9418"
         },
         {
           "path": "bootstrap/compiler/ir.eli",
-          "sha256": "08dee85f0839058d3f78b1e180fca400b345cfc1425d639b77a26c59df7d7ef8"
+          "sha256": "ae71c2749af2036e2059134b966e232f5f7f86553a7f51687a7c960f78d83743"
         },
         {
           "path": "bootstrap/compiler/lower.eli",
-          "sha256": "8be512725b39ba00dd77bc9e435b549cc47cd503fe862ab4f571dc6de1037f3a"
+          "sha256": "1751d87d273ac3d7ae8b748b0c54ecd7c8cfd75885e087d3a08b60f3ed50d223"
         },
         {
           "path": "bootstrap/compiler/source-map.eli",
-          "sha256": "8ac85cbf38b0f2b0bab3512fc02991c89945a70e240bc6d7a1de61744579afa9"
+          "sha256": "bbacca32b14ebf4bad25809dfd62fd26293fb8688ee5b18900e128710c37dd5d"
         },
         {
           "path": "bootstrap/compiler/emitter.eli",
-          "sha256": "bac95dc1f886e359266dc48e36e5361f3e676aeb2c399620e2d68deaec43b774"
+          "sha256": "741226d77b48f83061275587cd52d34c32c2622521d1bab02df24b2f635e604b"
         },
         {
           "path": "bootstrap/compiler/project.eli",
-          "sha256": "068f8c7836947853b11b2813becf385522f092e1cccfe97e487996e4b8132797"
+          "sha256": "9b93d947da90097c7d2e181d680ae495f1e78892607c411dfe52c669048db27b"
         },
         {
           "path": "bootstrap/compiler/compiler.eli",
-          "sha256": "e7971722e7af65aca6a42e0b9880d8e828c765aa640744d04cffd2ad123ea0f3"
+          "sha256": "f9022632ec5046f449893576fb4d984f7e7ac46d2222518275c5d041247e0d48"
         }
       ],
       "artifacts": [
         {
           "file": "symbol.mjs",
-          "treatment": "3ff92196cfc476cbc26c80c53d1342080995493b9129cb71099687fdf87141c0",
-          "control": "3ff92196cfc476cbc26c80c53d1342080995493b9129cb71099687fdf87141c0"
+          "treatment": "5c956b9389999ef334b40875fa81dfaefa8533a1059604d0200718fe82e4703f",
+          "control": "5c956b9389999ef334b40875fa81dfaefa8533a1059604d0200718fe82e4703f"
         },
         {
           "file": "syntax.mjs",
-          "treatment": "b34259819fc28506a5b318e07a3cbb8d314c42387a1ce57593a25cd91a549f58",
-          "control": "b34259819fc28506a5b318e07a3cbb8d314c42387a1ce57593a25cd91a549f58"
+          "treatment": "005740f986cf97bba5f3907d6cf44054c94e9beb146598b751c49ed8654eec90",
+          "control": "005740f986cf97bba5f3907d6cf44054c94e9beb146598b751c49ed8654eec90"
         },
         {
           "file": "reader.mjs",
-          "treatment": "f7c7418500c8ba0f72b1ea59d10f1651021dda9f74292e34a351a70e4deff7b6",
-          "control": "f7c7418500c8ba0f72b1ea59d10f1651021dda9f74292e34a351a70e4deff7b6"
+          "treatment": "c39393ae52cea92e024b39b354b37f47131eae5598aef3c97337c5a432e9ee7f",
+          "control": "c39393ae52cea92e024b39b354b37f47131eae5598aef3c97337c5a432e9ee7f"
         },
         {
           "file": "formatter.mjs",
-          "treatment": "d93d3d05f82061ffc6836f604ef098ab828b193aec04c21c9461ee5d4cd33d21",
-          "control": "d93d3d05f82061ffc6836f604ef098ab828b193aec04c21c9461ee5d4cd33d21"
+          "treatment": "4ccec24c2bef3507b369b446c82a39318a1467ecee1ad50ead5da61662f1c1a9",
+          "control": "4ccec24c2bef3507b369b446c82a39318a1467ecee1ad50ead5da61662f1c1a9"
         },
         {
           "file": "expander.mjs",
-          "treatment": "4df43e638eec9ccef8f922b496ec6a6f2cbfb99bc485340fd46f926a08bcbab7",
-          "control": "4df43e638eec9ccef8f922b496ec6a6f2cbfb99bc485340fd46f926a08bcbab7"
+          "treatment": "41137c04e8c209b892952b3157a0db1a4a49b65ec19adc7809dff13b205b528c",
+          "control": "41137c04e8c209b892952b3157a0db1a4a49b65ec19adc7809dff13b205b528c"
         },
         {
           "file": "transient-analysis.mjs",
-          "treatment": "9f3fb5a1bd31fd213ebbbbc7a7da1fc9675d3cbd8c9351135308643fa390255a",
-          "control": "9f3fb5a1bd31fd213ebbbbc7a7da1fc9675d3cbd8c9351135308643fa390255a"
+          "treatment": "3493883562cc29e3221ace08365e704fe6cf956141aeb7306dee615721b62350",
+          "control": "3493883562cc29e3221ace08365e704fe6cf956141aeb7306dee615721b62350"
         },
         {
           "file": "analyzer.mjs",
-          "treatment": "fb32820d40f13551f62d47081f228f7d5d5c505518595ad5913d3b5f8e9b7f07",
-          "control": "fb32820d40f13551f62d47081f228f7d5d5c505518595ad5913d3b5f8e9b7f07"
+          "treatment": "98bfad41ab52cbd68236423bdbf0f7dcefdce0c9d747b95964e3cb528cfd62fa",
+          "control": "98bfad41ab52cbd68236423bdbf0f7dcefdce0c9d747b95964e3cb528cfd62fa"
         },
         {
           "file": "ir.mjs",
-          "treatment": "76a935d14fd217e979300de06285ee7f73b97a52615d90d7f7cdaa872d84fc8a",
-          "control": "76a935d14fd217e979300de06285ee7f73b97a52615d90d7f7cdaa872d84fc8a"
+          "treatment": "0c353dd7ee13b3cf7b3a542112712ba02301b8d7f995be8a1cae31e18a787452",
+          "control": "0c353dd7ee13b3cf7b3a542112712ba02301b8d7f995be8a1cae31e18a787452"
         },
         {
           "file": "lower.mjs",
-          "treatment": "e90d51fe1ef4dfbb353cb0ac97b5517439512677cd0bd1364285cdda232c40c6",
-          "control": "e90d51fe1ef4dfbb353cb0ac97b5517439512677cd0bd1364285cdda232c40c6"
+          "treatment": "a3b88450c7ca0c08a887806fe20e70dd1cc34d237870c0056f990b5906208899",
+          "control": "a3b88450c7ca0c08a887806fe20e70dd1cc34d237870c0056f990b5906208899"
         },
         {
           "file": "source-map.mjs",
-          "treatment": "344c65354f671a24748ce330821b3cb0ede15a7907a9e30d515482de5e004b8b",
-          "control": "60c85fa6bffff89780f3fd50819a283562ca1f40882c3711d757db9036544808"
+          "treatment": "ab1a03aa3383e2849fb7e829c2d10ce73d683d4efb76ab6f30a86f26b83fb3b5",
+          "control": "91076729cc3af4c7e355f10c53d91ecac1bbdb3e62df2ef2b47e2feac2841e4b"
         },
         {
           "file": "emitter.mjs",
-          "treatment": "40b7eb07aefae6cf0e5b446031bdc93657fa62301da82cb33f41371a82a06246",
-          "control": "40b7eb07aefae6cf0e5b446031bdc93657fa62301da82cb33f41371a82a06246"
+          "treatment": "34974693b9b8c14ea4c218f650d8455797c46ff9bdbe4d4fb3c02c7c8d4cdeef",
+          "control": "34974693b9b8c14ea4c218f650d8455797c46ff9bdbe4d4fb3c02c7c8d4cdeef"
         },
         {
           "file": "project.mjs",
-          "treatment": "43f3505886f7fc5f4125c8bc269f60cb4174fb5b5303a85e02a7ca0c085d1400",
-          "control": "43f3505886f7fc5f4125c8bc269f60cb4174fb5b5303a85e02a7ca0c085d1400"
+          "treatment": "a6861cabde3917a3d5c20cf7ad23d2474932ef4edfb5337eb496af53fc8cdae0",
+          "control": "a6861cabde3917a3d5c20cf7ad23d2474932ef4edfb5337eb496af53fc8cdae0"
         },
         {
           "file": "compiler.mjs",
-          "treatment": "e9a0342f3603fb3305bc81d524157b33ca5bb08e051775c15cf696fc53b81843",
-          "control": "e9a0342f3603fb3305bc81d524157b33ca5bb08e051775c15cf696fc53b81843"
+          "treatment": "6a4b5e07914e73e81785f144f95d1ecc5cecfd120f78d37592be90b579481e6c",
+          "control": "6a4b5e07914e73e81785f144f95d1ecc5cecfd120f78d37592be90b579481e6c"
         }
       ]
     }
@@ -188,9 +215,9 @@
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli"
     ],
-    "sourceBytes": 439751,
-    "generatedBytes": 681034,
-    "artifactMarks": 34316,
+    "sourceBytes": 582239,
+    "generatedBytes": 763094,
+    "artifactMarks": 46186,
     "pipelineCases": 15
   },
   "parameters": {
@@ -203,94 +230,94 @@
     "equivalentCases": 15,
     "identicalCompilerOutputs": 13,
     "validSourceMaps": 13,
-    "referencePipelineChecksum": 1353380,
-    "optimizedPipelineChecksum": 1353380,
-    "baselineCompilerChecksum": 10651464,
-    "optimizedCompilerChecksum": 10651464
+    "referencePipelineChecksum": 1814540,
+    "optimizedPipelineChecksum": 1814540,
+    "baselineCompilerChecksum": 12980192,
+    "optimizedCompilerChecksum": 12980192
   },
   "measurements": {
     "referencePipeline": {
       "samplesMs": [
-        208.82187499999964,
-        204.0841250000003,
-        200.4932089999993,
-        196.66908400000102,
-        216.2151670000003,
-        204.36666700000023,
-        236.41154199999983,
-        195.6369169999998,
-        200.4514999999992,
-        224.23862499999814,
-        210.59095800000068,
-        217.54133400000137,
-        212.61012499999924,
-        211.56941700000243,
-        220.39024999999674
+        168.7171659999999,
+        175.88916699999982,
+        157.5994579999997,
+        150.80262500000026,
+        149.5055000000002,
+        144.84470799999963,
+        149.7146670000002,
+        146.855458,
+        147.23658299999988,
+        154.37099999999919,
+        153.31354199999987,
+        151.62862499999937,
+        157.55083399999967,
+        146.37087500000052,
+        147.967458000001
       ],
-      "medianMs": 210.59095800000068
+      "medianMs": 150.80262500000026
     },
     "optimizedPipeline": {
       "samplesMs": [
-        56.07679100000041,
-        54.93495900000016,
-        56.44495800000004,
-        54.7746670000015,
-        53.45525000000089,
-        56.9290830000009,
-        56.54437500000131,
-        55.18675000000076,
-        63.05104200000278,
-        63.2165419999983,
-        57.39262500000041,
-        61.346582999998645,
-        64.6352079999997,
-        65.56033399999797,
-        61.59404200000063
+        40.047000000000025,
+        47.23433300000033,
+        35.17837499999996,
+        38.44958399999996,
+        31.343583999999282,
+        34.91600000000017,
+        31.54675000000043,
+        34.224333999998635,
+        31.557708000000275,
+        37.38379200000054,
+        33.071500000000015,
+        35.70624999999927,
+        32.133584000001065,
+        36.67695800000001,
+        31.26470900000095
       ],
-      "medianMs": 56.9290830000009
+      "medianMs": 34.91600000000017
     },
-    "pipelineSpeedup": 3.699180575243015,
+    "pipelineSpeedup": 4.319012057509438,
     "baselineCompiler": {
       "samplesMs": [
-        718.81675,
-        714.5027500000006,
-        699.017667000001,
-        739.5991250000006,
-        701.2655829999985,
-        754.8945830000011,
-        746.0420409999988,
-        783.8055420000019,
-        787.3871250000011,
-        831.7416250000024,
-        813.2114590000019,
-        785.2506250000006,
-        759.8498749999999,
-        728.2091250000012,
-        861.5472919999993
+        489.43499999999995,
+        476.06266700000015,
+        455.2136250000003,
+        441.0050000000001,
+        435.05266699999993,
+        439.16091700000015,
+        446.3711659999999,
+        429.2020420000008,
+        441.1628330000003,
+        423.86595900000066,
+        425.31174999999894,
+        423.8473329999997,
+        446.9065840000003,
+        413.2232920000006,
+        434.93516700000146
       ],
-      "medianMs": 754.8945830000011
+      "medianMs": 439.16091700000015
     },
     "optimizedCompiler": {
       "samplesMs": [
-        650.7328750000006,
-        646.0187919999998,
-        662.6819159999995,
-        637.3314160000009,
-        679.7747500000005,
-        677.0065419999992,
-        672.7430830000012,
-        642.741250000001,
-        748.6256670000002,
-        681.641249999997,
-        764.3967080000002,
-        709.7044580000002,
-        711.4268330000014,
-        696.8393749999996,
-        715.8067909999991
+        427.1515830000001,
+        423.2060419999998,
+        403.5789999999997,
+        374.28804200000013,
+        407.0192499999994,
+        382.15800000000036,
+        404.25516700000026,
+        371.329667,
+        406.24091600000065,
+        374.84862500000054,
+        401.35041600000113,
+        389.32574999999997,
+        409.6241250000003,
+        402.25274999999965,
+        386.0868339999979
       ],
-      "medianMs": 679.7747500000005
+      "medianMs": 402.25274999999965
     },
-    "completeCompilerSpeedup": 1.1105069480736092
+    "completeCompilerSpeedup": 1.0917536722868906
   },
   "decision": {
     "minimumPipelineSpeedup": 1.5,

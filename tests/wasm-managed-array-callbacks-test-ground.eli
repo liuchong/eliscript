@@ -48,7 +48,7 @@
       (t x)))
 
   (defun read (a x)
-    (if (or (= x nil) (= (value-type x) "boolean") (undefined? x))
+    (if (or (= x nil) (= (value-type x) "boolean") (undefined? x) (= (value-type x) "number"))
       x
       (cond
         ((= (get x :kind) 4) (js-call a :readNumber x))
@@ -442,7 +442,7 @@
            (end (js-call source :indexOf "  (defun " (+ start 10))))
       (funcall assert (and (>= start 0) (> end start)))
       (let* ((faulty (str (js-call source :slice 0 start)
-                          "  (defun value-js-truth (heap value) (load-u32 4294967295))\n"
+                          "  (defun value-js-truth (heap value) (memory-sig u32 u32 v64) (load-u32 4294967295))\n"
                           (js-call source :slice end)))
              (rt (js-call (get backend :compiler) :compile_ir_string faulty "callback-trap.eli"))
              (a (instantiateManagedRuntime (Uint8Array/from (js-call (get backend :managed) :emit_managed_wasm program rt))))
@@ -467,7 +467,7 @@
           :children (js-array (js-object :kind "reference" :value "value-js-truth" :children (js-array)))))
       (let* ((raw-bytes (Uint8Array/from (js-call (get backend :wasm) :emit_memory_wasm ir)))
              (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module raw-bytes)) :exports))
-             (heap (js-call e "heap-new" 64 4096 32768))
+             (heap (js-call e "heap-new" 64 8192 32768))
              (cases (js-array
                       (js-array 0 0 false)
                       (js-array 0 2147483648 false)
@@ -491,7 +491,7 @@
               (js-call e "heap-collect" heap))))
         (js-call (js-array (js-array 0 0) (js-array 1 0) (js-array 2 1) (js-array 3 0)) :forEach
           (lambda (pair)
-            (js-call assert :equal (js-call e "value-js-truth" heap (aref pair 0)) (aref pair 1))))
+            (js-call assert :equal (js-call e "value-js-truth" heap (funcall globalThis.BigInt (aref pair 0))) (aref pair 1))))
         (let ((empty (js-call e "value-string" heap 0)))
           (js-call e "value-seal" heap empty)
           (js-call assert :equal (js-call e "value-js-truth" heap empty) 0)

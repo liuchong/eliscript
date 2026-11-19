@@ -7,6 +7,14 @@
   (import "node:buffer" Buffer)
   (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalDeadline)
   (import "./compiler-corpus-wire-host.mjs" wireFunctionalPartition wireFunctionalDeadline wireCasePolicy)
+  (defconst import-module (js* "(specifier) => import(specifier)"))
+  (defvar resource-supervisor-promise undefined)
+  (defasync ensure-resource-supervisor ()
+    (when (undefined? resource-supervisor-promise)
+      (setq resource-supervisor-promise
+        (funcall import-module
+          (get (new globalThis.URL "../testing/resource-supervisor.mjs" (js* "import.meta.url")) :href))))
+    (await resource-supervisor-promise))
   ;; The complete context is evidence, and may contain every original source
   ;; and map. Only this authenticated file reference belongs in a child env.
   (defasync writeOriginalCorpusExecutionContext (directory context)
@@ -17,7 +25,7 @@
              (path (resolve owned "context.json")))
         (try
           (await (writeFile path bytes (js-object :flag "wx" :mode 384)))
-          (JSON/stringify (js-object :format "eliscript-original-execution-context" :version 1
+          (JSON/stringify (js-object :format "eliscript-original-execution-context"
             :path path :bytes (get bytes :length)
             :sha256 (js-call (js-call (createHash "sha256") :update bytes) :digest "hex")))
           (catch error
@@ -31,7 +39,7 @@
               (not (Object/hasOwn reference "format"))) reference
         (progn
           (unless (and (= (get reference :format) "eliscript-original-execution-context")
-                       (= (get reference :version) 1) (= (js-length (Object/keys reference)) 5)
+                       (= (js-length (Object/keys reference)) 4)
                        (= (value-type (get reference :path)) "string") (isAbsolute (get reference :path))
                        (Number/isSafeInteger (get reference :bytes)) (> (get reference :bytes) 0)
                        (= (value-type (get reference :sha256)) "string")
@@ -107,7 +115,7 @@
       (when marker
         (let* ((id (dependency-id record)) (sources (get (get record :request) :hostSources))
                (assets (get original :sourceAssets)) (selected undefined) (count 0))
-          (unless (and (= (get marker :version) 1) (= (get marker :id) id)
+          (unless (and (= (get marker :id) id)
                        (Array/isArray sources) (Array/isArray assets)) (dependency-invalid))
           (js-call sources :forEach (lambda (source)
             (when (= (get source :id) id) (setq selected source count (1+ count)))))
@@ -152,7 +160,7 @@
             (js-call assets :push (Object/assign (js-object) proof))))))
       (put request :hostSources sources)
       (put original :sourceAssets assets)
-      (put original :processHostDependency (js-object :version 1 :id id
+      (put original :processHostDependency (js-object :id id
         :sourceAssets (js-call proofs :map (lambda (proof) (Object/assign (js-object) proof)))))
       (validateOriginalProcessHostDependency (Object/assign (js-object) record (js-object :request request :original original)))))
   (defun originalCorpusExecutionPolicy (context)
@@ -307,6 +315,11 @@
            (receipt-path (resolve directory "process-outcome.json"))
            (services (or (get options :services) (js-object)))
            (spawn-child (or (get services :spawn) spawn))
+           (real-spawn (nullish? (get services :spawn)))
+           (supervisor (when real-spawn (await (ensure-resource-supervisor))))
+           (read-process-snapshot (when supervisor (get supervisor :readProcessSnapshot)))
+           (collect-owned-processes (when supervisor (get supervisor :collectOwnedProcesses)))
+           (tree-root undefined) (cleanup-promise undefined)
            (now (or (get services :now) (lambda () (js-call globalThis.performance :now))))
            (schedule (or (get services :setTimeout) globalThis.setTimeout))
            (unschedule (or (get services :clearTimeout) globalThis.clearTimeout))
@@ -323,14 +336,57 @@
            (fail (lambda (error)
              (if has-failure (unless (eq error first) (js-call secondary :push error))
                (setq has-failure t first error))))
+           (force-timer undefined)
+           (group-alive (lambda ()
+             (if (and real-spawn child (Number/isInteger (get child :pid)) (> (get child :pid) 0))
+               (try (progn (js-call globalThis.process :kill (- (get child :pid)) 0) t)
+                 (catch ignored nil))
+               nil)))
+           (signal-tree (async (signal)
+             (when (and real-spawn tree-root)
+               (try
+                 (let* ((rows (await (funcall read-process-snapshot)))
+                        (owned (funcall collect-owned-processes rows tree-root (get tree-root :known))))
+                   (js-call owned :forEach (lambda (row)
+                     (unless (= (get row :pid) (get tree-root :pid))
+                       (try (js-call globalThis.process :kill (get row :pid) signal) (catch ignored nil)))))
+                   (when (js-call owned :has (get tree-root :pid))
+                     (try (js-call globalThis.process :kill (- (get tree-root :pid)) signal) (catch ignored nil))))
+                 (catch error
+                   (try (js-call globalThis.process :kill (- (get tree-root :pid)) signal) (catch ignored nil)))))))
+           (reap-group (lambda (deep)
+             (when (funcall group-alive)
+               (try (js-call globalThis.process :kill (- (get child :pid)) "SIGTERM") (catch ignored nil)))
+             (when (or deep (and tree-root (> (get (get tree-root :known) :size) 0)))
+               (funcall signal-tree "SIGTERM"))
+             (when (or (funcall group-alive) (and tree-root (> (get (get tree-root :known) :size) 0)))
+               (unless force-timer
+                 (setq force-timer (globalThis.setTimeout (lambda ()
+                   (setq force-timer undefined)
+                   (when child (try (js-call globalThis.process :kill (- (get child :pid)) "SIGKILL") (catch ignored nil)))
+                   (when (and tree-root (> (get (get tree-root :known) :size) 0))
+                     (funcall signal-tree "SIGKILL"))) 500))))))
            (terminate (lambda (reason)
              (when (and child (not terminated))
                (setq terminated t)
                (try
-                 (if (get options :terminate) (js-call options :terminate child reason)
-                   (js-call child :kill "SIGTERM"))
-                 (catch error (funcall fail error))))))
-           (event (lambda (phase)
+                 (if (get options :terminate)
+                   (js-call options :terminate child reason)
+                   (if real-spawn
+                     (setq cleanup-promise
+                       (funcall (async ()
+                         (try (await (funcall signal-tree "SIGTERM")) (catch ignored nil))
+                         (when (funcall group-alive)
+                           (try (js-call globalThis.process :kill (- (get child :pid)) "SIGTERM") (catch ignored nil)))
+                         (await (new globalThis.Promise (lambda (done ignored)
+                                  (funcall globalThis.setTimeout done 500))))
+                         (try (await (funcall signal-tree "SIGKILL")) (catch ignored nil))
+                         (when (funcall group-alive)
+                           (try (js-call globalThis.process :kill (- (get child :pid)) "SIGKILL") (catch ignored nil)))
+                         (when force-timer
+                           (globalThis.clearTimeout force-timer) (setq force-timer undefined)))))
+                     (js-call child :kill "SIGTERM")))
+                 (catch error (funcall fail error))))))           (event (lambda (phase)
              (let ((record (js-object :sequence sequence :caseId (get options :caseId)
                     :sourceIdentity (get options :sourceIdentity) :target (get options :target)
                     :pid (if child (get child :pid) nil) :phase phase :time (funcall now))))
@@ -369,6 +425,15 @@
           (when case-monitor (js-call case-monitor :cancel))
           (when signal (js-call signal :removeEventListener "abort" abort))
           (funcall event "child-exit")
+          (when cleanup-promise (await cleanup-promise))
+          (when real-spawn
+            (when (or (funcall group-alive) (and tree-root (> (get (get tree-root :known) :size) 0)))
+              (await (funcall signal-tree "SIGKILL")))
+            (when (funcall group-alive)
+              (try (js-call globalThis.process :kill (- (get child :pid)) "SIGKILL")
+                (catch ignored nil)))
+            (when force-timer
+              (globalThis.clearTimeout force-timer) (setq force-timer undefined)))
           (await (Promise/all drains))
           (when case-monitor
             (try (js-call case-monitor :finish has-failure) (catch error (funcall fail error)))
@@ -413,9 +478,13 @@
           (progn (funcall abort) (funcall settle))
           (try
             (progn
-              (setq child (funcall spawn-child command args (js-object :cwd (get options :cwd)
-                :env (Object/assign (js-object) (get globalThis.process :env) (get options :env))
-                :stdio (js-array "ignore" "pipe" "pipe"))))
+              (let ((spawn-options (js-object :cwd (get options :cwd)
+                    :env (Object/assign (js-object) (get globalThis.process :env) (get options :env))
+                    :stdio (js-array "ignore" "pipe" "pipe"))))
+                (when real-spawn (put spawn-options :detached t))
+                (setq child (funcall spawn-child command args spawn-options))
+                (when real-spawn
+                  (setq tree-root (js-object :pid (get child :pid) :token command :known (new globalThis.Map)))))
               (funcall event "spawn")
               (js-call (js-array "stdout" "stderr") :forEach (lambda (key)
                 (let ((stream (get child key)))
@@ -437,6 +506,12 @@
                         (lambda (error) (funcall fail error) (funcall terminate error) (js-call stream :resume)))))))
                   (js-call stream :on "error" (lambda (error) (funcall fail error) (funcall terminate error))))))
               (js-call child :on "error" (lambda (error) (funcall fail error)))
+              (js-call child :once "exit" (lambda (code child-signal)
+                ;; Node emits close only after inherited stdio closes, so a
+                ;; descendant can hold it open forever. Reclaim the owned group
+                ;; and any already-recorded tree at exit; close still owns final
+                ;; drains and the receipt.
+                (funcall reap-group false)))
               (js-call child :once "close" (lambda (code child-signal)
                 (put receipt :exitCode (if (nullish? code) nil code))
                 (put receipt :signal (if (nullish? child-signal) nil child-signal))

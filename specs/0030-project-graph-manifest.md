@@ -19,13 +19,12 @@ the latter maps Eliscript operation names to callable JavaScript functions.
 
 ## Format
 
-Version 1 has this shape:
+The manifest has this shape:
 
 ```json
 {
   "format": "eliscript-project",
-  "version": 1,
-  "entry": "examples/emacs-index/index.mjs",
+  "entries": ["examples/emacs-index/index.mjs"],
   "modules": [
     {
       "source": "examples/emacs-index/index.eli",
@@ -46,8 +45,8 @@ Every content digest is lowercase hexadecimal SHA-256 over the exact file
 bytes.
 
 The graph digest is SHA-256 over the compact JSON serialization of `format`,
-`version`, `entry`, and the ordered module records, before the top-level
-`digest` field is added. The manifest therefore remains byte-identical when an
+`entries`, and the ordered module records, before the top-level `digest` field
+is added. The manifest therefore remains byte-identical when an
 unchanged graph is rebuilt with the same paths and toolchain.
 
 The returned `eliscript-project-build-result` exposes both `manifest` and
@@ -55,16 +54,15 @@ The returned `eliscript-project-build-result` exposes both `manifest` and
 
 ## Worker Contract
 
-Protocol v1 requests may include `projectManifest`:
+Protocol requests may include `projectManifest`:
 
 ```json
 {
-  "version": 1,
   "type": "request",
   "id": "7",
   "module": "/tmp/build/main.mjs",
   "projectManifest": "/tmp/build/eliscript-project.json",
-  "moduleVersion": "<graph-digest>",
+  "moduleDigest": "<graph-digest>",
   "operation": "run",
   "arguments": []
 }
@@ -72,7 +70,7 @@ Protocol v1 requests may include `projectManifest`:
 
 The worker requires a local manifest whose entry resolves to the requested
 module. It verifies every generated module and Source Map against the declared
-digest on cold load. The graph digest becomes the immutable module version,
+digest on cold load. The graph digest becomes the immutable module digest,
 and all graph maps are loaded into a generated-file lookup used for stack-frame
 translation.
 

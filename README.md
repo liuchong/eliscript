@@ -76,7 +76,7 @@ alongside explicit `.mjs`).
 
 | Area | State |
 | --- | --- |
-| Compiler | Emacs Lisp seed, reproducible stage0–stage3 self-hosted compiler, deterministic formatter, versioned canonical IR, Source Maps that name `.eli` files, plus zero-glue WASM and ARM64 Native `:abi` backends |
+| Compiler | Emacs Lisp seed, reproducible stage0–stage3 self-hosted compiler, deterministic formatter, canonical IR, Source Maps that name `.eli` files, plus zero-glue WASM and ARM64 Native `:abi` backends |
 | Language | 100% Emacs Lisp core (`eliscript-runtime`) + `1+5+2` extension packs (`defun-case`, `let-bind`/`defun-bind`/`pcase-value`, `let-const`, `defmodule`, `defmacro-checked`, `with-async-scope`, `async-channel`), tail-safe `loop`/`recur` (50,000+ depth), protocols, records, `deftype`/`reify`, `case`/`condp`, and portable functions |
 | Data | 7 persistent collection types (List, Vector, HAMT Map/Set, Queue, AVL Sorted Map/Set), `cl-defstruct-persistent` with Schema validation and JSON Schema round-trip, `state-cell`, transients, lazy sequences, and transducers |
 | Runtime | Host-free runtime semantics, `eliscript/runtime/lisp` unified Lisp runtime & AOT module compiler, lossless JS sentinels (`js-false`/`js-null`/`js-undefined`), cross-engine handle revocation, and a long-lived Emacs-to-JavaScript worker |

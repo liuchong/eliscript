@@ -28,12 +28,12 @@ Emacs text and editor state
 
 An imported ESM module is immutable within one worker generation. The worker
 normalizes local module URLs, computes a filesystem fingerprint when the caller
-does not provide `moduleVersion`, and caches one import promise plus its source
-map. Responses expose `moduleCacheHit`, `moduleVersion`, and `sourceMapLoaded`
+does not provide `moduleDigest`, and caches one import promise plus its source
+map. Responses expose `moduleCacheHit`, `moduleDigest`, and `sourceMapLoaded`
 alongside duration metrics.
 
-A request that presents a different version for an already imported module
-receives `module-version-changed`; stale code is never executed as if it were
+A request that presents a different digest for an already imported module
+receives `module-digest-changed`; stale code is never executed as if it were
 fresh. The Emacs client fingerprints local modules before sending a request and
 restarts the worker when a known module changes. This policy accounts for ESM
 loader caches that cannot reliably reload a changed file inside one process.

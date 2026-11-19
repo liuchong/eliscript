@@ -207,12 +207,12 @@
         (let ((path (get (aref files index) :path)))
           (await (exact-bytes (resolve (get second :directory) path) (resolve (get third :directory) path))))
         (setq index (1+ index)))
-      (js-object :format "eliscript-js-fixed-point" :version 1 :status "identical" :from 2 :to 3
+      (js-object :format "eliscript-js-fixed-point" :status "identical" :from 2 :to 3
         :sourceIdentity identity :stage2ProductIdentity (get second :productIdentity)
         :stage3ProductIdentity (get third :productIdentity) :files files)))
 
   (defasync verify-seed (receipt source-root sources)
-    (unless (and (= (get receipt :format) "eliscript-js-stage0") (= (get receipt :version) 1)
+    (unless (and (= (get receipt :format) "eliscript-js-stage0")
                  (= (get receipt :status) "built") (= (get receipt :host) "javascript")
                  (= (get receipt :target) "javascript") (= (get receipt :producer) "emacs-lisp"))
       (fail "stage0 must be an authentic completed Emacs Lisp bootstrap"))
@@ -252,7 +252,7 @@
         (let ((base (dirname path)) (stages (get record :stages)) (index 0) (last nil))
           ;; An interrupted/failed invocation remains evidence. It cannot be
           ;; silently changed into a new successful invocation at the same path.
-          (unless (and (= (get record :format) "eliscript-js-bootstrap") (= (get record :version) 1)
+          (unless (and (= (get record :format) "eliscript-js-bootstrap")
                        (= (get record :status) "accepted") (Array/isArray stages) (= (js-length stages) 4))
             (fail "bootstrap output already contains an incomplete or failed invocation; preserve it and use a new outputRoot"))
           (same (get record :formalSourceIdentity) identity "completed bootstrap source identity changed")
@@ -319,7 +319,7 @@
              (initial-path (resolve (dirname stage0-path) (safe-path (get receipt :metadataPath))))
              (initial (await (artifact initial-path)))
              (manifest-path (resolve output-root "bootstrap.json"))
-             (record (js-object :format "eliscript-js-bootstrap" :version 1 :status "created"
+             (record (js-object :format "eliscript-js-bootstrap" :status "created"
                :seedSourceIdentity (get receipt :seedSourceIdentity) :formalSourceIdentity identity
                :configuration (js-object :host "javascript" :target "javascript" :profile "full-compiler" :retainIR t :debug t)
                :stages (js-array)

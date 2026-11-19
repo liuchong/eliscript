@@ -10,7 +10,7 @@
 
 ## Summary
 
-Eliscript owns one versioned, executable corpus for every mandatory AC and PD
+Eliscript owns one executable corpus for every mandatory AC and PD
 criterion. The corpus takes criterion identifiers and titles directly from the
 normative headings in 0040 and 0041, associates each criterion with executable
 core probes and tracked evidence, runs every distinct probe once, and retains
@@ -120,7 +120,7 @@ non-contributing application results exactly as recorded.
 
 ## Compatibility Freeze
 
-The version 1 corpus and run formats, normative-heading derivation, complete
+The corpus and run formats, normative-heading derivation, complete
 criterion inventory, bounded probe mapping, source and environment provenance,
 three-way separation of corpus completeness, operational success, and final
 acceptance, byte-exact Markdown rendering, and stronger `--require-pass` gate

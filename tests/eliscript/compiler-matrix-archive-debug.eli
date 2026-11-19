@@ -96,7 +96,7 @@
                          :resolveImports t :phased t :modules modules :debug t :binaryEncoding "u16le-chunks"
                          :nativeTarget (if (= (get globalThis.process :platform) "darwin") "arm64-macos" "arm64-linux")
                          :nativeFormat "library"))
-                       (response (await (js-call session :request request (js-object :responseMode "graph-events-v1")))))
+                       (response (await (js-call session :request request (js-object :responseMode "graph-events")))))
                   (assert-managed-user-ranges response modules spans))
                 (setq index (1+ index)))))
           (catch error (setq failed t) (throw error))
@@ -107,7 +107,7 @@
       (await (workspace (async (directory)
         (let* ((shared (js-object :filename "源😀.eli" :start -0 :end 17
                         :nested (js-array globalThis.NaN globalThis.Infinity (- globalThis.Infinity))))
-               (debug (js-object :format "archive-debug-fixture" :version 1
+               (debug (js-object :format "archive-debug-fixture"
                         :source (js-call "\ufeff中😀\ud800x\udfff\u0000\n" :repeat 257)
                         :zero -0 :small Number/MIN_VALUE :large Number/MAX_VALUE
                         :first shared :second shared :values (js-array -0 globalThis.NaN globalThis.Infinity)))

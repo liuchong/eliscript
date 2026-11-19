@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Explicit Emacs representations for the versioned Eliscript worker value
+;; Explicit Emacs representations for the Eliscript worker value
 ;; encoding.  Plain vectors remain native JavaScript Arrays; persistent values
 ;; use the constructors in this file so their language categories survive the
 ;; process boundary.
@@ -14,7 +14,7 @@
 
 (define-error 'eliscript-value-codec-error "Eliscript value codec error")
 
-(defconst eliscript-worker-value-encoding "eliscript-value-v1"
+(defconst eliscript-worker-value-encoding "eliscript-value"
   "Value encoding negotiated by the worker protocol.")
 
 (defconst eliscript-worker-value-undefined

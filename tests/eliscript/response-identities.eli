@@ -8,7 +8,7 @@
   (import "../../dist/bootstrap/compiler.mjs" compile-string)
   (import "../../dist/bootstrap/compiler.mjs" :as frontend)
   (import "../../tools/backends/compiler-session.mjs" createCompilerSession encodeCompilerIR)
-  (defconst graph-mode "graph-events-v1")
+  (defconst graph-mode "graph-events")
   (defvar fixture undefined)
   (defvar pending undefined)
   (defasync check-unit-dependencies (directory)
@@ -146,7 +146,7 @@
                         (let ((result (JSON/parse (js-call unit :compiler_session_request state
                                          (JSON/stringify (js-object :operation "response-close" :token (get first :token)))))))
                           (js-call assert :strictEqual (get result :done) t)
-                          (js-call assert :strictEqual (get result :version) 2))
+                          (js-call assert :strictEqual (get result :mode) graph-mode))
                         (let ((threw false) (finished false))
                           (try
                             (while (not finished)

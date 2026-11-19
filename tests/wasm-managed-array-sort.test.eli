@@ -209,11 +209,11 @@
            (bytes (get c :bytes)))
       (finish a)
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (js-call e "heap-new" 32 1024 65536))
-             (items (js-call e "value-array-new" heap 0))
-             (frame (js-call e "frame-new" heap 1)))
+             (heap (js-call e "heap-new" 32 4520 65536))
+             (items (globalThis.BigInt.asUintN 64 (js-call e "value-array-new" heap 0)))
+             (frame (globalThis.BigInt.asUintN 64 (js-call e "frame-new" heap 1))))
         (js-call e "frame-set" heap frame 0 items)
-        (js-call assert :equal (js-call e "value-source-array-sort" heap items 4294967295 0) 0)
+        (js-call assert :equal (globalThis.BigInt.asUintN 64 (js-call e "value-source-array-sort" heap items (globalThis.BigInt 4294967295) 0)) (globalThis.BigInt 0))
         (js-call assert :equal (js-call e "last-error") 1)
         (js-call assert :equal (js-call e "frame-depth" heap) 1)
         (js-call e "frame-pop" heap frame)
@@ -313,7 +313,7 @@
       (funcall assert (and (>= start 0) (> end start)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call text :slice 0 start)
-                              "  (defun value-number-binary (heap left right operation) (load-u32 4294967295))\n"
+                              "  (defun value-number-binary (heap left right operation) (memory-sig v64 u32 v64 v64 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                               (js-call text :slice end))
                          "trap-runtime.eli"))
              (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p injected))))
@@ -339,8 +339,14 @@
            (a (get c :a))
            (input (array a (js-array 4 1 3 2)))
            (held (js-array)))
+      ;; A bounded filler that really holds slots: the capacity refusal must come
+      ;; from the unchanged 64-slot budget, not from an unreachable loop bound.
       (js-call assert :throws
-        (lambda () (while t (js-call held :push (js-call a :number 19))))
+        (lambda ()
+          (let ((index 0))
+            (while (< index 256)
+              (js-call held :push (js-call a :array))
+              (setq index (1+ index)))))
         (rt-diag-p "ELI-RT0002"))
       (js-call assert :throws
         (lambda () (js-call a :invoke "f" (js-array input)))

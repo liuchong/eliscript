@@ -36,11 +36,7 @@
     (error "ELISCRIPT_ANALYZER_FIXTURE is required"))
   (princ
    (eliscript-bootstrap-analyzer-oracle--ascii-json
-    (decode-coding-string
-     (json-serialize
-      (eliscript-bootstrap-tests-analyzer-results fixture)
-      :null-object nil
-      :false-object :false)
-     'utf-8-unix))))
+    (eliscript-bootstrap-tests-serialize-json
+     (eliscript-bootstrap-tests-analyzer-results fixture)))))
 
 ;;; bootstrap-analyzer-oracle.el ends here

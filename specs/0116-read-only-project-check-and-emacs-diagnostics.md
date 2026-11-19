@@ -31,7 +31,6 @@ an optional `portableEntries` array. It returns a frozen value with:
 ```json
 {
   "format": "eliscript-check-operation",
-  "version": 1,
   "mode": "project",
   "entries": ["src/main.eli"],
   "root": "/project",
@@ -60,12 +59,11 @@ and never become project or cache identity.
 
 ## Check Report
 
-A successful operation returns this versioned, deterministic report on request:
+A successful operation returns this deterministic report on request:
 
 ```json
 {
   "format": "eliscript-check-report",
-  "version": 1,
   "status": "ok",
   "mode": "standard",
   "root": "/project",
@@ -92,7 +90,7 @@ Project-relative paths keep the graph portable while `root` identifies the
 checked checkout. The report intentionally excludes timing and host fields so
 Bun and Node produce identical JSON for the same canonical checkout.
 
-Failures use `eliscript-diagnostic` version 1 on stderr and a nonzero exit
+Failures use an `eliscript-diagnostic` object on stderr and a nonzero exit
 status. Compiler diagnostics preserve their code, phase, file, and exact source
 span; host/configuration failures use their existing structured categories.
 
@@ -116,7 +114,7 @@ unconfigured file uses its discovered root and file path directly. The current
 widened buffer is sent through `--stdin-file`, so checking does not save or
 rewrite the visited file.
 
-Only `eliscript-diagnostic` version 1 JSON is decoded. Zero-based Unicode
+Only `eliscript-diagnostic` JSON is decoded. Zero-based Unicode
 offsets map directly to Emacs buffer positions, severity maps to Flymake types,
 and diagnostics for other files are not attached to the current buffer. A new
 check cancels the buffer's previous process, and stale results are discarded
@@ -136,7 +134,7 @@ the final supported-editor matrix.
 
 ## Compatibility Freeze
 
-The version 1 check request and report, read-only graph traversal, virtual
+The check request and report, read-only graph traversal, virtual
 stdin override, Bun/Node report identity, structured diagnostic preservation,
 and asynchronous stale-safe Flymake integration are stable. Checking cannot
 create build artifacts or cache state, and application tooling cannot enter
@@ -144,7 +142,7 @@ the request or its evidence.
 
 ## Acceptance Criteria
 
-- **PCD-01:** The self-hosted compiler normalizes a frozen version 1 check
+- **PCD-01:** The self-hosted compiler normalizes a frozen check
   operation without output, cache, or application fields.
 - **PCD-02:** Standard and portable checks traverse the complete deterministic
   project closure and run reader-through-IR validation for every visited source.

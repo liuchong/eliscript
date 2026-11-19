@@ -224,7 +224,7 @@
       (funcall assert (and (>= start 0) (> end start)))
       (let* ((injected (js-call (get b :compiler) :compile_ir_string
                          (str (js-call source :slice 0 start)
-                              "  (defun value-iterator-value (heap iterator) (load-u32 4294967295))\n"
+                              "  (defun value-iterator-value (heap iterator) (memory-sig v64 u32 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                               (js-call source :slice end))
                          "collection-foreach-trap.eli"))
              (a (instantiateManagedRuntime (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program injected))))
@@ -251,15 +251,15 @@
 
   (test "Given malformed raw references, when collection forEach validates them, then invalid-handle errors do not become WASM traps" (lambda ()
     (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-           (heap (js-call e "heap-new" 32 4096 65536))
-           (items (js-call e "value-source-collection-new" heap 15 3))
+           (heap (js-call e "heap-new" 32 8192 65536))
+           (items (js-call e "value-source-collection-new" heap 15 (funcall globalThis.BigInt 3)))
            (caller (js-call e "frame-new" heap 1)))
       (funcall assert items)
       (js-call e "frame-set" heap caller 0 items)
-      (js-call assert :equal (js-call e "value-source-collection-for-each" heap items 4294967295) 0)
+      (js-call assert :equal (js-call e "value-source-collection-for-each" heap items (funcall globalThis.BigInt 4294967295)) 0)
       (js-call assert :equal (js-call e "last-error") 1)
       (js-call assert :equal (js-call e "frame-depth" heap) 1)
-      (js-call assert :equal (js-call e "value-source-collection-for-each" heap 4294967295 3) 0)
+      (js-call assert :equal (js-call e "value-source-collection-for-each" heap (funcall globalThis.BigInt 4294967295) (funcall globalThis.BigInt 3)) 0)
       (js-call assert :equal (js-call e "last-error") 1)
       (js-call assert :equal (js-call e "frame-depth" heap) 1)
       (js-call e "frame-pop" heap caller)

@@ -49,8 +49,8 @@ visited once. Diagnostics identify the portable declaration, forbidden
 dependency or form, and source location.
 
 The checker establishes host independence, not a complete data type proof.
-Ground calls require protocol-v1 JSON-compatible arguments and results.
-Callers selecting the versioned codec from specification 0088 may carry
+Ground calls require JSON-compatible arguments and results.
+Callers selecting the persistent value codec from specification 0088 may carry
 persistent List, Vector, Map, Set, Keyword, Symbol, and metadata values.
 
 ## Closure Compilation

@@ -26,9 +26,9 @@
       ((and (= (js-length values) 2) (= wanted-index 0)) (js-array wanted-value (get values 1)))
       ((and (= (js-length values) 2) (= wanted-index 1)) (js-array (get values 0) wanted-value))
       ((and (= (js-length values) 2) (= wanted-index 2)) (js-array (get values 0) (get values 1) wanted-value))
-      (t (__eliscript_array_build
+      (t (__eliscript_array_copy_assoc
            (if (< wanted-index (js-length values)) (js-length values) (1+ wanted-index))
-           (lambda (index) (if (= index wanted-index) wanted-value (get values index)))))))
+           values wanted-index wanted-value))))
 
 
   (defportable array-drop-last (values)

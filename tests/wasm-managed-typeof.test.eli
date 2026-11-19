@@ -268,7 +268,7 @@
       (funcall assert (and (>= start 0) (> end start)))
       (let* ((rt (js-call (get b :compiler) :compile_ir_string
                    (str (js-call src :slice 0 start)
-                        "  (defun value-source-typeof (heap value) (load-u32 4294967295))\n"
+                        "  (defun value-source-typeof (heap value) (memory-sig v64 u32 v64) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                         (js-call src :slice end))
                    "type-trap.eli"))
              (a (instantiateManagedRuntime (artifact program rt))))
@@ -297,7 +297,7 @@
           (js-call small :frameSet frame 0 retained)
           (while (and (< i 128) (not exhausted))
             (try
-              (js-call keep :push (js-call small :number i))
+              (js-call keep :push (js-call small :array))
               (catch err
                 (js-call assert :equal (let ((d (get err :eliscriptDiagnostic))) (and d (get d :code))) "ELI-RT0002")
                 (setq exhausted t)))

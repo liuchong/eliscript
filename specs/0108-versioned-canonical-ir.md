@@ -10,10 +10,10 @@
 
 ## Summary
 
-The self-hosted compiler now owns a lossless, versioned serialization boundary
+The self-hosted compiler now owns a lossless serialization boundary
 for source-located compiler IR. It exports `serialize-ir-program` and
 `deserialize-ir-program` from the generated in-memory compiler, with
-`ir-format` and `ir-version` identifying the schema.
+`ir-format` identifying the schema.
 
 This boundary makes IR suitable for reproducible compiler artifacts, future
 incremental cache records, cross-process phase composition, and compiler tools.
@@ -21,7 +21,7 @@ It does not expose host objects or reader-specific Emacs Lisp values.
 
 ## Version 1 Document
 
-Canonical IR uses the `eliscript-ir` version 1 envelope:
+Canonical IR uses the `eliscript-ir` envelope:
 
 ```json
 {
@@ -30,7 +30,6 @@ Canonical IR uses the `eliscript-ir` version 1 envelope:
     "body": [],
     "filename": "src/main.eli"
   },
-  "version": 1
 }
 ```
 
@@ -70,7 +69,7 @@ rewrite silently:
 - nesting beyond 512 levels
 
 Deserialization accepts canonical bytes only. It parses and validates the
-closed versioned schema, re-encodes the document, and requires byte identity.
+closed schema, re-encodes the document, and requires byte identity.
 This rejects duplicate object keys, unknown fields, reordered fields,
 alternative number spellings, and otherwise valid JSON containing whitespace.
 Callers that need to ingest general JSON must canonicalize it through a
@@ -79,12 +78,12 @@ separate data boundary rather than weakening persisted IR identity.
 ## Diagnostics
 
 Every serialization, parse, schema, and canonicality failure carries
-`ELI-I0001` in phase `ir-schema` using diagnostic schema version 1. Error text
+`ELI-I0001` in phase `ir-schema` using the diagnostic schema. Error text
 identifies the violated boundary without exposing a host stack trace.
 
 An unsupported format or version fails closed. Version migration belongs in an
 explicit reader selected by the format and version; it must not silently treat
-future layouts as version 1.
+future layouts as the current schema.
 
 ## Compiler Boundary
 
@@ -108,15 +107,15 @@ receive language maturity credit.
 
 ## Compatibility Freeze
 
-The `eliscript-ir` version 1 envelope, closed record schemas, public node-kind
+The `eliscript-ir` envelope, closed record schemas, public node-kind
 coverage, source-span rules, canonical JSON bytes, negative-zero preservation,
 and `ELI-I0001` failure boundary are stable. New node or record layouts require
-an explicit versioned contract; readers must continue rejecting unknown or
-non-canonical version 1 data.
+an explicit contract; readers must continue rejecting unknown or
+non-canonical data.
 
 ## Acceptance Criteria
 
-- **CIR-01:** The generated compiler exports `eliscript-ir` version 1 identity
+- **CIR-01:** The generated compiler exports `eliscript-ir` identity
   and public serialize/deserialize operations.
 - **CIR-02:** Every valid seed-normalized IR tree across all 57 public node
   kinds round-trips without structural loss.

@@ -11,7 +11,6 @@
   (import "./vector.mjs" readPersistentVectorMetadataReader)
   (import "../array-text.mjs" invokeCapturedArrayText)
 
-  (defun typeof-value (value) (js* "typeof value"))
   (defconst IMeta I_META)
   (defconst IWithMeta I_WITH_META)
 
@@ -24,27 +23,24 @@
     (and (implementsProtocolOperation IMeta "meta" value)
          (implementsProtocolOperation IWithMeta "withMeta" value)))
 
+  (defconst meta-impl
+    (funcall
+      (js* "(slot, readVecReader, invokeText, implOp, iMeta, dispRead) => { let cDir = null, cCall = null, cRead = null; const slow = (v, d, hasCall, c) => { if (typeof d === 'function') { const actualCall = hasCall ? c : d.call; const r = readVecReader(d, actualCall); if (r === undefined) return invokeText(actualCall, d, [v]); cDir = d; cCall = actualCall; cRead = r; return r(v); } return implOp(iMeta, 'meta', v) ? dispRead(v) : null; }; return (v) => { if (v == null) return slow(v, undefined, false, undefined); const d = v[slot]; if (d === cDir && cRead !== null) { const c = d.call; return c === cCall ? cRead(v) : slow(v, d, true, c); } return slow(v, d, false, undefined); }; }")
+      METADATA_READ
+      readPersistentVectorMetadataReader
+      invokeCapturedArrayText
+      implementsProtocolOperation
+      I_META
+      dispatchMetadataRead))
+
   (defun meta (value)
-    (if (not (nullish? value))
-        (let ((direct (aref value METADATA_READ)))
-          (if (= (funcall typeof-value direct) "function")
-              (let* ((call (get direct :call))
-                     (reader (readPersistentVectorMetadataReader direct call)))
-                (if (undefined? reader)
-                  (invokeCapturedArrayText call direct (js-array value))
-                  (funcall reader value)))
-              (if (implementsProtocolOperation IMeta "meta" value)
-                  (dispatchMetadataRead value)
-                  nil)))
-        (if (implementsProtocolOperation IMeta "meta" value)
-            (dispatchMetadataRead value)
-            nil)))
+    (funcall meta-impl value))
 
   (defun withMeta (value metadata)
     (validate-metadata metadata)
     (if (not (nullish? value))
         (let ((direct (aref value METADATA_WITH)))
-          (if (= (funcall typeof-value direct) "function")
+          (if (eq (js* "typeof direct") "function")
               (js-call direct :call value metadata)
               (progn
                 (unless (implementsProtocolOperation IWithMeta "withMeta" value)
@@ -56,7 +52,7 @@
           (dispatchMetadataWith value metadata))))
 
   (defun varyMeta (value transform &rest arguments)
-    (unless (= (funcall typeof-value transform) "function")
+    (unless (eq (js* "typeof transform") "function")
       (throw (new globalThis/TypeError "metadata transform must be a function")))
     (withMeta value (apply transform (js-call (js-array (meta value)) :concat arguments))))
 

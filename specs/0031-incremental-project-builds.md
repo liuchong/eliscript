@@ -24,7 +24,6 @@ The manifest adds a private `cache` object after the graph digest:
 {
   "cache": {
     "format": "eliscript-project-cache",
-    "version": 2,
     "compilerDigest": "<sha256>",
     "mode": "portable",
     "portableEntries": ["score-document"],
@@ -43,8 +42,8 @@ The manifest adds a private `cache` object after the graph digest:
 The cache digest covers the ordered metadata fields, including `format` and
 `version`, before its own `digest` is added. This prevents damaged dependency
 edges from being trusted while keeping private build mechanics outside the
-runtime graph digest. Ground version 1 records without `format` remain
-read-only compatible and are rewritten as version 2 after a successful build.
+runtime graph digest. A cache record without the current `format` is rejected
+and replaced only after a successful build.
 
 `compilerDigest` hashes the relative name and exact bytes of every Emacs Lisp
 compiler source. A compiler edit therefore invalidates all cached modules even

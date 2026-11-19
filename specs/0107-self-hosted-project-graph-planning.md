@@ -39,12 +39,11 @@ module records, and requested names are deduplicated and sorted. Result arrays
 and records are frozen. Invalid shapes, invalid callback results, and the
 bounded iteration guard fail with `ELI-B0003` in phase `project-plan`.
 
-The planner returns `eliscript-project-plan` version 1:
+The planner returns `eliscript-project-plan`:
 
 ```json
 {
   "format": "eliscript-project-plan",
-  "version": 1,
   "mode": "standard",
   "entries": ["src/main.eli"],
   "modules": []
@@ -66,7 +65,7 @@ single traversal snapshot.
 - reads source text and resolves only relative local `.eli` graph edges
 - invokes the generated compiler for IR, planning, ESM, and Source Maps
 - rewrites local source imports to generated `.mjs` imports
-- writes the version 1 public project manifest and deterministic digest
+- writes the public project manifest and deterministic digest
 
 The host does not implement graph traversal or portable fixed-point policy.
 The `.eli` planner receives module IDs and dependency callbacks, so another
@@ -92,7 +91,7 @@ application integrations.
 
 ## Compatibility Freeze
 
-The version 1 ordinary and portable planning operations, sorted frozen result
+The ordinary and portable planning operations, sorted frozen result
 shape, cycle handling, portable-name fixed-point semantics, structured
 planning diagnostics, and standards-based host boundary are stable. Hosts may
 change effect implementation without changing graph results, ordering, or the

@@ -1,5 +1,6 @@
 ;; Managed table pressure runs wholly inside the owned-memory module.
 (defun table-pressure (heap rounds)
+  (memory-sig v64 u32 u32)
   (let* ((frame (frame-new heap 4)) (map (value-table-new heap 10 4)) (index 0) (ok 1))
     (frame-set heap frame 0 map)
     (let ((set (value-table-new heap 11 4)))
@@ -23,5 +24,5 @@
           (setq count (1+ count)))
         (when (/= count (value-table-size heap map)) (setq ok 0)))
       (if (= ok 1) (frame-return heap frame map)
-        (progn (frame-pop heap frame) (fail 3))))))
+        (progn (frame-pop heap frame) (fail-v64 3))))))
 (export table-pressure)

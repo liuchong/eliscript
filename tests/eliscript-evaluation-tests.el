@@ -12,7 +12,6 @@
        (source . "(+ 1 2)")
        (filename . "repl.eli")))
     '((format . "eliscript-evaluation-operation")
-      (version . 1)
       (id . 7)
       (operation . "evaluate")
       (source . "(+ 1 2)")
@@ -46,7 +45,6 @@
     (eliscript-evaluation-form-description
      "(defun value () 42)" "repl.eli")
     '((format . "eliscript-evaluation-form")
-      (version . 1)
       (kind . "definition")
       (head . "defun")
       (name . "value")

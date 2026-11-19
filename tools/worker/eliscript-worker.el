@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Communicate with runtime/worker.mjs over versioned newline-delimited JSON.
+;; Communicate with runtime/worker.mjs over newline-delimited JSON.
 
 ;;; Code:
 
@@ -25,9 +25,6 @@
 (defgroup eliscript-worker nil
   "Long-lived JavaScript workers for portable Eliscript code."
   :group 'applications)
-
-(defconst eliscript-worker-protocol-version 1
-  "Protocol version implemented by this client.")
 
 (defconst eliscript-worker--project-directory
   (expand-file-name
@@ -79,7 +76,7 @@
   stderr-output
   receive-buffer
   pending
-  module-versions
+  module-digests
   next-id
   state
   generation
@@ -236,8 +233,7 @@
     (ignore-errors
       (eliscript-worker--send
        worker
-       `((version . ,eliscript-worker-protocol-version)
-         (type . "cancel")
+       `((type . "cancel")
          (id . ,id))))
     (eliscript-worker--finish-request
      worker id nil
@@ -262,8 +258,7 @@
             (eliscript-worker-request-upload-sequence request) (1+ sequence))
       (eliscript-worker--send
        worker
-       `((version . ,eliscript-worker-protocol-version)
-         (type . "value-chunk")
+       `((type . "value-chunk")
          (id . ,id)
          (channel . "arguments")
          (sequence . ,sequence)
@@ -393,11 +388,7 @@
 
 (defun eliscript-worker--handle-message (worker message)
   "Apply one parsed protocol MESSAGE to WORKER."
-  (let ((version (alist-get 'version message))
-        (type (alist-get 'type message)))
-    (unless (= version eliscript-worker-protocol-version)
-      (signal 'eliscript-worker-protocol-error
-              (list (format "worker protocol version mismatch: %S" version))))
+  (let ((type (alist-get 'type message)))
     (cond
      ((equal type "ready")
       (setf (eliscript-worker-state worker) 'ready
@@ -520,7 +511,7 @@
           (eliscript-worker-capabilities worker) nil
           (eliscript-worker-protocol-error worker) nil
           (eliscript-worker-state worker) 'starting)
-    (clrhash (eliscript-worker-module-versions worker))
+    (clrhash (eliscript-worker-module-digests worker))
     (process-put process 'eliscript-worker worker)
     (let ((deadline (+ (float-time) eliscript-worker-startup-timeout)))
       (while (and (eq (eliscript-worker-state worker) 'starting)
@@ -554,7 +545,7 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
                  (list eliscript-worker-program (eliscript-worker--script)))
     :auto-restart eliscript-worker-auto-restart
     :pending (make-hash-table :test #'equal)
-    :module-versions (make-hash-table :test #'equal)
+    :module-digests (make-hash-table :test #'equal)
     :next-id 0
     :generation 0
     :restart-count 0
@@ -605,7 +596,7 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
               (file-attribute-inode-number attributes)
               (file-attribute-device-number attributes)))))
 
-(defun eliscript-worker--project-manifest-version (manifest)
+(defun eliscript-worker--project-manifest-digest (manifest)
   "Return the graph digest declared by local project MANIFEST."
   (let ((file (eliscript-worker--module-file manifest)))
     (unless (and file (file-regular-p file))
@@ -623,7 +614,6 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
                (digest (alist-get 'digest object)))
           (unless (and (equal (alist-get 'format object)
                               "eliscript-project")
-                       (equal (alist-get 'version object) 1)
                        (stringp digest)
                        (string-match-p
                         "\\`[[:xdigit:]]\\{64\\}\\'" digest))
@@ -635,26 +625,26 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
                              manifest (error-message-string error-data))))))))
 
 (defun eliscript-worker--prepare-module
-    (worker module requested-version project-manifest)
-  "Resolve MODULE version and restart WORKER when it changed.
+    (worker module requested-digest project-manifest)
+  "Resolve MODULE digest and restart WORKER when it changed.
 
-PROJECT-MANIFEST, when non-nil, supplies the whole generated graph version."
-  (let* ((version
-          (or requested-version
+PROJECT-MANIFEST, when non-nil, supplies the whole generated graph digest."
+  (let* ((module-digest
+          (or requested-digest
               (and project-manifest
-                   (eliscript-worker--project-manifest-version
+                   (eliscript-worker--project-manifest-digest
                     project-manifest))
               (eliscript-worker--module-fingerprint module)))
-         (versions (eliscript-worker-module-versions worker))
+         (digests (eliscript-worker-module-digests worker))
          (key (if project-manifest
                   (cons module project-manifest)
                 module))
-         (previous (gethash key versions)))
-    (when (and version previous (not (equal version previous))
+         (previous (gethash key digests)))
+    (when (and module-digest previous (not (equal module-digest previous))
                (eliscript-worker-live-p worker))
       (eliscript-worker-restart worker))
-    (when version (puthash key version versions))
-    version))
+    (when module-digest (puthash key module-digest digests))
+    module-digest))
 
 (defun eliscript-worker--send (worker message)
   "Send protocol MESSAGE to WORKER."
@@ -682,7 +672,7 @@ PROJECT-MANIFEST, when non-nil, supplies the whole generated graph version."
 
 (cl-defun eliscript-worker-call
     (worker module export arguments callback
-            &key operation module-version project-manifest
+            &key operation module-digest project-manifest
             progress metrics timeout-ms value-codec value-chunks)
   "Call EXPORT from MODULE on WORKER with ARGUMENTS.
 
@@ -692,7 +682,7 @@ PROJECT-MANIFEST names an `eliscript-project.json' file whose digest identifies
 the complete generated module graph and whose source maps cover dependencies.
 PROGRESS receives each progress value.
 When VALUE-CODEC is non-nil, persistent Eliscript values use the negotiated
-versioned worker codec instead of the ground JSON representation.
+worker value codec instead of the ground JSON representation.
 When VALUE-CHUNKS is non-nil, the codec uses bounded incremental chunks with
 one-chunk request backpressure; this option implies VALUE-CODEC.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace
@@ -704,15 +694,15 @@ id."
              (or (not (integerp timeout-ms)) (<= timeout-ms 0)))
     (signal 'wrong-type-argument (list 'positive-integer-p timeout-ms)))
   (when (and value-codec
-             (not (member "value-codec-v1"
+             (not (member "value-codec"
                           (eliscript-worker-capabilities worker))))
     (signal 'eliscript-worker-protocol-error
-            (list "worker does not support value-codec-v1")))
+            (list "worker does not support value-codec")))
   (when (and value-chunks
-             (not (member "value-chunks-v1"
+             (not (member "value-chunks"
                           (eliscript-worker-capabilities worker))))
     (signal 'eliscript-worker-protocol-error
-            (list "worker does not support value-chunks-v1")))
+            (list "worker does not support value-chunks")))
   (let* ((id (number-to-string (cl-incf (eliscript-worker-next-id worker))))
          (request
           (eliscript-worker-request--create
@@ -739,9 +729,9 @@ id."
                (if (string-prefix-p "file:" project-manifest)
                    project-manifest
                  (expand-file-name project-manifest))))
-         (resolved-module-version
+         (resolved-module-digest
           (eliscript-worker--prepare-module
-           worker module-name module-version project-manifest-name)))
+           worker module-name module-digest project-manifest-name)))
     (puthash id request (eliscript-worker-pending worker))
     (when timeout-ms
       (setf (eliscript-worker-request-timer request)
@@ -752,8 +742,7 @@ id."
         (eliscript-worker--send
          worker
          (append
-          `((version . ,eliscript-worker-protocol-version)
-            (type . "request")
+          `((type . "request")
             (id . ,id)
             (module . ,module-name))
           (and (not value-chunks)
@@ -763,8 +752,8 @@ id."
           (if operation
               `((operation . ,operation))
             `((export . ,export)))
-          (and resolved-module-version
-               `((moduleVersion . ,resolved-module-version)))
+          (and resolved-module-digest
+               `((moduleDigest . ,resolved-module-digest)))
           (and project-manifest-name
                `((projectManifest . ,project-manifest-name)))
           (and value-codec
@@ -781,13 +770,13 @@ id."
 
 (cl-defun eliscript-worker-call-portable
     (worker module operation arguments callback
-            &key module-version project-manifest progress metrics timeout-ms
+            &key module-digest project-manifest progress metrics timeout-ms
             value-codec value-chunks)
   "Call portable OPERATION from MODULE on WORKER with ARGUMENTS."
   (eliscript-worker-call
    worker module nil arguments callback
    :operation operation
-   :module-version module-version
+   :module-digest module-digest
    :project-manifest project-manifest
    :progress progress
    :metrics metrics
@@ -803,14 +792,13 @@ id."
             (eliscript-worker-request-upload-awaiting request) nil)
       (eliscript-worker--send
        worker
-       `((version . ,eliscript-worker-protocol-version)
-         (type . "cancel")
+       `((type . "cancel")
          (id . ,id)))
       t)))
 
 (cl-defun eliscript-worker-call-sync
     (worker module export arguments
-            &key operation module-version project-manifest
+            &key operation module-digest project-manifest
             progress metrics timeout-ms value-codec value-chunks)
   "Synchronously call EXPORT from MODULE on WORKER with ARGUMENTS."
   (let (done value error-object)
@@ -823,7 +811,7 @@ id."
      :progress progress
      :metrics metrics
      :operation operation
-     :module-version module-version
+     :module-digest module-digest
      :project-manifest project-manifest
      :timeout-ms timeout-ms
      :value-codec value-codec
@@ -843,13 +831,13 @@ id."
 
 (cl-defun eliscript-worker-call-portable-sync
     (worker module operation arguments
-            &key module-version project-manifest progress metrics timeout-ms
+            &key module-digest project-manifest progress metrics timeout-ms
             value-codec value-chunks)
   "Synchronously call portable OPERATION from MODULE on WORKER."
   (eliscript-worker-call-sync
    worker module nil arguments
    :operation operation
-   :module-version module-version
+   :module-digest module-digest
    :project-manifest project-manifest
    :progress progress
    :metrics metrics
@@ -865,8 +853,7 @@ id."
         (ignore-errors
           (eliscript-worker--send
            worker
-           `((version . ,eliscript-worker-protocol-version)
-             (type . "shutdown")))))
+           `((type . "shutdown")))))
       (setf (eliscript-worker-state worker) 'closed)
       (unless force
         (let ((deadline (+ (float-time) 1.0)))

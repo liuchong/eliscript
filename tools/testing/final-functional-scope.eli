@@ -33,8 +33,8 @@
   (defconst persistent-literals-file "tests/wasm-managed-persistent-literals.test.mjs")
   (defconst direct-wasm-file "tests/direct-wasm-backend.test.mjs")
   (defconst ingress-sha "17868f19ba8f1dcc5ba747cf8bed164434705469f9daccaaff8dba825b4edb0a")
-  (defconst package-sha "4c41757d393d631c138a2e331c10bbae4263f24eb96ad375275bbe1f26e5c353")
-  (defconst tools-sha "5ada7aa0dd7fdbe3851641b876a9b5586fbb9ef2e6dee0c735e0dfdd0f46900d")
+  (defconst package-sha "e60739cf167072a3ad874ab229026b4f4258974e6ff1007cc976c93e97943546")
+  (defconst tools-sha "43dd9f9888fed2676a7aa45982535861d42349904166e5006eabe1b69c67b02f")
   (defconst cancellation-reason
     "The user cancelled WASM/native compiler execution hosts; JS stage3 still emits and executes all user-program targets.")
   (defun sha (source) (js-call (js-call (createHash "sha256") :update source) :digest "hex"))
@@ -259,7 +259,7 @@
              (digest-outcome (await (collectPassedFileDigests source-root results)))
              (directory (resolve (option options "outputDirectory" (resolve source-root ".eliscript-cache" "test-results"))))
              (archive (resolve directory (+ "final-functional-scope-" (Date/now) "-" (get globalThis.process :pid) ".json")))
-             (record (js-object :format "eliscript-final-functional-test-scope" :version 1
+             (record (js-object :format "eliscript-final-functional-test-scope"
                :inventory files :originalInventory original :shard shard :results results :cancelled cancelled
                :failedFiles failed-files
                :passedFileDigests (get digest-outcome :digests)

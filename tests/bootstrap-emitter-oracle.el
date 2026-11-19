@@ -36,11 +36,7 @@
     (error "ELISCRIPT_EMITTER_FIXTURE is required"))
   (princ
    (eliscript-bootstrap-emitter-oracle--ascii-json
-    (decode-coding-string
-     (json-serialize
-      (eliscript-bootstrap-tests-emitter-results fixture)
-      :null-object nil
-      :false-object :false)
-     'utf-8-unix))))
+    (eliscript-bootstrap-tests-serialize-json
+     (eliscript-bootstrap-tests-emitter-results fixture)))))
 
 ;;; bootstrap-emitter-oracle.el ends here

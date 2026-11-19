@@ -2,6 +2,8 @@
   (import "node:assert/strict" :default assert)
   (import "node:fs" readFileSync)
   (import "node:process" :default process)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
 
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
 
@@ -28,7 +30,7 @@
                   (out (js-call a :invoke "number-call" (js-array text)))
                   (unsafe (js-call a :number (Math/pow 2 53)))
                   (empty-arr (js-call a :sourceArray (js-array))))
-             (funcall assert (Object/is (js-call a :readNumber out) -0))
+             (funcall assert (Object/is (decoded-number-value a out) -0))
              (js-call assert :equal (js-call a :invoke "integer-call" (js-array unsafe)) t)
              (js-call assert :equal (js-call a :invoke "safe-call" (js-array unsafe)) false)
              (js-call assert :equal (js-call a :invoke "array-call" (js-array empty-arr)) t)

@@ -556,15 +556,25 @@
             (setq index (1+ index)))
           result))))
 
+  (defportable persistent-map-make-fns (count root fns metadata)
+    (if (nil? metadata)
+        (js-object :kind persistent-map-kind
+                :count count
+                :root root
+                :fns fns)
+      (js-object :kind persistent-map-kind
+              :count count
+              :root root
+              :fns fns
+              :metadata metadata)))
+
   (defportable persistent-map-make
       (count root hash-function key-equal-function value-equal-function metadata)
-    (js-object :kind persistent-map-kind
-            :count count
-            :root root
-            :hash-function hash-function
-            :key-equal-function key-equal-function
-            :value-equal-function value-equal-function
-            :metadata metadata))
+    (persistent-map-make-fns
+     count
+     root
+     (js-array hash-function key-equal-function value-equal-function)
+     metadata))
 
   (defportable empty-persistent-map
       (hash-function key-equal-function value-equal-function)
@@ -585,24 +595,23 @@
   (defportable persistent-map-with-meta (map metadata)
     (if (= metadata (persistent-map-meta map))
         map
-      (persistent-map-make
+      (persistent-map-make-fns
        (persistent-map-count map)
        (get map "root" nil)
-       (get map "hash-function" nil)
-       (get map "key-equal-function" nil)
-       (get map "value-equal-function" nil)
+       (get map "fns" nil)
        metadata)))
 
   (defportable persistent-map-find (map key)
     (let ((root (get map "root" nil)))
       (if (nil? root)
           (js-object :found false :value nil)
-        (persistent-map-find-item
-         root
-         0
-         (uint32 (funcall (get map "hash-function" nil) key))
-         key
-         (get map "key-equal-function" nil)))))
+        (let ((fns (get map "fns" nil)))
+          (persistent-map-find-item
+           root
+           0
+           (uint32 (funcall (get fns 0) key))
+           key
+           (get fns 1))))))
 
   (defportable persistent-map-has? (map key)
     (get (persistent-map-find map key) "found" false))
@@ -615,9 +624,10 @@
 
   (defportable persistent-map-assoc (map key value)
     (let* ((root (get map "root" nil))
-           (hash-function (get map "hash-function" nil))
-           (key-equal-function (get map "key-equal-function" nil))
-           (value-equal-function (get map "value-equal-function" nil))
+           (fns (get map "fns" nil))
+           (hash-function (get fns 0))
+           (key-equal-function (get fns 1))
+           (value-equal-function (get fns 2))
            (hash (uint32 (funcall hash-function key)))
            (result
             (if (nil? root)
@@ -639,23 +649,21 @@
                  (>= (persistent-map-count map)
                      persistent-map-max-count))
             nil
-          (persistent-map-make
+          (persistent-map-make-fns
            (if (get result "added" false)
                (1+ (persistent-map-count map))
              (persistent-map-count map))
            (get result "item" nil)
-           hash-function
-           key-equal-function
-           value-equal-function
+           fns
            (persistent-map-meta map))))))
 
   (defportable persistent-map-dissoc (map key)
     (let ((root (get map "root" nil)))
       (if (nil? root)
           map
-        (let* ((hash-function (get map "hash-function" nil))
-               (key-equal-function
-                (get map "key-equal-function" nil))
+        (let* ((fns (get map "fns" nil))
+               (hash-function (get fns 0))
+               (key-equal-function (get fns 1))
                (result
                 (persistent-map-dissoc-item
                  root
@@ -665,12 +673,10 @@
                  key-equal-function)))
           (if (not (get result "removed" false))
               map
-            (persistent-map-make
+            (persistent-map-make-fns
              (1- (persistent-map-count map))
              (get result "item" nil)
-             hash-function
-             key-equal-function
-             (get map "value-equal-function" nil)
+             fns
              (persistent-map-meta map)))))))
 
   (defportable persistent-map-reduce (function initial map)

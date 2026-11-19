@@ -11,6 +11,24 @@
   (import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 
   (defconst js-typeof (js* "(v) => typeof v"))
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
+  (defun float-words (number)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setFloat64 0 number t)
+      (js-array (js-call view :getUint32 0 t) (js-call view :getUint32 4 t))))
+  (defun words-to-raw (low high)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setUint32 0 low t)
+      (js-call view :setUint32 4 high t)
+      (js-call view :getBigUint64 0 t)))
+  (defun inline-number (number)
+    (let ((words (float-words number)))
+      (words-to-raw (aref words 0) (+ (aref words 1) 65536))))
+  (defun bits-words (bits)
+    (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
+      (js-call view :setBigUint64 0
+        (js-call globalThis.BigInt :asUintN 64 (funcall globalThis.BigInt bits)) t)
+      (js-array (js-call view :getUint32 0 t) (js-call view :getUint32 4 t))))
   (defconst dyn-import (js* "(specifier) => import(specifier)"))
 
   (defvar directory nil)
@@ -57,6 +75,7 @@
   (defun decode-value (a x)
     (cond
       ((or (= x nil) (= (funcall js-typeof x) "boolean") (undefined? x)) x)
+      ((= (funcall js-typeof x) "number") x)
       ((= (get x :kind) 4) (js-call a :readNumber x))
       ((= (get x :kind) 5) (js-call a :readString x))
       (t
@@ -328,21 +347,23 @@
         (let ((mixed (js-call (get (get lowered :descriptor) :functions) :find (lambda (f) (= (get f :name) "mixed")))))
           (js-call assert :deepEqual mixed
                    (js-object :name "mixed"
-                              :arity nil
+                              :arity 4
                               :callingConvention "argument-list"
-                              :parameterKinds (js-array "required" "optional" "rest"))))
+                              :parameterKinds (js-array "required" "optional" "rest")
+                              :publicArity nil
+                              :parameterTypes (js-array "u32" "v64" "v64" "u32")
+                              :resultType "v64")))
         (let ((find-fn (lambda (d name)
                          (js-call (get d :functions) :find (lambda (f) (= (get f :name) name))))))
           (js-call (js-array
                             (lambda (d) (Reflect/deleteProperty (funcall find-fn d "mixed") "parameterKinds"))
-                            (lambda (d) (let ((m (funcall find-fn d "mixed")))
-                                          (put m "arity" (+ (globalThis.Number (get m :arity)) 1))))
+                            (lambda (d) (put (funcall find-fn d "mixed") "publicArity" 5))
                             (lambda (d) (put (funcall find-fn d "mixed") "callingConvention" "other"))
                             (lambda (d) (Reflect/deleteProperty (funcall find-fn d "mixed") "callingConvention"))
                             (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array "required" "rest" "optional")))
                             (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array "required" "optional" "unknown")))
                             (lambda (d) (put (funcall find-fn d "mixed") "parameterKinds" (js-array)))
-                            (lambda (d) (put (funcall find-fn d "call-none") "arity" 3))) :forEach (lambda (mutate)
+                            (lambda (d) (put (funcall find-fn d "call-none") "publicArity" 3))) :forEach (lambda (mutate)
             (let ((d (globalThis.structuredClone (get lowered :descriptor))))
               (funcall mutate d)
               (let ((invalid (Uint8Array/from
@@ -379,9 +400,12 @@
              (lowered (js-call (get backends :managed) :lower_managed_program ir runtime)))
         (js-call assert :deepEqual (get (get lowered :descriptor) :functions)
                  (js-array (js-object :name "required-pattern"
-                                      :arity nil
+                                      :arity 4
                                       :callingConvention "argument-list"
-                                      :parameterKinds (js-array "required"))))
+                                      :parameterKinds (js-array "required")
+                                      :publicArity nil
+                                      :parameterTypes (js-array "u32" "v64" "v64" "u32")
+                                      :resultType "v64")))
         (let* ((raw (js-call (get backends :wasm) :emit_typed_memory_wasm (get lowered :typed)))
                (artifact (Uint8Array/from
                            (js-call (get backends :wasm) :append_metadata_section
@@ -417,9 +441,9 @@
       (let ((raw (Uint8Array/from (js-call (get backends :wasm) :emit_memory_wasm ir))))
         (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module raw)) (js-array))
         (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module raw)) :exports))
-               (heap (funcall (aref e "heap-new") 128 4096 32768))
+               (heap (funcall (aref e "heap-new") 128 5296 32768))
                (call-fn (lambda (name &rest args)
-                          (let ((res (unsigned-bit-shift-right (apply (aref e name) (js-call (js-array heap) :concat args)) 0)))
+                          (let ((res (funcall normalize-u64 (apply (aref e name) (js-call (js-array heap) :concat args)))))
                             (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                             res))))
           (funcall call-fn "heap-auto" 1)
@@ -448,18 +472,15 @@
           (funcall call-fn "heap-pin" tail)
           (setq i 0)
           (while (< i 60)
-            (funcall call-fn "value-number" i 0)
+            (funcall call-fn "value-string" 0)
             (setq i (+ i 1)))
           (funcall call-fn "heap-collect")
           (js-call assert :equal (funcall call-fn "value-length" tail) 4)
           (setq i 0)
           (while (< i 4)
-            (let* ((child (funcall call-fn "value-get" tail i))
-                   (offset (funcall call-fn "value-data" child 4))
-                   (view (new globalThis.DataView (get (get e :memory) :buffer))))
+            (let ((child (funcall call-fn "value-get" tail i)))
               (js-call assert :deepEqual
-                (js-array (js-call view :getUint32 offset t)
-                          (js-call view :getUint32 (+ offset 4) t))
+                (bits-words (funcall call-fn "value-number-bits" child))
                 (aref patterns (+ i 1))))
             (setq i (+ i 1)))
           (funcall call-fn "heap-release" tail)
@@ -477,7 +498,7 @@
              (i 0))
         (funcall call-fn "heap-pin" items)
         (while (< i 513)
-          (funcall call-fn "value-set" items i 2)
+          (funcall call-fn "value-set" items i (funcall globalThis.BigInt 2))
           (setq i (+ i 3)))
         (let ((expanded (funcall call-fn "value-call-expand" items)))
           (funcall call-fn "heap-pin" expanded)
@@ -485,13 +506,14 @@
           (setq i 0)
           (while (< i 513)
             (js-call assert :equal (funcall call-fn "value-get" expanded i)
-                     (if (= (% i 3) 0) 2 3))
+                     (funcall globalThis.BigInt (if (= (% i 3) 0) 2 3)))
             (setq i (+ i 1)))
           (js-call assert :equal (funcall call-fn "value-call-arguments-check" expanded 513) 1)
           (funcall (aref e "value-call-arguments-check") heap expanded 512)
           (js-call assert :equal (funcall (aref e "last-error")) 3)
           (let ((data (funcall call-fn "value-data" expanded 7)))
-            (js-call (new globalThis.DataView (get (get e :memory) :buffer)) :setUint32 (+ data 4) 4 t))
+            (js-call (new globalThis.DataView (get (get e :memory) :buffer))
+              :setBigUint64 (+ data 8) (funcall globalThis.BigInt 4) t))
           (funcall (aref e "value-call-arguments-check") heap expanded 513)
           (js-call assert :equal (funcall (aref e "last-error")) 1)
           (funcall call-fn "heap-release" expanded)
@@ -512,8 +534,12 @@
                  (start (js-call source :indexOf (str "  (defun " helper " (")))
                  (end (js-call source :indexOf "  (defun " (+ start 10))))
             (funcall assert (and (>= start 0) (> end start)))
-            (let* ((faulty (str (js-call source :slice 0 start)
-                                "  (defun " helper " (" signature ") (load-u32 4294967295))\n"
+            (let* ((result-signature (if (= helper "value-call-expand")
+                                         "(memory-sig v64 u32 v64)"
+                                       "(memory-sig v64 u32 v64 u32 u32)"))
+                   (faulty (str (js-call source :slice 0 start)
+                                "  (defun " helper " (" signature ")\n    "
+                                result-signature "\n    (v64-pack (load-u32 4294967295) 0))\n"
                                 (js-call source :slice end)))
                    (ir (js-call (get backends :compiler) :compile_ir_string faulty "trap-arguments.eli"))
                    (a (instantiateManagedRuntime
@@ -534,6 +560,124 @@
                 (js-call a :leaveFrame frame)
                 (unless (undefined? spread) (js-call a :release spread))
                 (finish-heap a (js-array n))))))))))
+
+  (test "rest read projections preserve qualified length constant in-bounds escape mutation member-callee capture identity and out-of-bounds behavior"
+    (lambda ()
+      (let* ((source (js-call (js-array
+                "(defun rest-length (&rest xs) (js-length xs))"
+                "(defun rest-qualified (&rest xs) xs.length)"
+                "(defun rest-constant (&rest xs) (if (> (js-length xs) 2) (js-array (aref xs 0) (aref xs 1) (aref xs 2)) -1))"
+                "(defun rest-eq (&rest xs) (eq xs xs))"
+                "(defun rest-escape (&rest xs) (js-array xs))"
+                "(defun rest-write (&rest xs) (put xs 0 9) (aref xs 0))"
+                "(defun rest-member (&rest xs) ((get xs 0) 4))"
+                "(defun rest-closure (&rest xs) (let ((f (lambda () (aref xs 0)))) (f)))"
+                "(defun rest-oob (&rest xs) (aref xs 3))"
+                "(defun rest-proto-oob (&rest xs) (let ((proto (Object/create nil))) (Object/defineProperty proto 3 (js-object :get (lambda () 77))) (Object/setPrototypeOf xs proto) (aref xs 3)))"
+                "(defun rest-index-oob (&rest xs) (aref xs 3))"
+                "(defun index-getter () (let ((self (js* \"this\"))) (js-array (Array/isArray self) (js-length self) (if (= (aref self 0) 1) 1 (if (= (aref self 0) 2) 2 -1)))))"
+                "(defun install-array-index-getter () (Object/defineProperty Array/prototype 3 (js-object :configurable t :get index-getter)))"
+                "(defun restore-array-prototype () (Reflect/deleteProperty Array/prototype 3))"
+                "(defun read-member (x) (js-array (Array/isArray (js* \"this\")) (js-length (js* \"this\")) (eq (aref (js* \"this\") 0) read-member) x))"
+                "(defun read-member-value () read-member)"
+                "(export rest-length rest-qualified rest-constant rest-eq rest-escape rest-write rest-member rest-closure rest-oob rest-proto-oob rest-index-oob index-getter install-array-index-getter restore-array-prototype read-member read-member-value)") :join "\n"))
+             (ir (js-call (get backends :compiler) :compile_ir_string source "rest-projection.eli"))
+             (a (instantiateManagedRuntime
+                  (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm ir runtime)))))
+        (js-call a :auto 1)
+        (js-call assert :equal (invoke-result a "rest-length" (js-array)) 0)
+        (js-call assert :equal (invoke-result a "rest-length" (js-array 1 2 3)) 3)
+        (js-call assert :equal (invoke-result a "rest-qualified" (js-array)) 0)
+        (js-call assert :equal (invoke-result a "rest-qualified" (js-array 1 2 3)) 3)
+        (js-call assert :equal (invoke-result a "rest-constant" (js-array 1 2)) -1)
+        (js-call assert :deepEqual (invoke-result a "rest-constant" (js-array 1 2 3))
+                 (js-array 1 2 3))
+        (js-call assert :equal (invoke-result a "rest-eq" (js-array 1)) t)
+        (js-call assert :deepEqual (invoke-result a "rest-escape" (js-array 1 2))
+                 (js-array (js-array 1 2)))
+        (js-call assert :equal (invoke-result a "rest-write" (js-array 1 2)) 9)
+        (js-call assert :equal (invoke-result a "rest-closure" (js-array 7 8)) 7)
+        (js-call assert :equal (invoke-result a "rest-oob" (js-array 1)) undefined)
+        (js-call assert :equal (invoke-result a "rest-proto-oob" (js-array 1)) 77)
+        (let ((f (js-call a :invoke "read-member-value" (js-array))))
+          (try
+            (js-call assert :deepEqual (invoke-result a "rest-member" (js-array f))
+                     (js-array t 1 t 4))
+            (finally (js-call a :release f))))
+        (js-call a :collect)
+        (js-call assert :equal (js-call a :live) 0 "before array prototype getter")
+        (let ((installed (js-call a :invoke "install-array-index-getter" (js-array))))
+          (try
+            (js-call assert :deepEqual (invoke-result a "rest-index-oob" (js-array 1)) (js-array t 1 1))
+            (js-call assert :deepEqual (invoke-result a "rest-index-oob" (js-array 2)) (js-array t 1 2))
+            (let ((restored (js-call a :invoke "restore-array-prototype" (js-array))))
+              (js-call assert :equal restored t)
+              (when (and restored (not (or (eq restored nil) (eq restored t) (eq restored false))))
+                (js-call a :release restored)))
+            (js-call assert :equal (invoke-result a "rest-index-oob" (js-array 1)) undefined)
+            (finally
+              (let ((restored (js-call a :invoke "restore-array-prototype" (js-array))))
+                (when (and restored (not (or (eq restored nil) (eq restored t) (eq restored false))))
+                  (js-call a :release restored)))
+              (when (and installed (not (or (eq installed nil) (eq installed t) (eq installed false))))
+                (js-call a :release installed)))))
+        (js-call a :closeModule)
+        (finish-heap a))))
+
+  (test "rest scalar snapshot keeps the captured element when a console-log callback replaces the pinned argv"
+    (lambda ()
+      (let* ((source (js-call (js-array
+                         "(defun witness (&rest xs) (print) (if (> (js-length xs) 0) (aref xs 0) -1))"
+                         "(export witness)") :join "\n"))
+             (ir (js-call (get backends :compiler) :compile_ir_string source "rest-snapshot.eli"))
+             (bytes (Uint8Array/from (js-call (get backends :managed) :emit_managed_wasm ir runtime)))
+             (module (new globalThis.WebAssembly.Module bytes))
+             (required (WebAssembly.Module/imports module))
+             (box (js-object :e nil :argv nil :next (inline-number 99) :error -1 :fired false :zero (words-to-raw 0 0)))
+             (host (js-object))
+             (imports (js-object)))
+        (put host "console-log-capture" (lambda (heap ignored) (get box :zero)))
+        (put host "console-log"
+          (lambda (heap ignored)
+            (funcall (aref (get box :e) "value-set") heap (get box :argv) 0 (get box :next))
+            (put box :error (funcall (aref (get box :e) "last-error")))
+            (put box :fired t)
+            (get box :zero)))
+        (put host "source-operation"
+          (lambda (heap ignored)
+            (funcall normalize-u64 (funcall (aref (get box :e) "value-foreign-new") heap 1 0))))
+        (js-call required :forEach (lambda (entry)
+          (js-call assert :equal (get entry :module) "eliscript.host")
+          (funcall assert (Object/hasOwn host (get entry :name)) (get entry :name))))
+        (put imports "eliscript.host" host)
+        (let* ((e (get (new globalThis.WebAssembly.Instance module imports) :exports))
+               (heap (funcall (aref e "heap-new") 128 5296 32768))
+               (argv (funcall normalize-u64 (funcall (aref e "value-refs") heap 7 1))))
+          (put box :e e)
+          (put box :argv argv)
+          (funcall (aref e "heap-auto") heap 1)
+          (funcall (aref e "heap-pin") heap argv)
+          (funcall (aref e "value-set") heap argv 0 (inline-number 11))
+          (js-call assert :equal (funcall (aref e "last-error")) 0)
+          (js-call assert :equal (funcall (aref e "value-kind") heap argv) 7)
+          (let ((result (funcall normalize-u64 (funcall (aref e "witness") heap (get box :zero) argv 1))))
+            (js-call assert :equal (funcall (aref e "last-error")) 0)
+            (funcall assert (get box :fired))
+            (js-call assert :equal (get box :error) 0)
+            (js-call assert :deepEqual
+              (bits-words (funcall normalize-u64 (funcall (aref e "value-number-bits") heap result)))
+              (float-words 11))
+            (js-call assert :deepEqual
+              (bits-words (funcall normalize-u64
+                (funcall (aref e "value-number-bits") heap
+                  (funcall normalize-u64 (funcall (aref e "value-get") heap argv 0)))))
+              (float-words 99)))
+          (funcall (aref e "heap-release") heap argv)
+          (funcall (aref e "value-standard-prototypes-close") heap)
+          (funcall (aref e "heap-collect") heap)
+          (js-call assert :equal (funcall (aref e "last-error")) 0)
+          (js-call assert :equal (funcall (aref e "heap-live") heap) 0)
+          (js-call assert :equal (funcall (aref e "frame-depth") heap) 0)))))
 
   (test "generated argument shapes match an independent optional and rest model with exact Number bits"
     (lambda ()

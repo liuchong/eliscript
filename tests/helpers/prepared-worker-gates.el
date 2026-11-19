@@ -23,12 +23,11 @@
 (require 'cl-lib)
 (require 'json)
 
-(defconst prepared-worker-gates--schema-version 1)
 (defconst prepared-worker-gates--format "eliscript-prepared-worker-gates")
 (defconst prepared-worker-gates--child-timeout 10.0)
 (defconst prepared-worker-gates--total-timeout 60.0)
 (defconst prepared-worker-gates--identity-keys
-  '(format version fixedPointFileCount sourceSha256 productSha256))
+  '(format fixedPointFileCount sourceSha256 productSha256))
 
 (defvar prepared-worker-gates--deadline nil)
 (defvar prepared-worker-gates--baseline-processes nil)
@@ -146,18 +145,17 @@ Signal an error when the final form is not the expected CLI condition-case."
       (funcall gate-function))))
 
 (defun prepared-worker-gates--identity-keys-match-p (identity)
-  "Return non-nil when IDENTITY has exactly the portable five-field shape."
+  "Return non-nil when IDENTITY has exactly the portable identity fields."
   (and (listp identity)
        (equal (sort (mapcar (lambda (pair) (symbol-name (car pair))) identity)
                     #'string<)
               '("fixedPointFileCount" "format" "productSha256"
-                "sourceSha256" "version"))))
+                "sourceSha256"))))
 
 (defun prepared-worker-gates--valid-identity-p (identity)
   "Return non-nil when IDENTITY is a valid portable prepared stage3 identity."
   (and (prepared-worker-gates--identity-keys-match-p identity)
        (equal (alist-get 'format identity) "eliscript-prepared-stage3")
-       (integerp (alist-get 'version identity))
        (integerp (alist-get 'fixedPointFileCount identity))
        (stringp (alist-get 'sourceSha256 identity))
        (stringp (alist-get 'productSha256 identity))
@@ -290,8 +288,7 @@ The plist contains :ok, :failures, :identities, :identity,
          (ok (plist-get result :ok))
          (identity (plist-get result :identity))
          (payload
-          (list (cons 'schemaVersion prepared-worker-gates--schema-version)
-                (cons 'format prepared-worker-gates--format)
+          (list (cons 'format prepared-worker-gates--format)
                 (cons 'ok (if ok t :false))
                 (cons 'bridges (length prepared-worker-gates--tools))
                 (cons 'identities (plist-get result :identities))

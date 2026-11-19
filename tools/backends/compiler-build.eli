@@ -32,7 +32,7 @@
         :full-compiler (Object/freeze
           (js-object
             :budget (Object/freeze (js-object :maxSlots 8388607 :initialBytes 268435456
-              :maxBytes 1073741824 :extendedHeap t))
+              :maxBytes 1073741824))
             :memory (Object/freeze (js-object :initialPages 4096 :maximumPages 65535)) :auto 16777216)))))
 
   (defun build-truth (value) (funcall globalThis.Boolean value))
@@ -587,7 +587,7 @@
     (let* ((literals (build-nullish (get graph :literalSources) (js-array)))
            (identity (compiler-source-identity (js-object :modules (js-array)
                        :runtime (get graph :runtime) :literalSources literals)))
-           (checkpoint (js-object :format "eliscript-compiler-runtime-ir-checkpoint" :version 1
+           (checkpoint (js-object :format "eliscript-compiler-runtime-ir-checkpoint"
              :producerHost (if (= (get producer :host) "js") "javascript" (get producer :host))
              :revision (get ready :revision) :literalRevision (get ready :literalRevision)
              :sourceIdentity identity :literals (js-array)))
@@ -701,12 +701,12 @@
                                  (modes (build-optional-get capabilities "responseModes")))
                             (cond
                               ((and (or (= host "native") (= debug t))
-                                    (not (nullish? modes)) (js-call modes :includes "graph-events-v1"))
-                               (setq response-options (js-object :signal signal :responseMode "graph-events-v1")))
-                              ((and (not (nullish? modes)) (js-call modes :includes "events-v1"))
-                               (setq response-options (js-object :signal signal :responseMode "events-v1")))
-                              ((and (not (nullish? modes)) (js-call modes :includes "graph-events-v1"))
-                               (setq response-options (js-object :signal signal :responseMode "graph-events-v1"))))))
+                                    (not (nullish? modes)) (js-call modes :includes "graph-events"))
+                               (setq response-options (js-object :signal signal :responseMode "graph-events")))
+                              ((and (not (nullish? modes)) (js-call modes :includes "events"))
+                               (setq response-options (js-object :signal signal :responseMode "events")))
+                              ((and (not (nullish? modes)) (js-call modes :includes "graph-events"))
+                               (setq response-options (js-object :signal signal :responseMode "graph-events"))))))
                         (funcall phase "project-start")
                         (let ((request (js-object :operation "project" :modules (get graph :modules))))
                           (when (build-truth (get graph :hostModules)) (put request :hostModules (get graph :hostModules)))

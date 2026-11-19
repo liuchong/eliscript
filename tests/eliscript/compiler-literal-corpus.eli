@@ -379,8 +379,8 @@
                      (native (compilerCorpusRequest record "native")))
                 (js-call assert :strictEqual (get wasm :phased) t)
                 (js-call assert :strictEqual (get native :phased) t)
-                (js-call assert :strictEqual (get wasm :memory) undefined)
-                (js-call assert :strictEqual (get native :memory) undefined)
+                (js-call assert :deepStrictEqual (get wasm :memory) (js-object :initialPages 128 :maximumPages 65535))
+                (js-call assert :deepStrictEqual (get native :memory) (js-object :initialPages 128 :maximumPages 65535))
                 (js-call assert :deepStrictEqual (get wasm :modules) (get record :modules))
                 (js-call assert :deepStrictEqual (get native :modules) (get record :modules))
                 (js-call assert :strictEqual (get wasm :entry) (get record :entry))
@@ -787,6 +787,7 @@
       (let* ((originals (await (loadOriginalCompilerManifests)))
              (document (await (loadOriginalCompilerCorpus (js-object :sourceRoot root :originals originals))))
              (names (js-array "core-set-usage" "core-stdlib-usage" "core-language-api-usage"))
+             (expected-api-host-source (await (readFile (resolve root "tests/fixtures/core-stdlib-api-host.mjs") "utf8")))
              (plans (js-call (js-call names :map (lambda (name)
                        (js-array (+ "stable-compatibility:program:tests/fixtures/" name ".eli") name)))
                       :concat (js-array
@@ -802,7 +803,17 @@
               (let ((base (js-call (get document :records) :find (lambda (item)
                             (= (get item :id) (+ "stable-compatibility:program:tests/fixtures/" name ".eli"))))))
                 (js-call assert :deepStrictEqual (get record :modules) (get base :modules))
-                (js-call assert :deepStrictEqual (get record :request) (get base :request))
+                ;; The complete-protocols recipe owns one authenticated API host
+                ;; provider beyond its stable base request; every other plan keeps
+                ;; the identical base request.
+                (if (= id "original-program:core-stdlib-complete-protocols")
+                  (js-call assert :deepStrictEqual (get record :request)
+                    (Object/assign (js-object) (get base :request)
+                      (js-object :hostSources (js-call (get (get base :request) :hostSources (js-array)) :concat
+                        (js-array (js-object :id "tests/fixtures/core-stdlib-api-host.mjs"
+                                   :filename "tests/fixtures/core-stdlib-api-host.mjs"
+                                   :source expected-api-host-source))))))
+                  (js-call assert :deepStrictEqual (get record :request) (get base :request)))
                 (js-call assert :strictEqual (get record :entry) (get base :entry))
                 (js-call assert :ok (js-call (get (get record :execution) :hostSource) :includes (+ name ".mjs")))))
             (while (< target-index (js-length targets))

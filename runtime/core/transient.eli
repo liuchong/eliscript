@@ -14,6 +14,10 @@
     dispatchTransientPersistent)
 
   (defconst typeof-value (js* "(value) => typeof value"))
+  (defconst native-call (get (get globalThis.Function :prototype) :call))
+  (defconst call-0 (js* "(fn, receiver) => fn.call(receiver)"))
+  (defconst call-1 (js* "(fn, receiver, a) => fn.call(receiver, a)"))
+  (defconst call-2 (js* "(fn, receiver, a, b) => fn.call(receiver, a, b)"))
   (defconst IEditable I_EDITABLE)
   (defconst ITransientCollection I_TRANSIENT_COLLECTION)
 
@@ -24,7 +28,9 @@
     (if (not (nil? collection))
         (let ((direct (aref collection EDITABLE_TRANSIENT)))
           (if (callable? direct)
-              (js-call direct :call collection)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-0 direct collection)
+                  (js-call direct :call collection))
               (dispatchEditableTransient collection)))
         (dispatchEditableTransient collection)))
 
@@ -32,68 +38,89 @@
     (if (not (nil? collection))
         (let ((direct (aref collection TRANSIENT_CONJ)))
           (if (callable? direct)
-              (js-call direct :call collection value)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-1 direct collection value)
+                  (js-call direct :call collection value))
               (dispatchTransientConj collection value)))
         (dispatchTransientConj collection value)))
 
-  (defun conjBang (&rest arguments)
-    (let ((arg-count (js-length arguments)))
-      (cond
-        ((= arg-count 0) undefined)
-        ((= arg-count 1) (get arguments 0))
-        ((= arg-count 2) (conj-one (get arguments 0) (get arguments 1)))
-        (t
-         (let ((result (get arguments 0))
-               (index 1))
-           (while (< index arg-count)
-             (setq result (conj-one result (get arguments index))
-                   index (+ index 1)))
-           result)))))
+  (defun conj-many (collection arguments)
+    (let ((arg-count (js-length arguments))
+          (result collection)
+          (index 1))
+      (while (< index arg-count)
+        (setq result (conj-one result (aref arguments index))
+              index (+ index 1)))
+      result))
+
+  (defconst conjBang
+    (funcall
+      (js* "(conjOne, conjMany) => function conjBang(collection, value) { const n = arguments.length; if (n === 2) return conjOne(collection, value); if (n === 1) return collection; if (n === 0) return undefined; return conjMany(collection, arguments); }")
+      conj-one
+      conj-many))
 
   (defun assoc-one (collection key value)
-    (if (and (not (nil? collection))
-             (callable? (aref collection TRANSIENT_ASSOC)))
-        (js-call (aref collection TRANSIENT_ASSOC) :call collection key value)
+    (if (not (nil? collection))
+        (let ((direct (aref collection TRANSIENT_ASSOC)))
+          (if (callable? direct)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-2 direct collection key value)
+                  (js-call direct :call collection key value))
+              (dispatchTransientAssoc collection key value)))
         (dispatchTransientAssoc collection key value)))
 
-  (defun assocBang (&rest arguments)
+  (defun assoc-many (arguments)
     (let ((arg-count (js-length arguments)))
       (when (or (< arg-count 3) (not (= (mod (- arg-count 3) 2) 0)))
         (throw (new globalThis/TypeError
                  "assocBang requires a transient collection followed by one or more key/value pairs")))
-      (let ((result (assoc-one (get arguments 0) (get arguments 1) (get arguments 2)))
+      (let ((result (assoc-one (aref arguments 0) (aref arguments 1) (aref arguments 2)))
             (index 3))
         (while (< index arg-count)
-          (setq result (assoc-one result (get arguments index) (get arguments (+ index 1)))
+          (setq result (assoc-one result (aref arguments index) (aref arguments (+ index 1)))
                 index (+ index 2)))
         result)))
 
+  (defconst assocBang
+    (funcall
+      (js* "(assocOne, assocMany) => function assocBang(collection, key, value) { const n = arguments.length; if (n === 3) return assocOne(collection, key, value); return assocMany(arguments); }")
+      assoc-one
+      assoc-many))
+
   (defun dissoc-one (collection key)
-    (if (and (not (nil? collection))
-             (callable? (aref collection TRANSIENT_DISSOC)))
-        (js-call (aref collection TRANSIENT_DISSOC) :call collection key)
+    (if (not (nil? collection))
+        (let ((direct (aref collection TRANSIENT_DISSOC)))
+          (if (callable? direct)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-1 direct collection key)
+                  (js-call direct :call collection key))
+              (dispatchTransientDissoc collection key)))
         (dispatchTransientDissoc collection key)))
 
-  (defun dissocBang (collection &rest keys)
+  (defun dissoc-many (collection arguments)
     (let ((result collection)
-          (index 0)
-          (limit (js-length keys)))
+          (index 1)
+          (limit (js-length arguments)))
       (while (< index limit)
-        (setq result (dissoc-one result (get keys index))
+        (setq result (dissoc-one result (aref arguments index))
               index (+ index 1)))
       result))
+
+  (defconst dissocBang
+    (funcall
+      (js* "(dissocOne, dissocMany) => function dissocBang(collection) { const n = arguments.length; if (n === 2) return dissocOne(collection, arguments[1]); if (n <= 1) return collection; return dissocMany(collection, arguments); }")
+      dissoc-one
+      dissoc-many))
 
   (defun persistentBang (collection)
     (if (not (nil? collection))
         (let ((direct (aref collection TRANSIENT_PERSISTENT)))
           (if (callable? direct)
-              (js-call direct :call collection)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-0 direct collection)
+                  (js-call direct :call collection))
               (dispatchTransientPersistent collection)))
         (dispatchTransientPersistent collection)))
-
-  (Object/defineProperty conjBang "length" (js-object :value 2 :configurable t))
-  (Object/defineProperty assocBang "length" (js-object :value 3 :configurable t))
-  (Object/defineProperty dissocBang "length" (js-object :value 1 :configurable t))
 
   (export
     IEditable

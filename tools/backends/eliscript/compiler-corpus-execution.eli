@@ -743,7 +743,7 @@
                (planned (await (js-call (get context :session) :request
                  (copy request (js-object :operation "project-plan")) (js-object :signal (get context :signal)))))
                (ids (new globalThis.Set)) (available (new globalThis.Map)))
-          (unless (and (= (field planned "format") "eliscript-project-plan") (= (field planned "version") 1)
+          (unless (and (= (field planned "format") "eliscript-project-plan")
                        (Array/isArray (field planned "modules")))
             (throw (new globalThis.TypeError "original source maps require the selected compiler's actual project plan")))
           (js-call (get request :modules) :forEach (lambda (module) (js-call available :set (get module :id) module)))
@@ -1007,7 +1007,7 @@
       (t value)))
   (defasync execute-exports (context artifact contract resources evidence)
     (when (Object/hasOwn contract "valueEncoding")
-      (unless (and (= (get contract :valueEncoding) "eliscript-observation-v1")
+      (unless (and (= (get contract :valueEncoding) "eliscript-observation")
         (= (get (get context :record) :id) "original-sequence:managed-language-intrinsics-source"))
         (throw (new globalThis.TypeError "encoded export observations require their exact original intrinsic recipe"))))
     ;; Encoded data must cross JSON intact; decode in the executing process.
@@ -1016,7 +1016,7 @@
       (await (execute-target-exports context artifact contract resources evidence))))
   (defasync execute-target-exports (context artifact contract resources evidence)
     (when (Object/hasOwn contract "valueEncoding")
-      (unless (= (get contract :valueEncoding) "eliscript-observation-v1")
+      (unless (= (get contract :valueEncoding) "eliscript-observation")
         (throw (new globalThis.TypeError "unknown compiler corpus value encoding")))
       (setq contract (decodeCompilerCorpusObservation contract)))
     (if (= (get artifact :target) "javascript")
@@ -1184,7 +1184,9 @@
         (js-call (get step :negativeZeroAt) :forEach (lambda (key) (setq value (get value key)))) (js-call assert :ok (Object/is value -0))))
     (when (get step :canonicalEnvelope)
       (js-call assert :ok (js-call (get response :canonicalIR) :startsWith "{\"format\":\"eliscript-ir\",\"program\":{\"body\":"))
-      (js-call assert :ok (js-call (get response :canonicalIR) :endsWith "},\"version\":1}")))
+      (js-call assert :ok (js-call (get response :canonicalIR) :endsWith "}}"))
+      ;; The canonical envelope is exactly the format tag and the program.
+      (js-call assert :deepStrictEqual (Object/keys (JSON/parse (get response :canonicalIR))) (js-array "format" "program")))
     (when (get step :sameFieldsAs)
       (js-call (get (get step :sameFieldsAs) :fields) :forEach (lambda (name)
         (let ((previous (field (js-call results :get (get (get step :sameFieldsAs) :step)) name)))
@@ -1566,7 +1568,8 @@
         ;; open-ended allow-host-capabilities switch. It precedes host launch.
         (let* ((names (js-array "source-operation" "console-log-capture" "console-log"))
                (expected (js-call names :map (lambda (name)
-                 (js-object :name name :module "eliscript.host" :arity 2 :abi "managed-host-call-v1"))))
+                 (js-object :name name :module "eliscript.host" :arity 2
+                 :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call"))))
                (artifact (get context :artifact)))
           (js-call assert :deepStrictEqual (get execution :requiredManagedImports) expected)
           (js-call assert :deepStrictEqual (get (get artifact :descriptor) :hostCapabilities) expected)
@@ -1581,7 +1584,7 @@
               (js-call imports :forEach (lambda (item)
                 (when (Object/hasOwn item "type")
                   (js-call assert :deepStrictEqual (get item :type)
-                    (js-object :parameters (js-array "i32" "i32") :results (js-array "i32"))))))))))))
+                    (js-object :parameters (js-array "i32" "i64") :results (js-array "i64"))))))))))))
   (defasync execute-js-unicode-profile (context)
     (let* ((record (get context :record)) (artifact (get context :artifact))
            (options (fallback (get context :options) (js-object)))
@@ -1590,7 +1593,7 @@
            (modules (join (resolve (get artifact :path) "..") "node_modules"))
            (profile-path (resolve directory "unicode-profile.json")))
       ;; Preserve the original actual-product package environment. Only this
-      ;; explicitly versioned case selects a profile, in its own process.
+      ;; explicit profile case selects a Unicode version, in its own process.
       (await (mkdir modules (js-object :recursive t)))
       (try (await (symlink (resolve source-root) (join modules "eliscript") "dir"))
         (catch error (unless (= (get error :code) "EEXIST") (throw error))))
@@ -1649,7 +1652,7 @@
                  (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
                  (configuration (resolve directory "__eliscript_original_compiler_session.json"))
                  (projected (str (js-call host :slice 0 at) after (js-call host :slice (+ at (js-length before)))))
-                 (proof (js-object :kind "original-tools-final-cli" :version 1 :recordId id
+                 (proof (js-object :kind "original-tools-final-cli" :recordId id
                    :sourceRoot source-root :configurationPath configuration
                    :producerPath (resolve directory (get artifact :path))
                    :supportingDirectory (resolve (get context :directory) "original-tool-products")
@@ -1693,7 +1696,6 @@
           (unless (and (= (get execution :kind) "compiler-session-program")
                        (= (get original :suite) "tests/compiler-session-tools.test.mjs")
                        (= (field declaration "kind") "original-tools-data-reference")
-                       (= (field declaration "version") 1)
                        (= (value-type host) "string")
                        (= (execution-digest original-host) (field declaration "hostSha256"))
                        (or (not cli) (= (execution-digest host) (get cli :transportHostSha256)))
@@ -1731,7 +1733,7 @@
                      (str (original-tools-side-effect-import url) host)
                      (js-call host :replace before after))) (artifact (get context :artifact))
                    (directory (fallback (get artifact :directory) (resolve (get artifact :path) "..")))
-                   (proof (js-object :kind "original-tools-data-reference" :version 1 :recordId id
+                   (proof (js-object :kind "original-tools-data-reference" :recordId id
                      :sourceRoot source-root :configurationPath (resolve directory "__eliscript_original_compiler_session.json")
                      :sourceAssets assets :moduleFile module-file :runtimeFile "runtime/unicode-case.mjs"
                      :runtimeSha256 (execution-digest (await (readFile (resolve source-root "runtime/unicode-case.mjs"))))

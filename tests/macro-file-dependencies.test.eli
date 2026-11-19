@@ -25,7 +25,7 @@
 
   (defun digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defun dependencies (value) (js-array (js-object :path "build-value.txt" :digest (digest value)) (js-object :path "unused.txt" :digest (digest "declared-but-unused"))))
-  (defun publicIdentity (manifest) (js-object :format (get manifest :format) :version (get manifest :version) :entry (get manifest :entry) :modules (get manifest :modules) :digest (get manifest :digest)))
+  (defun publicIdentity (manifest) (js-object :format (get manifest :format) :entries (get manifest :entries) :modules (get manifest :modules) :digest (get manifest :digest)))
   (defasync moduleValue (command output)
     (run (js-array command (resolve projectDirectory "tests/fixtures/macro-module-value-host.mjs") (get (pathToFileURL (resolve output "main.mjs")) :href))))
   (test "self-hosted macros read only declared context files" (async ()
@@ -50,7 +50,7 @@
           (await (run (js-array buildPath) (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR compilerDirectory)))))
           (let* ((project (await (funcall (js* "(url) => import(url)") "../bootstrap/host/project.mjs")))
                  (buildProject (get project :buildProject))
-                 (options (js-object :entry entry :root sourceRoot :outDir directOutput :moduleDirectory compilerDirectory
+                 (options (js-object :entries (js-array entry) :root sourceRoot :outDir directOutput :moduleDirectory compilerDirectory
                    :macroCapabilities (js-array "read-file") :macroFileDependencies (js-array "unused.txt" "build-value.txt")))
                  (first (await (buildProject options))))
             (same (get (get first :report) :counts) (js-object :modules 1 :compiled 1 :reused 0))
@@ -75,7 +75,7 @@
                 (js-object :outDir (resolve directory "invalid-utf8") :macroFileDependencies (js-array "invalid.txt"))))) :rejects)
                 :toThrow "macro file dependency is not valid UTF-8")))
             (let ((configuration (resolve directory "eliscript.json")) (selfHostedOutput (resolve directory "self-hosted")) (seedOutput (resolve directory "seed")))
-              (await (writeFile configuration (str (JSON/stringify (js-object :schemaVersion 1 :sourceRoot "src" :entry "main.eli" :outDir "self-hosted"
+              (await (writeFile configuration (str (JSON/stringify (js-object :sourceRoot "src" :entries (js-array "main.eli") :outDir "self-hosted"
                 :portableEntries (js-array) :macroCapabilities (js-array "read-file") :macroFileDependencies (js-array "unused.txt" "build-value.txt") :cache false)) "\n")))
               (await (run (js-array projectBuildPath "--config" configuration) (js-object :env (env (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR compilerDirectory)))))
               (await (run (js-array seedBuildPath "--config" configuration "--out-dir" seedOutput)))

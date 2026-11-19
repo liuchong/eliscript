@@ -9,7 +9,9 @@
   (defconst apply-function (get globalThis.Reflect :apply))
   (defconst own-descriptor (get globalThis.Reflect :getOwnPropertyDescriptor))
   (defconst object-intrinsics
-    (let ((methods (js-call (js-array "freeze" "isFrozen" "hasOwn" "getOwnPropertyDescriptor" "defineProperty" "defineProperties" "create" "getPrototypeOf") :map (lambda (name)
+    (let ((methods (js-call (js-array "freeze" "isFrozen" "hasOwn" "getOwnPropertyDescriptor" "defineProperty" "defineProperties" "create" "getPrototypeOf"
+                                      "keys" "values" "entries" "is" "assign" "setPrototypeOf" "getOwnPropertyNames" "getOwnPropertySymbols"
+                                      "preventExtensions" "isExtensible" "fromEntries" "getOwnPropertyDescriptors" "seal" "isSealed") :map (lambda (name)
       (let* ((entry (Object/getOwnPropertyDescriptor ObjectConstructor name)) (method (get entry :value)))
         ;; Modern hosts format native-function whitespace differently. Match
         ;; the complete named native syntax, not one engine's pretty printing.
@@ -38,6 +40,14 @@
         (when (authentic-native-method method "isArray")
           (js-call methods :push (js-object :name "array-isArray" :method method
             :runtime "value-builtin-primitive" :operation 5))))
+      (js-call (js-array (js-array "from" 0) (js-array "of" 1)) :forEach
+        (lambda (specification)
+          (let* ((name (aref specification 0))
+                 (entry (Object/getOwnPropertyDescriptor ArrayConstructor name))
+                 (method (when entry (get entry :value))))
+            (when (authentic-native-method method name)
+              (js-call methods :push (js-object :name (+ "array-" name) :method method
+                :runtime "value-array-construction" :operation (aref specification 1)))))))
       (js-call (js-array (js-array "push" 200) (js-array "pop" 201) (js-array "slice" 202)
                         (js-array "map" 203) (js-array "filter" 204) (js-array "forEach" 205)
                         (js-array "some" 206) (js-array "every" 207) (js-array "find" 208)

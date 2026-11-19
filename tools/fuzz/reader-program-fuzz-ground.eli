@@ -127,7 +127,7 @@
   (defun validateDiagnostic (error positions testCase)
     (let ((diagnostic (at error "eliscriptDiagnostic")))
       (unless (and (not (= diagnostic nil)) (= (funcall host-typeof diagnostic) "object")
-                   (= (get diagnostic :format) "eliscript-diagnostic") (= (get diagnostic :version) 1)
+                   (= (get diagnostic :format) "eliscript-diagnostic")
                    (= (funcall host-typeof (get diagnostic :code)) "string")
                    (js-call (new globalThis.RegExp "^ELI-[A-Z]\\d{4}$" "u") :test (get diagnostic :code))
                    (= (get diagnostic :severity) "error") (= (funcall host-typeof (get diagnostic :phase)) "string")
@@ -289,7 +289,7 @@
                   (fail (+ "seed oracle returned " received " results for " total " inputs")))
                 (unless (= (js-call replayDigest :digest "hex") (get corpus :digest)) (fail "deterministic corpus replay changed"))
                 (let ((readerInputs (Math/floor (/ total 2))))
-                  (js-object :schemaVersion 1 :format "eliscript-reader-program-fuzz" :version 1 :verified t :seed (+ "0x" (js-call (js-call seed :toString 16) :padStart 8 "0")) :inputs total :readerInputs readerInputs :programInputs (- total readerInputs) :maximumSourceCharacters maximumSourceCharacters :maximumCorpusBytes maximumCorpusBytes :corpusBytes (get corpus :bytes) :corpusDigest (get corpus :digest) :corpusReplayed t :reader (copyHostRecord readerCounts (js-object :resultDigest (js-call readerDigest :digest "hex"))) :compiler (copyHostRecord compilerCounts (js-object :resultDigest (js-call compilerDigest :digest "hex"))))))))
+                  (js-object :format "eliscript-reader-program-fuzz" :verified t :seed (+ "0x" (js-call (js-call seed :toString 16) :padStart 8 "0")) :inputs total :readerInputs readerInputs :programInputs (- total readerInputs) :maximumSourceCharacters maximumSourceCharacters :maximumCorpusBytes maximumCorpusBytes :corpusBytes (get corpus :bytes) :corpusDigest (get corpus :digest) :corpusReplayed t :reader (copyHostRecord readerCounts (js-object :resultDigest (js-call readerDigest :digest "hex"))) :compiler (copyHostRecord compilerCounts (js-object :resultDigest (js-call compilerDigest :digest "hex"))))))))
           (finally
             (when (running-p oracle) (terminate oracle) (when completed (await completed)))
             (await (rm directory (js-object :recursive t :force t))))))))

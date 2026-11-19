@@ -19,7 +19,7 @@ contract, and the public project command executes it under Bun or Node.
 
 Version 1 single-entry requests, manifests, reports, command output, and worker
 behavior remain unchanged. Version 2 is selected explicitly by an `entries`
-array and never changes the meaning of a version 1 `entry` field.
+array and never reintroduces a singular `entry` field.
 
 Application frameworks, UI libraries, bundlers, publishing systems, blog and
 site generators, hosting, and development servers are replaceable consumers.
@@ -33,7 +33,6 @@ The normalized multi-entry project request has this shape:
 ```json
 {
   "format": "eliscript-project-request",
-  "version": 2,
   "entries": ["src/admin.eli", "src/main.eli"],
   "outDir": "dist",
   "root": "src",
@@ -48,7 +47,6 @@ The corresponding configuration is:
 
 ```json
 {
-  "schemaVersion": 2,
   "sourceRoot": "src",
   "entries": ["admin.eli", "main.eli"],
   "outDir": "dist",
@@ -73,14 +71,14 @@ arrays shown above to both project versions. They do not alter entry-set
 meaning; non-empty declarations enter each module's public and private build
 identity through ordered path and digest records.
 
-The version 2 build-operation record carries the same frozen `entries` array
-and has version 2. Single-entry project and single-file operations retain
-version 1.
+The build-operation record carries the same frozen `entries` array.
+Single-entry project and single-file operations use a one-element `entries`
+array.
 
 Portable selection currently names functions relative to one source entry.
 Therefore a request with more than one source entry and non-empty
 `portableEntries` rejects before graph traversal. A future per-entry portable
-root model requires its own versioned contract and cannot reinterpret this
+root model requires its own contract and cannot reinterpret this
 schema.
 
 ## Manifest Version 2
@@ -90,7 +88,6 @@ A multi-entry build writes:
 ```json
 {
   "format": "eliscript-project",
-  "version": 2,
   "entries": ["admin.mjs", "main.mjs"],
   "modules": [],
   "digest": "<sha256>"
@@ -99,42 +96,38 @@ A multi-entry build writes:
 
 Entry outputs are sorted, unique, relative to the output root, and all appear
 in the module graph. The graph digest is SHA-256 over compact JSON containing
-`format`, `version`, `entries`, and the ordered module records. A single-entry
-build continues to write the byte-compatible version 1 identity with `entry`.
+`format`, `entries`, and the ordered module records. A single-entry build
+writes the same `entries` array with one element.
 
-The private cache remains `eliscript-project-cache` version 2. Cache lookup
-validates the complete public v1 or v2 entry identity before trusting private
-module metadata. Changing the entry set produces `entries-changed`; unchanged
+The private cache remains `eliscript-project-cache`. Cache lookup validates
+the complete public entry identity before trusting private module metadata. Changing the entry set produces `entries-changed`; unchanged
 multi-entry graphs may fully reuse artifacts written by Bun, Node, or the seed
 when compiler identity also matches.
 
 ## Report And Public Results
 
-Multi-entry builds return `eliscript-project-build` version 2 with frozen
-`entries` and `entryOutputs` arrays. The ground singular `entry` and
-`entryOutput` fields remain available only for a one-entry result.
-
-The build report similarly uses version 2 and replaces the singular fields:
+Builds return `eliscript-project-build` with frozen `entries` and
+`entryOutputs` arrays. The build report uses the same array structure:
 
 ```json
 {
   "format": "eliscript-build-report",
-  "version": 2,
   "entries": ["admin.eli", "main.eli"],
   "entryOutputs": ["admin.mjs", "main.mjs"]
 }
 ```
 
 All cache, count, timing, module, diagnostic, and Source Map semantics remain
-those of report version 1. Without `--json`, the public and seed project
+those of the complete report. Without `--json`, the public and seed project
 commands print one absolute generated entry path per line in identity order.
 
 ## Worker Contract
 
-The worker accepts manifest version 1 and version 2. For version 2 it verifies
-that entries are sorted and unique, requires the requested module to match one
-declared entry, verifies the graph digest and every artifact, and then uses the
-shared graph digest as module generation identity. Either declared entry can
+The worker accepts the manifest `entries` array. It verifies that entries are
+sorted and unique, requires the requested module to match one declared entry,
+verifies the graph digest and every artifact, and then uses the shared graph
+digest as module generation identity. A manifest carrying a `version` field is
+rejected. Either declared entry can
 therefore start the same verified project generation.
 
 ## M9 Completion
@@ -151,11 +144,10 @@ milestones.
 
 ## Compatibility Freeze
 
-Version 1 single-entry compatibility and the version 2 request, configuration,
-operation, manifest, report, cache-validation, CLI-output, and worker-entry
-contracts are stable. Entry arrays remain sorted, unique, frozen, and part of
+The request, configuration, operation, manifest, report, cache-validation,
+CLI-output, and worker-entry contracts are stable. Entry arrays remain sorted, unique, frozen, and part of
 graph identity; multi-entry portable selection continues to fail closed until
-a separately versioned per-entry model is defined.
+a separate per-entry model is defined.
 
 ## Acceptance Criteria
 
@@ -165,11 +157,11 @@ a separately versioned per-entry model is defined.
   validated, sorted, unique, frozen `entries` array.
 - **MEI-03:** One graph traversal compiles the union of all entry closures and
   emits every shared module once.
-- **MEI-04:** Manifest version 2 digests `entries` and ordered module records;
+- **MEI-04:** The manifest digests `entries` and ordered module records;
   cache lookup rejects a changed entry set and fully reuses an unchanged one.
-- **MEI-05:** Build result and report version 2 expose corresponding `entries`
+- **MEI-05:** Build result and report expose corresponding `entries`
   and `entryOutputs`; default CLI output prints each output exactly once.
-- **MEI-06:** The worker accepts either declared version 2 entry and rejects a
+- **MEI-06:** The worker accepts any declared entry and rejects a
   requested module outside the declared set.
 - **MEI-07:** Seed, Bun, and Node emit byte-identical ESM, Source Maps, and
   public manifest identity for the shared multi-entry corpus.

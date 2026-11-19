@@ -10,6 +10,9 @@
 	(import "../tools/backends/managed-runtime.mjs" instantiateManagedRuntime)
 	(import "./helpers/managed-browser-transport.mjs" loadManagedReference runManagedNode bundleManagedBrowserPage serveManagedBrowserPage)
 	(import "playwright-core" chromium firefox webkit)
+  (defun decoded-number-value (runtime value)
+    (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
+  (defconst normalize-u64 (js* "(x) => typeof x === 'bigint' ? BigInt.asUintN(64, x) : x"))
 	(defvar directory undefined) (defvar b undefined) (defvar runtime undefined) (defvar source undefined)
 	(beforeAll (async ()
 			  (setq directory (await (mkdtemp (resolve root ".eliscript-array-search-"))))
@@ -37,7 +40,7 @@
 	    (js-call entries :forEach (lambda (v) (js-call a :release v))) out))
 	(defun read (a v)
 	  (cond ((or (not v) (/= (value-type v) "object")) v)
-		((= (get v :kind) 4) (js-call a :readNumber v)) ((= (get v :kind) 5) (js-call a :readString v))
+		((= (get v :kind) 4) (decoded-number-value a v)) ((= (get v :kind) 5) (js-call a :readString v))
 		(t (Array/from (js-object :length (js-call a :length v)) (lambda (ignored i)
 									   (let ((x (js-call a :get v i))) (try (read a x) (finally (js-call a :release x)))))))))
 	(defun run (a name &rest supplied)
@@ -202,7 +205,7 @@
             (let* ((compiler (get b :compiler))
                    (injected (js-call compiler :compile_ir_string
                      (str (js-call raw :slice 0 start)
-                       "  (defun heap-array-search (heap items needle from present mode) (load-u32 4294967295))\n"
+                       "  (defun heap-array-search (heap items needle from present mode) (memory-sig v64 u32 v64 v64 v64 u32 u32) (progn (load-u32 4294967295) (v64-literal 0 0)))\n"
                        (js-call raw :slice end)) "trap.eli"))
                    (program (js-call compiler :compile_ir_string text "search-trap.eli"))
                    (trap (instantiateManagedRuntime (globalThis.Uint8Array.from
@@ -232,7 +235,7 @@
                              (new globalThis.WebAssembly.Module bytes)) :exports))
                  (heap (js-call exports "heap-new" 32 8192 8192))
                  (call (lambda (name &rest args)
-                   (let ((out (uint32 (Reflect/apply (get exports name) exports
+                   (let ((out (funcall normalize-u64 (Reflect/apply (get exports name) exports
                                 (js-call (js-array heap) :concat args)))))
                      (js-call assert :equal (js-call exports "last-error") 0 name)
                      out)))
@@ -257,14 +260,17 @@
               :forEach (lambda (row)
                 (js-call assert :equal
                   (js-call exports "value-sequence-search" heap
-                    (aref row 0) (aref row 1) (aref row 2) (aref row 3) (aref row 4)) 0)
+                    (funcall globalThis.BigInt (aref row 0))
+                    (funcall globalThis.BigInt (aref row 1))
+                    (funcall globalThis.BigInt (aref row 2))
+                    (aref row 3) (aref row 4)) (funcall globalThis.BigInt 0))
                 (js-call assert :equal (js-call exports "last-error") (aref row 5))
                 (js-call assert :equal (funcall call "frame-depth") 1)
                 (js-call assert :equal (funcall call "frame-get" frame 0) items)))
             (let ((held (js-array)) (index 0) (exhausted false))
               (while (and (< index 64) (not exhausted))
-                (let ((number (js-call exports "value-number" heap 0 0)))
-                  (if (= number 0)
+                (let ((number (js-call exports "value-string" heap 0)))
+                  (if (= number (funcall globalThis.BigInt 0))
                     (progn
                       (js-call assert :equal (js-call exports "last-error") 2)
                       (setq exhausted t))
@@ -272,16 +278,17 @@
                       (funcall call "heap-pin" number)
                       (js-call held :push number))))
                 (setq index (1+ index)))
-              (js-call assert :equal (funcall call "value-sequence-search" empty 3 unsealed 1 0) 1)
-              (js-call assert :equal (js-call exports "value-sequence-search" heap items 3 3 0 0) 0)
+              (js-call assert :equal (funcall call "value-sequence-search" empty (funcall globalThis.BigInt 3) unsealed 1 0) (funcall globalThis.BigInt 1))
+              (js-call assert :equal (js-call exports "value-sequence-search" heap items (funcall globalThis.BigInt 3) (funcall globalThis.BigInt 3) 0 0) (funcall globalThis.BigInt 0))
               (js-call assert :equal (js-call exports "last-error") 2)
               (js-call assert :equal (funcall call "frame-depth") 1)
               (js-call held :forEach (lambda (number) (funcall call "heap-release" number)))
               (funcall call "heap-collect")
-              (js-call assert :equal (funcall call "value-sequence-search" items 3 3 0 0) 2)
+              (js-call assert :equal (funcall call "value-sequence-search" items (funcall globalThis.BigInt 3) (funcall globalThis.BigInt 3) 0 0) (funcall globalThis.BigInt 2))
               (js-call assert :equal
                 (js-call (new globalThis.DataView (get (get exports :memory) :buffer))
-                  :getUint32 (funcall call "value-data" items 14) t) 4)
+                  :getBigUint64 (funcall call "value-data" items 14) t)
+                (funcall globalThis.BigInt 4))
               (funcall call "heap-release" unsealed)
               (funcall call "frame-pop" frame)
               (funcall call "heap-collect")

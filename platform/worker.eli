@@ -79,7 +79,6 @@
       (let* ((normalized (normalizeGrants actual-grants))
              (capabilities (Object/freeze
                              (js-object :format "eliscript-worker-capabilities"
-                               :version 1
                                :grants (Object/freeze normalized)))))
         (js-call capabilityState :set capabilities (operationTable context normalized))
         capabilities)))
@@ -101,7 +100,6 @@
     (stateFor capabilities)
     (Object/freeze
       (js-object :format (get capabilities :format)
-        :version (get capabilities :version)
         :grants (Object/freeze (Array/from (get capabilities :grants))))))
 
   (defun hasWorkerCapability (capabilities capability)

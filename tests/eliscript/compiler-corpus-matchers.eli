@@ -460,7 +460,7 @@
                 (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module owned-image)) (js-array))
               (js-call assert :deepStrictEqual (get (get lowered :descriptor) :hostCapabilities)
                 (js-array (js-object :name "source-operation" :module "eliscript.host"
-                  :arity 2 :abi "managed-host-call-v1")))
+                  :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "v64" :abi "managed-host-call")))
               (let ((imports (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image))))
                 (js-call assert :deepStrictEqual
                   (js-call imports :map (lambda (entry)
@@ -469,7 +469,7 @@
                 (js-call imports :forEach (lambda (entry)
                   (when (Object/hasOwn entry "type")
                     (js-call assert :deepStrictEqual (get entry :type)
-                      (js-object :parameters (js-array "i32" "i32") :results (js-array "i32")))))))
+                      (js-object :parameters (js-array "i32" "i64") :results (js-array "i64")))))))
               (while (< index (js-length targets))
                 (setq adapter undefined handle undefined graph undefined)
                 (try

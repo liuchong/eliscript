@@ -10,11 +10,11 @@
   (defconst usage
     (str "Usage: eliscript-check [OPTIONS] [ENTRY ...]\n\n"
          "Options:\n"
-         "  --config FILE     Read entries and root from a versioned project request\n"
+         "  --config FILE     Read entries and root from a project request\n"
          "  --root DIR        Contain local source imports below DIR\n"
          "  --portable NAME   Check NAME and its transitive portable closure\n"
          "  --stdin-file FILE Use standard input as the current contents of FILE\n"
-         "  --json            Print the versioned project check report\n"
+         "  --json            Print the project check report\n"
          "  --diagnostic-format human|json\n"
          "                     Select human-readable or JSON failures\n"
          "  -h, --help         Show this help\n"))
@@ -74,8 +74,7 @@
           (when (and (undefined? configuration) (= (js-length entries) 0))
             (throw (new globalThis.Error "missing entry file")))
           (js-object
-            :entry (if (= (js-length entries) 1) (aref entries 0) undefined)
-            :entries (if (> (js-length entries) 1) entries undefined)
+            :entries (if (> (js-length entries) 0) entries undefined)
             :root root
             :portableEntries portableEntries
             :configuration configuration
@@ -96,24 +95,17 @@
           (if (not (undefined? (get parsed :configuration)))
             (let ((configured (await (readProjectConfiguration (get parsed :configuration) compiler))))
               (setq request
-                (js-object :entry (get configured :entry)
-                  :entries (get configured :entries)
+                (js-object :entries (get configured :entries)
                   :root (get configured :root)
                   :portableEntries (get configured :portableEntries)))
-              (cond
-                ((not (undefined? (get parsed :entries)))
-                  (put request :entries (get parsed :entries))
-                  (Reflect/deleteProperty request "entry"))
-                ((not (undefined? (get parsed :entry)))
-                  (put request :entry (get parsed :entry))
-                  (Reflect/deleteProperty request "entries")))
+              (unless (undefined? (get parsed :entries))
+                (put request :entries (get parsed :entries)))
               (unless (undefined? (get parsed :root))
                 (put request :root (get parsed :root)))
               (when (> (js-length (get parsed :portableEntries)) 0)
                 (put request :portableEntries (get parsed :portableEntries))))
             (setq request
-              (js-object :entry (get parsed :entry)
-                :entries (get parsed :entries)
+              (js-object :entries (get parsed :entries)
                 :root (get parsed :root)
                 :portableEntries (get parsed :portableEntries))))
           (let ((sourceOverrides undefined))

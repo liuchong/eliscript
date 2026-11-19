@@ -18,6 +18,7 @@
     :set 1397052416)))
   (defconst COLLISION_LEFT "key-50691")
   (defconst COLLISION_RIGHT "key-194634")
+  (defconst MISSING_SENTINEL (funcall globalThis.Symbol "missing"))
   (defconst PROBE_KEYS (Object/freeze (js-array
     nil
     undefined
@@ -134,21 +135,23 @@
         (t (- (% bits 17) 8)))))
 
   (defun value-token (value &optional key)
-    (cond
-      ((eq value nil) "null")
-      ((undefined? value) "undefined")
-      ((= (value-type value) "number")
-       (cond
-         ((Number/isNaN value) "number:nan")
-         ((and key (Object/is value -0.0)) "number:0")
-         ((Object/is value -0.0) "number:-0")
-         (t (str "number:" value))))
-      (t (str (value-type value) ":" (JSON/stringify value)))))
+    (let ((type (js* "typeof value")))
+      (cond
+        ((eq value nil) "null")
+        ((= type "undefined") "undefined")
+        ((= type "number")
+         (cond
+           ((Number/isNaN value) "number:nan")
+           ((and key (Object/is value -0.0)) "number:0")
+           ((Object/is value -0.0) "number:-0")
+           (t (str "number:" value))))
+        ((= type "string") (str "string:" (JSON/stringify value)))
+        (t (str (value-type value) ":" (JSON/stringify value))))))
 
   (defun same-value (left right)
     (or (= left right)
-        (and (= (value-type left) "number")
-             (= (value-type right) "number")
+        (and (= (js* "typeof left") "number")
+             (= (js* "typeof right") "number")
              (Number/isNaN left)
              (Number/isNaN right))))
 
@@ -160,8 +163,8 @@
         (str (get context :family) " sequence " (get context :sequence) " step " (get context :step)
              " (" (get context :operation) "): " message trace)))))
 
-  (defun invariant (condition context message)
-    (unless condition (fail-check context message)))
+  (defmacro invariant (condition context message)
+    `(unless ,condition (fail-check ,context ,message)))
 
   (defun equal-value-arrays (actual expected context label)
     (invariant (= (js-length actual) (js-length expected)) context (str label " length differs"))
@@ -213,7 +216,7 @@
     (equal-value-arrays (js-call list :toArray) model context "toArray")
     (record-operation report "iterator")
     (equal-value-arrays (Array/from list) model context "iterator")
-    (let ((missing (funcall globalThis.Symbol "missing")))
+    (let ((missing MISSING_SENTINEL))
       (record-operation report "first")
       (invariant (same-value (js-call list :first missing) (if (= (js-length model) 0) missing (aref model 0)))
         context "first differs")
@@ -287,7 +290,7 @@
     (equal-value-arrays (js-call vector :toArray) model context "toArray")
     (record-operation report "iterator")
     (equal-value-arrays (Array/from vector) model context "iterator")
-    (let ((missing (funcall globalThis.Symbol "missing")))
+    (let ((missing MISSING_SENTINEL))
       (record-operation report "peek")
       (invariant (same-value (js-call vector :peek missing) (if (= (js-length model) 0) missing (js-call model :at -1)))
         context "peek differs")
@@ -367,7 +370,7 @@
           (record-operation report "has")
           (invariant (= (js-call map :has key) (js-call model :has key))
             context (str "has(" (value-token key t) ") differs"))
-          (let ((missing (funcall globalThis.Symbol "missing")))
+          (let ((missing MISSING_SENTINEL))
             (record-operation report "get")
             (let ((actual (js-call map :get key missing))
                   (expected (if (js-call model :has key) (js-call model :get key) missing)))
@@ -568,9 +571,7 @@
                                       (eq selected-sequence nil)))
             (values (Object/values family-reports)))
         (js-object
-          :schemaVersion 1
           :format "eliscript-persistent-semantics-corpus"
-          :version 1
           :verified t
           :acceptanceEligible acceptance-eligible
           :seed (str "0x" (js-call (js-call seed :toString 16) :padStart 8 "0"))

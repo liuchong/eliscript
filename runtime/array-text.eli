@@ -50,7 +50,6 @@
            (error (new TypeErrorClass message)))
       (put error :eliscriptDiagnostic
            (js-object :format "eliscript-diagnostic"
-                      :version 1
                       :code "ELI-RT0009"
                       :severity "error"
                       :phase "runtime"
@@ -87,19 +86,22 @@
               (throw (new TypeErrorClass "Cannot convert object to primitive value"))))))))
 
   (defun text (value)
-    (let ((result (primitive value)))
-      (when (eq (typeof-value result) "symbol")
-        (throw (new TypeErrorClass "Cannot convert a Symbol value to a string")))
-      (funcall string result)))
+    (if (eq (typeof-value value) "string")
+        value
+      (let ((result (primitive value)))
+        (when (eq (typeof-value result) "symbol")
+          (throw (new TypeErrorClass "Cannot convert a Symbol value to a string")))
+        (funcall string result))))
 
   (defun join (value separator)
     ;; Length is observed before separator conversion; indexed values stay live.
     (let* ((size (to-number-unary (get value :length)))
            (length (cond
-                     ((or (not (eq size size)) (<= size 0)) 0)
-                     ((>= size 9007199254740991) 9007199254740991)
+                     ((or (not (eq size size)) (funcall (js* "(a, b) => a <= b") size 0)) 0)
+                     ((funcall (js* "(a, b) => a >= b") size 9007199254740991) 9007199254740991)
                      (t (- size (% size 1)))))
-           (sep (if (undefined? separator) "," (text separator)))
+           (sep (if (undefined? separator) ","
+                  (if (eq (typeof-value separator) "string") separator (text separator))))
            (root (nil? (get active-state :root))))
       (if root
           (put active-state :root value)
@@ -111,13 +113,15 @@
       (try
         (let ((result "")
               (index 0))
-          (while (< index length)
-            (when (> index 0)
+          (while (funcall (js* "(a, b) => a < b") index length)
+            (when (not (eq index 0))
               (setq result (+ result sep)))
             (let ((child (aref value index)))
-              (when (and (not (nil? child)) (not (undefined? child)))
-                (setq result (+ result (text child)))))
-            (setq index (1+ index)))
+              (if (eq (typeof-value child) "string")
+                  (setq result (+ result child))
+                (when (and (not (nil? child)) (not (undefined? child)))
+                  (setq result (+ result (text child))))))
+            (setq index (+ index 1)))
           result)
         (finally
           (if root
@@ -176,7 +180,8 @@
   (defun normalized-method-p (method)
     (or (eq method numberStringBuiltin) (eq method intrinsicJoin)
         (eq method intrinsicArrayString) (eq method functionCall)
-        (eq method functionApply) (eq method functionBind)))
+        (eq method functionApply) (eq method functionBind)
+        (eq method apply-fn)))
 
   (defun ordinary-call-p (method receiver)
     (if (eq method functionCall)
@@ -292,7 +297,9 @@
 
   (defun d (value key &rest args)
     (let ((method (aref value key)))
-      (invokeCapturedArrayText method value args)))
+      (if (and (eq method intrinsicJoin) (funcall array value))
+          (join value (argument args 0))
+        (invokeCapturedArrayText method value args))))
 
   (defun invokeCapturedArrayText (method value args)
     (if (ordinary-call-p method value)

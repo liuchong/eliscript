@@ -301,9 +301,11 @@
                (make-program
                  (js-array
                    (js-array "copy" (copy-node text (make-node "sequence" nil (js-array counter (local 0)))))
-                   (js-array "indirect" (make-node "call-indirect" 1 (js-array (local 0) (constant 0))))))))
+                   (js-array "indirect"
+                     (let ((node (make-node "call-indirect" 1 (js-array (local 0) (constant 0)))))
+                       (put node :parameterTypes (js-array "u32")) (put node :resultType "u32") node))))))
         (put input :table (js-array 0))
-        (put input :indirectArities (js-array 1))
+        (put input :indirectSignatures (js-array (js-object :parameterTypes (js-array "u32") :resultType "u32")))
         (put input :metadata
           (js-object
             :filename "保留😀.eli"
@@ -500,7 +502,9 @@
     (lambda ()
       (let* ((span (js-object :filename "共享😀.eli" :start 0 :end 1 :line 1 :column 1 :endLine 1 :endColumn 2))
              (shared-load (make-node "memory-op" "load-u32" (js-array (local 0)) (js-object :span span)))
-             (shared-indirect (make-node "call-indirect" 1 (js-array (local 0) (constant 0)) (js-object :span span)))
+             (shared-indirect
+               (let ((node (make-node "call-indirect" 1 (js-array (local 0) (constant 0)) (js-object :span span))))
+                 (put node :parameterTypes (js-array "u32")) (put node :resultType "u32") node))
              (text (str "原" (String/fromCharCode 0) "😀"))
              (input
                (make-program
@@ -515,7 +519,7 @@
         (js-call (get (aref (get input :functions) 3) :locals) :push
           (js-object :name "existing-word" :index 1 :type "u32"))
         (put input :table (js-array 0))
-        (put input :indirectArities (js-array 1))
+        (put input :indirectSignatures (js-array (js-object :parameterTypes (js-array "u32") :resultType "u32")))
         (let ((expand nil))
           (setq expand
             (lambda (value)
@@ -883,8 +887,8 @@
           (js-call
             (js-array
               (js-array false source "unknown")
-              (js-array false with-binding "managed-control-v1")
-              (js-array t source "managed-control-v1"))
+              (js-array false with-binding "managed-control")
+              (js-array t source "managed-control"))
             :forEach
             (lambda (triple)
               (let ((project (aref triple 0))

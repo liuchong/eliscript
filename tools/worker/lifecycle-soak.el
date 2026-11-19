@@ -47,7 +47,6 @@
 (require 'eliscript-worker)
 
 (defconst eliscript-worker-soak-format "eliscript-worker-lifecycle-soak")
-(defconst eliscript-worker-soak-version 1)
 (defconst eliscript-worker-soak--modulus 1000000007)
 
 (defun eliscript-worker-soak--positive-environment (name default)
@@ -212,7 +211,9 @@ PREPARED is the freshly authenticated portable prepared stage3 identity."
   "Return portable prepared stage3 report IDENTITY or signal an error."
   (unless (and (listp identity)
                (equal (alist-get 'format identity) "eliscript-prepared-stage3")
-               (integerp (alist-get 'version identity))
+               (equal (sort (mapcar (lambda (entry) (symbol-name (car entry))) identity)
+                            #'string<)
+                      '("fixedPointFileCount" "format" "productSha256" "sourceSha256"))
                (integerp (alist-get 'fixedPointFileCount identity))
                (stringp (alist-get 'sourceSha256 identity))
                (stringp (alist-get 'productSha256 identity)))
@@ -430,7 +431,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                           (setq checksum
 				(% (+ checksum value)
                                    eliscript-worker-soak--modulus)))))
-                      :module-version (format "revision-%d" revision)
+                      :module-digest (format "revision-%d" revision)
                       :timeout-ms 5000)
                      (setq peak-in-flight
                            (max peak-in-flight
@@ -483,7 +484,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                  (setq request-id
                        (eliscript-worker-call
                         worker module "delayed_echo" '("cancel" 5000) callback
-                        :module-version "revision-1"
+                        :module-digest "revision-1"
                         :progress (lambda (value) (setq progress value))
                         :timeout-ms 5000))
                  (unless (eliscript-worker-soak--wait
@@ -530,7 +531,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
               (condition-case error-data
                   (eliscript-worker-call-sync
                    worker module "blocking_echo" '("late" 1000)
-                   :module-version "revision-2" :timeout-ms 25)
+                   :module-digest "revision-2" :timeout-ms 25)
                 (eliscript-worker-timeout (setq timeout-error error-data)))
               (unless timeout-error
                 (error "blocking request did not trigger client timeout"))
@@ -554,7 +555,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                (lambda (callback)
                  (eliscript-worker-call
                   worker module "delayed_echo" '("death" 5000) callback
-                  :module-version "revision-2"
+                  :module-digest "revision-2"
                   :progress (lambda (value) (setq progress value))
                   :timeout-ms 5000)
                  (unless (eliscript-worker-soak--wait
@@ -630,9 +631,7 @@ diagnostics stay on standard error so warnings cannot corrupt it."
                 (unless clean-shutdown
                   (error "worker did not complete a clean protocol shutdown"))
                 (setq report
-                      `((schemaVersion . 1)
-			(format . ,eliscript-worker-soak-format)
-			(version . ,eliscript-worker-soak-version)
+                      `((format . ,eliscript-worker-soak-format)
 			(verified . t)
                         (acceptanceQualified . ,acceptance-qualified)
 			(limits

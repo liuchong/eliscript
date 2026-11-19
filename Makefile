@@ -1,6 +1,13 @@
 EMACS ?= emacs
 BUN ?= bun
 NODE ?= node
+# A prepared stage3 build may hand its already-generated tools and package to
+# the test invocation. The variable is consumed here and never exported, so
+# child test processes cannot inherit a skip of a genuinely clean bootstrap.
+REUSE_PREPARED_STAGE3 := $(ELISCRIPT_PREPARED_STAGE3)
+unexport ELISCRIPT_PREPARED_STAGE3
+BATCH_CLEANED := $(ELISCRIPT_BATCH_CLEANED)
+unexport ELISCRIPT_BATCH_CLEANED
 # The full original managed programs need more than V8's default 4 GiB heap.
 # This is per Node process; a separate supervisor must bound the complete tree.
 ELISCRIPT_NODE_HEAP_MIB ?= 12288
@@ -41,7 +48,12 @@ STAGE3_FUNCTIONAL_RUNTIME_OPTION = $(if $(strip $(STAGE3_FUNCTIONAL_RUNTIME_PROF
 
 # All compiler hosts in this release are JavaScript. Binary targets below are
 # generated user programs, never alternative compiler hosts.
-bootstrap-release: bootstrap-backends
+# Formal complete builds always clean non-Git outputs first so every batch
+# reconstructs seed and Stage 0..3 strictly from maintained Git sources.
+bootstrap-release:
+	EMACS="$(EMACS)" ./bin/eliscript-clean
+	EMACS="$(EMACS)" ./bin/eliscript-clean --check --quiet
+	ELISCRIPT_BATCH_CLEANED=1 $(MAKE) bootstrap-backends
 	ELISCRIPT_JS_RUNTIME="$(ELISCRIPT_JS_RUNTIME)" $(EMACS) --batch -Q -l tools/backends/bootstrap.el --stage0 --output "$(BOOTSTRAP_RELEASE_OUT)/stage0"
 	$(NODE) tools/backends/dist/release-cli.mjs bootstrap --stage0-manifest "$(BOOTSTRAP_RELEASE_OUT)/stage0/stage0.json" --output "$(BOOTSTRAP_RELEASE_OUT)"
 
@@ -69,9 +81,9 @@ check-release-workflow:
 compiler-platform-ci: bootstrap-release
 	$(MAKE) verify-bootstrap
 	$(SUITE_STEP) compiler-platform-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
-	$(SUITE_STEP) compiler-platform-ci platform-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
+	ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-platform-ci platform-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
 	$(SUITE_PREREQ) compiler-platform-ci prepare-release-package "" -- $(MAKE) prepare-release-package
-	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(SUITE_STEP) compiler-platform-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
+	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-platform-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
 	$(SUITE_STEP) compiler-platform-ci platform-artifact-tests prepare-release-package -- $(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs
 	$(SUITE_STEP) compiler-platform-ci strict-byte-compile "" -- $(MAKE) byte-compile
 	@$(SUITE_FINALIZE) compiler-platform-ci "$(PLATFORM_CI_SUITE_STEPS)"
@@ -79,13 +91,13 @@ compiler-platform-ci: bootstrap-release
 compiler-release-ci: bootstrap-release
 	$(MAKE) verify-bootstrap
 	$(SUITE_STEP) compiler-release-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
-	$(SUITE_STEP) compiler-release-ci bootstrap-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
+	ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-release-ci bootstrap-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
 	$(SUITE_PREREQ) compiler-release-ci prepare-release-package "" -- $(MAKE) prepare-release-package
 	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" --functional-runtime-profile small
-	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json $(SUITE_STEP) compiler-release-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
+	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-release-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
-	ELISCRIPT_DEFER_SUITE_FINALIZE=1 ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
+	ELISCRIPT_PREPARED_STAGE3=1 ELISCRIPT_DEFER_SUITE_FINALIZE=1 ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
 	@$(SUITE_FINALIZE) compiler-release-ci "$(RELEASE_CI_SUITE_STEPS)"
 
 .PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends
@@ -106,17 +118,25 @@ test-pre-bootstrap: test-core test-applications test-pre-bootstrap-originals
 # that owns the recipe, so GNU Make builds it before `test-core` reaches
 # `check-contracts`.
 test-pre-bootstrap-originals: bootstrap-backends
-	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 $(SUITE_STEP) test test-pre-bootstrap-originals/node-originals "" -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=1 ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) test test-pre-bootstrap-originals/node-originals "" -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 	$(if $(filter test test-pre-bootstrap,$(MAKECMDGOALS)),,@$(SUITE_FINALIZE) test "$(ORIGINALS_SUITE_STEPS)")
 
 test-bootstrap-artifacts:
-	$(SUITE_PREREQ) compiler-release-ci prepare-bootstrap-artifacts $(if $(filter 1,$(ELISCRIPT_DEFER_SUITE_FINALIZE)),prepare-release-package,"") -- sh -c 'test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json || ($(MAKE) bootstrap-release && $(MAKE) prepare-release-package)'
+ifeq ($(REUSE_PREPARED_STAGE3),1)
+	@test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && \
+		test -f dist/stage3-release.json && \
+		$(NODE) tools/backends/dist/release-cli.mjs verify-prepared-stage3 >/dev/null
+else
+	$(MAKE) bootstrap-release
+	$(MAKE) prepare-release-package
+endif
+	$(SUITE_PREREQ) compiler-release-ci prepare-bootstrap-artifacts $(if $(filter 1,$(ELISCRIPT_DEFER_SUITE_FINALIZE)),prepare-release-package,"") -- sh -c 'test -f "$(BOOTSTRAP_RELEASE_MANIFEST)" && test -f dist/stage3-release.json'
 	$(SUITE_STEP) compiler-release-ci artifact-bun-files prepare-bootstrap-artifacts -- $(BUN) $(BUN_ARTIFACT_TEST_RUNNER) ./tests/package-surface.test.mjs ./tests/compiler-browser-session.test.mjs
-	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 $(SUITE_STEP) compiler-release-ci artifact-node-selfhosted prepare-bootstrap-artifacts -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
+	ELISCRIPT_PRE_BOOTSTRAP_FUNCTIONAL=0 ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-release-ci artifact-node-selfhosted prepare-bootstrap-artifacts -- $(NODE) --test --test-concurrency=1 ./tests/compiler-corpus-tools-cli-selfhosted.test.mjs ./tests/compiler-matrix-archive-debug-selfhosted.test.mjs ./tests/compiler-corpus-original-regressions-selfhosted.test.mjs
 	$(if $(filter 1,$(ELISCRIPT_DEFER_SUITE_FINALIZE)),,@$(SUITE_FINALIZE) compiler-release-ci "$(ARTIFACT_SUITE_STEPS)")
 
 test-core: check-contracts
-	$(SUITE_STEP) test test-core/ert "" -- $(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
+	$(SUITE_STEP) test test-core/ert "" -- $(EMACS) --batch -Q -L compiler -L editor -L tools -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-analyzer-depth-tests.el \
 		-l tests/eliscript-lower-depth-tests.el \
@@ -136,6 +156,7 @@ test-core: check-contracts
 		-l tests/eliscript-analysis-tests.el \
 		-l tests/eliscript-version-comparison-tests.el \
 		-l tests/bootstrap-tests.el \
+		-l tests/eliscript-clean-tests.el \
 		-l tests/eliscript-syntax-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(SUITE_STEP) test test-core/bun-files "" -- $(BUN) $(BUN_TEST_RUNNER) ./tests/conformance.test.mjs ./tests/compiler-parity-corpus.test.mjs \
@@ -324,6 +345,7 @@ test-core: check-contracts
 		./tests/wasm-managed-initializer-outlining.test.mjs \
 		./tests/native-managed-initializer-outlining.test.mjs \
 		./tests/wasm-managed-host-identity-runtime.test.mjs \
+		./tests/wasm-managed-host-prototype-flags.test.mjs \
 		./tests/wasm-managed-function-properties-runtime.test.mjs \
 		./tests/wasm-managed-primitive-own-runtime.test.mjs \
 		./tests/wasm-managed-function-properties.test.mjs \
@@ -352,6 +374,7 @@ test-core: check-contracts
 		./tests/native-backend.test.mjs \
 		./tests/native-memory-backend.test.mjs \
 		./tests/native-node-memory.test.mjs \
+		./tests/native-node-signed-zero.test.mjs \
 		./tests/native-memory-long-branches.test.mjs \
 		./tests/native-memory-indirect.test.mjs \
 		./tests/native-managed-runtime.test.mjs \
@@ -417,6 +440,7 @@ test-core: check-contracts
 		./tests/literal-runtime.test.mjs \
 		./tests/language-equality.test.mjs \
 		./tests/transducer.test.mjs ./tests/transient.test.mjs \
+		./tests/transducer-completion-forward.test.mjs \
 		./tests/core-order.test.mjs \
 		./tests/core-order-targets.test.mjs \
 		./tests/core-set.test.mjs \
@@ -471,7 +495,7 @@ test-core: check-contracts
 		./tests/math-runtime-selfhosted.test.mjs \
 		./tests/unicode-case-selfhosted.test.mjs \
 		./tests/unicode-default-selfhosted.test.mjs; \
-	$(SUITE_STEP) test test-core/node-selfhosted "" -- $(NODE) --expose-gc --test --test-concurrency=1 "$$@"
+	ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) test test-core/node-selfhosted "" -- $(NODE) --expose-gc --test --test-concurrency=1 "$$@"
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/cli-test "" -- ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/project-cli-test "" -- ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" $(SUITE_STEP) test test-core/check-cli-test "" -- ./tests/check-cli-test.sh
@@ -514,7 +538,20 @@ dogfood:
 	$(BUN) run dogfood
 
 bootstrap-backends:
+ifneq ($(and $(filter 1,$(REUSE_PREPARED_STAGE3)),$(if $(filter bootstrap-release,$(MAKECMDGOALS)),,1)),)
+	@test -f tools/testing/file-workers.mjs && \
+		test -f tools/ci/render-workflow.mjs && \
+		$(NODE) tools/backends/dist/release-cli.mjs verify-prepared-stage3 >/dev/null
+else ifneq ($(filter test test-core test-applications check-contracts,$(MAKECMDGOALS)),)
+	$(MAKE) bootstrap-release
+	$(MAKE) prepare-release-package
+else
+ifneq ($(BATCH_CLEANED),1)
+	EMACS="$(EMACS)" ./bin/eliscript-clean
+	EMACS="$(EMACS)" ./bin/eliscript-clean --check --quiet
+endif
 	ELISCRIPT_JS_RUNTIME="$(ELISCRIPT_JS_RUNTIME)" $(EMACS) --batch -Q -l tools/backends/bootstrap.el --tests
+endif
 
 check-contracts: bootstrap-backends
 	$(SUITE_STEP) test check-contracts/conformance "" -- $(BUN) tools/conformance/check.mjs
@@ -549,9 +586,9 @@ endif
 byte-compile:
 	EMACS="$(EMACS)" ./tools/ci/strict-byte-compile.sh
 
-.PHONY: clean clean-all
+.PHONY: clean clean-check
 clean:
-	./bin/eliscript-clean
+	EMACS="$(EMACS)" ./bin/eliscript-clean
 
-clean-all:
-	./bin/eliscript-clean --all
+clean-check:
+	EMACS="$(EMACS)" ./bin/eliscript-clean --check

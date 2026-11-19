@@ -13,6 +13,7 @@
   (defun check (value label) (unless value (throw (new globalThis.Error label))))
   (defun read (runtime value)
     (cond
+      ((= (value-type value) "number") value)
       ((and value (= (get value :kind) 4)) (js-call runtime :readNumber value))
       ((and value (= (get value :kind) 5)) (js-call runtime :readString value))
       ((and value (= (get value :kind) 14))

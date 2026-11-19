@@ -90,7 +90,7 @@ actually reached.
 
 ## Compatibility Freeze
 
-The version 1 final-manifest format, canonical output paths, source-run and
+The final-manifest format, canonical output paths, source-run and
 report binding, five evidence groups, unresolved-defect schema, severity 1 and
 2 blocking rule, derived gate calculation, byte-exact report, and
 non-contributing application projection are stable. Stabilizing this mechanism

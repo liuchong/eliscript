@@ -109,7 +109,7 @@
                              (get actual :observable) (get expected :observable)
                              (isManagedSourceView (get actual :value)))
                     (setq destination (resolve (get context :directory) "wire-first-failure.json"))
-                    (setq receipt (js-object :version 1 :caseId id :target (get context :target)
+                    (setq receipt (js-object :caseId id :target (get context :target)
                       :sourceIdentity (get context :sourceIdentity) :originalHostSha256 wire-host-sha
                       :phase "original-wire-assertion-before-close" :status "unobservable"))
                     (let ((snapshot (snapshotManagedSourceView (get actual :value))))

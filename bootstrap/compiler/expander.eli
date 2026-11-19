@@ -47,7 +47,6 @@
       (raise-diagnostic
         (js-object
           :format "eliscript-diagnostic"
-          :version 1
           :code "ELI-X0001"
           :severity "error"
           :phase "expansion"
@@ -2240,179 +2239,204 @@
             "extend-default" (js-call args :slice 1) context span))
         span)))
 
+  (defconst expand-special-expression-set
+    (new globalThis.Set
+      (js-array
+        "quote" "defmacro" "defportable" "defasync" "defmulti" "defmethod"
+        "deftype" "defrecord" "defprotocol" "extend-type" "extend-category" "extend-default"
+        "->" "->>" "as->" "cond->" "cond->>" "some->" "some->>"
+        "if-let" "when-let" "if-some" "when-some" "case" "condp"
+        "lambda" "fn" "async" "reify"
+        "let" "let*" "letfn" "setq" "set!" "cond" "try"
+        "js-object" "get" "put" "js-call")))
+
+  (defconst expand-ordinary-call-fast
+    (let ((factory
+            (js* "/* @eliscript-js-host-fastpath */ (specialSet, makeList) => (form, items, environment, depth, context, expandExpr) => { const len = items.length | 0; if (len === 0) return null; const opNode = items[0]; if (opNode == null || opNode.kind !== 'symbol') return null; const op = opNode.name; if (environment.has(op) || specialSet.has(op)) return null; const expanded = new Array(len); expanded[0] = opNode; let changed = false; for (let i = 1; i < len; i = (i + 1) | 0) { const orig = items[i]; const exp = expandExpr(orig, environment, depth, context); if (!Object.is(exp, orig)) changed = true; expanded[i] = exp; } return (!changed && context.ownedForms === true) ? form : makeList(expanded, form.span); }")))
+      (if (nil? factory)
+          nil
+        (funcall factory expand-special-expression-set make-list))))
+
   (defun expand-expression (form environment depth context)
-    (cond
-      ((= (node-kind form) "vector")
-       (expand-collection-result
-         "vector" form
-         (expand-sequence (node-items form) environment depth context)
-         context))
-      ((not (= (node-kind form) "list")) form)
-      (t
-       (let* ((items (node-items form))
-              (operator-node (js-nth 0 items))
-              (operator (and (symbol-node-p operator-node)
-                             (node-name operator-node)))
-              (args (js-call items :slice 1))
-              (span (node-span form)))
-         (cond
-           ((= operator "quote") form)
-           ((= operator "defmacro")
-            (expander-fail
-              context span "defmacro is only valid at module top level"))
-           ((= operator "defportable")
-            (expander-fail
-              context span "defportable is only valid at module top level"))
-           ((= operator "defasync")
-            (expander-fail
-              context span "defasync is only valid at module top level"))
-           ((= operator "defmulti")
-            (expander-fail
-              context span "defmulti is only valid at module top level"))
-           ((= operator "defmethod")
-            (expander-fail
-              context span "defmethod is only valid at module top level"))
-           ((or (= operator "deftype")
-                (= operator "defrecord")
-                (= operator "defprotocol")
-                (= operator "extend-type")
-                (= operator "extend-category")
-                (= operator "extend-default"))
-            (expander-fail
-              context span (str operator " is only valid at module top level")))
-           ((and operator (js-call environment :has operator))
-            (expand-user-macro (js-call environment :get operator)
-              args environment depth context span false))
-           ((= operator "->")
-            (expand-expression
-              (desugar-thread "->" args "first" context span)
-              environment depth context))
-           ((= operator "->>")
-            (expand-expression
-              (desugar-thread "->>" args "last" context span)
-              environment depth context))
-           ((= operator "as->")
-            (expand-expression
-              (desugar-as-thread args context span)
-              environment depth context))
-           ((= operator "cond->")
-            (expand-expression
-              (desugar-cond-thread "cond->" args "first" context span)
-              environment depth context))
-           ((= operator "cond->>")
-            (expand-expression
-              (desugar-cond-thread "cond->>" args "last" context span)
-              environment depth context))
-           ((= operator "some->")
-            (expand-expression
-              (desugar-some-thread "some->" args "first" context span)
-              environment depth context))
-           ((= operator "some->>")
-            (expand-expression
-              (desugar-some-thread "some->>" args "last" context span)
-              environment depth context))
-           ((= operator "if-let")
-            (expand-expression
-              (desugar-if-binding "if-let" args false context span)
-              environment depth context))
-           ((= operator "when-let")
-            (expand-expression
-              (desugar-when-binding "when-let" args false context span)
-              environment depth context))
-           ((= operator "if-some")
-            (expand-expression
-              (desugar-if-binding "if-some" args t context span)
-              environment depth context))
-           ((= operator "when-some")
-            (expand-expression
-              (desugar-when-binding "when-some" args t context span)
-              environment depth context))
-           ((= operator "case")
-            (expand-expression
-              (desugar-case args context span)
-              environment depth context))
-           ((= operator "condp")
-            (expand-expression
-              (desugar-condp args context span)
-              environment depth context))
-           ((and (or (= operator "lambda") (= operator "fn")
-                     (= operator "async"))
-                 (> (get args :length) 0)
-                 (multi-arity-clause-p (js-nth 0 args)))
-            (expand-expression
-              (desugar-multi-arity
-                operator-node nil args form context span)
-              environment depth context))
-           ((= operator "reify")
-            (expand-expression
-              (desugar-reify args context span)
-              environment depth context))
-           (t
-            (let ((expanded (js-array operator-node)))
-              (cond
-                ((or (= operator "lambda") (= operator "fn")
-                     (= operator "async"))
-                 (when (> (get args :length) 0)
-                   (js-call expanded :push (js-nth 0 args))
-                   (js-call (expand-sequence
-                              (js-call args :slice 1)
-                              environment depth context)
-                     :forEach
-                     (lambda (item) (js-call expanded :push item)))))
-                ((or (= operator "let") (= operator "let*"))
-                 (js-call (expand-bindings args environment depth context)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item))))
-                ((= operator "letfn")
-                 (setq expanded
-                   (node-items
-                     (expand-expression
-                       (desugar-letfn args form context span)
-                       environment depth context))))
-                ((= operator "setq")
-                 (js-call (expand-alternating
-                            args environment depth context false false)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item))))
-                ((= operator "set!")
-                 (when (> (get args :length) 0)
-                   (js-call expanded :push (js-nth 0 args))
-                   (js-call (expand-sequence
-                              (js-call args :slice 1)
-                              environment depth context)
-                     :forEach
-                     (lambda (item) (js-call expanded :push item)))))
-                ((= operator "cond")
-                 (js-call (expand-cond args environment depth context)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item))))
-                ((= operator "try")
-                 (js-call args :forEach
-                   (lambda (clause)
-                     (js-call expanded :push
-                       (expand-try-clause
-                         clause environment depth context)))))
-                ((= operator "js-object")
-                 (js-call (expand-alternating
-                            args environment depth context t t)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item))))
-                ((or (= operator "get")
-                     (= operator "put")
-                     (= operator "js-call"))
-                 (js-call (expand-property-call
-                            args environment depth context)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item))))
-                (t
-                 (when (not (symbol-node-p operator-node))
-                   (put expanded 0
-                     (expand-expression
-                       operator-node environment depth context)))
-                 (js-call (expand-sequence args environment depth context)
-                   :forEach
-                   (lambda (item) (js-call expanded :push item)))))
-              (expand-collection-result "list" form expanded context))))))))
+    (let ((kind (node-kind form)))
+      (cond
+        ((not (eq kind "list"))
+         (if (eq kind "vector")
+             (expand-collection-result
+               "vector" form
+               (expand-sequence (node-items form) environment depth context)
+               context)
+           form))
+        (t
+         (let* ((items (node-items form))
+                (fast (if (nil? expand-ordinary-call-fast)
+                          nil
+                        (funcall expand-ordinary-call-fast form items environment depth context expand-expression))))
+           (if (not (nil? fast))
+               fast
+             (let* ((operator-node (js-nth 0 items))
+                    (operator (and (symbol-node-p operator-node)
+                                   (node-name operator-node)))
+                    (args (js-call items :slice 1))
+                    (span (node-span form)))
+               (cond
+                 ((eq operator "quote") form)
+                 ((eq operator "defmacro")
+                  (expander-fail
+                    context span "defmacro is only valid at module top level"))
+                 ((eq operator "defportable")
+                  (expander-fail
+                    context span "defportable is only valid at module top level"))
+                 ((eq operator "defasync")
+                  (expander-fail
+                    context span "defasync is only valid at module top level"))
+                 ((eq operator "defmulti")
+                  (expander-fail
+                    context span "defmulti is only valid at module top level"))
+                 ((eq operator "defmethod")
+                  (expander-fail
+                    context span "defmethod is only valid at module top level"))
+                 ((or (eq operator "deftype")
+                      (eq operator "defrecord")
+                      (eq operator "defprotocol")
+                      (eq operator "extend-type")
+                      (eq operator "extend-category")
+                      (eq operator "extend-default"))
+                  (expander-fail
+                    context span (str operator " is only valid at module top level")))
+                 ((and operator (js-call environment :has operator))
+                  (expand-user-macro (js-call environment :get operator)
+                    args environment depth context span false))
+                 ((eq operator "->")
+                  (expand-expression
+                    (desugar-thread "->" args "first" context span)
+                    environment depth context))
+                 ((eq operator "->>")
+                  (expand-expression
+                    (desugar-thread "->>" args "last" context span)
+                    environment depth context))
+                 ((eq operator "as->")
+                  (expand-expression
+                    (desugar-as-thread args context span)
+                    environment depth context))
+                 ((eq operator "cond->")
+                  (expand-expression
+                    (desugar-cond-thread "cond->" args "first" context span)
+                    environment depth context))
+                 ((eq operator "cond->>")
+                  (expand-expression
+                    (desugar-cond-thread "cond->>" args "last" context span)
+                    environment depth context))
+                 ((eq operator "some->")
+                  (expand-expression
+                    (desugar-some-thread "some->" args "first" context span)
+                    environment depth context))
+                 ((eq operator "some->>")
+                  (expand-expression
+                    (desugar-some-thread "some->>" args "last" context span)
+                    environment depth context))
+                 ((eq operator "if-let")
+                  (expand-expression
+                    (desugar-if-binding "if-let" args false context span)
+                    environment depth context))
+                 ((eq operator "when-let")
+                  (expand-expression
+                    (desugar-when-binding "when-let" args false context span)
+                    environment depth context))
+                 ((eq operator "if-some")
+                  (expand-expression
+                    (desugar-if-binding "if-some" args t context span)
+                    environment depth context))
+                 ((eq operator "when-some")
+                  (expand-expression
+                    (desugar-when-binding "when-some" args t context span)
+                    environment depth context))
+                 ((eq operator "case")
+                  (expand-expression
+                    (desugar-case args context span)
+                    environment depth context))
+                 ((eq operator "condp")
+                  (expand-expression
+                    (desugar-condp args context span)
+                    environment depth context))
+                 ((and (or (eq operator "lambda") (eq operator "fn")
+                           (eq operator "async"))
+                       (> (get args :length) 0)
+                       (multi-arity-clause-p (js-nth 0 args)))
+                  (expand-expression
+                    (desugar-multi-arity
+                      operator-node nil args form context span)
+                    environment depth context))
+                 ((eq operator "reify")
+                  (expand-expression
+                    (desugar-reify args context span)
+                    environment depth context))
+                 (t
+                  (let ((expanded (js-array operator-node)))
+                    (cond
+                      ((or (eq operator "lambda") (eq operator "fn")
+                           (eq operator "async"))
+                       (when (> (get args :length) 0)
+                         (js-call expanded :push (js-nth 0 args))
+                         (js-call (expand-sequence
+                                    (js-call args :slice 1)
+                                    environment depth context)
+                           :forEach
+                           (lambda (item) (js-call expanded :push item)))))
+                      ((or (eq operator "let") (eq operator "let*"))
+                       (js-call (expand-bindings args environment depth context)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item))))
+                      ((eq operator "letfn")
+                       (setq expanded
+                         (node-items
+                           (expand-expression
+                             (desugar-letfn args form context span)
+                             environment depth context))))
+                      ((eq operator "setq")
+                       (js-call (expand-alternating
+                                  args environment depth context false false)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item))))
+                      ((eq operator "set!")
+                       (when (> (get args :length) 0)
+                         (js-call expanded :push (js-nth 0 args))
+                         (js-call (expand-sequence
+                                    (js-call args :slice 1)
+                                    environment depth context)
+                           :forEach
+                           (lambda (item) (js-call expanded :push item)))))
+                      ((eq operator "cond")
+                       (js-call (expand-cond args environment depth context)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item))))
+                      ((eq operator "try")
+                       (js-call args :forEach
+                         (lambda (clause)
+                           (js-call expanded :push
+                             (expand-try-clause
+                               clause environment depth context)))))
+                      ((eq operator "js-object")
+                       (js-call (expand-alternating
+                                  args environment depth context t t)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item))))
+                      ((or (eq operator "get")
+                           (eq operator "put")
+                           (eq operator "js-call"))
+                       (js-call (expand-property-call
+                                  args environment depth context)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item))))
+                      (t
+                       (when (not (symbol-node-p operator-node))
+                         (put expanded 0
+                           (expand-expression
+                             operator-node environment depth context)))
+                       (js-call (expand-sequence args environment depth context)
+                         :forEach
+                         (lambda (item) (js-call expanded :push item)))))
+                    (expand-collection-result "list" form expanded context)))))))))))
 
   (defun expand-top-level (form environment depth context)
     (if (not (= (node-kind form) "list"))

@@ -180,7 +180,7 @@
               (eliscript-service-update-module
                service
                (eliscript-service-module-declare
-                module :version "replacement"))
+                module :module-digest "replacement"))
               (should done)
               (should-not applied)
               (should (equal (alist-get 'code error-object)

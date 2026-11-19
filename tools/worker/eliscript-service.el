@@ -26,7 +26,7 @@
                (:constructor eliscript-service-module--create))
   path
   project-manifest
-  version)
+  digest)
 
 (cl-defstruct (eliscript-service-operation
                (:constructor eliscript-service-operation--create))
@@ -66,7 +66,7 @@
   error)
 
 (cl-defun eliscript-service-module-declare
-    (path &key project-manifest version)
+    (path &key project-manifest module-digest)
   "Declare generated module PATH and its lifecycle metadata."
   (unless (and (stringp path) (not (string-empty-p path)))
     (signal 'wrong-type-argument (list 'non-empty-string-p path)))
@@ -76,7 +76,7 @@
     (signal 'wrong-type-argument
             (list 'non-empty-string-p project-manifest)))
   (eliscript-service-module--create
-   :path path :project-manifest project-manifest :version version))
+   :path path :project-manifest project-manifest :digest module-digest))
 
 (cl-defun eliscript-service-operation
     (name reference &key portable-name export-name workload-size
@@ -340,7 +340,7 @@ current after successful verification."
                          (eliscript-service-module-path module)
                          (eliscript-service-operation-portable-name operation)
                          worker-arguments worker-callback
-                         :module-version (eliscript-service-module-version module)
+                         :module-digest (eliscript-service-module-digest module)
                          :project-manifest
                          (eliscript-service-module-project-manifest module)
                          :progress progress :metrics metrics
@@ -352,7 +352,7 @@ current after successful verification."
                        (eliscript-service-module-path module)
                        (eliscript-service-operation-export-name operation)
                        worker-arguments worker-callback
-                       :module-version (eliscript-service-module-version module)
+                       :module-digest (eliscript-service-module-digest module)
                        :project-manifest
                        (eliscript-service-module-project-manifest module)
                        :progress progress :metrics metrics

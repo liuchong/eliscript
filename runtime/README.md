@@ -120,7 +120,7 @@ equality without interning. Both implement `IEquiv` and `IHash`, use distinct
 deterministic category tags, and participate directly in persistent Map and
 Set operations. A non-enumerable global logical-type brand lets portable
 Eliscript value algorithms recognize the same categories without depending on
-the runtime classes. The versioned Emacs worker value codec preserves both
+the runtime classes. The Emacs worker value codec preserves both
 identifier categories across the process boundary.
 
 ### Metadata
@@ -148,7 +148,7 @@ with a located `DataTextError`. Depth, UTF-16 length, and value-count limits
 bound both directions.
 
 This is deliberately separate from executable source reading and the future
-versioned Emacs transport codec. Portable data text is implemented independently
+Emacs transport codec. Portable data text is implemented independently
 in `stdlib/data-text.eli` over the same common grammar. Exact
 semantics are specified in [0069](../specs/0069-canonical-runtime-data-text.md)
 and [0071](../specs/0071-canonical-portable-data-text.md).
@@ -170,7 +170,7 @@ Sparse bitmap nodes promote to dense 32-slot nodes, dense nodes compact after
 deletion, and complete 32-bit collisions retain distinct keys. Internal node
 shape, transition, allocation, visit, and sharing evidence lives in
 `testing/map.mjs`. Cross-engine measurements select promotion at 32 occupied
-branches and demotion at 24; the versioned methodology and baseline live under
+branches and demotion at 24; the measurement methodology and baseline live under
 `tools/collections` and `benchmarks`.
 
 ### Persistent Set
@@ -190,7 +190,7 @@ dispatch policy of its own; `core/protocol-error.mjs` contains only the host
 error type that cannot be expressed as an ordinary portable value.
 
 `protocolDefinition` extracts a frozen
-`eliscript-protocol-definition` v1 Object containing only a name and ordered
+`eliscript-protocol-definition` Object containing only a name and ordered
 operation names. `defineProtocolFromDefinition` validates that data and creates
 fresh local dispatch functions, Symbol slots, and empty extension state. The
 definition can cross JSON and worker value boundaries; the executable protocol
@@ -299,15 +299,15 @@ tables remain process-local and are not serialized by the worker value codec.
 ### Worker Host
 
 `worker.mjs` is the reference long-lived compute host. It communicates over
-versioned NDJSON, imports local generated modules, correlates concurrent
+NDJSON, imports local generated modules, correlates concurrent
 requests, and supports progress, cooperative cancellation, timeouts, structured
 errors, module caching, and shutdown. Protocol stdout is isolated from module
 logs, which are redirected to stderr. Requests may address a raw generated ESM
 export or resolve a `defportable` source name through the module's frozen
 `__eliscript_portable__` manifest. `worker-value-codec.mjs` adds the explicit
-`eliscript-value-v1` encoding for persistent values, identifiers, metadata,
+`eliscript-value` encoding for persistent values, identifiers, metadata,
 special numeric/nullish values, and explicit native containers.
-`worker-value-stream.mjs` adds `eliscript-value-chunks-v1`: an incremental
+`worker-value-stream.mjs` adds `eliscript-value-chunks`: an incremental
 event grammar with bounded batches, persistent transient builders, traversal
 limits, UTF-16-safe text parts, and cancellation checks. The worker applies
 one-chunk acknowledgements to request input and stdout drain backpressure to

@@ -24,7 +24,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-function-")))) (outputRoot (resolve directory "stdlib")) (usageModule (resolve directory "function-usage.mjs")))
       (try
         (let ((report (JSON/parse (await (build outputRoot t)))))
-          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :version 1 :counts (js-object :modules 2 :compiled 2 :reused 0) :entry "function.eli" :entryOutput "function.mjs")))
+          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 2 :compiled 2 :reused 0) :entries (js-array "function.eli") :entryOutputs (js-array "function.mjs"))))
         (await (compile (resolve ROOT "tests/fixtures/function-usage.eli") usageModule))
         (let ((hosts (js-array (get globalThis.process :execPath) (get (get globalThis.process :env) :NODE_BINARY "node"))) (index 0))
           (while (< index (js-length hosts))

@@ -17,7 +17,6 @@
     (JSON/parse (readFileSync (new globalThis.URL "./fixtures/wasm-managed-behavior.json" meta-url) "utf8")))
 
   (js-call assert :equal (get catalog :format) "eliscript-managed-bdd")
-  (js-call assert :equal (get catalog :version) 1)
   (js-call assert :deepEqual
     (js-call (get catalog :features) :map (lambda (feature) (get feature :name)))
     (js-array "Array text conversion" "Represented type and null queries" "Text formatting and decomposition"

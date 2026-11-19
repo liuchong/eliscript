@@ -35,7 +35,7 @@
              (target (get manifest :target)) (generations (get manifest :generations))
              (directories (new globalThis.Map)) (contexts (js-array)) (index 0))
         (unless (and (= (get manifest :format) "eliscript-original-compiler-generations")
-                     (= (get manifest :version) 1)
+
                      (js-call (js-array "javascript" "wasm" "native") :includes target)
                      (= target (get (get process :env) :ELISCRIPT_ORIGINAL_TARGET))
                      (Array/isArray generations) (= (js-length generations) 3))

@@ -45,7 +45,7 @@
   (afterAll closeMetadataPrivateUnits)
   (defun debugDocument ()
     (let ((span (js-object :filename "中😀\\ud800.eli" :start 0 :end 9 :line 1 :column 1 :endLine 1 :endColumn 10)))
-      (js-object :format "eliscript-wasm-source-map" :version 1 :target "wasm" :offsetUnit "byte" :offsetBase "module"
+      (js-object :format "eliscript-wasm-source-map" :target "wasm" :offsetUnit "byte" :offsetBase "module"
         :codeSection (js-object :payloadStart 10 :end 100)
         :functions (js-array (js-object :name "run" :index 0 :body (js-object :start 12 :end 95) :instructions (js-object :start 20 :end 90) :span span))
         :ranges (js-array (js-object :start 20 :end 40 :functionIndex 0 :depth 1 :span span))
@@ -53,7 +53,7 @@
   (defun numericMetadata ()
     (let ((values (js-array zero 0 globalThis.Number.MIN_VALUE (- globalThis.Number.MIN_VALUE) globalThis.Number.MAX_VALUE (- globalThis.Number.MAX_VALUE)
       globalThis.NaN globalThis.Infinity (- globalThis.Infinity))))
-      (js-object :format "eliscript-compiler-artifact" :version 1
+      (js-object :format "eliscript-compiler-artifact"
         :typed (js-object :abi "memory-u32" :functions (js-array (js-object :name "constants" :arity 0
           :body (js-object :kind "sequence" :children (js-call values :map (lambda (value) (js-object :kind "constant" :type "f64" :value value :children (js-array))))))))
         :request (js-object :offset zero :bounds (js-array globalThis.Number.MIN_VALUE globalThis.Number.MAX_VALUE))
@@ -142,7 +142,7 @@
     (let ((start (+ 10 (% (* index 73) 2970))))
       (js-object :start start :end (Math/min 2990 (+ start (% index 61))) :depth (- (% index 7) 3) :functionIndex 0 :span span :completeRecord index))))))
   (js-call ranges :push (copy (aref ranges 11) (js-object :completeRecord 4096)) (copy (aref ranges 11) (js-object :completeRecord 4097)))
-  (let* ((doc (js-object :format "eliscript-wasm-source-map" :version 1 :target "wasm" :offsetUnit "byte" :offsetBase "module"
+  (let* ((doc (js-object :format "eliscript-wasm-source-map" :target "wasm" :offsetUnit "byte" :offsetBase "module"
     :codeSection (js-object :payloadStart 10 :end 2990)
     :functions (js-array (js-object :name "run" :index 0 :body (js-object :start 0 :end 2990) :instructions (js-object :start 10 :end 2990) :span span))
     :ranges ranges :sources (js-array (js-object :id "entry.mjs" :filename (get span :filename) :macroOrigins (js-array)))))

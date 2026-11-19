@@ -38,6 +38,8 @@
     "tools/backends/managed-host-object-provider.mjs"
     "tools/backends/managed-host-object-realm.mjs"
     "tools/backends/managed-host-ground.mjs"
+    "tools/backends/managed-layout.mjs"
+    "tools/backends/managed-layout.mjs.map"
     "tools/backends/managed-host-runtime.mjs"
     "tools/backends/managed-host-runtime.mjs.map"
     "tools/backends/managed-host-lifecycle.mjs"
@@ -238,7 +240,7 @@
           (setq index (1+ index)))
         (let ((manifest "tools/backends/browser/transport.json"))
           (await (writeFile (resolve target manifest)
-            (str (JSON/stringify (js-object :format "eliscript-pages-browser-transports" :version 1
+            (str (JSON/stringify (js-object :format "eliscript-pages-browser-transports"
               :representation "derived-browser-bundle" :compilerFixedPointEvidence false
               :publishedSourceFiles published-sources :transports transports) nil 2) "\n")))
           (js-call (get result :files) :push manifest))) result))
