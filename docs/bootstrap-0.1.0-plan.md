@@ -915,7 +915,7 @@ tree 与报告 SHA，保持当前性能 NOT ACCEPTED，原 run、manifest、mark
   - `sourceSha256`: `"bfa844a997cd69856caeef8538f0ed3cef707fec5a046154048126330a9156a4"`
   - `productSha256`: `"f8d6579b01d4ee4a495af0f762ab196097840ef1ce4a43a43348f3342a1ebab3"`
   - `packagedProductIdentity.sha256`: `"9f22ba8ea750c7bf091bbf898a3e5117a22b7b31dfbbe2f95bd6d437a6c5ba1f"`
-  - `corpusRecordsSha256`: `"bf1590f04d2ed71e7a8414933271cf38d37c8e0b6b2ca8390a0fc9ed446ec1fa"`
+  - `corpusRecordsSha256`: `"83cc85d5bba1998927c4959f0652f4ee7526e10369223c2d09bae627e9315306"`
 
 - **一、JavaScript 全量验收（严格配置：原输入规模与原阈值，未启用 `ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE` 或 `--functional-runtime-profile small`）**：
   - **严格 JS 797 语料**：有效范围 `795/795` 全部 `equivalent` 通过，`0` 失败，`0` `resourceDeferred`；另有 `2` 条已移交独立门禁的记录标为 `cancelled`（不计入语料通过数），并在原入口严格无延期实跑通过（`original-program:compiler-cli-bootstrap-generations` 对应 `tests/bootstrap-compiler.test.mjs`，`original-managed-suite:complete-fixture-suites` 对应 `make test` 核心与应用套件；新增受管夹具 `tests/fixtures/transducer-completion-forward.eli` 已登记入 `maintained-fixture-plans` 且 `missingCaseAdapters = 0`，并在 `tests/transducer-completion-forward.test.mjs` 定向验证通过）。

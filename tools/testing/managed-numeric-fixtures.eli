@@ -138,13 +138,16 @@
            (program (js-call (get backend :compiler) :compile_ir_string source "direct-batches.eli"))
            (saved (JSON/stringify program)) (code (js-call (get backend :numeric) :emit_numeric_javascript program))
            (retained (JSON/parse (await (readFile (resolve root "tools/backends/results/direct-wasm-macos-arm64.json") "utf8"))))
+           (archived (JSON/parse (await (readFile (resolve root "tools/backends/results/direct-wasm-source-collections-first-macos-arm64.json") "utf8"))))
            (line "import \"eliscript/runtime/unicode-case.mjs\";") (lines (js-call code :split "\n")))
-      ;; Same accepted inputs, exactly one mandatory import, and byte-exact
-      ;; restoration of the complete emitted module.
+      ;; Same accepted inputs, exact current-source emitted bytes, exactly one
+      ;; mandatory import, and byte-exact restoration of the archived module.
       (js-call assert :strictEqual (digest kernels)
         (get (get retained :sourceHashes) "tools/experiments/native-wasm/kernels.eli"))
       (js-call assert :strictEqual (digest batches)
         (get (get retained :sourceHashes) "tools/backends/batches.eli"))
+      (js-call assert :strictEqual (digest code)
+        (get (get retained :artifacts) :javascriptSha256))
       (js-call assert :strictEqual (js-length (js-call lines :filter (lambda (value) (= value line)))) 1)
       (js-call assert :strictEqual (aref lines 1) line)
       (js-call assert :strictEqual (str (aref lines 0) "\n" line "\n" (js-call (js-call lines :slice 2) :join "\n")) code)
@@ -162,7 +165,7 @@
         (js-call assert :strictEqual (get counter :groups) 7)
         (js-call assert :strictEqual (get counter :value) 19)
         (js-call assert :strictEqual (digest (js-call expanded :join "\n"))
-          (get (get retained :artifacts) :javascriptSha256))
+          (get (get archived :artifacts) :javascriptSha256))
         (js-call assert :strictEqual (js-call (compact-artifact expanded) :join "\n") historical))
       (js-call assert :strictEqual (JSON/stringify program) saved)
       (let* ((input (resolve root "bootstrap/backends/numeric.eli"))
