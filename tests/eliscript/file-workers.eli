@@ -174,7 +174,12 @@
   (test "documentation builders settle ordinary workers and each other before touching shared generated inputs"
     (async ()
       (let* ((files (js-array "ordinary.test.mjs" "tests/docs-site.test.mjs"
-                      "tests/pages-assembly.test.mjs" "later.test.mjs"))
+                      "tests/pages-assembly.test.mjs"
+                      "tests/pages-derived-transports-selfhosted.test.mjs"
+                      "tests/pages-runtime.test.mjs"
+                      "tests/dogfood-action.test.mjs"
+                      "tests/dogfood-workflow.test.mjs"
+                      "later.test.mjs"))
              (active (new globalThis.Map)) (started (js-array))
              (supervisor (js-object :failure nil :run (lambda (request)
                (js-call started :push (get request :file))
@@ -190,7 +195,9 @@
         (js-call assert :strictEqual (get (await running) :exitCode) 0)
         (js-call assert :deepStrictEqual started files)
         (js-call assert :strictEqual (isExclusiveTestFile "tests/docs-site-copy.test.mjs") false)
-        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-assembly-copy.test.mjs") false))))
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-assembly-copy.test.mjs") false)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-derived-transports-selfhosted-copy.test.mjs") false)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-runtime-copy.test.mjs") false))))
 
   (test "cancellation keeps its original code stops queued work and restores both signal listeners"
     (async ()
