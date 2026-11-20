@@ -197,7 +197,9 @@
         (js-call assert :strictEqual (isExclusiveTestFile "tests/docs-site-copy.test.mjs") false)
         (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-assembly-copy.test.mjs") false)
         (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-derived-transports-selfhosted-copy.test.mjs") false)
-        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-runtime-copy.test.mjs") false))))
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/pages-runtime-copy.test.mjs") false)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/dogfood-action-copy.test.mjs") false)
+        (js-call assert :strictEqual (isExclusiveTestFile "tests/dogfood-workflow-copy.test.mjs") false))))
 
   (test "cancellation keeps its original code stops queued work and restores both signal listeners"
     (async ()
