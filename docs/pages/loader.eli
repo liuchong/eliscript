@@ -143,9 +143,21 @@
       (catch error
         (report (str "site script did not compile: " (field error "message"))))))
 
+  (defun ensure-import-map (doc)
+    (when (and doc (not (js-call doc :querySelector "script[type=\"importmap\"]")))
+      (let ((map-tag (js-call doc :createElement "script"))
+            (head (or (field doc "head") (field doc "documentElement"))))
+        (Reflect/set map-tag "type" "importmap")
+        (Reflect/set map-tag "textContent"
+          (js-call globalThis.JSON :stringify
+            (js-object "imports" (js-object "eliscript/" package-base))))
+        (when head
+          (js-call head :appendChild map-tag)))))
+
   (defun boot ()
     (let ((doc (field globalThis.globalThis "document")))
-      (if (= (field doc "readyState") "loading")
+      (ensure-import-map doc)
+      (if (and doc (= (field doc "readyState") "loading"))
           (js-call doc :addEventListener "DOMContentLoaded" (lambda (event) (start)))
         (start))))
 

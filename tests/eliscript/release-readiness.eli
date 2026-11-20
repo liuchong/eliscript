@@ -45,6 +45,29 @@
       (js-call (js-array "main" "a342aea" "" nil) :forEach (lambda (value)
         (js-call assert :throws (lambda () (validateReleaseReadiness value (green))) globalThis.TypeError)))
       (js-call assert :throws (lambda () (validateReleaseReadiness revision nil)) globalThis.TypeError)))
+  (test "explicit local-verified release gate still requires a green Pages run and blocks active checks"
+    (lambda ()
+      (let ((pages-only (js-array (js-object :name "Pages" :headSha revision :databaseId 9 :status "completed" :conclusion "success"))))
+        (js-call assert :throws (lambda () (validateReleaseReadiness revision pages-only))
+          (new globalThis.RegExp "publication blocked"))
+        (let ((waived-result (validateReleaseReadiness revision pages-only (js-object :allowLocalVerifiedGate t))))
+          (js-call assert :strictEqual (get waived-result :localVerifiedGate) t)
+          (js-call assert :strictEqual (js-length (get waived-result :checks)) 1)
+          (js-call assert :strictEqual (js-length (get waived-result :waived)) 3)))
+      (js-call assert :throws
+        (lambda ()
+          (validateReleaseReadiness revision
+            (js-array (js-object :name "Pages" :headSha revision :databaseId 9 :status "completed" :conclusion "failure"))
+            (js-object :allowLocalVerifiedGate t)))
+        (new globalThis.RegExp "Pages: completed/failure"))
+      (js-call assert :throws
+        (lambda ()
+          (validateReleaseReadiness revision
+            (js-array
+              (js-object :name "Pages" :headSha revision :databaseId 9 :status "completed" :conclusion "success")
+              (js-object :name "Compatibility" :headSha revision :databaseId 10 :status "in_progress" :conclusion ""))
+            (js-object :allowLocalVerifiedGate t)))
+        (new globalThis.RegExp "Compatibility: in_progress/"))))
   (test "the release workflow verifies required CI before every irreversible npm publishing command"
     (lambda ()
       (let* ((workflow (readFileSync (resolve root ".github/workflows/release.yml") "utf8"))

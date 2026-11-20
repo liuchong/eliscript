@@ -115,22 +115,24 @@ export default {
             <h2>Run the custom site</h2>
             <pre><code>bun run dev:org-site
 bun run build:org-site</code></pre>
-            <p>The example application is written in Eliscript and compiles through the same React and Vite path as any other browser program. It implements responsive article navigation, hash routes, tags, and trusted Org HTML rendering. Navigation uses portable sequence, text, and immutable object source modules for mapping, hash-prefix removal, browser options, and a prebuilt slug index with direct lookups. Drafts do not enter the production bundle.</p>
+            <p>The example application is written in Eliscript and compiles through the same React 19.3 and Vite 8.3 path as any other browser program. It implements responsive article navigation, hash routes, tags, and trusted Org HTML rendering. Navigation uses portable sequence, text, and immutable object source modules for mapping, hash-prefix removal, browser options, and a prebuilt slug index with direct lookups. Drafts do not enter the production bundle.</p>
             <p><a class="button" href="https://github.com/liuchong/eliscript/tree/master/examples/org-site">Inspect the example</a></p>
           </section>
 
           <section id="dogfood">
-            <h2>Dogfood hybrid blog design</h2>
-            <p>The planned <code>examples/dogfood</code> project separates two Eliscript programs. A build program runs in Actions and normalizes local Markdown, authorized GitHub Issues, and authorized Discussions into static blog and comment data. A browser program renders the resulting site after compilation to standard JavaScript.</p>
-            <p>Sources can be enabled independently or together. By default, only the repository owner may publish an Issue or Discussion as an article; a configured author list can extend that authority. Other participants may comment on an existing article or use a configured external comment provider, but cannot silently promote their content into a blog post.</p>
-            <p>Comment events are coalesced before rebuilding so bursts do not consume one Actions run per reply. Static output remains the fallback, while optional dynamic enhancement can refresh comments without changing core language semantics.</p>
-            <div class="callout callout-coral"><p>Dogfood is currently a complete design package, not an implemented or production-accepted application. Its status never contributes to the Eliscript core percentage.</p></div>
-            <p><a class="button" href="https://github.com/liuchong/eliscript/tree/master/examples/dogfood">Read the Dogfood design</a></p>
+            <h2>Dogfood hybrid publishing site &amp; GitHub Action</h2>
+            <p>The implemented <code>examples/dogfood</code> proving-ground separates two Eliscript programs. A static builder normalizes local Markdown, authorized GitHub Issues, and authorized Discussions into static blog, archive, feed, and search data, and packages as a standalone GitHub Action (<code>bun run package:dogfood</code>). A browser program compiled to standard JavaScript handles theme persistence and client-side search while keeping scriptless article reading intact.</p>
+            <p>Sources can be enabled independently or together. By default, only the repository owner may publish an Issue or Discussion as an article; a configured author list can extend that authority. Comment events are coalesced before rebuilding so bursts do not consume one Actions run per reply.</p>
+            <div class="callout callout-coral"><p>The proving-ground site is built and verified across Chromium, Firefox, and WebKit in CI, while its application acceptance remains strictly separate from the Eliscript core percentage.</p></div>
+            <div class="button-row">
+              <a class="button" href="https://eliscript.com/examples/dogfood/_site/">Open the live proving-ground</a>
+              <a class="text-link" href="https://github.com/liuchong/eliscript/tree/master/examples/dogfood">Inspect source &amp; Action</a>
+            </div>
           </section>
         </article>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Publishing</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="language.html">Language</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.1" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.1" data-version data-version-github>v0.1.1</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Publishing</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="language.html">Language</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>

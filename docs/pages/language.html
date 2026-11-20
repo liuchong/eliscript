@@ -34,9 +34,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Stable language core · 0.1.0 Emacs-compatible syntax</p>
+          <p class="eyebrow">Stable language core · Emacs-compatible syntax · v0.1.3</p>
           <h1>100% Emacs Lisp core, 1+5+2 extensions, four-target reach.</h1>
-          <p class="doc-lede">Eliscript 0.1.0 combines a 100% Emacs Lisp-compatible default core with seven explicit extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, lossless JS interop, and multi-backend WASM/Native ABI).</p>
+          <p class="doc-lede">Eliscript 0.1.3 combines a 100% Emacs Lisp-compatible default core, unified <code>.el</code>/<code>.eli</code> interpretation and AOT compilation, and seven explicit extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, lossless JS interop, and 64-bit <code>Val64</code> WASM/Native ABI).</p>
         </div>
       </header>
 
@@ -73,7 +73,7 @@
                 <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native JavaScript containers</td></tr>
               </tbody>
             </table>
-            <div class="callout"><p>In the 0.1.0 Emacs-compatible core (<code>eliscript-runtime</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
+            <div class="callout"><p>In the Emacs-compatible core (<code>eliscript-runtime</code> / <code>eliscript/runtime/lisp</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 32.0.50 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
           </section>
 
           <section id="forms">
@@ -123,6 +123,7 @@
                   <article class="form-item"><code>transient / conj! / assoc! / persistent!</code><p>Owner-isolated batch mutation builders with one-shot freeze enforcement.</p></article>
                   <article class="form-item"><code>[...] / {...} / #{...} / #queue [...]</code><p>Persistent Vector, Map, Set, and Queue literals plus Emacs <code>seq.el</code> / <code>map.el</code> integration.</p></article>
                   <article class="form-item"><code>value-equal? / value-hash</code><p>Recursive structural equality and deterministic hashing across all persistent collections.</p></article>
+                  <article class="form-item"><code>mdp / mds / gepo</code><p>Deterministic Markdown Data Protocol (<code>mdp-parse</code> / <code>mdp-encode</code>), schema validation (<code>mds-validate</code>), and self-describing HTTP RPC (<code>gepo-service</code> / <code>gepo-client</code>).</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="interop" hidden>
@@ -179,7 +180,7 @@
 
           <section id="sequences">
             <h2>Portable sequences</h2>
-            <pre><code>(import "../../stdlib/sequence.eli" map filter reduce range)
+            <pre><code>(import "eliscript/runtime/core/sequence" map filter reduce range)
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
             <p>The standard library is written in Eliscript and includes persistent hash and AVL-sorted collections, protocols, replayable and memoized lazy sequences, pull transduction, immutable tree rewriting and zipper editing, text, numeric, Result, JSON, state, and host-interop modules without adding application-framework dependencies.</p>
@@ -188,7 +189,7 @@
 
           <section id="text">
             <h2>Portable text</h2>
-            <pre><code>(import "../../stdlib/text.eli" contains? strip-prefix trim)
+            <pre><code>(import "eliscript/dist/stdlib/text" contains? strip-prefix trim)
 
 (trim (strip-prefix "#" "# article "))</code></pre>
             <p>Thirteen functions provide literal matching, end-exclusive slicing, prefix and suffix removal, ASCII-boundary trimming, blank checks, joining, and repetition. They are written in portable Eliscript without regular expressions or host string methods. Indices follow ECMAScript UTF-16 code units rather than locale-aware grapheme clusters.</p>
@@ -196,8 +197,8 @@
 
           <section id="objects">
             <h2>Immutable objects</h2>
-            <pre><code>(import "../../stdlib/object.eli" assoc pick)
-(import "../../stdlib/data.eli" index-by)
+            <pre><code>(import "eliscript/dist/stdlib/object" assoc pick)
+(import "eliscript/dist/stdlib/data" index-by)
 
 (pick (assoc (object :name "Eliscript") :runtime "JavaScript")
       [:name :runtime])</code></pre>
@@ -229,6 +230,6 @@
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Language</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.1" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.1" data-version data-version-github>v0.1.1</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Language</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
   </body>
 </html>

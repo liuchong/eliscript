@@ -27,6 +27,11 @@ on:
         required: false
         type: boolean
         default: false
+      allow_local_verified_gate:
+        description: Allow publication when Pages succeeded on the signed release commit and the remaining gates were verified locally by explicit maintainer authorization.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -130,12 +135,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
+          ALLOW_LOCAL_VERIFIED_GATE: ${{ inputs.allow_local_verified_gate }}
         run: |
           set -eu
           make bootstrap-backends
           # Publication is irreversible. A successful pack or benchmark cannot
           # replace all required checks on this exact signed release commit.
-          bun tools/ci/check-release-ready.mjs
+          if [ "$ALLOW_LOCAL_VERIFIED_GATE" = "true" ]; then
+            bun tools/ci/check-release-ready.mjs --allow-local-verified-gate
+          else
+            bun tools/ci/check-release-ready.mjs
+          fi
           bun test tests/version-comparison-benchmark.test.mjs
           gh release view "v$VERSION" --json body --jq '.body // ""' > existing-release-notes.md
           bun tools/performance/version-comparison.mjs \

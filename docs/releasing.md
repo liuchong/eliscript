@@ -113,11 +113,15 @@ or claim that exhaustive gate.
 ## Publication guard
 
 Publication is a separate, explicit action. The manual release workflow calls
-`tools/ci/check-release-ready.eli` before any registry publication. It requires
-Compatibility, Browser compatibility, Compiler bootstrap and final outputs,
-and Pages to have succeeded on the exact signed release commit. An older
-successful commit cannot satisfy this guard. The package is publishable in
-manifest terms; there is no `private: true` latch to remove.
+`tools/ci/check-release-ready.eli` before any registry publication. By default,
+it requires Compatibility, Browser compatibility, Compiler bootstrap and final
+outputs, and Pages to have succeeded on the exact signed release commit; an
+older successful commit cannot satisfy this guard. When a maintainer explicitly
+authorizes OIDC publication after complete local release-package verification
+and a green `Pages` run on the signed release commit, `workflow_dispatch` may
+pass `allow_local_verified_gate=true` (still rejecting any queued or in-progress
+runs on that commit). The package is publishable in manifest terms; there is no
+`private: true` latch to remove.
 
 The working candidate version is `0.1.3`. Preparing its quality does not authorize npm
 publication, a GitHub Release or a signed release tag.

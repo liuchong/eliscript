@@ -43,12 +43,13 @@
           <span class="hero-logo" aria-hidden="true">
             <img src="pages/assets/eliscript-logo-light.png" alt="">
           </span>
-          <p class="eyebrow"><span>Emacs-first · standard ECMAScript · <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.1" data-version data-version-github>v0.1.1</a> · <a href="https://www.npmjs.com/package/eliscript/v/0.1.1" data-version-npm>npm</a> · <a href="https://github.com/liuchong/eliscript">GitHub</a></span></p>
+          <p class="eyebrow"><span>Emacs-first · standard ECMAScript · <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a> · <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a> · <a href="https://github.com/liuchong/eliscript">GitHub</a></span></p>
           <h1 id="hero-title">Eliscript</h1>
           <p class="hero-copy">
-            A 100% Emacs Lisp-compatible core with 1+5+2 explicit extensions,
-            persistent values, a self-hosted compiler, and four-target execution
-            across Emacs, JavaScript, WASM, and ARM64 Native.
+            A 100% Emacs Lisp-compatible core with unified <code>.el</code>/<code>.eli</code>
+            execution, 1+5+2 explicit extensions, persistent values, a self-hosted
+            compiler, and multi-target execution across Emacs, JavaScript, WASM, and
+            ARM64 Native.
           </p>
           <div class="hero-actions">
             <a class="button button-light" href="pages/getting-started.html">Get started</a>
@@ -60,7 +61,7 @@
       <section class="status-band" aria-label="Checked project status">
         <div class="status-grid">
           <div class="status-metric"><strong>175</strong><span>stable specifications</span></div>
-          <div class="status-metric"><strong>598</strong><span>checked library exports</span></div>
+          <div class="status-metric"><strong>601</strong><span>checked library exports</span></div>
           <div class="status-metric"><strong>35/35</strong><span>core criteria retained passing</span></div>
           <div class="status-metric"><strong>0</strong><span>tracked .mjs source files</span></div>
         </div>
@@ -71,17 +72,17 @@
           <div class="section-heading">
             <h2 id="pipeline-title">One language, two compiler generations, four execution targets.</h2>
             <p>
-              Plain Emacs runs the 100% compatible core and builds the seed. The
-              seed builds the self-hosted Eliscript compiler across stage0–stage3,
-              emitting readable, source-mapped ESM alongside zero-glue WASM and
-              ARM64 native binaries.
+              Plain GNU Emacs runs the 100% compatible core and builds the seed. The
+              seed bootstraps the self-hosted Eliscript compiler across stage0–stage3
+              (343 byte-identical fixed-point outputs), emitting readable, source-mapped
+              ESM alongside zero-glue WASM and ARM64 native binaries.
             </p>
           </div>
           <div class="pipeline" aria-label="Compilation pipeline">
             <article class="pipeline-step">
               <span class="step-number">01</span>
               <h3>Read Lisp</h3>
-              <p>Parse Emacs Lisp forms, 1+5+2 extension packs, persistent literals, modules, macros, and explicit host boundaries.</p>
+              <p>Parse <code>.el</code> and <code>.eli</code> forms, 1+5+2 extension packs, persistent literals, modules, macros, and explicit host boundaries.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">02</span>
@@ -96,7 +97,7 @@
             <article class="pipeline-step">
               <span class="step-number">04</span>
               <h3>Run across targets</h3>
-              <p>Execute identically in Emacs Lisp, standard ESM (Bun, Node, browser), and zero-glue WASM / ARM64 native `:abi` targets.</p>
+              <p>Execute identically in GNU Emacs 32.0.50, standard ESM (Node 24+, Bun 1.4+, browsers), and zero-glue WASM / ARM64 native targets.</p>
             </article>
           </div>
         </div>
@@ -119,6 +120,7 @@
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="data">persistent data</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="interop">interop</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="compat">1+5+2 compat</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-example="wire">mdp / gepo</button>
               </div>
             </div>
             <div class="code-grid">
@@ -179,14 +181,14 @@ constant JavaScript stack</code></pre>
               <p><code>defmodule</code> with lexical-private bindings, explicit <code>:export</code> / <code>:import</code>, and <code>defvar-once</code> hot-reload state, plus sandboxed <code>defmacro-checked</code>.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Async &amp; JS Interop (Packs 5–6)</span>
-              <h3>Structured concurrency &amp; sentinels</h3>
-              <p><code>defun-async</code> / <code>await</code>, <code>with-async-scope</code> cancellation, backpressure <code>async-channel</code>, handle revocation, and lossless <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels.</p>
+              <span class="feature-kicker">Async, Interop &amp; Wire (Packs 5–6)</span>
+              <h3>Structured concurrency, sentinels &amp; RPC</h3>
+              <p><code>defun-async</code> / <code>await</code>, <code>with-async-scope</code> cancellation, bounded <code>async-channel</code>, lossless <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels, plus <code>mdp</code> / <code>mds</code> / <code>gepo</code> Markdown wire data and HTTP RPC.</p>
             </article>
             <article class="feature">
               <span class="feature-kicker">Multi-Backend ABI (Pack 7)</span>
               <h3>Emacs · JS · WASM · Native</h3>
-              <p>Explicit <code>:abi (:numeric-f64 / :memory-u32)</code> declarations and linear-memory operators execute with identical results across Emacs, ESM, WASM, and ARM64 native binaries.</p>
+              <p>Unified 64-bit <code>Val64</code> tagged-value layout and explicit <code>:abi (:numeric-f64 / :memory-u32)</code> declarations execute with identical semantics across Emacs, ESM, WASM, and ARM64 native binaries.</p>
             </article>
           </div>
         </div>
@@ -204,9 +206,10 @@ constant JavaScript stack</code></pre>
             <p>
               All 42 implementation units, 35 mandatory verification criteria,
               and 173 stabilization units are complete in the retained core
-              evidence. Future work is tracked without retroactively inflating
-              that result; general automatic tail-call optimization begins as a
-              Draft and Pending specification.
+              evidence, alongside 46 library modules / 601 checked exports and a
+              343-file byte-identical Stage 2/Stage 3 bootstrap closure in
+              <code>v0.1.3</code>. General automatic tail-call optimization begins
+              as a Draft and Pending specification.
             </p>
             <div class="button-row">
               <a class="button" href="pages/roadmap.html">Read the roadmap</a>
@@ -224,9 +227,9 @@ constant JavaScript stack</code></pre>
           <a href="pages/language.html">Language</a>
           <a href="pages/publishing.html">Applications</a>
           <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
-          <a href="https://www.npmjs.com/package/eliscript/v/0.1.1" data-version-npm>npm</a>
+          <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
-          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.1" data-version data-version-github>v0.1.1</a>
+          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
           <span>© <span data-year>2026</span></span>
         </div>
       </div>

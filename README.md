@@ -24,10 +24,11 @@ modules, and bootstraps a compiler written in Eliscript itself.
 
 ## Quick Start
 
-Building from source needs Emacs 29 or newer and Bun 1.4 or newer. The
-compiled compiler ships in the release tarball, so a consumer needs only Node
-24 or Bun; releases are published to GitHub Releases and the npm registry
-(`eliscript`).
+Building from source needs GNU Emacs 29 or newer (CI and release verification
+build pinned GNU Emacs 32.0.50), Bun 1.4 or newer, and Node.js 24 or newer. The
+compiled Stage 3 compiler ships in the release tarball (`eliscript@0.1.3`), so
+a consumer needs only Node.js 24+ or Bun 1.4+; releases are published to GitHub
+Releases and the npm registry (`eliscript`).
 
 ```sh
 bun install --frozen-lockfile
@@ -57,7 +58,7 @@ without a build server or repository files. Include `dist/browser/loader.js`
 and use either `data-eliscript` or `<script type="text/eliscript">` tags:
 
 ```html
-<script defer src="https://unpkg.com/eliscript@0.1.1/dist/browser/loader.js"></script>
+<script defer src="https://unpkg.com/eliscript@0.1.3/dist/browser/loader.js"></script>
 <script type="text/eliscript">
 (module app.live
   (print "Hello from in-browser Eliscript!"))
@@ -78,7 +79,7 @@ alongside explicit `.mjs`).
 | --- | --- |
 | Compiler | Emacs Lisp seed, reproducible stage0–stage3 self-hosted compiler, deterministic formatter, canonical IR, Source Maps that name `.eli` files, plus zero-glue WASM and ARM64 Native `:abi` backends |
 | Language | 100% Emacs Lisp core (`eliscript-runtime`) + `1+5+2` extension packs (`defun-case`, `let-bind`/`defun-bind`/`pcase-value`, `let-const`, `defmodule`, `defmacro-checked`, `with-async-scope`, `async-channel`), tail-safe `loop`/`recur` (50,000+ depth), protocols, records, `deftype`/`reify`, `case`/`condp`, and portable functions |
-| Data | 7 persistent collection types (List, Vector, HAMT Map/Set, Queue, AVL Sorted Map/Set), `cl-defstruct-persistent` with Schema validation and JSON Schema round-trip, `state-cell`, transients, lazy sequences, and transducers |
+| Data & Wire | 7 persistent collection types (List, Vector, HAMT Map/Set, Queue, AVL Sorted Map/Set), `cl-defstruct-persistent` with Schema validation and JSON Schema round-trip, `state-cell`, transients, lazy sequences, transducers, and `mdp`/`mds`/`gepo` Markdown wire data, schema validation, and self-describing HTTP RPC |
 | Runtime | Host-free runtime semantics, `eliscript/runtime/lisp` unified Lisp runtime & AOT module compiler, lossless JS sentinels (`js-false`/`js-null`/`js-undefined`), cross-engine handle revocation, and a long-lived Emacs-to-JavaScript worker |
 | Browser | An in-memory multi-file compile host, a module worker, standalone `dist/browser/loader.js`, and a compiler bundled for the browser — the [playground](https://eliscript.com/pages/playground.html) compiles and runs Eliscript in the page |
 | Editor | [`eliscript-mode`](editor/README.md), an evaluation REPL, and the `editor/eliscript-{runtime,contract,data,bind,module,async,js,abi}.el` Emacs Lisp libraries |
