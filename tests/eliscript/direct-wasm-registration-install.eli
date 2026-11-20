@@ -6,7 +6,7 @@
   (import "node:path" resolve)
   (import "../../tools/backends/build.mjs" root)
   (import "./direct-wasm-registration.mjs" createDirectWasmRegistration registerDirectWasmCompletion)
-  (import "./direct-wasm-affected.mjs" runDirectReflectionCase runDirectValueJsonCase closeDirectAffected)
+  (import "./direct-wasm-affected.mjs" runDirectReflectionCase runDirectValueJsonCase runDirectPerformanceReportCase closeDirectAffected)
   (defconst original (Object/assign (js-object) framework))
   (defconst archive (resolve root "tests/direct-wasm-backend-test-ground.mjs"))
   (defconst source (readFileSync archive))
@@ -16,7 +16,8 @@
   (defconst registration (createDirectWasmRegistration original
     (js-object
       "browser function properties preserve ordinary absence builtin refusal identities and calls" runDirectReflectionCase
-      "browser complete Value and JSON graph executes original persistent and JSON semantics" runDirectValueJsonCase)
+      "browser complete Value and JSON graph executes original persistent and JSON semantics" runDirectValueJsonCase
+      "direct WASM performance report preserves budgets and blocks failed promotion" runDirectPerformanceReportCase)
     (js-object :timeouts (if (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
       (js-object "browser complete Value and JSON graph executes original persistent and JSON semantics" 900000)
       (js-object)))))

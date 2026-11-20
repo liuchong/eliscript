@@ -836,71 +836,78 @@
               (put environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE before)))))))
   (test "ordinary sorted corpus records run the original checkAll or checkProvider only while the unchanged complete original suite keeps the sixth brand case at its own 120000 ms gate"
     (async ()
-      (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
-             (records (get corpus :records))
-             (document (get corpus :document))
-             (suite "tests/wasm-managed-sorted-core.test.mjs")
-             (all (js-array "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:0:0"
-                    "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:1:0"
-                    "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:2:0"
-                    "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:3:0"
-                    "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:4:0"
-                    "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:5:0"))
-             (brand (aref all 3))
-             (ordinary (js-call records :filter (lambda (record)
-               (and (= (value-type (get record :id)) "string")
-                 (js-call (get record :id) :startsWith "original-managed:sorted-core")
-                 (= (get (get record :original) :suite) suite))))))
-        ;; The ordinary target records keep their original workload and gates.
-        (js-call assert :strictEqual (js-length ordinary) 6)
-        (js-call ordinary :forEach (lambda (record)
-          (let ((execution (get record :execution)))
-            (js-call assert :strictEqual (get execution :timeoutMs) 30000)
-            (js-call assert :deepStrictEqual (get execution :timeoutByTarget)
-              (js-object :javascript 30000 :wasm 30000 :native 120000))
-            ;; The merged brand declaration is gone: the brand source region is
-            ;; owned by the complete original suite, not by checkAll.
-            (js-call assert :strictEqual (js-call (get record :coverage) :includes brand) false)
-            (js-call assert :strictEqual (Object/hasOwn (get record :execution) "brandAssertions") false)
-            (js-call assert :strictEqual
-              (js-call (get record :coverage) :some (lambda (id) (js-call (new globalThis.RegExp ":3:0$") :test id))) false)
-            ;; Every remaining assertion identity is a real original case.
-            (js-call (get record :coverage) :forEach (lambda (id)
-              (when (js-call id :startsWith "stable-compatibility:source-case:")
-                (js-call assert :ok (js-call all :includes id) id)))))))
-        ;; The unchanged complete original suite keeps all six case identities.
-        (let* ((complete (js-call records :find (lambda (record)
-                   (= (get record :id) "original-managed-suite:complete-fixture-suites"))))
-               (original (get complete :original))
-               (entry (js-call (get original :suites) :find (lambda (suite-source)
-                        (= (get suite-source :file) suite)))))
-          (js-call assert :ok complete)
-          (js-call assert :ok entry)
-          (js-call assert :strictEqual (get original :testRunner) "bun test")
-          (js-call all :forEach (lambda (id)
-            (js-call assert :ok (js-call (get entry :coverage) :includes id) id)
-            (js-call assert :ok (js-call (get complete :coverage) :includes id) id)))
-          (js-call assert :strictEqual (js-length (get entry :coverage)) 7)
-          ;; The maintained registration keeps the sixth case's own 120000 ms.
-          (let* ((gate (get document :originalGateEvidence))
-                 (locator (js-call (get gate :locators) :find (lambda (item)
-                            (and (= (get item :file) suite) (= (get item :id) brand)))))
-                 (original-case (get locator :originalCase)))
-            (js-call assert :ok locator "the original gate keeps the sixth sorted case identity")
-            (js-call assert :strictEqual (get original-case :timeoutMs) 120000)
-            (js-call assert :ok (js-call (get original-case :title) :startsWith
-              "Given a replaced Symbol.hasInstance")))
-          ;; The final gate still declares the whole suite as make test work.
-          (let ((migration (js-call (get original :finalGateSuiteMigrations) :find
-                            (lambda (item) (= (get item :suite) suite)))))
-            (js-call assert :ok migration)
-            (js-call assert :strictEqual (get migration :gateCommand) "make test")
-            (js-call assert :strictEqual (get migration :targetExecution) false)
-            (js-call assert :strictEqual (js-length (get (get migration :assertionSource) :cases)) 6)
-            (let ((case (js-call (get (get migration :assertionSource) :cases) :find
-                         (lambda (item) (= (get item :id) brand)))))
-              (js-call assert :ok case)
-              (js-call assert :strictEqual (get (get case :originalCase) :timeoutMs) 120000)))))))
+      (let* ((environment (get globalThis.process :env))
+             (before (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE)))
+        (Reflect/deleteProperty environment "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE")
+        (try
+          (let* ((corpus (await (loadCompilerMatrixCorpus (js-object :sourceRoot root))))
+                 (records (get corpus :records))
+                 (document (get corpus :document))
+                 (suite "tests/wasm-managed-sorted-core.test.mjs")
+                 (all (js-array "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:0:0"
+                        "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:1:0"
+                        "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:2:0"
+                        "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:3:0"
+                        "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:4:0"
+                        "stable-compatibility:source-case:tests/wasm-managed-sorted-core.test.mjs:5:0"))
+                 (brand (aref all 3))
+                 (ordinary (js-call records :filter (lambda (record)
+                   (and (= (value-type (get record :id)) "string")
+                     (js-call (get record :id) :startsWith "original-managed:sorted-core")
+                     (= (get (get record :original) :suite) suite))))))
+            ;; The ordinary target records keep their original workload and gates.
+            (js-call assert :strictEqual (js-length ordinary) 6)
+            (js-call ordinary :forEach (lambda (record)
+              (let ((execution (get record :execution)))
+                (js-call assert :strictEqual (get execution :timeoutMs) 30000)
+                (js-call assert :deepStrictEqual (get execution :timeoutByTarget)
+                  (js-object :javascript 30000 :wasm 30000 :native 120000))
+                ;; The merged brand declaration is gone: the brand source region is
+                ;; owned by the complete original suite, not by checkAll.
+                (js-call assert :strictEqual (js-call (get record :coverage) :includes brand) false)
+                (js-call assert :strictEqual (Object/hasOwn (get record :execution) "brandAssertions") false)
+                (js-call assert :strictEqual
+                  (js-call (get record :coverage) :some (lambda (id) (js-call (new globalThis.RegExp ":3:0$") :test id))) false)
+                ;; Every remaining assertion identity is a real original case.
+                (js-call (get record :coverage) :forEach (lambda (id)
+                  (when (js-call id :startsWith "stable-compatibility:source-case:")
+                    (js-call assert :ok (js-call all :includes id) id)))))))
+            ;; The unchanged complete original suite keeps all six case identities.
+            (let* ((complete (js-call records :find (lambda (record)
+                       (= (get record :id) "original-managed-suite:complete-fixture-suites"))))
+                   (original (get complete :original))
+                   (entry (js-call (get original :suites) :find (lambda (suite-source)
+                            (= (get suite-source :file) suite)))))
+              (js-call assert :ok complete)
+              (js-call assert :ok entry)
+              (js-call assert :strictEqual (get original :testRunner) "bun test")
+              (js-call all :forEach (lambda (id)
+                (js-call assert :ok (js-call (get entry :coverage) :includes id) id)
+                (js-call assert :ok (js-call (get complete :coverage) :includes id) id)))
+              (js-call assert :strictEqual (js-length (get entry :coverage)) 7)
+              ;; The maintained registration keeps the sixth case's own 120000 ms.
+              (let* ((gate (get document :originalGateEvidence))
+                     (locator (js-call (get gate :locators) :find (lambda (item)
+                                (and (= (get item :file) suite) (= (get item :id) brand)))))
+                     (original-case (get locator :originalCase)))
+                (js-call assert :ok locator "the original gate keeps the sixth sorted case identity")
+                (js-call assert :strictEqual (get original-case :timeoutMs) 120000)
+                (js-call assert :ok (js-call (get original-case :title) :startsWith
+                  "Given a replaced Symbol.hasInstance")))
+              ;; The final gate still declares the whole suite as make test work.
+              (let ((migration (js-call (get original :finalGateSuiteMigrations) :find
+                                (lambda (item) (= (get item :suite) suite)))))
+                (js-call assert :ok migration)
+                (js-call assert :strictEqual (get migration :gateCommand) "make test")
+                (js-call assert :strictEqual (get migration :targetExecution) false)
+                (js-call assert :strictEqual (js-length (get (get migration :assertionSource) :cases)) 6)
+                (let ((case (js-call (get (get migration :assertionSource) :cases) :find
+                             (lambda (item) (= (get item :id) brand)))))
+                  (js-call assert :ok case)
+                  (js-call assert :strictEqual (get (get case :originalCase) :timeoutMs) 120000)))))
+          (finally
+            (if (undefined? before) (Reflect/deleteProperty environment "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE")
+              (put environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE before)))))))
   (test "wire functional schedule preserves every original input tail and strict resource boundary"
     (async ()
       (let* ((environment (get globalThis.process :env))

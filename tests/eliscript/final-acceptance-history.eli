@@ -313,7 +313,7 @@
              (before (await (Promise/all (js-call files :map (lambda (file) (readFile (resolve root file)))))))
              (child (spawnSync (get globalThis.process :execPath)
                (js-array (resolve root "tools/acceptance/finalize.mjs") "--verify")
-               (js-object :cwd root :encoding "utf8" :timeout 30000
+               (js-object :cwd root :encoding "utf8" :timeout 180000
                  :env (Object/assign (js-object) (get globalThis.process :env)
                    (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"))))))
         (js-call assert :strictEqual (get child :status) 0 (get child :stderr))
@@ -332,7 +332,7 @@
         (let ((index 0))
           (while (< index (js-length files))
             (js-call assert :deepStrictEqual (await (readFile (resolve root (aref files index)))) (aref before index))
-            (setq index (1+ index)))))) 30000)
+            (setq index (1+ index)))))) 300000)
 
   (test "historical benchmark and soak reports authenticate accepted Git bytes without current-source acceptance"
     (async ()

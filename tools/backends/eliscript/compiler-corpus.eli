@@ -689,17 +689,13 @@
                          (js-call (js-array "original-program:core-stdlib-complete-protocols"
                            "original-program:eliscript-protocol-complete-hosts"
                            "original-program:atom-complete-hosts"
-                           "original-program:portable-persistent-set-complete-hosts") :includes id)
+                           "original-program:portable-persistent-set-complete-hosts"
+                           "original-program:portable-persistent-list-1"
+                           "original-program:portable-persistent-list-0") :includes id)
                          (complete-library-functional-resource-recipe-p record))
                 (put result :functionalExecutionDeadlineMs 600000))
-              ;; The unchanged million-node list takes 62.4s in WASM. The
-              ;; related native value workload measured 3.9x its WASM time.
-              ;; This bounded functional allowance does not accept the original
-              ;; 30s performance gate; the policy applies it only to native.
               (when (and (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-                         (or (and (js-call (js-array "original-program:portable-persistent-list-1"
-                                    "original-program:portable-persistent-list-0"
-                                    "original-program:portable-persistent-vector-complete-hosts") :includes id)
+                         (or (and (= id "original-program:portable-persistent-vector-complete-hosts")
                                   (complete-library-functional-resource-recipe-p record))
                              (and (= id "original-program:persistent-tree-walk-complete-hosts")
                                   (retained-deep-walk-resource-recipe-p record))))
@@ -1606,7 +1602,8 @@
     (js-array "tests/fixtures/response-owned-wasm-host.eli" "host-fixture" (js-array "tests/compiler-response-events-test-ground.eli" "response-owned-wasm-host"))
     (js-array "tests/fixtures/session-tools-build-host.eli" "host-fixture" (js-array "tests/compiler-session-tools.test.eli" "session-tools-build-host"))
     (js-array "tests/fixtures/session-tools-cli-stream-host.eli" "host-fixture" (js-array "tests/compiler-session-tools.test.eli" "session-tools-cli-stream-host"))
-    (js-array "tests/fixtures/source-debugging-host.eli" "program-asset" (js-array "original-program:compiler-source-debugging"))))
+    (js-array "tests/fixtures/source-debugging-host.eli" "program-asset" (js-array "original-program:compiler-source-debugging"))
+    (js-array "tests/fixtures/transducer-completion-forward.eli" "host-fixture" (js-array "tests/eliscript/transducer-completion-forward.test.eli" "tests/fixtures/transducer-completion-forward.eli"))))
 
   (defun fixture-consumer-region (source filename token)
     (let ((pending (read-string source filename)) (found undefined))

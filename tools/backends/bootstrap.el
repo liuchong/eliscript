@@ -1095,6 +1095,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                             ("tests/fixtures/bootstrap-ir-host.eli" . "tests/fixtures/bootstrap-ir-host.mjs")
                             ("tests/fixtures/collection-adapter-isolation.eli" . "tests/fixtures/collection-adapter-isolation.mjs")
                             ("tests/fixtures/dense-order.eli" . "tests/fixtures/dense-order.mjs")
+                            ("tests/fixtures/transducer-completion-forward.eli" . "tests/fixtures/transducer-completion-forward.mjs")
                             ("tests/fixtures/collection-protocol-host.eli" . "tests/fixtures/collection-protocol-host.mjs")
                             ("tests/fixtures/compiled-eli-bun-preload.eli" . "tests/fixtures/compiled-eli-bun-preload.mjs")
                             ("tests/fixtures/compiled-eli-node-loader.eli" . "tests/fixtures/compiled-eli-node-loader.mjs")
