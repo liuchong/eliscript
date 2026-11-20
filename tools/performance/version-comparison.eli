@@ -270,7 +270,16 @@
                    (relocatedRunner (js-call (js-call runnerSource :replaceAll
                      "(import \"../../runtime/" "(import \"./runtime/") :replaceAll
                      "(import \"../../stdlib/core/" "(import \"./stdlib/core/"))
-                   (runnerScript (js-call compiler :compile_string relocatedRunner "version-comparison-workloads.eli")))
+                   (runnerScript
+                     (js-call
+                       (js-call
+                         (js-call
+                           (js-call
+                             (js-call compiler :compile_string relocatedRunner "version-comparison-workloads.eli")
+                             :split "\"eliscript/runtime/prelude.mjs\"")
+                           :join "\"./runtime/prelude.mjs\"")
+                         :split "\"eliscript/runtime/primitives.mjs\"")
+                       :join "\"./runtime/primitives.mjs\"")))
               (await (mkdir stdlibCoreDir (js-object :recursive t)))
               (await (symlink (js-call path :join targetRoot "runtime") (js-call path :join tempDir "runtime") "dir"))
               (await (mkdir (js-call path :dirname nodeModulesEliscript) (js-object :recursive t)))

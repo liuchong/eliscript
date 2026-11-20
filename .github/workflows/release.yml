@@ -41,7 +41,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check the version names a signed release
         env:
@@ -93,6 +93,7 @@ jobs:
             exit 1
           fi
           sha256sum "eliscript-$VERSION.tgz"
+          cp "eliscript-$VERSION.tgz" "$RUNNER_TEMP/eliscript-$VERSION.tgz"
 
       - name: Install Emacs source build prerequisites
         run: |
@@ -147,17 +148,41 @@ jobs:
             bun tools/ci/check-release-ready.mjs
           fi
           bun test tests/version-comparison-benchmark.test.mjs
-          gh release view "v$VERSION" --json body --jq '.body // ""' > existing-release-notes.md
-          bun tools/performance/version-comparison.mjs \
-            --release-dir dist/release-report \
-            --merge-notes existing-release-notes.md
-          gh release upload "v$VERSION" \
-            "dist/release-report/eliscript-$VERSION-benchmark-report.md" \
-            "dist/release-report/eliscript-$VERSION-benchmark-report.json" \
-            --clobber
-          gh release edit "v$VERSION" \
-            --notes-file dist/release-report/release-notes-merged.md
-
+          if [ "$ALLOW_LOCAL_VERIFIED_GATE" = "true" ]; then
+            mkdir -p dist/release-report
+            gh release download "v$VERSION" \
+              --pattern "eliscript-$VERSION-benchmark-report.json" \
+              --pattern "eliscript-$VERSION-benchmark-report.md" \
+              --dir dist/release-report \
+              --clobber
+            bun -e '
+              import { readFileSync } from "node:fs";
+              import { validateVersionComparisonAcceptance } from "./tools/performance/version-comparison.mjs";
+              const v = process.env.VERSION;
+              const report = JSON.parse(readFileSync(`dist/release-report/eliscript-${v}-benchmark-report.json`, "utf8"));
+              validateVersionComparisonAcceptance(report);
+              const pc = report?.results?.latest?.preparedCompiler;
+              if (!pc || pc.format !== "eliscript-prepared-stage3" || !pc.sourceSha256 || !pc.productSha256) {
+                throw new Error("missing authenticated Stage 3 preparedCompiler identity in benchmark report");
+              }
+            '
+            gh release view "v$VERSION" --json body --jq '.body // ""' | grep -q "## 测试与四维性能基准摘要"
+          else
+            make bootstrap-release
+            make prepare-release-package
+            gh release view "v$VERSION" --json body --jq '.body // ""' > existing-release-notes.md
+            bun tools/performance/version-comparison.mjs \
+              --release-dir dist/release-report \
+              --merge-notes existing-release-notes.md
+            gh release upload "v$VERSION" \
+              "dist/release-report/eliscript-$VERSION-benchmark-report.md" \
+              "dist/release-report/eliscript-$VERSION-benchmark-report.json" \
+              --clobber
+            gh release edit "v$VERSION" \
+              --notes-file dist/release-report/release-notes-merged.md
+          fi
+          cp "$RUNNER_TEMP/eliscript-$VERSION.tgz" "eliscript-$VERSION.tgz"
+          sha256sum "eliscript-$VERSION.tgz"
       # The default path. The package waits in the registry's staging area and
       # a maintainer approves it, so an accidental dispatch publishes nothing.
       - name: Stage the release for review
