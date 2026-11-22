@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="The Eliscript roadmap from seed compiler to self-hosted language and Emacs acceleration.">
-    <meta name="theme-color" content="#f2f0e8">
+    <meta name="theme-color" content="#f6f4ec">
     <title>Roadmap · Eliscript</title>
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
@@ -18,15 +18,19 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="nav-shell" aria-label="Primary navigation">
-        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <a class="brand" href="../index.html">
+          <img class="brand-mark" src="assets/eliscript-logo.png" alt="">
+          <span>Eliscript</span>
+          <span class="brand-ver" data-version>v0.1.3</span>
+        </a>
         <div class="nav-links">
           <a href="getting-started.html">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
           <a class="nav-optional" href="specifications.html">Specs</a>
-          <a class="nav-optional" href="playground.html">Playground</a>
           <a class="nav-optional" href="roadmap.html" aria-current="page">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a class="nav-cta" href="playground.html">Playground →</a>
         </div>
       </nav>
     </header>
@@ -34,7 +38,7 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Roadmap</p>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span><span>Roadmap · v0.1.3</span></p>
           <h1>A mature core with an explicit next frontier.</h1>
           <p class="doc-lede">The retained maturity baseline closes implementation, verification, and stabilization. New language work begins as visible Draft specifications without rewriting that evidence.</p>
         </div>
@@ -72,10 +76,10 @@
               <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent collections, protocols, transducers, 46 standard-library modules with 601 checked exports, and explicit platform capabilities are complete and stabilized.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M12</span><div><h3>Reliability</h3><p>The 100,000-input fuzz corpus, 1,000-module scale suite, 100,000-request Emacs worker soak, security matrix, performance budgets, and repository-integrity audit are complete.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M13</span><div><h3>Core acceptance</h3><p>All 42 implementation units, 35 mandatory verification criteria, and 173 compatibility stabilization units are complete in the retained evidence.</p></div><span class="status status-done">35/35 pass</span></article>
-              <article class="milestone"><span class="milestone-id">v0.1.0</span><div><h3>Emacs-compatible core &amp; 1+5+2 extensions</h3><p>100% Emacs Lisp compatible default core, 7 modular extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, explicit JS sentinels, and WASM/ARM64 Native ABI), 50-case Emacs/JS Differential Oracle, and 4-dimension performance gate.</p></div><span class="status status-done">Released</span></article>
-              <article class="milestone"><span class="milestone-id">v0.1.1</span><div><h3>Pure Eliscript dual-host runtime, .el project support &amp; TDZ narrowing</h3><p>100% pure Eliscript dual-host runtime (<code>runtime/lisp.eli</code>, 0 <code>js*</code> capsules), industrial Emacs Lisp semantics (<code>?char</code>, <code>&amp;key</code>, <code>cl-defstruct</code>, <code>setf</code>, <code>cl-loop</code>, <code>rx</code>, <code>secure-hash</code>, <code>with-temp-buffer</code>), native <code>.el</code> / <code>.eli</code> project build support, and TDZ narrowing with <code>runtime/prelude.eli</code> (-6.57% compiler size, 2.08x faster compile).</p></div><span class="status status-done">Released</span></article>
-              <article class="milestone"><span class="milestone-id">v0.1.2</span><div><h3>Unified .el/.eli CLI &amp; AOT runtime, async dynamic continuations &amp; compact Stage 3 package</h3><p>Unified Lisp interpretation and AOT compilation behind <code>eliscript</code>, dynamic/special binding preservation across async continuations and bounded channels, live keymap inheritance, WASM/Native ABI precision, and deduplicated <code>&lt;5 MB</code> Stage 3 release tarball.</p></div><span class="status status-done">Released</span></article>
-              <article class="milestone"><span class="milestone-id">v0.1.3</span><div><h3>MDP/MDS/GEPO wire suite, Val64 memory architecture, Emacs 32.0.50 baseline &amp; Stage 3 closure</h3><p>Structured Markdown Data Protocol (<code>stdlib/mdp</code>), Markdown Data Schema (<code>stdlib/mds</code>), and self-describing GEPO HTTP RPC (<code>stdlib/gepo</code>) expanding the library surface to 46 modules / 601 exports; unified 64-bit <code>Val64</code> tagged-value memory model across WASM and Native targets; pinned GNU Emacs 32.0.50 source baseline; 343-file byte-identical Stage 2/Stage 3 closure; and 18/18 four-dimension performance improvements.</p></div><span class="status status-done">Released</span></article>
+              <article class="milestone"><span class="milestone-id">v0.1.0</span><div><h3>Emacs-compatible core &amp; modular extensions</h3><p>Emacs Lisp compatible default core, modular extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, and explicit JS sentinels), Emacs/JS differential verification, and compiler performance gates.</p></div><span class="status status-done">Released</span></article>
+              <article class="milestone"><span class="milestone-id">v0.1.1</span><div><h3>Pure Eliscript dual-host runtime, .el project support &amp; TDZ narrowing</h3><p>100% pure Eliscript dual-host runtime (<code>runtime/lisp.eli</code>), rich Emacs Lisp semantics (<code>?char</code>, <code>&amp;key</code>, <code>cl-defstruct</code>, <code>setf</code>, <code>cl-loop</code>, <code>rx</code>, <code>secure-hash</code>, <code>with-temp-buffer</code>), native <code>.el</code> / <code>.eli</code> project builds, and faster self-hosted compilation via <code>runtime/prelude.eli</code>.</p></div><span class="status status-done">Released</span></article>
+              <article class="milestone"><span class="milestone-id">v0.1.2</span><div><h3>Unified .el/.eli CLI &amp; AOT runtime and dynamic async continuations</h3><p>Unified Lisp interpretation and AOT compilation behind <code>eliscript</code>, dynamic binding preservation across async continuations and bounded channels, live keymap inheritance, and compact Stage 3 distribution.</p></div><span class="status status-done">Released</span></article>
+              <article class="milestone"><span class="milestone-id">v0.1.3</span><div><h3>Standard library expansion, persistent semantics &amp; Stage 3 closure</h3><p>Expanded the standard library surface to 46 modules / 601 checked exports, strengthened runtime memory/collection consistency across targets, verified reproducible Stage 2/Stage 3 self-hosted builds, and improved end-to-end compilation and runtime speed.</p></div><span class="status status-done">Released</span></article>
             </div>
           </section>
 
@@ -103,15 +107,15 @@ Emacs Lisp seed + compiler.eli → compiler.js
 
 Generation 2
 compiler.js + compiler.eli → next-compiler.js</code></pre>
-            <p>Both compiler generations pass the same conformance suite, and the generated compiler reproduces itself without semantic drift across a zero-tracked-<code>.mjs</code> repository where all JavaScript modules are synthesized from <code>.eli</code> sources.</p>
-            <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the same Generation 3. All thirteen compiler ESM modules, their Source Maps, and the 343-file self-hosted stage2/stage3 closure match byte-for-byte.</p></div>
+            <p>Both compiler generations pass the same conformance suite, and the generated compiler reproduces itself without semantic drift from clean <code>.eli</code> sources.</p>
+            <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the identical Generation 3 across every compiler module, runtime module, and Source Map.</p></div>
           </section>
 
           <section id="acceleration">
             <h2>A path back into Emacs</h2>
-            <p>Emacs now controls a long-lived Bun worker over NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, whole-graph manifests, dependency-aware mapped Eliscript errors, immutable module digests, and automatic worker generations.</p>
-            <p><code>defportable</code> rejects mutable module state and host interop, follows immutable helper dependencies transitively, and emits a frozen manifest that the worker resolves by Eliscript source name. Verified project metadata now reuses clean modules while dirty portable graphs repeat closure validation before emission. Versioned build reports expose stable cache decisions and separate non-identity phase timings to editors and CI. A document-search adapter compiles its scoring closure with a source map and dispatches documents concurrently.</p>
-            <p>The mature API adds persistent-value encoding, chunked transfer, dual Emacs Lisp and Eliscript implementations, verification mode, workload thresholds, buffer-version guards, and transactional result application. Editors keep identity-sensitive work in Emacs; parsers, transforms, indexing, graph analysis, and other coarse-grained computations can use a warm JavaScript engine.</p>
+            <p>Emacs controls a long-lived worker over NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, whole-graph manifests, source-mapped Eliscript errors, immutable module digests, and automatic worker restarts on source edits.</p>
+            <p><code>defportable</code> rejects mutable module state and host interop, follows immutable helper dependencies transitively, and emits a manifest resolved by Eliscript name. Verified project metadata reuses clean modules while dirty graphs re-validate before emission.</p>
+            <p>Editors keep identity-sensitive work in Emacs; parsers, transforms, indexing, graph analysis, and other coarse-grained computations can use a warm JavaScript engine.</p>
             <div class="callout"><p>The reference workload measured a much larger engine-only speedup than end-to-end speedup because transport and client work remain visible. Coarse-grained tasks are the target; small editor operations stay in Emacs.</p></div>
           </section>
 
@@ -124,7 +128,7 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
 
           <section id="next">
             <h2>The next frontier</h2>
-            <p>General automatic tail-call optimization is now tracked by <a href="https://github.com/liuchong/eliscript/blob/master/specs/0180-general-tail-call-optimization.md">specification 0180</a>. Direct self-tail calls and closed mutual-recursion groups are separate candidates. Both must preserve argument evaluation, arity, destructuring, exceptions, async ordering, Source Maps, interoperation, and compiler parity.</p>
+            <p>General automatic tail-call optimization is tracked by <a href="https://github.com/liuchong/eliscript/blob/master/specs/0180-general-tail-call-optimization.md">specification 0180</a>. Direct self-tail calls and closed mutual-recursion groups are separate candidates. Both must preserve argument evaluation, arity, destructuring, exceptions, async ordering, Source Maps, interoperation, and compiler parity.</p>
             <p>Until that Draft becomes an implemented and stabilized contract, explicit <code>recur</code> remains the preferred self-recursion mechanism and <code>trampoline</code> remains the mechanism for dynamic or mutual thunk chains.</p>
           </section>
 
@@ -144,6 +148,21 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Roadmap</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div class="footer-brand">
+          <img class="footer-logo" src="assets/eliscript-logo-light.png" alt="">
+          <p>Eliscript · Roadmap</p>
+        </div>
+        <div class="footer-links">
+          <a href="language.html">Language</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
+          <span>© <span data-year>2026</span></span>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>

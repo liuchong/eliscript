@@ -78,10 +78,10 @@
                   "output" "native container requested explicitly\nreceiver-preserving method call\nlossless js-false / js-null / js-undefined sentinels\nstandard ESM host behavior on Node 24+ and Bun 1.4+")
       "compat" (js-object
                  "source" "(require 'eliscript-runtime)\n\n(defun-case scale\n  ((x) (scale x 2))\n  ((x factor)\n   (let-bind (((:keys a b :or ((b 10))) x))\n     (* (+ a b) factor))))"
-                 "output" "100% Emacs Lisp compatible core (.el + .eli)\nmulti-arity dispatch + pcase destructuring\nruns in GNU Emacs 32.0.50 and JS AOT runtime\nzero-conflict 1+5+2 extension packs")
-      "wire" (js-object
-               "source" "(import \"eliscript/dist/stdlib/mdp\" mdp-encode mdp-parse)\n(import \"eliscript/dist/stdlib/mds\" mds-validate)\n(import \"eliscript/dist/stdlib/gepo\" gepo-operation gepo-service)\n\n(defconst doc (mdp-encode (js-object :release \"0.1.3\" :ready t)))\n(print (get (mdp-parse doc) :release))"
-               "output" "deterministic Markdown Data Protocol (MDP)\nopen-world Markdown Data Schema (MDS) checks\nself-describing GEPO HTTP discovery & RPC\nshipped in the 46-module / 601-export stdlib")))
+                 "output" "100% Emacs Lisp compatible core (.el + .eli)\nmulti-arity dispatch + pcase destructuring\nnil-only falsiness in Emacs compat mode\nsame source across GNU Emacs and standard ESM")
+      "async" (js-object
+                "source" "(defun-async load-all (items)\n  (with-async-scope\n    (let ((ch (async-channel 4)))\n      (async-put! ch (await (fetch-item (first items))))\n      (await (async-take! ch)))))"
+                "output" "lexical task scope owns child tasks\nsibling tasks cancel automatically on failure\nbounded async-channel backpressure\ndynamic bindings preserved across await")))
 
   ;; ---------------------------------------------------------- example switcher
 
@@ -159,6 +159,29 @@
                      (when (present? empty)
                        (set-hidden empty (not (= visible 0)))))))))))
 
+  ;; ---------------------------------------------------------- copy command bar
+
+  (defun bind-copy-commands ()
+    (each (nodes "[data-copy-command]")
+          (lambda (button)
+            (watch button "click"
+                   (lambda (event)
+                     (let ((command (js-call button :getAttribute "data-copy-command")))
+                       (when (present? command)
+                         (let ((clipboard (field globalThis.navigator "clipboard")))
+                           (when (and (present? clipboard)
+                                      (present? (field clipboard "writeText")))
+                             (try
+                               (let ((pending (js-call clipboard :writeText command)))
+                                 (when (and (present? pending)
+                                            (present? (field pending "catch")))
+                                   (js-call pending :catch (lambda (err) nil))))
+                               (catch err nil))))
+                         (set-text button "Copied")
+                         (globalThis.setTimeout
+                           (lambda () (set-text button "Copy"))
+                           1400))))))))
+
   ;; ---------------------------------------------------------------- footer
 
   (defconst site-semver "0.1.3")
@@ -187,6 +210,7 @@
     (bind-examples)
     (bind-language-tabs)
     (bind-api-search)
+    (bind-copy-commands)
     (bind-version)
     (bind-year))
 

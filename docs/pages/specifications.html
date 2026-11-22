@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="How Eliscript specifications define language behavior, implementation state, compatibility, and evidence.">
-    <meta name="theme-color" content="#f2f0e8">
+    <meta name="theme-color" content="#f6f4ec">
     <title>Specifications · Eliscript</title>
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
@@ -18,15 +18,19 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="nav-shell" aria-label="Primary navigation">
-        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <a class="brand" href="../index.html">
+          <img class="brand-mark" src="assets/eliscript-logo.png" alt="">
+          <span>Eliscript</span>
+          <span class="brand-ver" data-version>v0.1.3</span>
+        </a>
         <div class="nav-links">
           <a href="getting-started.html">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
           <a class="nav-optional" href="specifications.html" aria-current="page">Specs</a>
-          <a class="nav-optional" href="playground.html">Playground</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a class="nav-cta" href="playground.html">Playground →</a>
         </div>
       </nav>
     </header>
@@ -34,7 +38,7 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Design authority</p>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span><span>Design authority · v0.1.3</span></p>
           <h1>Behavior is specified before it becomes a promise.</h1>
           <p class="doc-lede">Every language, compiler, runtime, library, and toolchain capability has an explicit owner, delivery state, and executable evidence boundary.</p>
         </div>
@@ -42,6 +46,7 @@
 
       <div class="doc-shell">
         <nav class="doc-nav" aria-label="On this page">
+          <img class="doc-nav-emblem" src="assets/eliscript-logo-avocado.png" alt="" loading="lazy">
           <p class="doc-nav-title">On this page</p>
           <a href="#snapshot">Snapshot</a>
           <a href="#states">States</a>
@@ -90,8 +95,8 @@
             <div class="milestones">
               <article class="milestone"><span class="milestone-id">Core</span><div><h3>Language and compiler</h3><p>Start with the language boundary, implemented forms, lexical analysis, explicit IR, direct ESM emission, and Source Maps.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0001-language-and-toolchain.md">0001</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0003-core-language-v0.md">0003</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0007-intermediate-representation.md">0007</a></p></div><span class="status status-done">Stable core</span></article>
               <article class="milestone"><span class="milestone-id">Data</span><div><h3>Persistent values</h3><p>Follow the host-symbiosis design into Vector tries, Lists, HAMT Maps and Sets, Transients, Queues, Records, sorted collections, and the million-value exit audit.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0041-host-symbiosis-and-persistent-data.md">0041</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0078-persistent-collection-core-exit-audit.md">0078</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0175-persistent-sorted-collections.md">0175</a></p></div><span class="status status-done">Implemented</span></article>
-              <article class="milestone"><span class="milestone-id">Host</span><div><h3>Self-hosting and Emacs</h3><p>Read the bootstrap foundation, self-hosted compiler, worker protocol, accelerated operation service, and measured Emacs reinvestment.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0013-bootstrap-foundation.md">0013</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0019-self-hosted-compiler.md">0019</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0105-emacs-analysis-performance-reinvestment.md">0105</a></p></div><span class="status status-done">Implemented</span></article>
-              <article class="milestone"><span class="milestone-id">Wire</span><div><h3>Markdown data, schemas, and HTTP RPC</h3><p>Read the deterministic Markdown Data Protocol (<code>mdp</code>), open-world Markdown Data Schema validator (<code>mds</code>), and self-describing GEPO HTTP discovery and RPC handler suite (<code>gepo</code>).</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0181-markdown-wire-and-http-rpc.md">0181</a></p></div><span class="status status-done">Implemented</span></article>
+              <article class="milestone"><span class="milestone-id">Host</span><div><h3>Self-hosting and Emacs</h3><p>Read the bootstrap foundation, self-hosted compiler, Emacs workflow, and portable library design.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0013-bootstrap-foundation.md">0013</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0019-self-hosted-compiler.md">0019</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0105-emacs-analysis-performance-reinvestment.md">0105</a></p></div><span class="status status-done">Implemented</span></article>
+              <article class="milestone"><span class="milestone-id">Stdlib</span><div><h3>Tree walking, Zippers, and lazy sequences</h3><p>Read the stack-safe persistent tree rewriting, O(1)-step Zipper navigation, and memoized lazy-sequence specifications.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0173-persistent-tree-walk.md">0173</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0174-persistent-zipper-navigation.md">0174</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0176-memoized-lazy-sequences.md">0176</a></p></div><span class="status status-done">Implemented</span></article>
               <article class="milestone"><span class="milestone-id">Gate</span><div><h3>Maturity and acceptance</h3><p>The roadmap defines denominators; the compatibility corpus, documentation contract, retained runs, and final manifest provide the evidence.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0040-maturity-roadmap.md">0040</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0134-versioned-core-acceptance-corpus.md">0134</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0138-versioned-final-acceptance-artifacts.md">0138</a></p></div><span class="status status-done">35/35</span></article>
             </div>
           </section>
@@ -115,6 +120,23 @@ make byte-compile</code></pre>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Specifications</p><div class="footer-links"><a href="language.html">Language</a><a href="roadmap.html">Roadmap</a><a href="publishing.html">Applications</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div class="footer-brand">
+          <img class="footer-logo" src="assets/eliscript-logo-light.png" alt="">
+          <p>Eliscript · Specifications</p>
+        </div>
+        <div class="footer-links">
+          <a href="language.html">Language</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="publishing.html">Applications</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
+          <span>© <span data-year>2026</span></span>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>

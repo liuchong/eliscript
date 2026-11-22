@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="The implemented Eliscript core language and its semantics.">
-    <meta name="theme-color" content="#f2f0e8">
+    <meta name="theme-color" content="#f6f4ec">
     <title>Language · Eliscript</title>
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
@@ -18,15 +18,19 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="nav-shell" aria-label="Primary navigation">
-        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <a class="brand" href="../index.html">
+          <img class="brand-mark" src="assets/eliscript-logo.png" alt="">
+          <span>Eliscript</span>
+          <span class="brand-ver" data-version>v0.1.3</span>
+        </a>
         <div class="nav-links">
           <a href="getting-started.html">Start</a>
           <a href="language.html" aria-current="page">Language</a>
           <a href="api.html">API</a>
           <a class="nav-optional" href="specifications.html">Specs</a>
-          <a class="nav-optional" href="playground.html">Playground</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a class="nav-cta" href="playground.html">Playground →</a>
         </div>
       </nav>
     </header>
@@ -34,9 +38,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Stable language core · Emacs-compatible syntax · v0.1.3</p>
-          <h1>100% Emacs Lisp core, 1+5+2 extensions, four-target reach.</h1>
-          <p class="doc-lede">Eliscript 0.1.3 combines a 100% Emacs Lisp-compatible default core, unified <code>.el</code>/<code>.eli</code> interpretation and AOT compilation, and seven explicit extension packs (contracts, persistent data, pcase-superset destructuring, lexical modules, structured async, lossless JS interop, and 64-bit <code>Val64</code> WASM/Native ABI).</p>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span><span>Language core · Emacs-compatible syntax · v0.1.3</span></p>
+          <h1>Emacs Lisp core, persistent data, standard ESM.</h1>
+          <p class="doc-lede">Eliscript 0.1.3 combines an unchanged Emacs Lisp core, unified <code>.el</code>/<code>.eli</code> compilation, and modular extensions for contracts, persistent data, structural destructuring, lexical modules, structured async, and explicit JS interop.</p>
         </div>
       </header>
 
@@ -73,17 +77,17 @@
                 <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native JavaScript containers</td></tr>
               </tbody>
             </table>
-            <div class="callout"><p>In the Emacs-compatible core (<code>eliscript-runtime</code> / <code>eliscript/runtime/lisp</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp 32.0.50 100%. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
+            <div class="callout"><p>In the Emacs-compatible core (<code>eliscript-runtime</code> / <code>eliscript/runtime/lisp</code>), only <code>nil</code> is false—<code>0</code>, <code>""</code>, <code>'[]</code>, and <code>js-false</code> are truthy, matching GNU Emacs Lisp semantics. In standalone <code>.eli</code> ESM modules, <code>false</code>, <code>nil</code>, and <code>undefined</code> are false while <code>0</code> and <code>""</code> remain true.</p></div>
           </section>
 
           <section id="forms">
-            <h2>Implemented forms &amp; 1+5+2 extensions</h2>
+            <h2>Implemented forms &amp; language extensions</h2>
             <div class="language-tabs">
               <div class="segments" role="tablist" aria-label="Language form categories">
                 <button class="segment" type="button" role="tab" aria-selected="true" data-language-tab="bindings">Bindings</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="control">Control</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="data">Data</button>
-                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="interop">Interop &amp; ABI</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="interop">JS Interop</button>
               </div>
 
               <div class="language-panel" data-language-panel="bindings">
@@ -93,7 +97,7 @@
                   <article class="form-item"><code>defun-bind / let-bind / let*-bind</code><p>Unified <code>pcase</code>-superset structural destructuring (<code>:keys</code>, <code>:strs</code>, <code>:syms</code>, <code>:or</code>, <code>:as</code>, <code>&amp;rest</code>).</p></article>
                   <article class="form-item"><code>let-const / let*-const</code><p>Immutable local bindings that reject <code>setq</code> / <code>setf</code> mutation at expansion time.</p></article>
                   <article class="form-item"><code>declare (eliscript-*)</code><p>Zero-overhead <code>eliscript-type</code>, <code>eliscript-pure</code>, <code>eliscript-pre</code>, and <code>eliscript-post</code> contracts.</p></article>
-                  <article class="form-item"><code>defportable</code><p>Worker entries with a statically checked immutable dependency closure.</p></article>
+                  <article class="form-item"><code>defportable</code><p>Portable functions with a statically checked immutable dependency closure.</p></article>
                   <article class="form-item"><code>defmulti / defmethod</code><p>Named multimethods and source-ordered method definitions over the portable multimethod library.</p></article>
                   <article class="form-item"><code>defprotocol / eliscript-defprotocol</code><p>Open protocols with exact-type, host-category, and default implementations.</p></article>
                   <article class="form-item"><code>lambda / fn / letfn</code><p>First-class anonymous and mutually recursive local functions.</p></article>
@@ -108,7 +112,7 @@
                   <article class="form-item"><code>case / condp</code><p>Single-evaluation constant or predicate dispatch with lazy selected results.</p></article>
                   <article class="form-item"><code>-&gt; / -&gt;&gt; / as-&gt; / cond-&gt; / cond-&gt;&gt;</code><p>First-position, last-position, named, and conditional expression threading.</p></article>
                   <article class="form-item"><code>thread-some-&gt; / thread-some-&gt;&gt;</code><p>Nil-short-circuiting pipelines that preserve <code>js-false</code> and falsy host values.</p></article>
-                  <article class="form-item"><code>eliscript-loop / loop / recur</code><p>50,000+ depth stack-safe iteration with checked tail positions and simultaneous rebinding.</p></article>
+                  <article class="form-item"><code>eliscript-loop / loop / recur</code><p>Constant-stack deep iteration with checked tail positions and simultaneous rebinding.</p></article>
                   <article class="form-item"><code>defun-async / await / with-async-scope</code><p>Async functions, structured task scopes with automatic sibling cancellation, timeouts, and bounded <code>async-channel</code>.</p></article>
                   <article class="form-item"><code>fn-comp / fn-partial / fn-juxt / fn-memoize</code><p>Functional composition, partial application, juxtaposition, complement, and structural memoization.</p></article>
                   <article class="form-item"><code>condition-case / unwind-protect / catch / throw</code><p>Full Emacs Lisp condition hierarchy (<code>define-error</code>) and non-local exit semantics.</p></article>
@@ -123,7 +127,7 @@
                   <article class="form-item"><code>transient / conj! / assoc! / persistent!</code><p>Owner-isolated batch mutation builders with one-shot freeze enforcement.</p></article>
                   <article class="form-item"><code>[...] / {...} / #{...} / #queue [...]</code><p>Persistent Vector, Map, Set, and Queue literals plus Emacs <code>seq.el</code> / <code>map.el</code> integration.</p></article>
                   <article class="form-item"><code>value-equal? / value-hash</code><p>Recursive structural equality and deterministic hashing across all persistent collections.</p></article>
-                  <article class="form-item"><code>mdp / mds / gepo</code><p>Deterministic Markdown Data Protocol (<code>mdp-parse</code> / <code>mdp-encode</code>), schema validation (<code>mds-validate</code>), and self-describing HTTP RPC (<code>gepo-service</code> / <code>gepo-client</code>).</p></article>
+                  <article class="form-item"><code>zipper / prewalk / postwalk</code><p>Stack-safe nested tree editing and immutable path reconstruction via O(1)-step Zippers.</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="interop" hidden>
@@ -132,8 +136,8 @@
                   <article class="form-item"><code>js-false / js-null / js-undefined</code><p>Distinct tri-state JS sentinels preserved losslessly by <code>eliscript-&gt;js</code> and <code>js-&gt;eliscript</code>.</p></article>
                   <article class="form-item"><code>js-call / js-new / js*</code><p>Receiver-preserving method invocation, constructor calls, and explicit raw JS escape hatch.</p></article>
                   <article class="form-item"><code>with-eliscript-handle</code><p>Cross-engine opaque object handles with deterministic lifecycle revocation (<code>eliscript-revoke-handle!</code>).</p></article>
-                  <article class="form-item"><code>:abi (:numeric-f64 / :memory-u32)</code><p>Zero-glue typed numeric and linear-memory ABI lowered across Emacs, JS, WASM, and ARM64 Native.</p></article>
-                  <article class="form-item"><code>mem-load-* / mem-store-*!</code><p>Bounds-checked <code>u32</code> and <code>f64</code> linear-memory load/store operators.</p></article>
+                  <article class="form-item"><code>eliscript-&gt;js / js-&gt;eliscript</code><p>Explicit shallow and deep host conversion at module boundaries without hidden coercion.</p></article>
+                  <article class="form-item"><code>import / export / export-default</code><p>Direct static ECMAScript module boundaries alongside extensionless package imports.</p></article>
                 </div>
               </div>
             </div>
@@ -147,7 +151,7 @@
 (defun load-once (value)
   (once (+ value 1)))</code></pre>
             <p><code>defmacro</code> and <code>cl-defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>,@</code>, <code>&amp;optional</code>, <code>&amp;rest</code>, and <code>&amp;body</code> are supported. <code>defmacro-checked</code> enforces a pure compile-time sandbox that statically rejects side-effecting IO, process, network, or file mutations during macro expansion.</p>
-            <div class="callout callout-coral"><p>Both compiler generations interpret the same deterministic macro subset. Unlisted host functions, editor state, files, environment variables, and processes are unavailable unless a future explicit compiler capability exposes them.</p></div>
+            <div class="callout callout-coral"><p>Both compiler generations interpret the same deterministic macro subset. Unlisted host functions, editor state, files, environment variables, and processes are unavailable unless an explicit compiler capability exposes them.</p></div>
           </section>
 
           <section id="modules">
@@ -159,7 +163,7 @@
 
 (export Component helper)
 (export-default Component)</code></pre>
-            <p>One Eliscript source file emits one ESM file. Alongside file-level <code>(module ...)</code>, the <code>eliscript-module</code> extension provides <code>(defmodule name (:export ...) (:import ...) ...)</code> with lexical-private internal bindings (inaccessible externally while exposed to exported functions) and <code>defvar-once</code> hot-reload state preservation. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/runtime/lisp"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler. The repository itself tracks zero <code>.mjs</code> source files in Git; all JavaScript modules are synthesized from <code>.eli</code> sources during bootstrap.</p>
+            <p>One Eliscript source file emits one ESM file. Alongside file-level <code>(module ...)</code>, the <code>eliscript-module</code> extension provides <code>(defmodule name (:export ...) (:import ...) ...)</code> with lexical-private internal bindings (inaccessible externally while exposed to exported functions) and <code>defvar-once</code> hot-reload state preservation. Package subpath imports under <code>eliscript/*</code> support both extensionless specifiers (such as <code>"eliscript/runtime/core/order"</code> or <code>"eliscript/runtime/lisp"</code>) and explicit <code>.mjs</code> specifiers across Node, Bun, and the browser compiler.</p>
           </section>
 
           <section id="collections">
@@ -174,7 +178,7 @@
                 <tr><td>Sorted Map / Set</td><td>Structurally shared AVL trees with custom comparators and range queries</td></tr>
               </tbody>
             </table>
-            <p>All collection families participate in value equality, hashing, metadata, canonical data text, generic lookup, reduction, construction, stack, and reversible traversal protocols where applicable, with structural reference-identity (<code>===</code>) short-circuiting for shared subtrees and compact O(1)-step persistent Vector Zipper navigation across 12,000+ levels without prefix array copying. Records extend persistent Map behavior without surrendering their declared type identity.</p>
+            <p>All collection families participate in value equality, hashing, metadata, canonical data text, generic lookup, reduction, construction, stack, and reversible traversal protocols where applicable, with structural reference-identity (<code>===</code>) short-circuiting for shared subtrees and compact O(1)-step persistent Vector Zipper navigation across deeply nested trees without prefix array copying. Records extend persistent Map behavior without surrendering their declared type identity.</p>
             <p>Owner-token Transient Vector, Map, and Set builders support efficient isolated construction. <code>persistent!</code> completes the builder once; later mutation or reuse is rejected, and static compiler analysis prevents transient ownership from escaping trusted construction scopes.</p>
           </section>
 
@@ -217,19 +221,34 @@
           </section>
 
           <section id="differences">
-            <h2>100% Emacs Lisp core &amp; 1+5+2 architecture</h2>
+            <h2>Emacs Lisp core &amp; modular extension architecture</h2>
             <ul>
-              <li><strong>100% Emacs Lisp default core (<code>eliscript-runtime</code>)</strong>: Preserves Lisp-2 dual function/value namespaces, <code>nil</code>-only falsiness, lexical and dynamic <code>defvar</code> scope, mutable native containers alongside 7 persistent collection types, integer division <code>(/ 7 2) =&gt; 3</code>, <code>condition-case</code> / <code>define-error</code>, and full <code>defmacro</code> / <code>cl-defmacro</code> / <code>pcase</code> compatibility.</li>
-              <li><strong>7 explicit extension packs (<code>1+5+2</code>)</strong>: Activated by definition form without polluting standard Emacs Lisp — <code>eliscript-contract</code>, <code>eliscript-data</code>, <code>eliscript-bind</code>, <code>eliscript-module</code>, <code>eliscript-async</code>, <code>eliscript-js</code>, and <code>eliscript-abi</code>.</li>
-              <li><strong>Four-target ABI execution</strong>: Functions annotated with <code>(declare (eliscript-abi :numeric-f64 ...))</code> or <code>(declare (eliscript-abi :memory-u32 ...))</code> execute with identical semantics across Emacs Lisp, JavaScript ESM, WASM, and ARM64 Native binaries.</li>
-              <li><strong>Standalone <code>.eli</code> ESM modules</strong>: Keep lexical Lisp-1 resolution, immutable persistent literals <code>[...]</code> / <code>{...}</code> / <code>#{...}</code>, and explicit ECMAScript module boundaries.</li>
+              <li><strong>Emacs Lisp default core (<code>eliscript-runtime</code>)</strong>: Preserves Lisp-2 dual function/value namespaces, <code>nil</code>-only falsiness, lexical and dynamic <code>defvar</code> scope, mutable native containers alongside 7 persistent collection types, integer division <code>(/ 7 2) =&gt; 3</code>, <code>condition-case</code> / <code>define-error</code>, and full <code>defmacro</code> / <code>cl-defmacro</code> / <code>pcase</code> compatibility.</li>
+              <li><strong>Modular opt-in extensions</strong>: Activated by definition form without polluting standard Emacs Lisp — contracts (<code>declare</code>), persistent data &amp; records, unified pattern matching, lexical <code>defmodule</code>, structured async concurrency, and lossless JS sentinels.</li>
+              <li><strong>Standalone <code>.eli</code> ESM modules</strong>: Keep lexical Lisp-1 resolution, immutable persistent literals <code>[...]</code> / <code>{...}</code> / <code>#{...}</code>, and clean ECMAScript module boundaries.</li>
             </ul>
-            <div class="callout callout-coral"><p>See <a href="https://github.com/liuchong/eliscript/blob/master/docs/core-syntax.md">Emacs-Compatible Syntax Specification (0.1.0)</a> for the complete 1+5+2 specification and 50-case Emacs/JS Differential Oracle.</p></div>
+            <div class="callout callout-coral"><p>See <a href="https://github.com/liuchong/eliscript/blob/master/docs/core-syntax.md">Emacs-Compatible Syntax Specification (0.1.0)</a> for the complete language syntax and compatibility reference.</p></div>
           </section>
         </article>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Language</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div class="footer-brand">
+          <img class="footer-logo" src="assets/eliscript-logo-light.png" alt="">
+          <p>Eliscript · Language</p>
+        </div>
+        <div class="footer-links">
+          <a href="getting-started.html">Start</a>
+          <a href="roadmap.html">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
+          <span>© <span data-year>2026</span></span>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>

@@ -1,0 +1,81 @@
+<svg viewBox="0 0 600 340" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Eliscript persistent structural sharing and compilation model">
+  <defs>
+    <pattern id="paperGrain" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="0.9" fill="#d9d4c4"/>
+    </pattern>
+  </defs>
+  <rect width="600" height="340" fill="#fbf9f2"/>
+  <rect width="600" height="340" fill="url(#paperGrain)"/>
+
+  <!-- Sculptural Lisp Outer Parentheses (ample clearance around diagram) -->
+  <path d="M44 46 C16 100 16 218 44 272" stroke="#171815" stroke-width="7.5" stroke-linecap="round"/>
+  <path d="M556 46 C584 100 584 218 556 272" stroke="#171815" stroke-width="7.5" stroke-linecap="round"/>
+
+  <!-- Left Half: Persistent Structural Sharing Tree -->
+  <rect x="66" y="34" width="214" height="24" rx="5" fill="#e6efe0" stroke="#c7d9bd"/>
+  <text x="173" y="50" text-anchor="middle" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">PERSISTENT STRUCTURAL SHARING</text>
+
+  <!-- Original Root v0 (Avocado) & Updated Root v1 (Coral) -->
+  <circle cx="134" cy="96" r="16" fill="#2d5a34"/>
+  <text x="134" y="100" text-anchor="middle" fill="#fffefa" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="700">v0</text>
+  <circle cx="224" cy="96" r="16" fill="#ef6049"/>
+  <text x="224" y="100" text-anchor="middle" fill="#fffefa" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="700">v1</text>
+
+  <!-- Edges from v0 to shared nodes -->
+  <path d="M126 110 L96 156" stroke="#2d5a34" stroke-width="2.6"/>
+  <path d="M134 112 L147 156" stroke="#2d5a34" stroke-width="2.6"/>
+  <path d="M142 110 L196 156" stroke="#2d5a34" stroke-width="2.6"/>
+
+  <!-- Reused edges from v1 to shared children + path-copied leaf -->
+  <path d="M212 108 L152 158" stroke="#9fb834" stroke-width="2.4" stroke-dasharray="5 3"/>
+  <path d="M224 112 L246 156" stroke="#ef6049" stroke-width="2.8"/>
+
+  <!-- Middle Persistent Nodes -->
+  <rect x="74" y="156" width="44" height="26" rx="6" fill="#e6efe0" stroke="#2d5a34" stroke-width="2"/>
+  <text x="96" y="173" text-anchor="middle" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">:el</text>
+
+  <rect x="125" y="156" width="46" height="26" rx="6" fill="#e6efe0" stroke="#2d5a34" stroke-width="2"/>
+  <text x="148" y="173" text-anchor="middle" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">HAMT</text>
+
+  <rect x="179" y="156" width="36" height="26" rx="6" fill="#fffefa" stroke="#b9b4a5" stroke-width="1.6"/>
+  <text x="197" y="173" text-anchor="middle" fill="#777b6f" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5">val</text>
+
+  <rect x="223" y="156" width="48" height="26" rx="6" fill="#fde7e3" stroke="#ef6049" stroke-width="2.2"/>
+  <text x="247" y="173" text-anchor="middle" fill="#d24832" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">val'</text>
+
+  <!-- Bottom Code Pill -->
+  <rect x="66" y="210" width="214" height="58" rx="8" fill="#171815"/>
+  <text x="80" y="233" fill="#c4d83e" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11">(assoc m :status :ready)</text>
+  <text x="80" y="253" fill="#cfd3c8" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5">O(1) shared roots · immutable</text>
+
+  <!-- Coral Transform Arrow -->
+  <line x1="292" y1="168" x2="352" y2="168" stroke="#ef6049" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M342 157 L357 168 L342 179" stroke="#ef6049" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="323" y="150" text-anchor="middle" fill="#d24832" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">COMPILE</text>
+
+  <!-- Right Half: 4 Wide Pure-Language Pillar Cards -->
+  <rect x="372" y="54" width="162" height="44" rx="7" fill="#fffefa" stroke="#2d5a34" stroke-width="2"/>
+  <text x="386" y="74" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="800">EMACS LISP CORE</text>
+  <text x="386" y="89" fill="#5b5f55" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10">Lisp-2 · .el &amp; .eli</text>
+
+  <rect x="372" y="112" width="162" height="44" rx="7" fill="#171815" stroke="#171815" stroke-width="2"/>
+  <text x="386" y="132" fill="#c4d83e" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="800">READABLE ESM</text>
+  <text x="386" y="147" fill="#d3d6cb" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10">Source Map v3 · ESM</text>
+
+  <rect x="372" y="170" width="162" height="44" rx="7" fill="#fde7e3" stroke="#ef6049" stroke-width="2"/>
+  <text x="386" y="190" fill="#d24832" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="800">LIVE BROWSER</text>
+  <text x="386" y="205" fill="#5b5f55" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10">Zero-build &lt;script&gt;</text>
+
+  <rect x="372" y="228" width="162" height="44" rx="7" fill="#fffefa" stroke="#2d5a34" stroke-width="2"/>
+  <text x="386" y="248" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="11" font-weight="800">PERSISTENT DATA</text>
+  <text x="386" y="263" fill="#5b5f55" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10">HAMT · Vector · Zipper</text>
+
+  <!-- Crisp Vector Bottom Footer Track -->
+  <text x="116" y="313" text-anchor="middle" fill="#5b5f55" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="600">(.el / .eli)</text>
+  <line x1="164" y1="309" x2="210" y2="309" stroke="#c8c3b2" stroke-width="1.8"/>
+  <rect x="210" y="297" width="170" height="24" rx="12" fill="#fffefa" stroke="#d6d3c7" stroke-width="1.2"/>
+  <text x="295" y="313" text-anchor="middle" fill="#2d5a34" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10" font-weight="700">Self-Hosted Compiler</text>
+  <line x1="380" y1="309" x2="414" y2="309" stroke="#ef6049" stroke-width="1.8"/>
+  <polygon points="413,304 422,309 413,314" fill="#ef6049"/>
+  <text x="496" y="313" text-anchor="middle" fill="#171815" font-family="SFMono-Regular, ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="700">Emacs · ESM · Web</text>
+</svg>

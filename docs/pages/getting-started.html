@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Compile and run your first Eliscript module.">
-    <meta name="theme-color" content="#f2f0e8">
+    <meta name="theme-color" content="#f6f4ec">
     <title>Getting Started · Eliscript</title>
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
@@ -18,15 +18,19 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <nav class="nav-shell" aria-label="Primary navigation">
-        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <a class="brand" href="../index.html">
+          <img class="brand-mark" src="assets/eliscript-logo.png" alt="">
+          <span>Eliscript</span>
+          <span class="brand-ver" data-version>v0.1.3</span>
+        </a>
         <div class="nav-links">
           <a href="getting-started.html" aria-current="page">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
           <a class="nav-optional" href="specifications.html">Specs</a>
-          <a class="nav-optional" href="playground.html">Playground</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a class="nav-cta" href="playground.html">Playground →</a>
         </div>
       </nav>
     </header>
@@ -34,9 +38,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Getting started · v0.1.3</p>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span><span>Getting started · v0.1.3</span></p>
           <h1>From one Lisp form to a running module.</h1>
-          <p class="doc-lede">Published releases ship the self-hosted Stage 3 compiler for Node.js 24+ and Bun 1.4+. Source checkouts build the seed in GNU Emacs (pinned at 32.0.50 in CI).</p>
+          <p class="doc-lede">Published releases ship the self-hosted compiler for Node.js 24+ and Bun 1.4+. Source checkouts build the seed compiler directly in GNU Emacs.</p>
         </div>
       </header>
 
@@ -63,11 +67,11 @@
             <pre><code>npm install eliscript@0.1.3
 # or: bun add eliscript@0.1.3
 npx eliscript --help</code></pre>
-            <p>Building from a source checkout or running the Emacs editor/worker integration uses GNU Emacs 29+ (CI and release verification build pinned <strong>GNU Emacs 32.0.50</strong>), Bun 1.4+, and Node.js 24+:</p>
+            <p>Building from a source checkout or running the Emacs editor integration uses GNU Emacs 29+ (CI verifies against GNU Emacs 32.0.50), Bun 1.4+, and Node.js 24+:</p>
             <pre><code>emacs --version
 bun --version
 node --version</code></pre>
-            <p>Install the exact locked JavaScript dependencies used by the optional application and browser probes (<code>react</code> <code>19.3.1</code>, <code>vite</code> <code>8.3.5</code>, <code>playwright-core</code> <code>1.64.1</code>):</p>
+            <p>Install the locked JavaScript dependencies used by optional browser checks (<code>react</code> <code>19.3.1</code>, <code>vite</code> <code>8.3.5</code>, <code>playwright-core</code> <code>1.64.1</code>):</p>
             <pre><code>bun install --frozen-lockfile</code></pre>
             <div class="callout"><p>The Emacs Lisp seed compiler itself has zero JavaScript dependencies; a clean Emacs installation can bootstrap Stage 0 from source.</p></div>
           </section>
@@ -100,11 +104,11 @@ node --version</code></pre>
             <h2>Build a source graph</h2>
             <pre><code>bun run build:stdlib-cli
 bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
-            <p>The Emacs project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph, SHA-256 identities, and separately verified incremental metadata. Repeat builds reuse unchanged modules; pass <code>--no-cache</code> to force compilation. This example builds sequence, text, object, and application sources together. Package, JavaScript, CSS, and image imports remain available to the eventual host.</p>
-            <p>Tooling can request a report with stable cache and per-module decisions plus cache-read, build-work, manifest-write, and total timings:</p>
+            <p>The project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph, SHA-256 identities, and incremental cache metadata. Repeat builds reuse unchanged modules; pass <code>--no-cache</code> to force compilation.</p>
+            <p>Tooling can request a report with stable cache and per-module decisions plus phase timings:</p>
             <pre><code>./bin/eliscript-build --json --root . --out-dir dist/project \
   examples/stdlib-cli/main.eli</code></pre>
-            <p>Timings are observational and never enter the deterministic manifest or cache identity. Without <code>--json</code>, successful builds continue to print only the generated entry path.</p>
+            <p>Timings are observational and never enter the deterministic manifest or cache identity. Without <code>--json</code>, successful builds print only the generated entry path.</p>
           </section>
 
           <section id="browser-hot-reload">
@@ -116,7 +120,7 @@ bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
 (module web.hello
   (print "Compiled live in the browser!"))
 &lt;/script&gt;</code></pre>
-            <p>For programmatic in-memory compilation, Closure-style IR/JS optimization (<code>{ optimize: true, minify: true, closureCompiler }</code>), extensionless package imports (such as <code>(import "eliscript/runtime/core/order" sort)</code> alongside explicit <code>.mjs</code>), and multi-module execution, import <code>eliscript/browser</code> directly:</p>
+            <p>For programmatic in-memory compilation, optimization (<code>{ optimize: true, minify: true, closureCompiler }</code>), extensionless package imports (such as <code>(import "eliscript/runtime/core/order" sort)</code>), and multi-module execution, import <code>eliscript/browser</code> directly:</p>
             <pre><code>import { compileSource, compileProject, moduleGraphUrls, runSource, mountEliscriptScripts } from "eliscript/browser";
 
 const { module } = await runSource(
@@ -127,7 +131,7 @@ console.log(module.double(21)); // 42</code></pre>
           </section>
 
           <section id="persistent">
-            <h2>Use persistent values &amp; 1+5+2 Emacs-compatible extensions</h2>
+            <h2>Use persistent values &amp; Emacs-compatible extensions</h2>
             <pre><code>(module collections
   (import "eliscript/runtime/core/collection" assoc get)
 
@@ -136,9 +140,9 @@ console.log(module.double(21)); // 42</code></pre>
 
   (print (get original :status :missing))
   (print (get updated :status)))</code></pre>
-            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols with reference-identity equality short-circuiting and compact O(1)-step Zipper navigation, and Transient builders provide an isolated high-throughput construction path for Vector, Map, Set, sorting, and data aggregation.</p>
-            <p>In GNU Emacs or JavaScript, load the unified <code>1+5+2</code> entry (<code>(require 'eliscript-runtime)</code> in Emacs or <code>import "eliscript/runtime/lisp"</code> in JS) to combine 100% Emacs Lisp default semantics with <code>defun-case</code>, <code>let-bind</code> / <code>defun-bind</code>, <code>cl-defstruct-persistent</code>, <code>defmodule</code>, <code>with-async-scope</code>, <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels, <code>mdp</code> / <code>mds</code> / <code>gepo</code> Markdown wire &amp; HTTP RPC, and <code>:abi (:numeric-f64 / :memory-u32)</code> multi-target compilation.</p>
-            <p><a class="button" href="language.html#collections">Inspect collection &amp; 1+5+2 semantics</a></p>
+            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols with reference-identity equality short-circuiting and compact O(1)-step Zipper navigation, while Transient builders provide an isolated construction path for batch updates.</p>
+            <p>In GNU Emacs or JavaScript, load the unified Emacs runtime (<code>(require 'eliscript-runtime)</code> in Emacs or <code>import "eliscript/runtime/lisp"</code> in JS) to combine standard Emacs Lisp semantics with <code>defun-case</code>, <code>let-bind</code> / <code>defun-bind</code>, <code>cl-defstruct-persistent</code>, <code>defmodule</code>, <code>with-async-scope</code>, and lossless <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels.</p>
+            <p><a class="button" href="language.html#collections">Inspect collection semantics</a></p>
           </section>
 
           <section id="applications">
@@ -166,20 +170,20 @@ bun run build:org-site</code></pre>
             <h2>Build the bootstrap modules</h2>
             <pre><code>make bootstrap-release
 make verify-bootstrap</code></pre>
-            <p><code>make bootstrap-release</code> cleans generated outputs, builds the Emacs Lisp Stage 0 seed, and drives the Stage 0 → Stage 1 → Stage 2 → Stage 3 self-hosted closure (leaving zero tracked <code>.mjs</code> files in Git). <code>make verify-bootstrap</code> independently authenticates the 343-file byte-identical Stage 2/Stage 3 fixed point. Compile through the portable driver with:</p>
+            <p><code>make bootstrap-release</code> cleans generated outputs, builds the Emacs Lisp Stage 0 seed, and drives the Stage 0 → Stage 1 → Stage 2 → Stage 3 self-hosted closure. <code>make verify-bootstrap</code> independently checks that Stage 2 and Stage 3 match byte-for-byte. Compile through the portable driver with:</p>
             <pre><code>./bin/eliscript-portable --output dist/program.mjs source/program.eli</code></pre>
-            <p>Every compiler module, runtime module, and Source Map in Stage 2 and Stage 3 matches byte-for-byte.</p>
+            <p>Every compiler module, runtime module, and Source Map in Stage 2 and Stage 3 matches identically.</p>
           </section>
 
           <section id="worker">
-            <h2>Measure the Emacs worker</h2>
+            <h2>Emacs portable acceleration</h2>
             <pre><code>(defportable score-values (values)
   (length values))
 
 ./bin/eliscript --portable score-values --output dist/score.mjs source.eli</code></pre>
-            <p><code>defportable</code> validates the complete immutable dependency closure. The generated manifest lets Emacs call <code>score-values</code> without knowing its JavaScript identifier.</p>
+            <p><code>defportable</code> validates the complete immutable dependency closure. The generated manifest lets Emacs invoke <code>score-values</code> directly by Eliscript name.</p>
             <pre><code>bun run benchmark:worker</code></pre>
-            <p>The benchmark compiles one pure workload, starts a long-lived Bun worker, verifies equal Emacs and Eliscript results, and reports cold and warm compilation, startup, execution, serialization, transport, and client costs separately.</p>
+            <p>The benchmark compiles one pure workload, starts a long-lived worker, verifies equal Emacs and Eliscript results, and reports compilation and execution timings cleanly.</p>
             <pre><code>(require 'eliscript-index)
 
 (let ((session (eliscript-index-start)))
@@ -187,19 +191,34 @@ make verify-bootstrap</code></pre>
       (eliscript-index-search-sync
        session '(("intro" . "Emacs and JavaScript")) "javascript")
     (eliscript-index-stop session)))</code></pre>
-            <p>The indexing adapter compiles a source-mapped portable project closure, follows its data and object dependencies, tokenizes editor-owned text, scores documents concurrently, and owns cleanup. Its graph manifest makes dependency changes restart the same client object automatically and maps imported-module errors to their Eliscript source.</p>
+            <p>The indexing example compiles a source-mapped portable project closure, follows its data and object dependencies, tokenizes editor-owned text, scores documents concurrently, and maps any errors cleanly back to Eliscript source locations.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
-            <p>This runs the Emacs ERT suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
+            <p>This runs the Emacs test suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
             <div class="callout callout-coral"><p>The portable standard library and protocol-driven persistent collection core run through the same Eliscript module pipeline. Application adapters are tested separately and contribute no core maturity credit.</p></div>
           </section>
         </article>
       </div>
     </main>
 
-    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Getting started</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a><a href="https://github.com/liuchong/eliscript">GitHub</a><a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a><span>© <span data-year>2026</span></span></div></div></footer>
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <div class="footer-brand">
+          <img class="footer-logo" src="assets/eliscript-logo-light.png" alt="">
+          <p>Eliscript · Getting started</p>
+        </div>
+        <div class="footer-links">
+          <a href="language.html">Language</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
+          <span>© <span data-year>2026</span></span>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>

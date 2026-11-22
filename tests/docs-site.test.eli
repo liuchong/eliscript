@@ -106,12 +106,14 @@
             (await (withPage path
               (async (page requests)
                 (let ((band (await (js-call page :evaluate
-                                     "(() => { const hero = document.querySelector('.hero, .doc-hero'); if (!hero) return null; const heading = hero.querySelector('h1'); return { image: getComputedStyle(hero).backgroundImage.includes('eliscript-hero.jpg'), overlay: getComputedStyle(hero, '::before').backgroundColor, heading: getComputedStyle(heading).color, height: Math.round(hero.getBoundingClientRect().height) }; })()"))))
+                                     "(() => { const hero = document.querySelector('.hero, .doc-hero'); if (!hero) return null; const heading = hero.querySelector('h1'); const svgImg = document.querySelector('img[src*=\"eliscript-concept.svg\"]'); return { legacyPhoto: getComputedStyle(hero).backgroundImage.includes('eliscript-hero.jpg'), dotGrid: getComputedStyle(hero).backgroundImage.includes('radial-gradient'), heading: getComputedStyle(heading).color, height: Math.round(hero.getBoundingClientRect().height), svgLoaded: svgImg ? (svgImg.complete && svgImg.naturalWidth > 0) : null }; })()"))))
                   (js-call (get (expect band) :not) :toBeNull)
-                  (js-call (expect (get band :image)) :toBe t)
-                  (js-call (expect (get band :height)) :toBeGreaterThan 200)
-                  (js-call (expect (get band :heading)) :toBe "rgb(255, 255, 255)")
-                  (js-call (expect (get band :overlay)) :toMatch (new globalThis.RegExp "rgba\\(8, 9, 8, [0-9.]+\\)" "u")))))))
+                  (js-call (expect (get band :legacyPhoto)) :toBe false)
+                  (js-call (expect (get band :dotGrid)) :toBe t)
+                  (js-call (expect (get band :height)) :toBeGreaterThan 180)
+                  (js-call (expect (get band :heading)) :toBe "rgb(23, 24, 21)")
+                  (when (= path "index.html")
+                    (js-call (expect (get band :svgLoaded)) :toBe t)))))))
           (setq idx (1+ idx))))))
 
   (test "the example switcher replaces the source and the output"
@@ -128,12 +130,16 @@
                        :toContain "native container")
               (js-call (expect (await (js-call (js-call page :locator "[data-example=\"interop\"]") :getAttribute "aria-selected")))
                        :toBe "true")
-              (await (js-call (js-call page :locator "[data-example=\"wire\"]") :click))
+              (await (js-call (js-call page :locator "[data-example=\"async\"]") :click))
               (await (js-call page :waitForTimeout 120))
               (js-call (expect (await (js-call (js-call page :locator "[data-source-code]") :innerText)))
-                       :toContain "mdp-encode")
+                       :toContain "with-async-scope")
               (js-call (expect (await (js-call (js-call page :locator "[data-output-code]") :innerText)))
-                       :toContain "Markdown Data Protocol"))))))))
+                       :toContain "cancel automatically"))
+            (await (js-call (js-call page :locator "[data-copy-command]") :click))
+            (await (js-call page :waitForTimeout 80))
+            (js-call (expect (await (js-call (js-call page :locator "[data-copy-command]") :innerText)))
+                     :toBe "Copied")))))))
 
   (test "the language tabs switch the visible panel"
     (async ()
