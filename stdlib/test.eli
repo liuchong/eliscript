@@ -1,0 +1,566 @@
+(module eliscript.test
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/identifier.mjs" isKeyword keyword qualifiedIdentifierName)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "./diff.mjs" diff)
+  (import "./pprint.mjs" pprint-str)
+  (import "./regex.mjs" re-find regex?)
+
+  (defconst report-format "eliscript-test-report")
+  (defconst MISSING (js-object))
+
+  (defun make-registry ()
+    (js-object :tests (js-array) :onceFixtures (js-array) :eachFixtures (js-array)))
+
+  (defvar active-registry (make-registry))
+  (defvar active-context-stack (js-array))
+  (defvar active-assertions nil)
+  (defvar active-seed nil)
+
+  (defun truthy? (value)
+    (not (or (nil? value) (undefined? value) (eq value false))))
+
+  (defun promise-like? (value)
+    (and (not (nullish? value))
+         (= (value-type (get value :then)) "function")))
+
+  (defun host-regexp? (value)
+    (js* "value instanceof globalThis.RegExp"))
+
+  (defun read-opt (options k1 &optional k2 fallback)
+    (cond
+      ((nullish? options) fallback)
+      ((Collection/isMap options)
+        (let ((v1 (Collection/get options (keyword k1) MISSING)))
+          (if (not (eq v1 MISSING))
+            v1
+            (let ((s1 (Collection/get options k1 MISSING)))
+              (if (not (eq s1 MISSING))
+                s1
+                (if (not (nullish? k2))
+                  (let ((v2 (Collection/get options (keyword k2) MISSING)))
+                    (if (not (eq v2 MISSING)) v2 (Collection/get options k2 fallback)))
+                  fallback))))))
+      ((= (value-type options) "object")
+        (cond
+          ((Object/hasOwn options k1) (aref options k1))
+          ((and (not (nullish? k2)) (Object/hasOwn options k2)) (aref options k2))
+          (t fallback)))
+      (t fallback)))
+
+  (defun to-tag-name (tag)
+    (cond
+      ((isKeyword tag) (qualifiedIdentifierName tag))
+      ((= (value-type tag) "string")
+        (if (js-call tag :startsWith ":") (js-call tag :slice 1) tag))
+      (t (str tag))))
+
+  (defun normalize-tags (raw)
+    (let ((out (js-array)))
+      (unless (nullish? raw)
+        (cond
+          ((Array/isArray raw)
+            (let ((i 0))
+              (while (< i (js-length raw))
+                (js-call out :push (to-tag-name (aref raw i)))
+                (setq i (1+ i)))))
+          ((Collection/isSeqable raw)
+            (Collection/reduce raw (lambda (_a t-val) (js-call out :push (to-tag-name t-val)) nil) nil))
+          (t (js-call out :push (to-tag-name raw)))))
+      (Object/freeze out)))
+
+  (defun current-test-seed ()
+    active-seed)
+
+  (defun clear-tests! ()
+    (put active-registry :tests (js-array))
+    (put active-registry :onceFixtures (js-array))
+    (put active-registry :eachFixtures (js-array))
+    nil)
+
+  (defun registered-tests ()
+    (js-call (get active-registry :tests) :slice))
+
+  (defasync with-test-registry (thunk)
+    (unless (= (value-type thunk) "function")
+      (throw (new globalThis/TypeError "with-test-registry expects a function")))
+    (let ((prev active-registry))
+      (setq active-registry (make-registry))
+      (try
+        (await (funcall thunk))
+        (finally
+          (setq active-registry prev)))))
+
+  (defun deftest (name fn-or-options &optional maybe-fn)
+    (unless (and (= (value-type name) "string") (> (js-length name) 0))
+      (throw (new globalThis/TypeError "deftest expects a non-empty test name string")))
+    (let* ((has-opts (not (nullish? maybe-fn)))
+           (opts (if has-opts fn-or-options nil))
+           (fn (if has-opts maybe-fn fn-or-options)))
+      (unless (= (value-type fn) "function")
+        (throw (new globalThis/TypeError "deftest expects a test function")))
+      (let* ((tags (normalize-tags (read-opt opts "tags" nil nil)))
+             (skip (truthy? (read-opt opts "skip" nil false)))
+             (descriptor (Object/freeze (js-object :name name :tags tags :skip skip :fn fn))))
+        (js-call (get active-registry :tests) :push descriptor)
+        descriptor)))
+
+  (defun normalize-fixture (fix)
+    (cond
+      ((= (value-type fix) "function") fix)
+      ((and (not (nullish? fix)) (or (Collection/isMap fix) (= (value-type fix) "object")))
+        (let ((before (read-opt fix "before" nil nil))
+              (after (read-opt fix "after" nil nil)))
+          (when (and (not (nullish? before)) (not (= (value-type before) "function")))
+            (throw (new globalThis/TypeError "fixture :before must be a function")))
+          (when (and (not (nullish? after)) (not (= (value-type after) "function")))
+            (throw (new globalThis/TypeError "fixture :after must be a function")))
+          (async (run-next)
+            (when (not (nullish? before))
+              (await (funcall before)))
+            (try
+              (await (funcall run-next))
+              (finally
+                (when (not (nullish? after))
+                  (await (funcall after))))))))
+      (t
+        (throw (new globalThis/TypeError "fixture must be a function or {:before :after} object")))))
+
+  (defun use-fixtures (kind &rest fixtures)
+    (let* ((k (to-tag-name kind))
+           (target (cond
+                     ((= k "once") (get active-registry :onceFixtures))
+                     ((= k "each") (get active-registry :eachFixtures))
+                     (t (throw (new globalThis/RangeError "use-fixtures expects :once or :each")))))
+           (i 0))
+      (while (< i (js-length fixtures))
+        (js-call target :push (normalize-fixture (aref fixtures i)))
+        (setq i (1+ i))))
+    nil)
+
+  (defasync testing (label body-fn)
+    (unless (= (value-type label) "string")
+      (throw (new globalThis/TypeError "testing expects a string label")))
+    (unless (= (value-type body-fn) "function")
+      (throw (new globalThis/TypeError "testing expects a function")))
+    (js-call active-context-stack :push label)
+    (try
+      (await (funcall body-fn))
+      (finally
+        (js-call active-context-stack :pop))))
+
+  (defun record-assertion (record)
+    (if (nil? active-assertions)
+      (unless (= (get record :type) "pass")
+        (throw (new globalThis/Error (format-failure-line record))))
+      (js-call active-assertions :push record))
+    (= (get record :type) "pass"))
+
+  (defun is (actual &optional msg)
+    (if (truthy? actual)
+      (record-assertion (js-object :type "pass"))
+      (record-assertion
+        (js-object
+          :type "fail"
+          :kind "is"
+          :context (js-call active-context-stack :join " > ")
+          :message (if (nullish? msg) "expected truthy value" (str msg))
+          :actual (pprint-str actual (js-object :width 60))
+          :expected "truthy"))))
+
+  (defun is-equal (actual expected &optional msg)
+    (if (equalValues actual expected)
+      (record-assertion (js-object :type "pass"))
+      (let* ((diff-tuple (diff expected actual))
+             (only-expected (js-call diff-tuple :nth 0))
+             (only-actual (js-call diff-tuple :nth 1))
+             (common (js-call diff-tuple :nth 2))
+             (pretty-expected (pprint-str expected (js-object :width 60)))
+             (pretty-actual (pprint-str actual (js-object :width 60)))
+             (pretty-diff (pprint-str diff-tuple (js-object :width 60))))
+        (record-assertion
+          (js-object
+            :type "fail"
+            :kind "is-equal"
+            :context (js-call active-context-stack :join " > ")
+            :message (if (nullish? msg) "values are not equal" (str msg))
+            :expected pretty-expected
+            :actual pretty-actual
+            :onlyExpected (if (nil? only-expected) nil (pprint-str only-expected (js-object :width 60)))
+            :onlyActual (if (nil? only-actual) nil (pprint-str only-actual (js-object :width 60)))
+            :both (if (nil? common) nil (pprint-str common (js-object :width 60)))
+            :diff pretty-diff)))))
+
+  (defun is-not-equal (actual unexpected &optional msg)
+    (if (not (equalValues actual unexpected))
+      (record-assertion (js-object :type "pass"))
+      (record-assertion
+        (js-object
+          :type "fail"
+          :kind "is-not-equal"
+          :context (js-call active-context-stack :join " > ")
+          :message (if (nullish? msg) "expected values to differ" (str msg))
+          :expected (str "not " (pprint-str unexpected (js-object :width 60)))
+          :actual (pprint-str actual (js-object :width 60))))))
+
+  (defun row-to-array (row)
+    (cond
+      ((Array/isArray row) row)
+      ((Collection/isSeqable row)
+        (let ((arr (js-array)))
+          (Collection/reduce row (lambda (_a v) (js-call arr :push v) nil) nil)
+          arr))
+      (t (js-array row))))
+
+  (defun are (check-fn rows &optional msg)
+    (unless (= (value-type check-fn) "function")
+      (throw (new globalThis/TypeError "are expects a check function")))
+    (let ((row-list (row-to-array rows))
+          (all-ok t)
+          (i 0))
+      (while (< i (js-length row-list))
+        (let* ((args (row-to-array (aref row-list i)))
+               (res (apply check-fn args)))
+          (if (truthy? res)
+            (record-assertion (js-object :type "pass"))
+            (progn
+              (setq all-ok false)
+              (record-assertion
+                (js-object
+                  :type "fail"
+                  :kind "are"
+                  :context (js-call active-context-stack :join " > ")
+                  :message (str (if (nullish? msg) "are row failed" (str msg))
+                                " at row " i ": " (pprint-str args (js-object :width 60)))
+                  :actual (pprint-str res (js-object :width 60))
+                  :expected "truthy")))))
+        (setq i (1+ i)))
+      all-ok))
+
+  (defun error-matches? (expected err)
+    (cond
+      ((nullish? expected) t)
+      ((= expected t) t)
+      ((= (value-type expected) "string")
+        (or (= (get err :name) expected)
+            (= (get err :code) expected)
+            (js-call (str (get err :message "")) :includes expected)))
+      ((= (value-type expected) "function")
+        (let ((is-ctor (and (get expected :prototype)
+                            (js* "err instanceof expected"))))
+          (if is-ctor
+            t
+            (truthy? (funcall expected err)))))
+      (t false)))
+
+  (defun message-matches? (pattern msg)
+    (let ((text (str (if (nullish? msg) "" msg))))
+      (cond
+        ((nullish? pattern) t)
+        ((= (value-type pattern) "string") (js-call text :includes pattern))
+        ((host-regexp? pattern) (js-call pattern :test text))
+        ((regex? pattern) (not (nil? (re-find pattern text))))
+        (t false))))
+
+  (defun finish-thrown-check (expected pattern caught msg)
+    (cond
+      ((nil? caught)
+        (record-assertion
+          (js-object
+            :type "fail"
+            :kind "thrown?"
+            :context (js-call active-context-stack :join " > ")
+            :message (if (nullish? msg) "expected an error to be thrown, but none was thrown" (str msg))
+            :expected (if (= (value-type expected) "string") expected "Error")
+            :actual "no error")))
+      ((not (error-matches? expected (get caught :error)))
+        (record-assertion
+          (js-object
+            :type "fail"
+            :kind "thrown?"
+            :context (js-call active-context-stack :join " > ")
+            :message (if (nullish? msg)
+                       (str "unexpected error type: " (get (get caught :error) :name))
+                       (str msg))
+            :expected (if (= (value-type expected) "function") (get expected :name "Error") (str expected))
+            :actual (str (get (get caught :error) :name) ": " (get (get caught :error) :message)))))
+      ((and (not (nullish? pattern))
+            (not (message-matches? pattern (get (get caught :error) :message))))
+        (record-assertion
+          (js-object
+            :type "fail"
+            :kind "thrown-with-msg?"
+            :context (js-call active-context-stack :join " > ")
+            :message (if (nullish? msg) "thrown error message did not match pattern" (str msg))
+            :expected (str pattern)
+            :actual (str (get (get caught :error) :message)))))
+      (t
+        (record-assertion (js-object :type "pass")))))
+
+  (defun thrown? (expected-error thunk &optional msg)
+    (unless (= (value-type thunk) "function")
+      (throw (new globalThis/TypeError "thrown? expects a thunk function")))
+    (try
+      (let ((res (funcall thunk)))
+        (if (promise-like? res)
+          (js-call res :then
+            (lambda (_v) (finish-thrown-check expected-error nil nil msg))
+            (lambda (err) (finish-thrown-check expected-error nil (js-object :error err) msg)))
+          (finish-thrown-check expected-error nil nil msg)))
+      (catch err
+        (finish-thrown-check expected-error nil (js-object :error err) msg))))
+
+  (defun thrown-with-msg? (expected-error pattern thunk &optional msg)
+    (unless (= (value-type thunk) "function")
+      (throw (new globalThis/TypeError "thrown-with-msg? expects a thunk function")))
+    (try
+      (let ((res (funcall thunk)))
+        (if (promise-like? res)
+          (js-call res :then
+            (lambda (_v) (finish-thrown-check expected-error pattern nil msg))
+            (lambda (err) (finish-thrown-check expected-error pattern (js-object :error err) msg)))
+          (finish-thrown-check expected-error pattern nil msg)))
+      (catch err
+        (finish-thrown-check expected-error pattern (js-object :error err) msg))))
+
+  (defasync run-with-fixtures (fixtures body)
+    (let ((runner body)
+          (i (1- (js-length fixtures))))
+      (while (>= i 0)
+        (let ((fix (aref fixtures i))
+              (next runner))
+          (setq runner (async () (await (funcall fix next)))))
+        (setq i (1- i)))
+      (await (funcall runner))))
+
+  (defun test-matches-filter? (descriptor filter-opt tag-opt)
+    (let ((name (get descriptor :name))
+          (tags (get descriptor :tags))
+          (name-ok t)
+          (tag-ok t))
+      (unless (nullish? filter-opt)
+        (setq name-ok
+          (cond
+            ((= (value-type filter-opt) "string") (js-call name :includes filter-opt))
+            ((host-regexp? filter-opt) (js-call filter-opt :test name))
+            ((regex? filter-opt) (not (nil? (re-find filter-opt name))))
+            ((= (value-type filter-opt) "function") (truthy? (funcall filter-opt descriptor)))
+            (t t))))
+      (unless (nullish? tag-opt)
+        (let ((wanted (to-tag-name tag-opt)))
+          (setq tag-ok (js-call tags :includes wanted))))
+      (and name-ok tag-ok)))
+
+  (defasync run-single-test (descriptor each-fixtures use-fix?)
+    (let ((started (Date/now))
+          (assertions (js-array))
+          (prev-assertions active-assertions)
+          (prev-stack active-context-stack)
+          (status "pass")
+          (errored nil))
+      (setq active-assertions assertions)
+      (setq active-context-stack (js-array))
+      (try
+        (let ((exec (async () (await (funcall (get descriptor :fn))))))
+          (if (and use-fix? (> (js-length each-fixtures) 0))
+            (await (run-with-fixtures each-fixtures exec))
+            (await (funcall exec))))
+        (catch err
+          (setq status "error")
+          (setq errored
+            (js-object
+              :type "error"
+              :kind "exception"
+              :context (js-call active-context-stack :join " > ")
+              :message (str (if (and err (get err :message)) (get err :message) err))
+              :stack (if (and err (get err :stack)) (get err :stack) nil))))
+        (finally
+          (setq active-assertions prev-assertions)
+          (setq active-context-stack prev-stack)))
+      (let ((failures (js-array))
+            (passed-count 0)
+            (i 0))
+        (while (< i (js-length assertions))
+          (let ((a (aref assertions i)))
+            (if (= (get a :type) "pass")
+              (setq passed-count (1+ passed-count))
+              (js-call failures :push a)))
+          (setq i (1+ i)))
+        (unless (nil? errored)
+          (js-call failures :push errored))
+        (when (and (= status "pass") (> (js-length failures) 0))
+          (setq status "fail"))
+        (js-object
+          :name (get descriptor :name)
+          :tags (get descriptor :tags)
+          :status status
+          :durationMs (- (Date/now) started)
+          :assertions (+ (js-length assertions) (if (nil? errored) 0 1))
+          :assertionsPassed passed-count
+          :assertionsFailed (- (js-length failures) (if (nil? errored) 0 1))
+          :failures failures))))
+
+  (defasync run-all-tests (&optional options)
+    (let* ((started (Date/now))
+           (filter-opt (read-opt options "filter" nil nil))
+           (tag-opt (read-opt options "tag" nil nil))
+           (raw-seed (read-opt options "seed" nil nil nil))
+           (fail-fast? (truthy? (read-opt options "failFast" "fail-fast" false)))
+           (file-opt (read-opt options "file" nil nil))
+           (use-fix? (not (eq (read-opt options "fixtures" nil t) false)))
+           (explicit-tests (read-opt options "tests" nil nil))
+           (seed (if (nullish? raw-seed)
+                   (uint32 (+ (* (Date/now) 2654435761) (Math/floor (* (Math/random) 100000))))
+                   (uint32 raw-seed)))
+           (source-tests (if (nullish? explicit-tests)
+                           (get active-registry :tests)
+                           (row-to-array explicit-tests)))
+           (matched (js-call source-tests :filter (lambda (d) (test-matches-filter? d filter-opt tag-opt))))
+           (once-fixtures (if use-fix? (js-call (get active-registry :onceFixtures) :slice) (js-array)))
+           (each-fixtures (if use-fix? (js-call (get active-registry :eachFixtures) :slice) (js-array)))
+           (results (js-array))
+           (total 0)
+           (passed 0)
+           (failed 0)
+           (errored 0)
+           (skipped 0)
+           (total-assertions 0)
+           (assertions-passed 0)
+           (assertions-failed 0)
+           (prev-seed active-seed))
+      (setq active-seed seed)
+      (try
+        (let ((suite-exec
+                (async ()
+                  (let ((stopped false)
+                        (i 0))
+                    (while (and (not stopped) (< i (js-length matched)))
+                      (let ((descriptor (aref matched i)))
+                        (setq total (1+ total))
+                        (if (get descriptor :skip)
+                          (progn
+                            (setq skipped (1+ skipped))
+                            (js-call results :push
+                              (js-object
+                                :name (get descriptor :name)
+                                :tags (get descriptor :tags)
+                                :status "skipped"
+                                :durationMs 0
+                                :assertions 0
+                                :assertionsPassed 0
+                                :assertionsFailed 0
+                                :failures (js-array))))
+                          (let ((res (await (run-single-test descriptor each-fixtures use-fix?))))
+                            (js-call results :push res)
+                            (setq total-assertions (+ total-assertions (get res :assertions)))
+                            (setq assertions-passed (+ assertions-passed (get res :assertionsPassed)))
+                            (setq assertions-failed (+ assertions-failed (get res :assertionsFailed)))
+                            (cond
+                              ((= (get res :status) "pass") (setq passed (1+ passed)))
+                              ((= (get res :status) "fail")
+                                (setq failed (1+ failed))
+                                (when fail-fast? (setq stopped t)))
+                              (t
+                                (setq errored (1+ errored))
+                                (when fail-fast? (setq stopped t)))))))
+                      (setq i (1+ i)))))))
+          (if (and (> (js-length once-fixtures) 0) (> (js-length matched) 0))
+            (await (run-with-fixtures once-fixtures suite-exec))
+            (await (funcall suite-exec))))
+        (finally
+          (setq active-seed prev-seed)))
+      (Object/freeze
+        (js-object
+          :format report-format
+          :seed seed
+          :file (if (nullish? file-opt) nil file-opt)
+          :durationMs (- (Date/now) started)
+          :passed (and (= failed 0) (= errored 0))
+          :counts
+            (Object/freeze
+              (js-object
+                :total total
+                :passed passed
+                :failed failed
+                :errored errored
+                :skipped skipped
+                :assertions total-assertions
+                :assertionsPassed assertions-passed
+                :assertionsFailed assertions-failed))
+          :results results))))
+
+  (defasync run-tests (&optional tests-or-options maybe-options)
+    (if (and (not (nullish? tests-or-options))
+             (or (Array/isArray tests-or-options) (Collection/isSeqable tests-or-options))
+             (not (Collection/isMap tests-or-options)))
+      (let* ((base (if (nullish? maybe-options) (js-object) maybe-options))
+             (opts (js-object :tests tests-or-options
+                     :filter (read-opt base "filter" nil nil)
+                     :tag (read-opt base "tag" nil nil)
+                     :seed (read-opt base "seed" nil nil)
+                     :failFast (read-opt base "failFast" "fail-fast" false)
+                     :file (read-opt base "file" nil nil)
+                     :fixtures (read-opt base "fixtures" nil t))))
+        (await (run-all-tests opts)))
+      (await (run-all-tests tests-or-options))))
+
+  (defun format-failure-line (f)
+    (let ((lines (js-array)))
+      (js-call lines :push
+        (str "FAIL (" (get f :kind) ")"
+             (if (and (get f :context) (> (js-length (get f :context)) 0))
+               (str " in \"" (get f :context) "\"")
+               "")
+             ": " (get f :message)))
+      (unless (undefined? (get f :expected))
+        (js-call lines :push (str "  expected: " (get f :expected))))
+      (unless (undefined? (get f :actual))
+        (js-call lines :push (str "  actual:   " (get f :actual))))
+      (when (and (get f :diff) (> (js-length (get f :diff)) 0))
+        (js-call lines :push (str "  diff [only-expected only-actual both]:\n    "
+                                  (js-call (get f :diff) :replaceAll "\n" "\n    "))))
+      (js-call lines :join "\n")))
+
+  (defun test-summary (report)
+    (let ((c (get report :counts)))
+      (str "Ran " (get c :total) " tests (" (get c :assertions) " assertions, seed " (get report :seed) "): "
+           (get c :passed) " passed, "
+           (get c :failed) " failed, "
+           (get c :errored) " errored, "
+           (get c :skipped) " skipped.")))
+
+  (defun test-report (report)
+    (let ((lines (js-array))
+          (results (get report :results))
+          (i 0))
+      (while (< i (js-length results))
+        (let ((r (aref results i)))
+          (when (or (= (get r :status) "fail") (= (get r :status) "error"))
+            (js-call lines :push (str (js-call (get r :status) :toUpperCase) " " (get r :name)))
+            (let ((failures (get r :failures))
+                  (j 0))
+              (while (< j (js-length failures))
+                (js-call lines :push (format-failure-line (aref failures j)))
+                (setq j (1+ j))))))
+        (setq i (1+ i)))
+      (js-call lines :push (test-summary report))
+      (str (js-call lines :join "\n") "\n")))
+
+  (export
+    are
+    clear-tests!
+    current-test-seed
+    deftest
+    is
+    is-equal
+    is-not-equal
+    registered-tests
+    run-all-tests
+    run-tests
+    test-report
+    test-summary
+    testing
+    thrown-with-msg?
+    thrown?
+    use-fixtures
+    with-test-registry))

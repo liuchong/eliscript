@@ -129,7 +129,7 @@
           (eliscript-compile-file-with-source-map source output))))
     (eliscript-bootstrap-write-runtime-package dist-dir t)
     (dolist (name '("bun" "build" "project-ground" "project-cli-ground" "check-cli-ground"
-                    "evaluation" "evaluation-cli" "format-cli" "watch" "watch-cli"))
+                    "evaluation" "evaluation-cli" "format-cli" "test-cli" "watch" "watch-cli"))
       (let ((source (expand-file-name (concat "bootstrap/host/" name ".eli") root))
             (output (expand-file-name (concat name ".mjs") dist-host)))
         (when (file-exists-p source)

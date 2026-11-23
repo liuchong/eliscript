@@ -1,0 +1,59 @@
+(module tests.fixtures.sample-test
+  (import "../../runtime/core/identifier.mjs" keyword)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (import "../../stdlib/test.mjs"
+    are
+    current-test-seed
+    deftest
+    is
+    is-equal
+    testing
+    thrown-with-msg?
+    thrown?
+    use-fixtures)
+
+  (defvar once-count 0)
+  (defvar each-count 0)
+
+  (use-fixtures :once
+    (async (run-suite)
+      (setq once-count (1+ once-count))
+      (await (funcall run-suite))))
+
+  (use-fixtures :each
+    (js-object
+      :before (lambda () (setq each-count (1+ each-count)))
+      :after (lambda () nil)))
+
+  (deftest "passing arithmetic and seed check" (js-object :tags (js-array (keyword "smoke")))
+    (async ()
+      (await (testing "fixture counters increment cleanly"
+        (lambda ()
+          (is (= once-count 1))
+          (is (>= each-count 1))
+          (is (or (nil? (current-test-seed)) (Number/isSafeInteger (current-test-seed))))
+          (is-equal (+ 20 22) 42)
+          (are (lambda (a b sum) (= (+ a b) sum))
+               (js-array (js-array 1 2 3) (js-array 4 5 9))))))))
+
+  (deftest "passing error expectation checks" (js-object :tags (js-array (keyword "smoke")))
+    (async ()
+      (thrown? globalThis/TypeError (lambda () (throw (new globalThis/TypeError "bad arg"))))
+      (await (thrown-with-msg? globalThis/Error "boom"
+               (async () (throw (new globalThis/Error "async boom")))))))
+
+  (deftest "failing nested map diff" (js-object :tags (js-array (keyword "failing")))
+    (async ()
+      (await (testing "nested comparison"
+        (lambda ()
+          (let ((actual (persistentHashMap
+                          (js-array (keyword "user") (persistentHashMap (js-array (keyword "name") "Ada")
+                                                       (js-array (keyword "roles") (persistentVector "read" "wrong"))))
+                          (js-array (keyword "count") 2)))
+                (expected (persistentHashMap
+                            (js-array (keyword "user") (persistentHashMap (js-array (keyword "name") "Ada")
+                                                         (js-array (keyword "roles") (persistentVector "read" "write"))))
+                            (js-array (keyword "count") 3))))
+            (is-equal actual expected "user payload should match")))))))
+)

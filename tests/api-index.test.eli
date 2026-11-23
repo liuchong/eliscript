@@ -30,8 +30,8 @@
   (test "generated library API index matches every declared module and export"
     (async ()
       (let ((index (await (buildApiIndex (js-object :root ROOT)))))
-        (js-call (expect (get index :moduleCount)) :toBe 51)
-        (js-call (expect (get index :exportCount)) :toBe 782)
+        (js-call (expect (get index :moduleCount)) :toBe 56)
+        (js-call (expect (get index :exportCount)) :toBe 1395)
         (js-call (expect (get (named-module index "protocol") :exports)) :toContain "read-external-protocol-method")
         (js-call (expect (named-module index "regex")) :toEqual
           (expected-module "regex" "stdlib/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"
@@ -82,7 +82,7 @@
       (let ((metadata (await (read-json "contracts/library-api.json"))))
         (js-call (get metadata :modules) :shift)
         (js-call (expect (await (validation-errors metadata))) :toContain
-          "library API module inventory is missing current entries: bit"))))
+          "library API module inventory is missing current entries: async"))))
   (test "library API metadata requires an explicit normalized module name"
     (async ()
       (let ((metadata (await (read-json "contracts/library-api.json"))))

@@ -1,0 +1,187 @@
+(module tests.stdlib-schema
+  (import "bun:test" expect test)
+  (import "node:fs/promises" mkdtemp rm symlink)
+  (import "node:path" resolve)
+  (import "node:process" :default process)
+  (import "node:url" pathToFileURL)
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/identifier.mjs" keyword)
+  (import "../runtime/core/map.mjs" persistentHashMap)
+  (import "../runtime/core/set.mjs" persistentHashSet)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/core/vector.mjs" persistentVector)
+
+  (defconst ROOT (resolve (js* "import.meta.dir") ".."))
+  (defconst EMACS (let ((v (get (get process :env) :EMACS))) (if (nullish? v) "emacs" v)))
+  (defconst dynamic-import (js* "(url) => import(url)"))
+  (defun be (a b) (js-call (expect a) :toBe b))
+
+  (defasync compile-stdlib (modules)
+    (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-s4-schema-"))))
+           (out-root (resolve directory "stdlib")))
+      (try
+        (await (symlink (resolve ROOT "runtime") (resolve directory "runtime") "dir"))
+        (let* ((cmd (js-call (js-array (resolve ROOT "bin/eliscript-build") "--json" "--root" (resolve ROOT "stdlib") "--out-dir" out-root "--no-cache")
+                      :concat (js-call modules :map (lambda (m) (resolve ROOT (str "stdlib/" m ".eli"))))))
+               (child (Bun/spawn cmd (js-object :cwd ROOT :env (Object/assign (js-object) (get process :env) (js-object :EMACS EMACS)) :stdout "pipe" :stderr "pipe")))
+               (res (await (Promise/all (js-array (get child :exited)
+                                                  (js-call (new globalThis.Response (get child :stdout)) :text)
+                                                  (js-call (new globalThis.Response (get child :stderr)) :text))))))
+          (unless (= (aref res 0) 0)
+            (throw (new globalThis.Error (str "build failed: " (aref res 2) "\n" (aref res 1))))))
+        (let ((loaded (js-object))
+              (idx 0))
+          (while (< idx (js-length modules))
+            (let* ((m (aref modules idx))
+                   (ns (await (funcall dynamic-import (get (pathToFileURL (resolve out-root (str m ".mjs"))) :href)))))
+              (put loaded m ns))
+            (setq idx (1+ idx)))
+          (js-object :directory directory :mods loaded))
+        (catch err
+          (await (rm directory (js-object :recursive t :force t)))
+          (throw err)))))
+
+  (test "stdlib/schema validates, conforms, unforms, and explains nested paths accurately"
+    (async ()
+      (let* ((built (await (compile-stdlib (js-array "schema"))))
+             (directory (get built :directory))
+             (SC (get (get built :mods) "schema")))
+        (try
+          (let* ((kw-name (keyword "name"))
+                 (kw-age (keyword "age"))
+                 (kw-role (keyword "role"))
+                 (kw-users (keyword "users"))
+                 (kw-tags (keyword "tags"))
+                 (kw-meta (keyword "meta"))
+                 (kw-active (keyword "active"))
+                 (user-spec
+                   (js-call SC :spec_keys
+                     (js-object
+                       :req (js-array (js-array kw-name (js-call SC :spec_string_len 1 20))
+                                      (js-array kw-age (js-call SC :spec_int_in 0 150)))
+                       :opt (js-array (js-array kw-role (js-call SC :spec_enum (js-array (keyword "admin") (keyword "member"))))
+                                      (js-array kw-meta (js-call SC :spec_nilable (get SC :spec_map))))
+                       :closed? t)))
+                 (team-spec
+                   (js-call SC :spec_keys
+                     (js-object
+                       :req (js-array (js-array kw-users (js-call SC :spec_coll_of user-spec :minCount 1))
+                                      (js-array kw-tags (js-call SC :spec_coll_of (get SC :spec_keyword) :kind "set" :distinct t))))))
+                 (valid-team
+                   (persistentHashMap
+                     (js-array kw-users (persistentVector
+                                          (persistentHashMap (js-array kw-name "Ada") (js-array kw-age 36) (js-array kw-role (keyword "admin")) (js-array kw-meta nil))
+                                          (persistentHashMap (js-array kw-name "Bob") (js-array kw-age 28))))
+                     (js-array kw-tags (persistentHashSet kw-active))))
+                 (bad-team
+                   (persistentHashMap
+                     (js-array kw-users (persistentVector
+                                          (persistentHashMap (js-array kw-name "Ada") (js-array kw-age 36))
+                                          (persistentHashMap (js-array kw-name "Bob") (js-array kw-age 250))))
+                     (js-array kw-tags (persistentHashSet kw-active)))))
+            (be (js-call SC :valid_QMARK_ team-spec valid-team) t)
+            (be (js-call SC :explain_data team-spec valid-team) nil)
+            (be (js-call SC :explain_str team-spec valid-team) "Success!\n")
+            (be (js-call SC :valid_QMARK_ team-spec bad-team) false)
+            (let* ((ed (js-call SC :explain_data team-spec bad-team))
+                   (problems (Collection/get ed (keyword "eliscript.schema" "problems")))
+                   (p0 (js-call problems :nth 0))
+                   (in-path (Collection/get p0 (keyword "eliscript.schema" "in")))
+                   (err-str (js-call SC :explain_str team-spec bad-team)))
+              (be (Collection/count problems) 1)
+              (be (equalValues in-path (persistentVector kw-users 1 kw-age)) t)
+              (be (Collection/get p0 (keyword "eliscript.schema" "val")) 250)
+              (js-call (expect err-str) :toContain "150"))
+            ;; Closed keys rejects unexpected keys
+            (let* ((extra-user (persistentHashMap (js-array kw-name "Ada") (js-array kw-age 30) (js-array (keyword "extra") 1)))
+                   (extra-ed (js-call SC :explain_data user-spec extra-user))
+                   (ep0 (js-call (Collection/get extra-ed (keyword "eliscript.schema" "problems")) :nth 0)))
+              (be (js-call SC :valid_QMARK_ user-spec extra-user) false)
+              (be (equalValues (Collection/get ep0 (keyword "eliscript.schema" "in"))
+                    (persistentVector (keyword "extra"))) t))
+            ;; spec-or + spec-cat backtracking conform/unform round-trip
+            (let* ((or-spec (js-call SC :spec_or
+                              (keyword "num") (get SC :spec_int)
+                              (keyword "str") (get SC :spec_string)))
+                   (conformed (js-call SC :conform or-spec 42))
+                   (cat-spec (js-call SC :spec_cat
+                               (keyword "nums") (js-call SC :spec_rep_STAR_ (get SC :spec_int))
+                               (keyword "tail") (get SC :spec_int)
+                               (keyword "label") (js-call SC :spec_opt_QMARK_ (get SC :spec_string))))
+                   (seq-input (persistentVector 1 2 3 99 "ok"))
+                   (cat-conf (js-call SC :conform cat-spec seq-input)))
+              (be (equalValues conformed (persistentVector (keyword "num") 42)) t)
+              (be (js-call SC :unform or-spec conformed) 42)
+              (be (equalValues (Collection/get cat-conf (keyword "nums")) (persistentVector 1 2 3)) t)
+              (be (Collection/get cat-conf (keyword "tail")) 99)
+              (be (Collection/get cat-conf (keyword "label")) "ok")
+              (be (equalValues (js-call SC :unform cat-spec cat-conf) seq-input) t))
+            ;; spec-tuple + spec-map-of + fdef/instrument + def-spec
+            (let* ((tup-spec (js-call SC :spec_tuple (get SC :spec_keyword) (js-call SC :spec_int_in 1 10)))
+                   (map-spec (js-call SC :spec_map_of (get SC :spec_keyword) (get SC :spec_int) (js-object :minCount 1 :maxCount 2)))
+                   (fn-spec (js-call SC :spec_fn
+                              (js-object :args (js-call SC :spec_tuple (js-call SC :spec_int_in 1 100) (js-call SC :spec_int_in 1 100))
+                                         :ret (get SC :spec_int))))
+                   (checked-add (js-call SC :fdef (lambda (a b) (+ a b)) fn-spec)))
+              (js-call SC :def_spec (keyword "test.schema" "pair") tup-spec)
+              (be (js-call SC :valid_QMARK_ (keyword "test.schema" "pair") (persistentVector (keyword "a") 5)) t)
+              (be (js-call SC :valid_QMARK_ map-spec (persistentHashMap (js-array (keyword "x") 1))) t)
+              (be (js-call SC :valid_QMARK_ map-spec (persistentHashMap)) false)
+              (be (funcall checked-add 3 4) 7)
+              (js-call (expect (lambda () (funcall checked-add -1 4))) :toThrow "Call args violated spec")))
+          (finally
+            (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "stdlib/schema deterministic seeded generation, minimal counterexample shrinking, and edge cases"
+    (async ()
+      (let* ((built (await (compile-stdlib (js-array "schema"))))
+             (directory (get built :directory))
+             (SC (get (get built :mods) "schema")))
+        (try
+          (let* ((kw-count (keyword "count"))
+                 (kw-items (keyword "items"))
+                 (kw-note (keyword "note"))
+                 (num-spec (js-call SC :spec_int_in 0 500))
+                 (rec-spec
+                   (js-call SC :spec_keys
+                     (js-object
+                       :req (js-array (js-array kw-count num-spec)
+                                      (js-array kw-items (js-call SC :spec_coll_of (js-call SC :spec_int_in 1 50)
+                                                           (js-object :minCount 1 :maxCount 8))))
+                       :opt (js-array (js-array kw-note (js-call SC :spec_string_len 0 12))))))
+                 (s1 (js-call SC :gen_sample rec-spec (js-object :count 8 :seed 12345 :size 25)))
+                 (s2 (js-call SC :gen_sample rec-spec (js-object :count 8 :seed 12345 :size 25)))
+                 (s3 (js-call SC :gen_sample rec-spec (js-object :count 8 :seed 99999 :size 25))))
+            ;; Seeded sampling determinism
+            (be (equalValues s1 s2) t)
+            (be (equalValues s1 s3) false)
+            ;; Shrinking nested map + vector property down to minimal failing boundary
+            (let* ((prop-res (js-call SC :check_property rec-spec
+                               (lambda (m) (< (Collection/get m kw-count) 25))
+                               (js-object :numTests 120 :seed 77)))
+                   (ok (Collection/get prop-res (keyword "ok?")))
+                   (initial-fail (Collection/get prop-res (keyword "fail")))
+                   (shrunk (Collection/get prop-res (keyword "shrunk")))
+                   (smallest (Collection/get shrunk (keyword "smallest"))))
+              (be ok false)
+              (be (js-call SC :valid_QMARK_ rec-spec smallest) t)
+              (be (Collection/get smallest kw-count) 25)
+              (be (Collection/contains smallest kw-note) false)
+              (be (Collection/count (Collection/get smallest kw-items)) 1)
+              (be (js-call (Collection/get smallest kw-items) :nth 0) 1)
+              (js-call (expect (Collection/get initial-fail kw-count)) :toBeGreaterThanOrEqual 25))
+            ;; Passing property
+            (let ((pass-res (js-call SC :check_property (js-call SC :spec_int_in 1 50)
+                              (lambda (n) (and (>= n 1) (<= n 50)))
+                              (js-object :numTests 40 :seed 11))))
+              (be (Collection/get pass-res (keyword "ok?")) t)
+              (be (Collection/get pass-res (keyword "num-tests")) 40))
+            ;; Protective edge cases
+            (be (js-call SC :valid_QMARK_ (get SC :spec_number) (get globalThis/Number :NaN)) false)
+            (be (js-call SC :valid_QMARK_ (get SC :spec_int) nil) false)
+            (js-call (expect (lambda () (js-call SC :spec_enum (js-array)))) :toThrow)
+            (let ((impossible (js-call SC :gen_such_that (lambda (_v) false) (js-call SC :gen_int 0 5) 5)))
+              (js-call (expect (lambda () (js-call SC :gen_generate impossible (js-object :seed 1)))) :toThrow "exhausted")))
+          (finally
+            (await (rm directory (js-object :recursive t :force t))))))))
+)

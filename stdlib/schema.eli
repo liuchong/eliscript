@@ -1,0 +1,1886 @@
+(module eliscript.schema
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/data-text.mjs" printValue)
+  (import "../runtime/core/identifier.mjs"
+    eliscriptSymbol isEliscriptSymbol isIdentifier isKeyword keyword qualifiedIdentifierName)
+  (import "../runtime/core/list.mjs" persistentList)
+  (import "../runtime/core/map.mjs" EMPTY_MAP)
+  (import "../runtime/core/set.mjs" persistentHashSet)
+  (import "../runtime/core/value.mjs" equalValues)
+  (import "../runtime/core/vector.mjs" EMPTY_VECTOR PersistentVector persistentVector)
+
+  (defconst INVALID (keyword "eliscript.schema" "invalid"))
+  (defconst KW_SCHEMA (keyword "eliscript.schema" "schema"))
+  (defconst KW_VALUE (keyword "eliscript.schema" "value"))
+  (defconst KW_PROBLEMS (keyword "eliscript.schema" "problems"))
+  (defconst KW_PATH (keyword "eliscript.schema" "path"))
+  (defconst KW_PRED (keyword "eliscript.schema" "pred"))
+  (defconst KW_VAL (keyword "eliscript.schema" "val"))
+  (defconst KW_VIA (keyword "eliscript.schema" "via"))
+  (defconst KW_IN (keyword "eliscript.schema" "in"))
+  (defconst KW_REASON (keyword "eliscript.schema" "reason"))
+  (defconst KW_OK (keyword "ok?"))
+  (defconst KW_SEED (keyword "seed"))
+  (defconst KW_NUM_TESTS (keyword "num-tests"))
+  (defconst KW_FAIL (keyword "fail"))
+  (defconst KW_SHRUNK (keyword "shrunk"))
+  (defconst KW_SMALLEST (keyword "smallest"))
+  (defconst KW_STEPS (keyword "steps"))
+  (defconst KW_DEPTH (keyword "depth"))
+  (defconst KW_ERROR (keyword "error"))
+  (defconst MISSING (js-object))
+  (defconst REGISTRY (new globalThis.Map))
+
+  (defconst Schema
+    (js* "(class Schema { constructor(kind, name, config, customGen, meta) { this.kind = kind; this.name = name; this.config = config; this.customGen = customGen || null; this.meta = meta || null; Object.freeze(this); } })"))
+
+  (defconst SchemaGen
+    (js* "(class SchemaGen { constructor(name, sampleFn) { this.name = name; this.sampleFn = sampleFn; Object.freeze(this); } })"))
+
+  (defun schema? (value)
+    (js* "value instanceof Schema"))
+
+  (defun gen? (value)
+    (js* "value instanceof SchemaGen"))
+
+  (defun invalid? (value)
+    (equalValues value INVALID))
+
+  (defun kv-map (&rest kvs)
+    (let ((out EMPTY_MAP)
+          (i 0)
+          (len (js-length kvs)))
+      (while (< (1+ i) len)
+        (setq out (Collection/assoc out (aref kvs i) (aref kvs (1+ i))))
+        (setq i (+ i 2)))
+      out))
+
+  (defun truthy? (value)
+    (not (or (nil? value) (undefined? value) (eq value false))))
+
+  (defun make-schema (kind name config &optional custom-gen meta)
+    (new Schema kind name config
+      (if (nullish? custom-gen) nil custom-gen)
+      (if (nullish? meta) nil meta)))
+
+  (defun make-gen (name sample-fn)
+    (new SchemaGen name sample-fn))
+
+  (defun read-opt (options k1 &optional k2 k3 fallback)
+    (cond
+      ((nullish? options) fallback)
+      ((Collection/isMap options)
+        (let ((v1 (Collection/get options (keyword k1) MISSING)))
+          (if (not (eq v1 MISSING))
+            v1
+            (let ((s1 (Collection/get options k1 MISSING)))
+              (if (not (eq s1 MISSING))
+                s1
+                (if (not (nullish? k2))
+                  (let ((v2 (Collection/get options (keyword k2) MISSING)))
+                    (if (not (eq v2 MISSING))
+                      v2
+                      (let ((s2 (Collection/get options k2 MISSING)))
+                        (if (not (eq s2 MISSING))
+                          s2
+                          (if (not (nullish? k3))
+                            (let ((v3 (Collection/get options (keyword k3) MISSING)))
+                              (if (not (eq v3 MISSING))
+                                v3
+                                (Collection/get options k3 fallback)))
+                            fallback)))))
+                  fallback))))))
+      ((= (value-type options) "object")
+        (cond
+          ((Object/hasOwn options k1) (aref options k1))
+          ((and (not (nullish? k2)) (Object/hasOwn options k2)) (aref options k2))
+          ((and (not (nullish? k3)) (Object/hasOwn options k3)) (aref options k3))
+          (t fallback)))
+      (t fallback)))
+
+  (defun def-spec (key schema)
+    (unless (or (isKeyword key) (isEliscriptSymbol key))
+      (throw (new globalThis/TypeError "def-spec expects a keyword or symbol key")))
+    (let ((resolved (resolve-spec schema)))
+      (js-call REGISTRY :set (hash-key-for-id key) resolved)
+      resolved))
+
+  (defun hash-key-for-id (id)
+    (str (if (isKeyword id) "k:" "s:") (qualifiedIdentifierName id)))
+
+  (defun get-spec (key)
+    (if (or (isKeyword key) (isEliscriptSymbol key))
+      (let ((found (js-call REGISTRY :get (hash-key-for-id key))))
+        (if (undefined? found) nil found))
+      nil))
+
+  (defun resolve-spec (spec)
+    (cond
+      ((schema? spec) spec)
+      ((= (value-type spec) "function")
+        (spec-pred spec (js-object :name (let ((n (get spec :name))) (if (and n (> (js-length n) 0)) n "predicate")))))
+      ((Collection/isSet spec)
+        (spec-enum spec))
+      ((or (isKeyword spec) (isEliscriptSymbol spec))
+        (let ((found (get-spec spec)))
+          (when (nil? found)
+            (throw (new globalThis/Error (str "unknown registered schema: " (qualifiedIdentifierName spec)))))
+          found))
+      (t
+        (throw (new globalThis/TypeError (str "expected schema or predicate, got " (printValue spec)))))))
+
+  ;; ============================================================================
+  ;; Deterministic Mulberry32 PRNG
+  ;; ============================================================================
+
+  (defun make-rng (seed)
+    (let ((normalized (if (nullish? seed) 42 (uint32 seed))))
+      (js-object :state normalized)))
+
+  (defun rng-next-u32 (rng)
+    (let* ((s (uint32 (+ (get rng :state) 1831565813)))
+           (_w (put rng :state s))
+           (t1 (imul32 (bit-xor s (unsigned-bit-shift-right s 15)) (bit-or s 1)))
+           (t2 (uint32 (+ t1 (imul32 (bit-xor t1 (unsigned-bit-shift-right t1 7)) (bit-or t1 61))))))
+      (uint32 (bit-xor t2 (unsigned-bit-shift-right t2 14)))))
+
+  (defun rng-next-float (rng)
+    (/ (rng-next-u32 rng) 4294967296))
+
+  (defun rng-next-int (rng min-val max-val)
+    (let ((lo (Math/ceil min-val))
+          (hi (Math/floor max-val)))
+      (when (> lo hi)
+        (throw (new globalThis/RangeError (str "invalid integer range [" min-val ", " max-val "]"))))
+      (if (= lo hi)
+        lo
+        (let ((span (+ (- hi lo) 1)))
+          (+ lo (Math/floor (* (rng-next-float rng) span)))))))
+
+  ;; ============================================================================
+  ;; Built-in Generators
+  ;; ============================================================================
+
+  (defun gen-return (value)
+    (make-gen "return" (lambda (_rng _size) value)))
+
+  (defun gen-fmap (f gen)
+    (unless (= (value-type f) "function")
+      (throw (new globalThis/TypeError "gen-fmap expects a function")))
+    (let ((g (ensure-gen gen)))
+      (make-gen (str "fmap:" (get g :name))
+        (lambda (rng size)
+          (funcall f (js-call g :sampleFn rng size))))))
+
+  (defun gen-bind (gen f)
+    (unless (= (value-type f) "function")
+      (throw (new globalThis/TypeError "gen-bind expects a function")))
+    (let ((g (ensure-gen gen)))
+      (make-gen (str "bind:" (get g :name))
+        (lambda (rng size)
+          (let ((inner (ensure-gen (funcall f (js-call g :sampleFn rng size)))))
+            (js-call inner :sampleFn rng size))))))
+
+  (defun gen-one-of (gens)
+    (let ((arr (to-js-array gens)))
+      (when (= (js-length arr) 0)
+        (throw (new globalThis/RangeError "gen-one-of requires at least one generator")))
+      (let ((resolved (js-call arr :map ensure-gen)))
+        (make-gen "one-of"
+          (lambda (rng size)
+            (let ((idx (rng-next-int rng 0 (1- (js-length resolved)))))
+              (js-call (aref resolved idx) :sampleFn rng size)))))))
+
+  (defun gen-elements (values)
+    (let ((arr (to-js-array values)))
+      (when (= (js-length arr) 0)
+        (throw (new globalThis/RangeError "gen-elements requires at least one value")))
+      (make-gen "elements"
+        (lambda (rng _size)
+          (aref arr (rng-next-int rng 0 (1- (js-length arr))))))))
+
+  (defun gen-such-that (pred gen &optional max-tries)
+    (let ((g (ensure-gen gen))
+          (tries-limit (if (nullish? max-tries) 200 max-tries)))
+      (make-gen (str "such-that:" (get g :name))
+        (lambda (rng size)
+          (let ((attempt 0)
+                (found MISSING))
+            (while (and (eq found MISSING) (< attempt tries-limit))
+              (let ((candidate (js-call g :sampleFn rng (+ size (Math/floor (/ attempt 4))))))
+                (when (truthy? (funcall pred candidate))
+                  (setq found candidate)))
+              (setq attempt (1+ attempt)))
+            (when (eq found MISSING)
+              (throw (new globalThis/Error (str "gen-such-that exhausted after " tries-limit " attempts"))))
+            found)))))
+
+  (defconst gen-boolean
+    (make-gen "boolean"
+      (lambda (rng _size)
+        (= (rng-next-int rng 0 1) 1))))
+
+  (defun gen-int (&optional min-val max-val)
+    (if (and (not (nullish? min-val)) (not (nullish? max-val)))
+      (make-gen "int-range"
+        (lambda (rng _size) (rng-next-int rng min-val max-val)))
+      (make-gen "int"
+        (lambda (rng size)
+          (let* ((bound (Math/max 1 (Math/floor size)))
+                 (r (rng-next-int rng (- bound) bound)))
+            r)))))
+
+  (defun gen-double (&optional options)
+    (let ((min-v (read-opt options "min" nil nil -1000.0))
+          (max-v (read-opt options "max" nil nil 1000.0))
+          (allow-nan (truthy? (read-opt options "NaN?" "nan?" nil false)))
+          (allow-inf (truthy? (read-opt options "infinite?" "infinite" nil false))))
+      (make-gen "double"
+        (lambda (rng size)
+          (let ((tag (rng-next-int rng 0 19)))
+            (cond
+              ((and allow-nan (= tag 0)) (get globalThis/Number :NaN))
+              ((and allow-inf (= tag 1)) (get globalThis/Number :POSITIVE_INFINITY))
+              ((and allow-inf (= tag 2)) (get globalThis/Number :NEGATIVE_INFINITY))
+              (t
+                (let* ((span (- max-v min-v))
+                       (scaled (+ min-v (* (rng-next-float rng) (if (Number/isFinite span) span (Math/max 1 size))))))
+                  (/ (Math/round (* scaled 10000)) 10000)))))))))
+
+  (defconst PRINTABLE_ASCII "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ")
+
+  (defun gen-string (&optional min-len max-len)
+    (let ((lo (if (nullish? min-len) 0 min-len))
+          (hi (if (nullish? max-len) nil max-len)))
+      (make-gen "string"
+        (lambda (rng size)
+          (let* ((cap (if (nullish? hi) (Math/max lo (Math/min 32 (Math/floor size))) hi))
+                 (len (rng-next-int rng lo cap))
+                 (chars (js-array))
+                 (i 0))
+            (while (< i len)
+              (let ((cidx (rng-next-int rng 0 (1- (js-length PRINTABLE_ASCII)))))
+                (js-call chars :push (aref PRINTABLE_ASCII cidx)))
+              (setq i (1+ i)))
+            (js-call chars :join ""))))))
+
+  (defconst gen-keyword
+    (make-gen "keyword"
+      (lambda (rng size)
+        (let* ((len (rng-next-int rng 1 (Math/max 1 (Math/min 12 (Math/floor (+ size 1))))))
+               (chars (js-array))
+               (i 0))
+          (while (< i len)
+            (js-call chars :push (aref "abcdefghijkmnopqrstuvwxyz" (rng-next-int rng 0 24)))
+            (setq i (1+ i)))
+          (keyword (js-call chars :join ""))))))
+
+  (defconst gen-symbol
+    (make-gen "symbol"
+      (lambda (rng size)
+        (let ((kw (js-call gen-keyword :sampleFn rng size)))
+          (eliscriptSymbol (qualifiedIdentifierName kw))))))
+
+  (defun gen-tuple (&rest gens)
+    (let ((resolved (js-call (Array/from gens) :map ensure-gen)))
+      (make-gen "tuple"
+        (lambda (rng size)
+          (let ((items (js-array))
+                (i 0))
+            (while (< i (js-length resolved))
+              (js-call items :push (js-call (aref resolved i) :sampleFn rng size))
+              (setq i (1+ i)))
+            (js-call PersistentVector :from items))))))
+
+  (defun gen-vector (item-gen &optional min-count max-count distinct?)
+    (let ((g (ensure-gen item-gen))
+          (lo (if (nullish? min-count) 0 min-count))
+          (hi (if (nullish? max-count) nil max-count))
+          (uniq (truthy? distinct?)))
+      (make-gen "vector"
+        (lambda (rng size)
+          (let* ((cap (if (nullish? hi) (Math/max lo (Math/min 16 (Math/floor size))) hi))
+                 (target-len (rng-next-int rng lo cap))
+                 (items (js-array))
+                 (attempts 0)
+                 (limit (* (Math/max 1 target-len) 20)))
+            (while (and (< (js-length items) target-len) (< attempts limit))
+              (let ((candidate (js-call g :sampleFn rng (Math/max 1 (Math/floor (/ size 2))))))
+                (if (or (not uniq) (not (array-contains-equal? items candidate)))
+                  (js-call items :push candidate)))
+              (setq attempts (1+ attempts)))
+            (when (< (js-length items) lo)
+              (throw (new globalThis/Error "gen-vector failed to produce minimum distinct elements")))
+            (js-call PersistentVector :from items))))))
+
+  (defun gen-map (key-gen val-gen &optional min-count max-count)
+    (let ((kg (ensure-gen key-gen))
+          (vg (ensure-gen val-gen))
+          (lo (if (nullish? min-count) 0 min-count))
+          (hi (if (nullish? max-count) nil max-count)))
+      (make-gen "map"
+        (lambda (rng size)
+          (let* ((cap (if (nullish? hi) (Math/max lo (Math/min 12 (Math/floor size))) hi))
+                 (target-len (rng-next-int rng lo cap))
+                 (pairs (js-array))
+                 (seen-keys (js-array))
+                 (attempts 0)
+                 (limit (* (Math/max 1 target-len) 20)))
+            (while (and (< (js-length seen-keys) target-len) (< attempts limit))
+              (let ((k (js-call kg :sampleFn rng (Math/max 1 (Math/floor (/ size 2))))))
+                (unless (array-contains-equal? seen-keys k)
+                  (let ((v (js-call vg :sampleFn rng (Math/max 1 (Math/floor (/ size 2))))))
+                    (js-call seen-keys :push k)
+                    (js-call pairs :push k)
+                    (js-call pairs :push v))))
+              (setq attempts (1+ attempts)))
+            (when (< (js-length seen-keys) lo)
+              (throw (new globalThis/Error "gen-map failed to produce minimum distinct keys")))
+            (apply kv-map pairs))))))
+
+  (defun ensure-gen (value)
+    (cond
+      ((gen? value) value)
+      ((schema? value) (gen-from-spec value))
+      (t (throw (new globalThis/TypeError "expected a generator or schema")))))
+
+  (defun with-gen (schema gen)
+    (let ((s (resolve-spec schema))
+          (g (if (= (value-type gen) "function")
+               (funcall gen)
+               (ensure-gen gen))))
+      (make-schema (get s :kind) (get s :name) (get s :config) (ensure-gen g) (get s :meta))))
+
+  ;; ============================================================================
+  ;; Schema Combinators
+  ;; ============================================================================
+
+  (defun spec-pred (pred &optional options)
+    (unless (= (value-type pred) "function")
+      (throw (new globalThis/TypeError "spec-pred expects a predicate function")))
+    (let ((name (read-opt options "name" nil nil
+                  (let ((pn (get pred :name))) (if (and pn (> (js-length pn) 0)) pn "predicate"))))
+          (gen (read-opt options "gen" nil nil nil)))
+      (make-schema "pred" name (js-object :pred pred) (if (nullish? gen) nil (ensure-gen gen)))))
+
+  (defconst spec-any
+    (make-schema "any" "any?" (js-object)
+      (gen-one-of (js-array (gen-int) gen-boolean (gen-string) gen-keyword (gen-return nil)))))
+
+  (defconst spec-nil
+    (make-schema "pred" "nil?" (js-object :pred (lambda (x) (nil? x))) (gen-return nil)))
+
+  (defconst spec-boolean
+    (make-schema "pred" "boolean?" (js-object :pred (lambda (x) (= (value-type x) "boolean"))) gen-boolean))
+
+  (defconst spec-number
+    (make-schema "pred" "number?"
+      (js-object :pred (lambda (x) (and (= (value-type x) "number") (not (Number/isNaN x)))))
+      (gen-double (js-object :min -100 :max 100))))
+
+  (defconst spec-int
+    (make-schema "pred" "int?"
+      (js-object :pred (lambda (x) (Number/isSafeInteger x)))
+      (gen-int)))
+
+  (defconst spec-double
+    (make-schema "pred" "double?"
+      (js-object :pred (lambda (x) (= (value-type x) "number")))
+      (gen-double)))
+
+  (defconst spec-string
+    (make-schema "pred" "string?" (js-object :pred (lambda (x) (= (value-type x) "string"))) (gen-string)))
+
+  (defconst spec-keyword
+    (make-schema "pred" "keyword?" (js-object :pred isKeyword) gen-keyword))
+
+  (defconst spec-symbol
+    (make-schema "pred" "symbol?" (js-object :pred isEliscriptSymbol) gen-symbol))
+
+  (defconst spec-vector
+    (make-schema "pred" "vector?" (js-object :pred Collection/isVector) (gen-vector spec-any 0 8)))
+
+  (defconst spec-map
+    (make-schema "pred" "map?" (js-object :pred Collection/isMap) (gen-map gen-keyword spec-any 0 8)))
+
+  (defconst spec-set
+    (make-schema "pred" "set?" (js-object :pred Collection/isSet)
+      (gen-fmap (lambda (v) (apply persistentHashSet (to-js-array v)))
+        (gen-vector spec-any 0 6))))
+
+  (defconst spec-list
+    (make-schema "pred" "list?" (js-object :pred Collection/isList)
+      (gen-fmap (lambda (v) (apply persistentList (to-js-array v)))
+        (gen-vector spec-any 0 8))))
+
+  (defun spec-int-in (min-val max-val)
+    (unless (and (Number/isSafeInteger min-val) (Number/isSafeInteger max-val) (<= min-val max-val))
+      (throw (new globalThis/RangeError "spec-int-in requires safe integers min <= max")))
+    (make-schema "int-in" (str "(int-in " min-val " " max-val ")")
+      (js-object :min min-val :max max-val)
+      (gen-int min-val max-val)))
+
+  (defun spec-double-in (&optional options)
+    (let ((min-v (read-opt options "min" nil nil (get globalThis/Number :NEGATIVE_INFINITY)))
+          (max-v (read-opt options "max" nil nil (get globalThis/Number :POSITIVE_INFINITY)))
+          (allow-inf (truthy? (read-opt options "infinite?" "infinite" nil false)))
+          (allow-nan (truthy? (read-opt options "NaN?" "nan?" nil false))))
+      (make-schema "double-in" "double-in"
+        (js-object :min min-v :max max-v :infinite? allow-inf :NaN? allow-nan)
+        (gen-double (js-object
+                      :min (if (Number/isFinite min-v) min-v -1000)
+                      :max (if (Number/isFinite max-v) max-v 1000)
+                      :infinite? allow-inf
+                      :NaN? allow-nan)))))
+
+  (defun spec-string-len (min-len &optional max-len)
+    (let ((lo (if (nullish? min-len) 0 min-len))
+          (hi (if (nullish? max-len) nil max-len)))
+      (unless (and (Number/isSafeInteger lo) (>= lo 0)
+                   (or (nullish? hi) (and (Number/isSafeInteger hi) (>= hi lo))))
+        (throw (new globalThis/RangeError "spec-string-len requires non-negative safe integers min <= max")))
+      (make-schema "string-len" (str "(string-len " lo (if (nullish? hi) ")" (str " " hi ")")))
+        (js-object :min lo :max hi)
+        (gen-string lo hi))))
+
+  (defun spec-nilable (spec)
+    (let ((inner (resolve-spec spec)))
+      (make-schema "nilable" (str "(nilable " (get inner :name) ")") (js-object :inner inner))))
+
+  (defun spec-enum (values)
+    (let ((arr (to-js-array values)))
+      (when (= (js-length arr) 0)
+        (throw (new globalThis/RangeError "spec-enum requires a non-empty collection or array")))
+      (make-schema "enum" "enum" (js-object :values arr) (gen-elements arr))))
+
+  (defun spec-and (&rest specs)
+    (when (= (js-length specs) 0)
+      (throw (new globalThis/RangeError "spec-and requires at least one spec")))
+    (let ((resolved (js-call (Array/from specs) :map resolve-spec)))
+      (make-schema "and" "and" (js-object :specs resolved))))
+
+  (defun normalize-tagged-pairs (args label)
+    (let ((count (js-length args)))
+      (when (or (= count 0) (not (= (% count 2) 0)))
+        (throw (new globalThis/Error (str label " expects alternating tag and schema pairs"))))
+      (let ((clauses (js-array))
+            (i 0))
+        (while (< i count)
+          (js-call clauses :push
+            (js-object :tag (aref args i) :spec (resolve-spec (aref args (+ i 1)))))
+          (setq i (+ i 2)))
+        clauses)))
+
+  (defun spec-or (&rest tag-spec-pairs)
+    (let ((clauses (normalize-tagged-pairs tag-spec-pairs "spec-or")))
+      (make-schema "or" "or" (js-object :clauses clauses))))
+
+  (defun normalize-key-entries (raw)
+    (cond
+      ((nullish? raw) (js-array))
+      ((Collection/isMap raw)
+        (let ((entries (js-array)))
+          (Collection/reduceKV raw
+            (lambda (_acc k v)
+              (js-call entries :push (js-object :key k :spec (resolve-spec v)))
+              nil)
+            nil)
+          entries))
+      ((or (Array/isArray raw) (Collection/isSequential raw))
+        (let ((arr (to-js-array raw))
+              (entries (js-array))
+              (i 0))
+          (while (< i (js-length arr))
+            (let ((item (aref arr i)))
+              (cond
+                ((or (Array/isArray item) (Collection/isVector item))
+                  (let ((pair (to-js-array item)))
+                    (unless (= (js-length pair) 2)
+                      (throw (new globalThis/TypeError "spec-keys entry pair must have 2 elements")))
+                    (js-call entries :push (js-object :key (aref pair 0) :spec (resolve-spec (aref pair 1))))))
+                ((isKeyword item)
+                  (let ((s (get-spec item)))
+                    (if (nil? s)
+                      (throw (new globalThis/Error (str "spec-keys unknown key spec: " (qualifiedIdentifierName item))))
+                      (js-call entries :push (js-object :key item :spec s)))))
+                (t
+                  (throw (new globalThis/TypeError "spec-keys entry must be [key schema] or registered keyword")))))
+            (setq i (1+ i)))
+          entries))
+      ((= (value-type raw) "object")
+        (let ((keys (Object/keys raw))
+              (entries (js-array))
+              (i 0))
+          (while (< i (js-length keys))
+            (let ((k (aref keys i)))
+              (js-call entries :push (js-object :key k :spec (resolve-spec (aref raw k)))))
+            (setq i (1+ i)))
+          entries))
+      (t
+        (throw (new globalThis/TypeError "spec-keys entries must be a map or list of [key spec] pairs")))))
+
+  (defun unqualified-key (k)
+    (cond
+      ((isKeyword k) (keyword (identifierName-safe k)))
+      ((isEliscriptSymbol k) (eliscriptSymbol (identifierName-safe k)))
+      (t k)))
+
+  (defun identifierName-safe (id)
+    (if (isIdentifier id)
+      (let* ((q (qualifiedIdentifierName id))
+             (idx (js-call q :indexOf "/")))
+        (if (< idx 0) q (js-call q :slice (1+ idx))))
+      id))
+
+  (defun normalize-unqualified-entries (entries)
+    (js-call entries :map
+      (lambda (entry)
+        (js-object :key (unqualified-key (get entry :key))
+          :originalKey (get entry :key)
+          :spec (get entry :spec)))))
+
+  (defun spec-keys (options)
+    (let* ((req (normalize-key-entries (read-opt options "req" nil nil nil)))
+           (opt (normalize-key-entries (read-opt options "opt" nil nil nil)))
+           (req-un (normalize-unqualified-entries (normalize-key-entries (read-opt options "req-un" "reqUn" nil nil))))
+           (opt-un (normalize-unqualified-entries (normalize-key-entries (read-opt options "opt-un" "optUn" nil nil))))
+           (closed (truthy? (read-opt options "closed?" "closed" nil false)))
+           (all-req (js-call req :concat req-un))
+           (all-opt (js-call opt :concat opt-un)))
+      (make-schema "keys" "keys"
+        (js-object :req all-req :opt all-opt :closed closed))))
+
+  (defun spec-coll-of (item-spec &optional options)
+    (let ((inner (resolve-spec item-spec))
+          (kind (read-opt options "kind" nil nil nil))
+          (min-c (read-opt options "min-count" "minCount" nil 0))
+          (max-c (read-opt options "max-count" "maxCount" nil nil))
+          (distinct? (truthy? (read-opt options "distinct" "distinct?" nil false))))
+      (make-schema "coll-of" "coll-of"
+        (js-object :item inner :kind kind :minCount min-c :maxCount max-c :distinct distinct?))))
+
+  (defun spec-map-of (key-spec val-spec &optional options)
+    (let ((ks (resolve-spec key-spec))
+          (vs (resolve-spec val-spec))
+          (min-c (read-opt options "min-count" "minCount" nil 0))
+          (max-c (read-opt options "max-count" "maxCount" nil nil)))
+      (make-schema "map-of" "map-of"
+        (js-object :key ks :val vs :minCount min-c :maxCount max-c))))
+
+  (defun spec-tuple (&rest item-specs)
+    (let ((items (js-call (Array/from item-specs) :map resolve-spec)))
+      (make-schema "tuple" "tuple" (js-object :items items))))
+
+  (defun spec-cat (&rest tag-spec-pairs)
+    (let ((clauses (normalize-tagged-pairs tag-spec-pairs "spec-cat")))
+      (make-schema "cat" "cat" (js-object :clauses clauses))))
+
+  (defun spec-alt (&rest tag-spec-pairs)
+    (let ((clauses (normalize-tagged-pairs tag-spec-pairs "spec-alt")))
+      (make-schema "alt" "alt" (js-object :clauses clauses))))
+
+  (defun spec-rep* (spec)
+    (make-schema "rep*" "rep*" (js-object :inner (resolve-spec spec))))
+
+  (defun spec-rep+ (spec)
+    (make-schema "rep+" "rep+" (js-object :inner (resolve-spec spec))))
+
+  (defun spec-opt? (spec)
+    (make-schema "opt?" "opt?" (js-object :inner (resolve-spec spec))))
+
+  (defun spec-fn (options)
+    (let ((args-spec (read-opt options "args" nil nil nil))
+          (ret-spec (read-opt options "ret" nil nil nil))
+          (fn-spec (read-opt options "fn" nil nil nil)))
+      (make-schema "fn" "fspec"
+        (js-object
+          :args (if (nullish? args-spec) nil (resolve-spec args-spec))
+          :ret (if (nullish? ret-spec) nil (resolve-spec ret-spec))
+          :fn (if (nullish? fn-spec) nil (resolve-spec fn-spec))))))
+
+  (defun fdef (fn-value fn-spec)
+    (let ((s (resolve-spec fn-spec)))
+      (unless (= (get s :kind) "fn")
+        (throw (new globalThis/TypeError "fdef requires a spec-fn schema")))
+      (unless (= (value-type fn-value) "function")
+        (throw (new globalThis/TypeError "fdef expects a function")))
+      (js-call REGISTRY :set fn-value s)
+      (instrument fn-value s)))
+
+  (defun instrument (fn-value &optional explicit-spec)
+    (let ((s (if (nullish? explicit-spec) (js-call REGISTRY :get fn-value) (resolve-spec explicit-spec))))
+      (when (nullish? s)
+        (throw (new globalThis/Error "instrument: function has no registered spec-fn")))
+      (let* ((cfg (get s :config))
+             (args-spec (get cfg :args))
+             (ret-spec (get cfg :ret))
+             (fn-rel-spec (get cfg :fn))
+             (wrapped
+               (lambda (&rest call-args)
+                 (let ((arg-vec (js-call PersistentVector :from call-args))
+                       (conformed-args nil))
+                   (when args-spec
+                     (setq conformed-args (conform args-spec arg-vec))
+                     (when (invalid? conformed-args)
+                       (throw (new globalThis/Error (str "Call args violated spec:\n" (explain-str args-spec arg-vec))))))
+                   (let ((ret (apply fn-value call-args))
+                         (conformed-ret nil))
+                     (when ret-spec
+                       (setq conformed-ret (conform ret-spec ret))
+                       (when (invalid? conformed-ret)
+                         (throw (new globalThis/Error (str "Return value violated spec:\n" (explain-str ret-spec ret))))))
+                     (when fn-rel-spec
+                       (let ((rel-input (kv-map
+                                          (keyword "args") (if args-spec conformed-args arg-vec)
+                                          (keyword "ret") (if ret-spec conformed-ret ret))))
+                         (unless (valid? fn-rel-spec rel-input)
+                           (throw (new globalThis/Error (str "Function :fn invariant violated:\n" (explain-str fn-rel-spec rel-input)))))))
+                     ret)))))
+        (js-call REGISTRY :set wrapped s)
+        wrapped)))
+
+  ;; ============================================================================
+  ;; Collection Helpers
+  ;; ============================================================================
+
+  (defun to-js-array (coll)
+    (cond
+      ((nullish? coll) (js-array))
+      ((Array/isArray coll) coll)
+      ((Collection/isSeqable coll)
+        (let ((items (js-array)))
+          (Collection/reduce coll
+            (lambda (_acc item) (js-call items :push item) nil)
+            nil)
+          items))
+      (t
+        (throw (new globalThis/TypeError (str "expected sequential or iterable collection, got " (printValue coll)))))))
+
+  (defun array-contains-equal? (items target)
+    (let ((i 0)
+          (found false))
+      (while (and (not found) (< i (js-length items)))
+        (when (equalValues (aref items i) target)
+          (setq found t))
+        (setq i (1+ i)))
+      found))
+
+  (defun regex-schema? (schema)
+    (let ((k (get schema :kind)))
+      (or (= k "cat") (= k "alt") (= k "rep*") (= k "rep+") (= k "opt?"))))
+
+  (defun push-problem (problems path pred val via in-path reason)
+    (js-call problems :push
+      (kv-map
+        KW_PATH (js-call PersistentVector :from path)
+        KW_PRED pred
+        KW_VAL val
+        KW_VIA (js-call PersistentVector :from via)
+        KW_IN (js-call PersistentVector :from in-path)
+        KW_REASON reason)))
+
+  ;; ============================================================================
+  ;; Regex Sequence Matching (Backtracking)
+  ;; ============================================================================
+
+  (defun regex-match (schema items pos)
+    (let ((kind (get schema :kind))
+          (cfg (get schema :config)))
+      (cond
+        ((= kind "cat")
+          (regex-match-cat (get cfg :clauses) 0 items pos EMPTY_MAP))
+        ((= kind "alt")
+          (let ((clauses (get cfg :clauses))
+                (i 0)
+                (res nil))
+            (while (and (nil? res) (< i (js-length clauses)))
+              (let* ((clause (aref clauses i))
+                     (tag (get clause :tag))
+                     (sub (get clause :spec))
+                     (m (regex-match sub items pos)))
+                (when (get m :ok)
+                  (setq res (js-object :ok t :pos (get m :pos)
+                              :value (persistentVector tag (get m :value))))))
+              (setq i (1+ i)))
+            (if (nil? res)
+              (js-object :ok false :pos pos :reason "no spec-alt branch matched" :schema schema)
+              res)))
+        ((= kind "opt?")
+          (let ((inner (get cfg :inner)))
+            (let ((m (regex-match inner items pos)))
+              (if (get m :ok)
+                m
+                (js-object :ok t :pos pos :value nil)))))
+        ((or (= kind "rep*") (= kind "rep+"))
+          (let ((inner (get cfg :inner))
+                (cursor pos)
+                (acc (js-array))
+                (keep-going t))
+            (while (and keep-going (< cursor (js-length items)))
+              (let ((m (regex-match inner items cursor)))
+                (if (and (get m :ok) (> (get m :pos) cursor))
+                  (progn
+                    (js-call acc :push (get m :value))
+                    (setq cursor (get m :pos)))
+                  (setq keep-going false))))
+            (if (and (= kind "rep+") (= (js-length acc) 0))
+              (js-object :ok false :pos pos :reason "expected at least one element for spec-rep+" :schema inner)
+              (js-object :ok t :pos cursor :value (js-call PersistentVector :from acc)))))
+        (t
+          ;; Element schema consumes exactly 1 item
+          (if (>= pos (js-length items))
+            (js-object :ok false :pos pos :reason "unexpected end of sequence" :schema schema)
+            (let* ((item (aref items pos))
+                   (c (conform schema item)))
+              (if (invalid? c)
+                (js-object :ok false :pos pos :reason "element failed schema" :schema schema :item item)
+                (js-object :ok t :pos (1+ pos) :value c))))))))
+
+  (defun regex-match-cat (clauses idx items pos acc-map)
+    (if (>= idx (js-length clauses))
+      (js-object :ok t :pos pos :value acc-map)
+      (let* ((clause (aref clauses idx))
+             (tag (get clause :tag))
+             (sub (get clause :spec))
+             (sub-kind (get sub :kind)))
+        (if (or (= sub-kind "rep*") (= sub-kind "rep+"))
+          ;; Backtracking repetition inside cat
+          (let* ((inner (get (get sub :config) :inner))
+                 (min-c (if (= sub-kind "rep+") 1 0))
+                 (matches (js-array))
+                 (cursor pos)
+                 (keep-going t))
+            (while (and keep-going (< cursor (js-length items)))
+              (let ((m (regex-match inner items cursor)))
+                (if (and (get m :ok) (> (get m :pos) cursor))
+                  (progn
+                    (js-call matches :push (js-object :val (get m :value) :next (get m :pos)))
+                    (setq cursor (get m :pos)))
+                  (setq keep-going false))))
+            (let ((n (js-length matches))
+                  (found nil))
+              (if (< n min-c)
+                (js-object :ok false :pos cursor :reason "insufficient elements for repetition" :schema sub :clauseTag tag)
+                (progn
+                  (while (and (nil? found) (>= n min-c))
+                    (let* ((end-pos (if (= n 0) pos (get (aref matches (1- n)) :next)))
+                           (slice-vals (js-array))
+                           (k 0))
+                      (while (< k n)
+                        (js-call slice-vals :push (get (aref matches k) :val))
+                        (setq k (1+ k)))
+                      (let* ((next-acc (Collection/assoc acc-map tag (js-call PersistentVector :from slice-vals)))
+                             (tail-res (regex-match-cat clauses (1+ idx) items end-pos next-acc)))
+                        (when (get tail-res :ok)
+                          (setq found tail-res))))
+                    (setq n (1- n)))
+                  (if (nil? found)
+                    (js-object :ok false :pos pos :reason "cat continuation failed" :schema sub :clauseTag tag)
+                    found)))))
+          (if (= sub-kind "opt?")
+            ;; Try present first, then omitted
+            (let* ((inner (get (get sub :config) :inner))
+                   (present (regex-match inner items pos))
+                   (res (if (get present :ok)
+                          (let ((next-acc (Collection/assoc acc-map tag (get present :value))))
+                            (regex-match-cat clauses (1+ idx) items (get present :pos) next-acc))
+                          (js-object :ok false))))
+              (if (get res :ok)
+                res
+                (regex-match-cat clauses (1+ idx) items pos acc-map)))
+            (let ((m (regex-match sub items pos)))
+              (if (not (get m :ok))
+                (js-object :ok false :pos (get m :pos) :reason (get m :reason)
+                  :schema (get m :schema) :clauseTag tag :item (get m :item))
+                (regex-match-cat clauses (1+ idx) items (get m :pos)
+                  (Collection/assoc acc-map tag (get m :value))))))))))
+
+  (defun regex-conform (schema value)
+    (if (not (or (Collection/isSequential value) (Collection/isList value) (Collection/isVector value) (Array/isArray value)))
+      INVALID
+      (let* ((items (to-js-array value))
+             (m (regex-match schema items 0)))
+        (if (and (get m :ok) (= (get m :pos) (js-length items)))
+          (get m :value)
+          INVALID))))
+
+  ;; ============================================================================
+  ;; Core Conform / Valid? / Unform / Explain
+  ;; ============================================================================
+
+  (defun conform (schema value)
+    (let* ((s (resolve-spec schema))
+           (kind (get s :kind))
+           (cfg (get s :config)))
+      (cond
+        ((= kind "any") value)
+        ((= kind "pred")
+          (if (truthy? (funcall (get cfg :pred) value)) value INVALID))
+        ((= kind "int-in")
+          (if (and (Number/isSafeInteger value)
+                   (>= value (get cfg :min))
+                   (<= value (get cfg :max)))
+            value
+            INVALID))
+        ((= kind "double-in")
+          (if (not (= (value-type value) "number"))
+            INVALID
+            (if (Number/isNaN value)
+              (if (get cfg :NaN?) value INVALID)
+              (if (not (Number/isFinite value))
+                (if (get cfg :infinite?) value INVALID)
+                (if (and (>= value (get cfg :min)) (<= value (get cfg :max))) value INVALID)))))
+        ((= kind "string-len")
+          (if (not (= (value-type value) "string"))
+            INVALID
+            (let ((len (js-length value))
+                  (hi (get cfg :max)))
+              (if (and (>= len (get cfg :min)) (or (nullish? hi) (<= len hi)))
+                value
+                INVALID))))
+        ((= kind "nilable")
+          (if (nil? value) nil (conform (get cfg :inner) value)))
+        ((= kind "enum")
+          (if (array-contains-equal? (get cfg :values) value) value INVALID))
+        ((= kind "and")
+          (let ((specs (get cfg :specs))
+                (cur value)
+                (i 0)
+                (failed false))
+            (while (and (not failed) (< i (js-length specs)))
+              (setq cur (conform (aref specs i) cur))
+              (when (invalid? cur) (setq failed t))
+              (setq i (1+ i)))
+            (if failed INVALID cur)))
+        ((= kind "or")
+          (let ((clauses (get cfg :clauses))
+                (i 0)
+                (res INVALID))
+            (while (and (invalid? res) (< i (js-length clauses)))
+              (let* ((clause (aref clauses i))
+                     (c (conform (get clause :spec) value)))
+                (unless (invalid? c)
+                  (setq res (persistentVector (get clause :tag) c))))
+              (setq i (1+ i)))
+            res))
+        ((= kind "keys")
+          (if (not (Collection/isMap value))
+            INVALID
+            (let ((req (get cfg :req))
+                  (opt (get cfg :opt))
+                  (closed (get cfg :closed))
+                  (out value)
+                  (failed false)
+                  (i 0))
+              (while (and (not failed) (< i (js-length req)))
+                (let* ((entry (aref req i))
+                       (k (get entry :key))
+                       (v (Collection/get value k MISSING)))
+                  (if (eq v MISSING)
+                    (setq failed t)
+                    (let ((cv (conform (get entry :spec) v)))
+                      (if (invalid? cv)
+                        (setq failed t)
+                        (unless (equalValues cv v)
+                          (setq out (Collection/assoc out k cv)))))))
+                (setq i (1+ i)))
+              (setq i 0)
+              (while (and (not failed) (< i (js-length opt)))
+                (let* ((entry (aref opt i))
+                       (k (get entry :key))
+                       (v (Collection/get value k MISSING)))
+                  (unless (eq v MISSING)
+                    (let ((cv (conform (get entry :spec) v)))
+                      (if (invalid? cv)
+                        (setq failed t)
+                        (unless (equalValues cv v)
+                          (setq out (Collection/assoc out k cv)))))))
+                (setq i (1+ i)))
+              (when (and (not failed) closed)
+                (let ((ks (js-call req :concat opt)))
+                  (Collection/reduceKV value
+                    (lambda (_acc k _v)
+                      (let ((found false)
+                            (j 0))
+                        (while (and (not found) (< j (js-length ks)))
+                          (when (equalValues k (get (aref ks j) :key))
+                            (setq found t))
+                          (setq j (1+ j)))
+                        (unless found (setq failed t)))
+                      nil)
+                    nil)))
+              (if failed INVALID out))))
+        ((= kind "coll-of")
+          (if (not (or (Collection/isVector value)
+                       (Collection/isList value)
+                       (Collection/isSet value)
+                       (Collection/isQueue value)
+                       (Collection/isSequence value)
+                       (Array/isArray value)))
+            INVALID
+            (let* ((expected-kind (get cfg :kind))
+                   (kind-ok (cond
+                              ((nullish? expected-kind) t)
+                              ((= expected-kind "vector") (Collection/isVector value))
+                              ((= expected-kind "list") (Collection/isList value))
+                              ((= expected-kind "set") (Collection/isSet value))
+                              ((= (value-type expected-kind) "function") (truthy? (funcall expected-kind value)))
+                              (t t))))
+              (if (not kind-ok)
+                INVALID
+                (let ((items (to-js-array value))
+                      (min-c (get cfg :minCount))
+                      (max-c (get cfg :maxCount))
+                      (uniq (get cfg :distinct))
+                      (item-spec (get cfg :item))
+                      (conformed (js-array))
+                      (seen (js-array))
+                      (failed false)
+                      (i 0))
+                  (when (or (< (js-length items) min-c)
+                            (and (not (nullish? max-c)) (> (js-length items) max-c)))
+                    (setq failed t))
+                  (while (and (not failed) (< i (js-length items)))
+                    (let* ((el (aref items i))
+                           (ce (conform item-spec el)))
+                      (if (invalid? ce)
+                        (setq failed t)
+                        (if (and uniq (array-contains-equal? seen el))
+                          (setq failed t)
+                          (progn
+                            (when uniq (js-call seen :push el))
+                            (js-call conformed :push ce)))))
+                    (setq i (1+ i)))
+                  (if failed
+                    INVALID
+                    (cond
+                      ((Collection/isVector value) (js-call PersistentVector :from conformed))
+                      ((Collection/isSet value) (apply persistentHashSet conformed))
+                      ((Collection/isList value) (apply persistentList conformed))
+                      (t (js-call PersistentVector :from conformed)))))))))
+        ((= kind "map-of")
+          (if (not (Collection/isMap value))
+            INVALID
+            (let ((min-c (get cfg :minCount))
+                  (max-c (get cfg :maxCount))
+                  (cnt (Collection/count value))
+                  (ks (get cfg :key))
+                  (vs (get cfg :val))
+                  (entries (js-array)))
+              (if (or (< cnt min-c) (and (not (nullish? max-c)) (> cnt max-c)))
+                INVALID
+                (progn
+                  (Collection/reduceKV value
+                    (lambda (_acc k v)
+                      (js-call entries :push (js-array k v))
+                      nil)
+                    nil)
+                  (let ((pairs (js-array))
+                        (failed false)
+                        (i 0))
+                    (while (and (not failed) (< i (js-length entries)))
+                      (let* ((pair (aref entries i))
+                             (ck (conform ks (aref pair 0)))
+                             (cv (conform vs (aref pair 1))))
+                        (if (or (invalid? ck) (invalid? cv))
+                          (setq failed t)
+                          (progn
+                            (js-call pairs :push ck)
+                            (js-call pairs :push cv))))
+                      (setq i (1+ i)))
+                    (if failed INVALID (apply kv-map pairs))))))))
+        ((= kind "tuple")
+          (if (not (or (Collection/isVector value) (Array/isArray value)))
+            INVALID
+            (let ((items (to-js-array value))
+                  (item-specs (get cfg :items)))
+              (if (not (= (js-length items) (js-length item-specs)))
+                INVALID
+                (let ((conformed (js-array))
+                      (failed false)
+                      (i 0))
+                  (while (and (not failed) (< i (js-length item-specs)))
+                    (let ((ce (conform (aref item-specs i) (aref items i))))
+                      (if (invalid? ce)
+                        (setq failed t)
+                        (js-call conformed :push ce)))
+                    (setq i (1+ i)))
+                  (if failed INVALID (js-call PersistentVector :from conformed)))))))
+        ((regex-schema? s)
+          (regex-conform s value))
+        ((= kind "fn")
+          (if (= (value-type value) "function") value INVALID))
+        (t INVALID))))
+
+  (defun valid? (schema value)
+    (not (invalid? (conform schema value))))
+
+  (defun unform (schema conformed)
+    (let* ((s (resolve-spec schema))
+           (kind (get s :kind))
+           (cfg (get s :config)))
+      (cond
+        ((= kind "or")
+          (let* ((pair (to-js-array conformed))
+                 (tag (aref pair 0))
+                 (val (aref pair 1))
+                 (clauses (get cfg :clauses))
+                 (i 0)
+                 (found nil))
+            (while (and (nil? found) (< i (js-length clauses)))
+              (let ((c (aref clauses i)))
+                (when (equalValues (get c :tag) tag)
+                  (setq found (unform (get c :spec) val))))
+              (setq i (1+ i)))
+            (if (nil? found) val found)))
+        ((= kind "alt")
+          (let* ((pair (to-js-array conformed))
+                 (tag (aref pair 0))
+                 (val (aref pair 1))
+                 (clauses (get cfg :clauses))
+                 (i 0)
+                 (found nil))
+            (while (and (nil? found) (< i (js-length clauses)))
+              (let ((c (aref clauses i)))
+                (when (equalValues (get c :tag) tag)
+                  (setq found (unform (get c :spec) val))))
+              (setq i (1+ i)))
+            (persistentVector (if (nil? found) val found))))
+        ((= kind "cat")
+          (let ((clauses (get cfg :clauses))
+                (items (js-array))
+                (i 0))
+            (while (< i (js-length clauses))
+              (let* ((c (aref clauses i))
+                     (tag (get c :tag))
+                     (sub (get c :spec)))
+                (when (Collection/contains conformed tag)
+                  (let ((v (Collection/get conformed tag)))
+                    (if (or (= (get sub :kind) "rep*") (= (get sub :kind) "rep+"))
+                      (let ((inner (get (get sub :config) :inner))
+                            (arr (to-js-array v))
+                            (j 0))
+                        (while (< j (js-length arr))
+                          (let ((u (unform inner (aref arr j))))
+                            (if (regex-schema? inner)
+                              (let ((ua (to-js-array u)) (k 0))
+                                (while (< k (js-length ua))
+                                  (js-call items :push (aref ua k))
+                                  (setq k (1+ k))))
+                              (js-call items :push u)))
+                          (setq j (1+ j))))
+                      (let ((u (unform sub v)))
+                        (if (regex-schema? sub)
+                          (let ((ua (to-js-array u)) (k 0))
+                            (while (< k (js-length ua))
+                              (js-call items :push (aref ua k))
+                              (setq k (1+ k))))
+                          (js-call items :push u)))))))
+              (setq i (1+ i)))
+            (js-call PersistentVector :from items)))
+        ((or (= kind "rep*") (= kind "rep+"))
+          (let ((inner (get cfg :inner))
+                (arr (to-js-array conformed))
+                (items (js-array))
+                (i 0))
+            (while (< i (js-length arr))
+              (let ((u (unform inner (aref arr i))))
+                (if (regex-schema? inner)
+                  (let ((ua (to-js-array u)) (k 0))
+                    (while (< k (js-length ua))
+                      (js-call items :push (aref ua k))
+                      (setq k (1+ k))))
+                  (js-call items :push u)))
+              (setq i (1+ i)))
+            (js-call PersistentVector :from items)))
+        ((= kind "opt?")
+          (if (nil? conformed)
+            EMPTY_VECTOR
+            (let* ((inner (get cfg :inner))
+                   (u (unform inner conformed)))
+              (if (regex-schema? inner) u (persistentVector u)))))
+        ((= kind "keys")
+          (let ((out conformed)
+                (all-entries (js-call (get cfg :req) :concat (get cfg :opt)))
+                (i 0))
+            (while (< i (js-length all-entries))
+              (let* ((e (aref all-entries i))
+                     (k (get e :key)))
+                (when (Collection/contains out k)
+                  (setq out (Collection/assoc out k (unform (get e :spec) (Collection/get out k))))))
+              (setq i (1+ i)))
+            out))
+        ((= kind "coll-of")
+          (let ((item-spec (get cfg :item))
+                (arr (to-js-array conformed)))
+            (let ((out (js-call arr :map (lambda (el) (unform item-spec el)))))
+              (cond
+                ((Collection/isSet conformed) (apply persistentHashSet out))
+                ((Collection/isList conformed) (apply persistentList out))
+                (t (js-call PersistentVector :from out))))))
+        ((= kind "tuple")
+          (let ((specs (get cfg :items))
+                (arr (to-js-array conformed))
+                (out (js-array))
+                (i 0))
+            (while (< i (js-length specs))
+              (js-call out :push (unform (aref specs i) (aref arr i)))
+              (setq i (1+ i)))
+            (js-call PersistentVector :from out)))
+        ((= kind "and")
+          (let ((specs (get cfg :specs))
+                (cur conformed)
+                (i (1- (js-length (get cfg :specs)))))
+            (while (>= i 0)
+              (setq cur (unform (aref specs i) cur))
+              (setq i (1- i)))
+            cur))
+        ((= kind "nilable")
+          (if (nil? conformed) nil (unform (get cfg :inner) conformed)))
+        (t conformed))))
+
+  (defun explain-into (schema value path via in-path problems)
+    (let* ((s (resolve-spec schema))
+           (kind (get s :kind))
+           (name (get s :name))
+           (cfg (get s :config))
+           (next-via (js-call via :concat (js-array name))))
+      (cond
+        ((= kind "any") nil)
+        ((= kind "pred")
+          (unless (truthy? (funcall (get cfg :pred) value))
+            (push-problem problems path name value via in-path "predicate failed")))
+        ((= kind "int-in")
+          (unless (and (Number/isSafeInteger value)
+                       (>= value (get cfg :min))
+                       (<= value (get cfg :max)))
+            (push-problem problems path name value via in-path
+              (str "expected integer in [" (get cfg :min) ", " (get cfg :max) "]"))))
+        ((= kind "double-in")
+          (when (invalid? (conform s value))
+            (push-problem problems path name value via in-path "number out of bounds or invalid float")))
+        ((= kind "string-len")
+          (when (invalid? (conform s value))
+            (push-problem problems path name value via in-path "expected string within length bounds")))
+        ((= kind "nilable")
+          (unless (nil? value)
+            (explain-into (get cfg :inner) value path next-via in-path problems)))
+        ((= kind "enum")
+          (unless (array-contains-equal? (get cfg :values) value)
+            (push-problem problems path "enum" value via in-path "value not in allowed enum set")))
+        ((= kind "and")
+          (let ((specs (get cfg :specs))
+                (cur value)
+                (i 0)
+                (failed false))
+            (while (and (not failed) (< i (js-length specs)))
+              (let ((sub (aref specs i)))
+                (let ((c (conform sub cur)))
+                  (if (invalid? c)
+                    (progn
+                      (explain-into sub cur (js-call path :concat (js-array i)) next-via in-path problems)
+                      (setq failed t))
+                    (setq cur c))))
+              (setq i (1+ i)))))
+        ((= kind "or")
+          (when (invalid? (conform s value))
+            (let ((clauses (get cfg :clauses))
+                  (i 0))
+              (while (< i (js-length clauses))
+                (let ((clause (aref clauses i)))
+                  (explain-into (get clause :spec) value
+                    (js-call path :concat (js-array (get clause :tag)))
+                    next-via in-path problems))
+                (setq i (1+ i))))))
+        ((= kind "keys")
+          (if (not (Collection/isMap value))
+            (push-problem problems path "map?" value via in-path "expected a map")
+            (let ((req (get cfg :req))
+                  (opt (get cfg :opt))
+                  (closed (get cfg :closed))
+                  (i 0))
+              (while (< i (js-length req))
+                (let* ((entry (aref req i))
+                       (k (get entry :key))
+                       (v (Collection/get value k MISSING)))
+                  (if (eq v MISSING)
+                    (push-problem problems (js-call path :concat (js-array k))
+                      (str "contains? " (printValue k)) value next-via in-path
+                      (str "missing required key " (printValue k)))
+                    (unless (valid? (get entry :spec) v)
+                      (explain-into (get entry :spec) v
+                        (js-call path :concat (js-array k))
+                        next-via (js-call in-path :concat (js-array k)) problems))))
+                (setq i (1+ i)))
+              (setq i 0)
+              (while (< i (js-length opt))
+                (let* ((entry (aref opt i))
+                       (k (get entry :key))
+                       (v (Collection/get value k MISSING)))
+                  (when (and (not (eq v MISSING)) (not (valid? (get entry :spec) v)))
+                    (explain-into (get entry :spec) v
+                      (js-call path :concat (js-array k))
+                      next-via (js-call in-path :concat (js-array k)) problems)))
+                (setq i (1+ i)))
+              (when closed
+                (let ((all-ks (js-call req :concat opt)))
+                  (Collection/reduceKV value
+                    (lambda (_acc k v)
+                      (let ((found false)
+                            (j 0))
+                        (while (and (not found) (< j (js-length all-ks)))
+                          (when (equalValues k (get (aref all-ks j) :key))
+                            (setq found t))
+                          (setq j (1+ j)))
+                        (unless found
+                          (push-problem problems path "closed-keys" v next-via
+                            (js-call in-path :concat (js-array k))
+                            (str "unexpected extra key " (printValue k)))))
+                      nil)
+                    nil))))))
+        ((= kind "coll-of")
+          (if (not (or (Collection/isVector value)
+                       (Collection/isList value)
+                       (Collection/isSet value)
+                       (Collection/isQueue value)
+                       (Collection/isSequence value)
+                       (Array/isArray value)))
+            (push-problem problems path "coll?" value via in-path "expected collection")
+            (let* ((expected-kind (get cfg :kind))
+                   (kind-ok (cond
+                              ((nullish? expected-kind) t)
+                              ((= expected-kind "vector") (Collection/isVector value))
+                              ((= expected-kind "list") (Collection/isList value))
+                              ((= expected-kind "set") (Collection/isSet value))
+                              ((= (value-type expected-kind) "function") (truthy? (funcall expected-kind value)))
+                              (t t))))
+              (if (not kind-ok)
+                (push-problem problems path (str "kind:" expected-kind) value via in-path "collection kind mismatch")
+                (let ((items (to-js-array value))
+                      (min-c (get cfg :minCount))
+                      (max-c (get cfg :maxCount))
+                      (uniq (get cfg :distinct))
+                      (item-spec (get cfg :item))
+                      (seen (js-array))
+                      (i 0))
+                  (when (< (js-length items) min-c)
+                    (push-problem problems path (str "min-count>=" min-c) value next-via in-path
+                      (str "expected at least " min-c " elements, got " (js-length items))))
+                  (when (and (not (nullish? max-c)) (> (js-length items) max-c))
+                    (push-problem problems path (str "max-count<=" max-c) value next-via in-path
+                      (str "expected at most " max-c " elements, got " (js-length items))))
+                  (while (< i (js-length items))
+                    (let ((el (aref items i)))
+                      (when (and uniq (array-contains-equal? seen el))
+                        (push-problem problems path "distinct" el next-via
+                          (js-call in-path :concat (js-array i)) "duplicate collection element"))
+                      (when uniq (js-call seen :push el))
+                      (unless (valid? item-spec el)
+                        (explain-into item-spec el path next-via
+                          (js-call in-path :concat (js-array i)) problems)))
+                    (setq i (1+ i))))))))
+        ((= kind "map-of")
+          (if (not (Collection/isMap value))
+            (push-problem problems path "map?" value via in-path "expected a map")
+            (let ((cnt (Collection/count value))
+                  (min-c (get cfg :minCount))
+                  (max-c (get cfg :maxCount))
+                  (ks (get cfg :key))
+                  (vs (get cfg :val))
+                  (entries (js-array)))
+              (when (< cnt min-c)
+                (push-problem problems path (str "min-count>=" min-c) value next-via in-path
+                  (str "expected at least " min-c " map entries")))
+              (when (and (not (nullish? max-c)) (> cnt max-c))
+                (push-problem problems path (str "max-count<=" max-c) value next-via in-path
+                  (str "expected at most " max-c " map entries")))
+              (Collection/reduceKV value
+                (lambda (_acc k v) (js-call entries :push (js-array k v)) nil)
+                nil)
+              (let ((i 0))
+                (while (< i (js-length entries))
+                  (let* ((pair (aref entries i))
+                         (k (aref pair 0))
+                         (v (aref pair 1)))
+                    (unless (valid? ks k)
+                      (explain-into ks k (js-call path :concat (js-array (keyword "key")))
+                        next-via (js-call in-path :concat (js-array k)) problems))
+                    (unless (valid? vs v)
+                      (explain-into vs v (js-call path :concat (js-array (keyword "val")))
+                        next-via (js-call in-path :concat (js-array k)) problems)))
+                  (setq i (1+ i)))))))
+        ((= kind "tuple")
+          (if (not (or (Collection/isVector value) (Array/isArray value)))
+            (push-problem problems path "vector?" value via in-path "expected tuple vector")
+            (let ((items (to-js-array value))
+                  (specs (get cfg :items)))
+              (if (not (= (js-length items) (js-length specs)))
+                (push-problem problems path (str "count=" (js-length specs)) value via in-path
+                  (str "expected tuple of length " (js-length specs) ", got " (js-length items)))
+                (let ((i 0))
+                  (while (< i (js-length specs))
+                    (unless (valid? (aref specs i) (aref items i))
+                      (explain-into (aref specs i) (aref items i)
+                        (js-call path :concat (js-array i))
+                        next-via (js-call in-path :concat (js-array i)) problems))
+                    (setq i (1+ i))))))))
+        ((regex-schema? s)
+          (if (not (or (Collection/isSequential value) (Collection/isList value) (Collection/isVector value) (Array/isArray value)))
+            (push-problem problems path "sequential?" value via in-path "expected sequence")
+            (let* ((items (to-js-array value))
+                   (m (regex-match s items 0)))
+              (cond
+                ((not (get m :ok))
+                  (let ((bad-pos (get m :pos))
+                        (tag (get m :clauseTag)))
+                    (push-problem problems
+                      (if (nullish? tag) path (js-call path :concat (js-array tag)))
+                      (if (get m :schema) (get (get m :schema) :name) name)
+                      (if (< bad-pos (js-length items)) (aref items bad-pos) nil)
+                      next-via
+                      (js-call in-path :concat (js-array bad-pos))
+                      (get m :reason))))
+                ((< (get m :pos) (js-length items))
+                  (push-problem problems path name (aref items (get m :pos))
+                    next-via (js-call in-path :concat (js-array (get m :pos)))
+                    "unexpected trailing element in sequence"))))))
+        (t
+          (when (invalid? (conform s value))
+            (push-problem problems path name value via in-path "schema check failed"))))))
+
+  (defun explain-data (schema value)
+    (let ((s (resolve-spec schema)))
+      (if (valid? s value)
+        nil
+        (let ((problems (js-array)))
+          (explain-into s value (js-array) (js-array) (js-array) problems)
+          (when (= (js-length problems) 0)
+            (push-problem problems (js-array) (get s :name) value (js-array) (js-array) "validation failed"))
+          (kv-map
+            KW_SCHEMA s
+            KW_VALUE value
+            KW_PROBLEMS (js-call PersistentVector :from problems))))))
+
+  (defun explain-str (schema value)
+    (let ((data (explain-data schema value)))
+      (if (nil? data)
+        "Success!\n"
+        (let* ((problems (Collection/get data KW_PROBLEMS EMPTY_VECTOR))
+               (lines (js-array))
+               (i 0)
+               (count (Collection/count problems)))
+          (while (< i count)
+            (let* ((p (js-call problems :nth i))
+                   (val-str (printValue (Collection/get p KW_VAL)))
+                   (pred-str (Collection/get p KW_PRED))
+                   (in-vec (Collection/get p KW_IN EMPTY_VECTOR))
+                   (path-vec (Collection/get p KW_PATH EMPTY_VECTOR))
+                   (reason (Collection/get p KW_REASON "")))
+              (js-call lines :push
+                (str val-str " - failed: " pred-str
+                     (if (> (Collection/count in-vec) 0) (str " in: " (printValue in-vec)) "")
+                     (if (> (Collection/count path-vec) 0) (str " at: " (printValue path-vec)) "")
+                     (if (> (js-length reason) 0) (str " (" reason ")") ""))))
+            (setq i (1+ i)))
+          (str (js-call lines :join "\n") "\n")))))
+
+  (defun explain (schema value)
+    (console/log (js-call (explain-str schema value) :trimEnd))
+    nil)
+
+  ;; ============================================================================
+  ;; Schema-to-Generator Synthesis & Seeded Sampling
+  ;; ============================================================================
+
+  (defun gen-from-spec (schema)
+    (let* ((s (resolve-spec schema))
+           (custom (get s :customGen))
+           (kind (get s :kind))
+           (cfg (get s :config)))
+      (if (not (nullish? custom))
+        custom
+        (cond
+          ((or (= kind "any") (= kind "pred") (= kind "int-in")
+               (= kind "double-in") (= kind "string-len") (= kind "enum"))
+            (throw (new globalThis/Error (str "no generator available for predicate schema " (get s :name)))))
+          ((= kind "nilable")
+            (let ((inner-gen (gen-from-spec (get cfg :inner))))
+              (make-gen "nilable"
+                (lambda (rng size)
+                  (if (= (rng-next-int rng 0 7) 0)
+                    nil
+                    (js-call inner-gen :sampleFn rng size))))))
+          ((= kind "and")
+            (let* ((specs (get cfg :specs))
+                   (base (gen-from-spec (aref specs 0))))
+              (if (= (js-length specs) 1)
+                base
+                (gen-such-that (lambda (v) (valid? s v)) base))))
+          ((= kind "or")
+            (let ((clauses (get cfg :clauses)))
+              (gen-one-of (js-call clauses :map (lambda (c) (gen-from-spec (get c :spec)))))))
+          ((= kind "keys")
+            (let ((req (get cfg :req))
+                  (opt (get cfg :opt)))
+              (let ((req-gens (js-call req :map (lambda (e) (js-object :key (get e :key) :gen (gen-from-spec (get e :spec))))))
+                    (opt-gens (js-call opt :map (lambda (e) (js-object :key (get e :key) :gen (gen-from-spec (get e :spec)))))))
+                (make-gen "keys"
+                  (lambda (rng size)
+                    (let ((pairs (js-array))
+                          (i 0))
+                      (while (< i (js-length req-gens))
+                        (let ((entry (aref req-gens i)))
+                          (js-call pairs :push (get entry :key))
+                          (js-call pairs :push (js-call (get entry :gen) :sampleFn rng size)))
+                        (setq i (1+ i)))
+                      (setq i 0)
+                      (while (< i (js-length opt-gens))
+                        (when (= (rng-next-int rng 0 1) 1)
+                          (let ((entry (aref opt-gens i)))
+                            (js-call pairs :push (get entry :key))
+                            (js-call pairs :push (js-call (get entry :gen) :sampleFn rng size))))
+                        (setq i (1+ i)))
+                      (apply kv-map pairs)))))))
+          ((= kind "coll-of")
+            (let* ((ig (gen-from-spec (get cfg :item)))
+                   (expected-kind (get cfg :kind))
+                   (vg (gen-vector ig (get cfg :minCount) (get cfg :maxCount) (get cfg :distinct))))
+              (cond
+                ((= expected-kind "set") (gen-fmap (lambda (v) (apply persistentHashSet (to-js-array v))) vg))
+                ((= expected-kind "list") (gen-fmap (lambda (v) (apply persistentList (to-js-array v))) vg))
+                (t vg))))
+          ((= kind "map-of")
+            (gen-map (gen-from-spec (get cfg :key))
+                     (gen-from-spec (get cfg :val))
+                     (get cfg :minCount)
+                     (get cfg :maxCount)))
+          ((= kind "tuple")
+            (apply gen-tuple (js-call (get cfg :items) :map gen-from-spec)))
+          ((= kind "cat")
+            (let ((clauses (get cfg :clauses)))
+              (make-gen "cat"
+                (lambda (rng size)
+                  (let ((out (js-array))
+                        (i 0))
+                    (while (< i (js-length clauses))
+                      (let* ((sub (get (aref clauses i) :spec))
+                             (sg (gen-from-spec sub))
+                             (part (js-call sg :sampleFn rng size)))
+                        (if (regex-schema? sub)
+                          (let ((pa (to-js-array part)) (j 0))
+                            (while (< j (js-length pa))
+                              (js-call out :push (aref pa j))
+                              (setq j (1+ j))))
+                          (js-call out :push part)))
+                      (setq i (1+ i)))
+                    (js-call PersistentVector :from out))))))
+          ((= kind "alt")
+            (let ((clauses (get cfg :clauses)))
+              (gen-one-of (js-call clauses :map (lambda (c) (gen-from-spec (get c :spec)))))))
+          ((= kind "rep*")
+            (gen-vector (gen-from-spec (get cfg :inner)) 0 8))
+          ((= kind "rep+")
+            (gen-vector (gen-from-spec (get cfg :inner)) 1 8))
+          ((= kind "opt?")
+            (let ((inner-g (gen-from-spec (get cfg :inner))))
+              (make-gen "opt?"
+                (lambda (rng size)
+                  (if (= (rng-next-int rng 0 1) 0)
+                    EMPTY_VECTOR
+                    (let ((v (js-call inner-g :sampleFn rng size)))
+                      (if (regex-schema? (get cfg :inner)) v (persistentVector v))))))))
+          (t
+            (throw (new globalThis/Error (str "cannot synthesize generator for schema kind " kind))))))))
+
+  (defun gen-generate (schema-or-gen &optional options)
+    (let* ((g (ensure-gen schema-or-gen))
+           (seed (read-opt options "seed" nil nil 42))
+           (size (read-opt options "size" nil nil 20))
+           (rng (make-rng seed)))
+      (js-call g :sampleFn rng size)))
+
+  (defun gen-sample (schema-or-gen &optional options)
+    (let* ((g (ensure-gen schema-or-gen))
+           (count (read-opt options "count" nil nil 10))
+           (seed (read-opt options "seed" nil nil 42))
+           (size (read-opt options "size" nil nil 20))
+           (rng (make-rng seed))
+           (items (js-array))
+           (i 0))
+      (while (< i count)
+        (let ((step-size (Math/min size (+ 1 (Math/floor (/ (* i size) (Math/max 1 count)))))))
+          (js-call items :push (js-call g :sampleFn rng step-size)))
+        (setq i (1+ i)))
+      (js-call PersistentVector :from items)))
+
+  ;; ============================================================================
+  ;; Structural Counterexample Shrinking & Property Check
+  ;; ============================================================================
+
+  (defun shrink-int-toward (val target)
+    (let ((candidates (js-array)))
+      (unless (= val target)
+        (js-call candidates :push target)
+        (let ((diff (- val target)))
+          (let ((step (if (> diff 0) (Math/floor (/ diff 2)) (Math/ceil (/ diff 2)))))
+            (while (not (= step 0))
+              (let ((cand (+ target step)))
+                (unless (or (= cand val) (= cand target))
+                  (js-call candidates :push cand)))
+              (setq step (if (> step 0) (Math/floor (/ step 2)) (Math/ceil (/ step 2)))))))
+        (let ((one-closer (if (> val target) (1- val) (1+ val))))
+          (unless (= one-closer target)
+            (js-call candidates :push one-closer))))
+      candidates))
+
+  (defun shrink-string-value (text min-len)
+    (let ((candidates (js-array))
+          (len (js-length text)))
+      (when (> len min-len)
+        (js-call candidates :push (js-call text :slice 0 min-len))
+        (let ((half (Math/max min-len (Math/floor (/ (+ min-len len) 2)))))
+          (when (and (> half min-len) (< half len))
+            (js-call candidates :push (js-call text :slice 0 half))))
+        (when (> len (1+ min-len))
+          (js-call candidates :push (js-call text :slice 0 (1- len)))
+          (js-call candidates :push (js-call text :slice 1))))
+      candidates))
+
+  (defun wrap-sequential-like (original arr)
+    (cond
+      ((Collection/isSet original) (apply persistentHashSet arr))
+      ((Collection/isList original) (apply persistentList arr))
+      (t (js-call PersistentVector :from arr))))
+
+  (defun shrink-sequence-items (original arr item-spec min-c)
+    (let ((candidates (js-array))
+          (n (js-length arr)))
+      (unless (= n 0)
+        ;; 1. Drop to minimum count first
+        (when (> n min-c)
+          (js-call candidates :push (wrap-sequential-like original (js-call arr :slice 0 min-c)))
+          ;; Try dropping half chunks
+          (let ((half (Math/max min-c (Math/floor (/ n 2)))))
+            (when (< half n)
+              (js-call candidates :push (wrap-sequential-like original (js-call arr :slice 0 half)))
+              (let ((second-half (js-call arr :slice (- n half))))
+                (when (>= (js-length second-half) min-c)
+                  (js-call candidates :push (wrap-sequential-like original second-half))))))
+          ;; Try removing individual elements
+          (let ((i 0))
+            (while (< i n)
+              (let ((without (js-array))
+                    (j 0))
+                (while (< j n)
+                  (unless (= j i) (js-call without :push (aref arr j)))
+                  (setq j (1+ j)))
+                (when (>= (js-length without) min-c)
+                  (js-call candidates :push (wrap-sequential-like original without))))
+              (setq i (1+ i)))))
+        ;; 2. Shrink each element in-place
+        (when item-spec
+          (let ((i 0))
+            (while (< i n)
+              (let ((el-shrinks (shrink-value item-spec (aref arr i)))
+                    (si 0))
+                (while (< si (js-length el-shrinks))
+                  (let ((copy (js-call arr :slice)))
+                    (put copy i (aref el-shrinks si))
+                    (js-call candidates :push (wrap-sequential-like original copy)))
+                  (setq si (1+ si))))
+              (setq i (1+ i))))))
+      candidates))
+
+  (defun shrink-value (schema value)
+    (let* ((s (resolve-spec schema))
+           (kind (get s :kind))
+           (cfg (get s :config))
+           (candidates (js-array)))
+      (cond
+        ((= kind "nilable")
+          (unless (nil? value)
+            (js-call candidates :push nil)
+            (let ((sub (shrink-value (get cfg :inner) value)) (i 0))
+              (while (< i (js-length sub))
+                (js-call candidates :push (aref sub i))
+                (setq i (1+ i))))))
+        ((= kind "int-in")
+          (let* ((lo (get cfg :min))
+                 (hi (get cfg :max))
+                 (target (if (<= lo 0) (if (>= hi 0) 0 hi) lo)))
+            (setq candidates (shrink-int-toward value target))))
+        ((= kind "double-in")
+          (when (and (= (value-type value) "number") (Number/isFinite value))
+            (let* ((lo (get cfg :min))
+                   (hi (get cfg :max))
+                   (target (if (<= lo 0) (if (>= hi 0) 0 hi) lo)))
+              (unless (= value target)
+                (js-call candidates :push target)
+                (let ((tr (Math/trunc value)))
+                  (when (and (not (= tr value)) (>= tr lo) (<= tr hi))
+                    (js-call candidates :push tr)))
+                (let ((mid (/ (+ value target) 2)))
+                  (when (and (not (= mid value)) (>= mid lo) (<= mid hi))
+                    (js-call candidates :push mid)))))))
+        ((= kind "string-len")
+          (when (= (value-type value) "string")
+            (setq candidates (shrink-string-value value (get cfg :min)))))
+        ((= kind "pred")
+          (let ((name (get s :name)))
+            (cond
+              ((Number/isSafeInteger value)
+                (setq candidates (shrink-int-toward value 0)))
+              ((= (value-type value) "string")
+                (setq candidates (shrink-string-value value 0)))
+              ((= name "boolean?")
+                (when (eq value t) (js-call candidates :push false))))))
+        ((= kind "coll-of")
+          (setq candidates (shrink-sequence-items value (to-js-array value) (get cfg :item) (get cfg :minCount))))
+        ((or (= kind "rep*") (= kind "rep+"))
+          (setq candidates (shrink-sequence-items value (to-js-array value) (get cfg :inner) (if (= kind "rep+") 1 0))))
+        ((= kind "tuple")
+          (let ((items (to-js-array value))
+                (specs (get cfg :items))
+                (i 0))
+            (while (< i (js-length specs))
+              (let ((sub (shrink-value (aref specs i) (aref items i))) (j 0))
+                (while (< j (js-length sub))
+                  (let ((copy (js-call items :slice)))
+                    (put copy i (aref sub j))
+                    (js-call candidates :push (js-call PersistentVector :from copy)))
+                  (setq j (1+ j))))
+              (setq i (1+ i)))))
+        ((= kind "keys")
+          (when (Collection/isMap value)
+            (let ((req (get cfg :req))
+                  (opt (get cfg :opt))
+                  (i 0))
+              ;; Try dropping optional keys first
+              (while (< i (js-length opt))
+                (let ((k (get (aref opt i) :key)))
+                  (when (Collection/contains value k)
+                    (js-call candidates :push (Collection/dissoc value k))))
+                (setq i (1+ i)))
+              ;; Try shrinking each declared key's value
+              (let ((all-e (js-call req :concat opt)))
+                (setq i 0)
+                (while (< i (js-length all-e))
+                  (let* ((e (aref all-e i))
+                         (k (get e :key)))
+                    (when (Collection/contains value k)
+                      (let ((sub (shrink-value (get e :spec) (Collection/get value k)))
+                            (j 0))
+                        (while (< j (js-length sub))
+                          (js-call candidates :push (Collection/assoc value k (aref sub j)))
+                          (setq j (1+ j))))))
+                  (setq i (1+ i)))))))
+        ((= kind "map-of")
+          (when (Collection/isMap value)
+            (let ((min-c (get cfg :minCount))
+                  (ks (get cfg :key))
+                  (vs (get cfg :val))
+                  (entries (js-array)))
+              (Collection/reduceKV value (lambda (_acc k v) (js-call entries :push (js-array k v)) nil) nil)
+              (when (> (Collection/count value) min-c)
+                (let ((i 0))
+                  (while (< i (js-length entries))
+                    (js-call candidates :push (Collection/dissoc value (aref (aref entries i) 0)))
+                    (setq i (1+ i)))))
+              (let ((i 0))
+                (while (< i (js-length entries))
+                  (let* ((pair (aref entries i))
+                         (k (aref pair 0))
+                         (v (aref pair 1))
+                         (v-shrinks (shrink-value vs v))
+                         (j 0))
+                    (while (< j (js-length v-shrinks))
+                      (js-call candidates :push (Collection/assoc value k (aref v-shrinks j)))
+                      (setq j (1+ j)))
+                    (let ((k-shrinks (shrink-value ks k)) (kj 0))
+                      (while (< kj (js-length k-shrinks))
+                        (let ((nk (aref k-shrinks kj)))
+                          (unless (Collection/contains value nk)
+                            (js-call candidates :push (Collection/assoc (Collection/dissoc value k) nk v))))
+                        (setq kj (1+ kj)))))
+                  (setq i (1+ i)))))))
+        ((= kind "and")
+          (let ((specs (get cfg :specs)))
+            (when (> (js-length specs) 0)
+              (let ((sub (shrink-value (aref specs 0) value)) (i 0))
+                (while (< i (js-length sub))
+                  (let ((c (aref sub i)))
+                    (when (valid? s c) (js-call candidates :push c)))
+                  (setq i (1+ i)))))))
+        ((= kind "or")
+          (let ((clauses (get cfg :clauses))
+                (i 0))
+            (while (< i (js-length clauses))
+              (let ((sub-spec (get (aref clauses i) :spec)))
+                (when (valid? sub-spec value)
+                  (let ((sub (shrink-value sub-spec value)) (j 0))
+                    (while (< j (js-length sub))
+                      (js-call candidates :push (aref sub j))
+                      (setq j (1+ j))))))
+              (setq i (1+ i)))))
+        ((= kind "cat")
+          (let ((arr (to-js-array value))
+                (i 0))
+            (while (< i (js-length arr))
+              (let ((el (aref arr i)))
+                (cond
+                  ((Number/isSafeInteger el)
+                    (let ((sub (shrink-int-toward el 0)) (j 0))
+                      (while (< j (js-length sub))
+                        (let ((copy (js-call arr :slice)))
+                          (put copy i (aref sub j))
+                          (js-call candidates :push (js-call PersistentVector :from copy)))
+                        (setq j (1+ j)))))
+                  ((= (value-type el) "string")
+                    (let ((sub (shrink-string-value el 0)) (j 0))
+                      (while (< j (js-length sub))
+                        (let ((copy (js-call arr :slice)))
+                          (put copy i (aref sub j))
+                          (js-call candidates :push (js-call PersistentVector :from copy)))
+                        (setq j (1+ j)))))))
+              (setq i (1+ i)))))
+        (t nil))
+      candidates))
+
+  (defun eval-property (prop-fn candidate)
+    (try
+      (let ((res (funcall prop-fn candidate)))
+        (js-object :passed (truthy? res) :error nil))
+      (catch err
+        (js-object :passed false :error (get err :message)))))
+
+  (defun shrink-counterexample (schema initial-fail initial-error prop-fn max-shrinks)
+    (let ((current initial-fail)
+          (current-error initial-error)
+          (steps 0)
+          (depth 0)
+          (improved t))
+      (while (and improved (< steps max-shrinks))
+        (setq improved false)
+        (let ((candidates (shrink-value schema current))
+              (i 0))
+          (while (and (not improved) (< i (js-length candidates)) (< steps max-shrinks))
+            (let ((cand (aref candidates i)))
+              (when (and (not (equalValues cand current)) (valid? schema cand))
+                (setq steps (1+ steps))
+                (let ((ev (eval-property prop-fn cand)))
+                  (unless (get ev :passed)
+                    (setq current cand)
+                    (setq current-error (get ev :error))
+                    (setq depth (1+ depth))
+                    (setq improved t)))))
+            (setq i (1+ i)))))
+      (kv-map
+        KW_SMALLEST current
+        KW_STEPS steps
+        KW_DEPTH depth
+        KW_ERROR current-error)))
+
+  (defun check-property (schema prop-fn &optional options)
+    (unless (= (value-type prop-fn) "function")
+      (throw (new globalThis/TypeError "check-property expects a property function")))
+    (let* ((s (resolve-spec schema))
+           (g (gen-from-spec s))
+           (num-tests (read-opt options "num-tests" "numTests" nil 100))
+           (raw-seed (read-opt options "seed" nil nil nil))
+           (seed (if (nullish? raw-seed)
+                   (uint32 (+ (* (Date/now) 2654435761) (Math/floor (* (Math/random) 100000))))
+                   (uint32 raw-seed)))
+           (max-size (read-opt options "max-size" "maxSize" nil 30))
+           (max-shrinks (read-opt options "max-shrinks" "maxShrinks" nil 200))
+           (rng (make-rng seed))
+           (i 0)
+           (failure nil))
+      (while (and (nil? failure) (< i num-tests))
+        (let* ((size (Math/min max-size (+ 1 (Math/floor (/ (* i max-size) (Math/max 1 num-tests))))))
+               (sample (js-call g :sampleFn rng size))
+               (ev (eval-property prop-fn sample)))
+          (unless (get ev :passed)
+            (setq failure (js-object :index (1+ i) :sample sample :error (get ev :error)))))
+        (setq i (1+ i)))
+      (if (nil? failure)
+        (kv-map
+          KW_OK t
+          KW_SEED seed
+          KW_NUM_TESTS num-tests)
+        (let ((shrunk (shrink-counterexample s (get failure :sample) (get failure :error) prop-fn max-shrinks)))
+          (kv-map
+            KW_OK false
+            KW_SEED seed
+            KW_NUM_TESTS (get failure :index)
+            KW_FAIL (get failure :sample)
+            KW_SHRUNK shrunk)))))
+
+  (export
+    INVALID
+    Schema
+    SchemaGen
+    check-property
+    conform
+    def-spec
+    explain
+    explain-data
+    explain-str
+    fdef
+    gen-bind
+    gen-boolean
+    gen-double
+    gen-elements
+    gen-fmap
+    gen-from-spec
+    gen-generate
+    gen-int
+    gen-keyword
+    gen-map
+    gen-one-of
+    gen-return
+    gen-sample
+    gen-string
+    gen-such-that
+    gen-symbol
+    gen-tuple
+    gen-vector
+    gen?
+    get-spec
+    instrument
+    invalid?
+    schema?
+    shrink-value
+    spec-alt
+    spec-and
+    spec-any
+    spec-boolean
+    spec-cat
+    spec-coll-of
+    spec-double
+    spec-double-in
+    spec-enum
+    spec-fn
+    spec-int
+    spec-int-in
+    spec-keys
+    spec-keyword
+    spec-list
+    spec-map
+    spec-map-of
+    spec-nil
+    spec-nilable
+    spec-number
+    spec-opt?
+    spec-or
+    spec-pred
+    spec-rep+
+    spec-rep*
+    spec-set
+    spec-string
+    spec-string-len
+    spec-symbol
+    spec-tuple
+    spec-vector
+    unform
+    valid?
+    with-gen))

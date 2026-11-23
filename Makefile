@@ -453,6 +453,8 @@ test-core: check-contracts
 		./tests/stdlib-seq-data-state.test.mjs ./tests/stdlib-string-regex.test.mjs \
 		./tests/stdlib-math-bit.test.mjs ./tests/stdlib-diff-pprint.test.mjs \
 		./tests/stdlib-tagged-time-uuid.test.mjs \
+		./tests/stdlib-schema.test.mjs ./tests/stdlib-async.test.mjs \
+		./tests/stdlib-test-devtools.test.mjs \
 		./tests/core-syntax.test.mjs \
 		./tests/review-repairs.test.mjs
 	@set -- ./tests/compiler-session-protocol-selfhosted.test.mjs ./tests/compiler-matrix-selfhosted.test.mjs ./tests/managed-module-graph-selfhosted.test.mjs ./tests/compiler-corpus-managed-adapters-selfhosted.test.mjs \

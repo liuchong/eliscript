@@ -1,0 +1,1245 @@
+(module eliscript.async
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/identifier.mjs" keyword)
+  (import "../runtime/core/map.mjs" EMPTY_MAP)
+  (import "../runtime/core/vector.mjs" persistentVector)
+
+  (defconst KW_DEFAULT (keyword "default"))
+  (defconst MISSING (js-object))
+
+  (defvar fallback-async-bindings EMPTY_MAP)
+
+  (defconst async-local-storage
+    (try
+      (let ((proc (js* "typeof process !== 'undefined' ? process : null")))
+        (if (and proc (= (value-type (get proc :getBuiltinModule)) "function"))
+          (let* ((mod (js-call proc :getBuiltinModule "node:async_hooks"))
+                 (ALS (if mod (get mod :AsyncLocalStorage) nil)))
+            (if ALS (new ALS) nil))
+          nil))
+      (catch _err nil)))
+
+  (defun truthy? (value)
+    (not (or (nil? value) (undefined? value) (eq value false))))
+
+  (defun read-opt (options k1 &optional k2 fallback)
+    (cond
+      ((nullish? options) fallback)
+      ((Collection/isMap options)
+        (let ((v1 (Collection/get options (keyword k1) MISSING)))
+          (if (not (eq v1 MISSING))
+            v1
+            (let ((s1 (Collection/get options k1 MISSING)))
+              (if (not (eq s1 MISSING))
+                s1
+                (if (not (nullish? k2))
+                  (let ((v2 (Collection/get options (keyword k2) MISSING)))
+                    (if (not (eq v2 MISSING)) v2 (Collection/get options k2 fallback)))
+                  fallback))))))
+      ((= (value-type options) "object")
+        (cond
+          ((Object/hasOwn options k1) (aref options k1))
+          ((and (not (nullish? k2)) (Object/hasOwn options k2)) (aref options k2))
+          (t fallback)))
+      (t fallback)))
+
+  (defun has-opt? (options key-name)
+    (cond
+      ((nullish? options) false)
+      ((Collection/isMap options)
+        (or (Collection/contains options (keyword key-name))
+            (Collection/contains options key-name)))
+      ((= (value-type options) "object")
+        (Object/hasOwn options key-name))
+      (t false)))
+
+  ;; ============================================================================
+  ;; Async Dynamic Bindings
+  ;; ============================================================================
+
+  (defun current-async-bindings ()
+    (if (not (nil? async-local-storage))
+      (let ((store (js-call async-local-storage :getStore)))
+        (if (undefined? store) fallback-async-bindings store))
+      fallback-async-bindings))
+
+  (defun merge-bindings (base extra)
+    (cond
+      ((nullish? extra) base)
+      ((Collection/isMap extra)
+        (let ((entries (js-array))
+              (next base)
+              (i 0))
+          (Collection/reduceKV extra
+            (lambda (_acc k v) (js-call entries :push (js-array k v)) nil)
+            nil)
+          (while (< i (js-length entries))
+            (let ((pair (aref entries i)))
+              (setq next (Collection/assoc next (aref pair 0) (aref pair 1))))
+            (setq i (1+ i)))
+          next))
+      ((= (value-type extra) "object")
+        (let ((ks (Object/keys extra))
+              (next base)
+              (i 0))
+          (while (< i (js-length ks))
+            (let ((k (aref ks i)))
+              (setq next (Collection/assoc next (keyword k) (aref extra k))))
+            (setq i (1+ i)))
+          next))
+      (t
+        (throw (new globalThis/TypeError "with-async-bindings expects a map or object")))))
+
+  (defun run-with-bindings (captured thunk &rest args)
+    (if (not (nil? async-local-storage))
+      (js-call async-local-storage :run captured (lambda () (apply thunk args)))
+      (let ((prev fallback-async-bindings))
+        (setq fallback-async-bindings captured)
+        (try
+          (let ((res (apply thunk args)))
+            (if (and res (= (value-type (get res :then)) "function"))
+              (js-call res :finally (lambda () (setq fallback-async-bindings prev)))
+              (progn
+                (setq fallback-async-bindings prev)
+                res)))
+          (catch err
+            (setq fallback-async-bindings prev)
+            (throw err))))))
+
+  (defun with-async-bindings (bindings thunk)
+    (unless (= (value-type thunk) "function")
+      (throw (new globalThis/TypeError "with-async-bindings expects a thunk function")))
+    (let ((merged (merge-bindings (current-async-bindings) bindings)))
+      (run-with-bindings merged thunk)))
+
+  ;; ============================================================================
+  ;; Buffers: Fixed, Dropping, Sliding
+  ;; ============================================================================
+
+  (defconst ChannelBuffer
+    (js* "(class ChannelBuffer { constructor(kind, capacity) { this.kind = kind; this.capacity = capacity; this.items = []; Object.freeze(this); } })"))
+
+  (defun buffer? (value)
+    (js* "value instanceof ChannelBuffer"))
+
+  (defun buffer (n)
+    (unless (and (Number/isSafeInteger n) (>= n 0))
+      (throw (new globalThis/RangeError "buffer capacity must be a non-negative safe integer")))
+    (new ChannelBuffer "fixed" n))
+
+  (defun dropping-buffer (n)
+    (unless (and (Number/isSafeInteger n) (>= n 1))
+      (throw (new globalThis/RangeError "dropping-buffer capacity must be >= 1")))
+    (new ChannelBuffer "dropping" n))
+
+  (defun sliding-buffer (n)
+    (unless (and (Number/isSafeInteger n) (>= n 1))
+      (throw (new globalThis/RangeError "sliding-buffer capacity must be >= 1")))
+    (new ChannelBuffer "sliding" n))
+
+  (defun buffer-count (buf)
+    (js-length (get buf :items)))
+
+  (defun buffer-full? (buf)
+    (let ((kind (get buf :kind)))
+      (cond
+        ((= kind "fixed") (>= (js-length (get buf :items)) (get buf :capacity)))
+        ((or (= kind "dropping") (= kind "sliding")) false)
+        (t t))))
+
+  (defun buffer-add! (buf val)
+    (let ((kind (get buf :kind))
+          (items (get buf :items))
+          (cap (get buf :capacity)))
+      (cond
+        ((= kind "dropping")
+          (when (< (js-length items) cap)
+            (js-call items :push val)))
+        ((= kind "sliding")
+          (when (>= (js-length items) cap)
+            (js-call items :shift))
+          (js-call items :push val))
+        (t
+          (js-call items :push val)))))
+
+  (defun buffer-remove! (buf)
+    (js-call (get buf :items) :shift))
+
+  ;; ============================================================================
+  ;; Channels (CSP + Transducers + Non-blocking + Alt Handlers)
+  ;; ============================================================================
+
+  (defconst AsyncChannel
+    (js* "(class AsyncChannel { constructor(buf, xform, exHandler) { this.buf = buf; this.closed = false; this.takes = []; this.puts = []; this.xform = xform || null; this.exHandler = exHandler || null; this.xformCompleted = false; } })"))
+
+  (defun chan? (value)
+    (js* "value instanceof AsyncChannel"))
+
+  (defun require-chan (value op)
+    (unless (chan? value)
+      (throw (new globalThis/TypeError (str op " expects a channel"))))
+    value)
+
+  (defun default-ex-handler (err)
+    nil)
+
+  (defun make-channel-rf (ch)
+    (lambda (&rest args)
+      (let ((argc (js-length args)))
+        (cond
+          ((= argc 0) (get ch :buf))
+          ((= argc 1) (aref args 0))
+          (t
+            (buffer-add! (get ch :buf) (aref args 1))
+            (aref args 0))))))
+
+  (defun chan (&optional buf-or-n xform ex-handler)
+    (let ((buf nil))
+      (cond
+        ((nullish? buf-or-n) (setq buf nil))
+        ((Number/isSafeInteger buf-or-n)
+          (when (< buf-or-n 0)
+            (throw (new globalThis/RangeError "channel buffer size must be >= 0")))
+          (when (> buf-or-n 0)
+            (setq buf (buffer buf-or-n))))
+        ((buffer? buf-or-n) (setq buf buf-or-n))
+        (t (throw (new globalThis/TypeError "chan buffer must be nil, integer, or Buffer"))))
+      (when (and (not (nullish? xform)) (not (= (value-type xform) "function")))
+        (throw (new globalThis/TypeError "chan xform must be a transducer function")))
+      (when (and (not (nullish? ex-handler)) (not (= (value-type ex-handler) "function")))
+        (throw (new globalThis/TypeError "chan ex-handler must be a function")))
+      (when (and (not (nullish? xform)) (nil? buf))
+        ;; Transducers require a buffer to support 0-to-many expansions.
+        (setq buf (buffer 1)))
+      (let ((ch (new AsyncChannel buf nil
+                  (if (nullish? ex-handler) default-ex-handler ex-handler))))
+        (when (not (nullish? xform))
+          (let ((step (funcall xform (make-channel-rf ch))))
+            (put ch :xform step)))
+        ch)))
+
+  (defun closed? (ch)
+    (get (require-chan ch "closed?") :closed))
+
+  (defun handler-active? (h)
+    (get (get h :lock) :active))
+
+  (defun commit-handler (h)
+    (let ((lock (get h :lock)))
+      (if (get lock :active)
+        (progn
+          (put lock :active false)
+          t)
+        false)))
+
+  (defun pop-active! (queue)
+    (let ((found nil))
+      (while (and (nil? found) (> (js-length queue) 0))
+        (let ((h (js-call queue :shift)))
+          (when (handler-active? h)
+            (setq found h))))
+      found))
+
+  (defun commit-next-active! (queue)
+    (let ((found nil))
+      (while (and (nil? found) (> (js-length queue) 0))
+        (let ((h (js-call queue :shift)))
+          (when (commit-handler h)
+            (setq found h))))
+      found))
+
+  (defun invoke-waiter (waiter arg)
+    (let ((bindings (get waiter :bindings))
+          (cb (get waiter :fn)))
+      (if (not (nil? bindings))
+        (run-with-bindings bindings cb arg)
+        (funcall cb arg))))
+
+  (defun drain-buffer-to-takers! (ch)
+    (let ((buf (get ch :buf)))
+      (when (not (nil? buf))
+        (let ((keep-going t))
+          (while (and keep-going (> (buffer-count buf) 0))
+            (let ((taker (commit-next-active! (get ch :takes))))
+              (if (nil? taker)
+                (setq keep-going false)
+                (invoke-waiter taker (buffer-remove! buf)))))))))
+
+  (defun run-xform-step (ch val)
+    (let ((xf (get ch :xform))
+          (exh (get ch :exHandler))
+          (should-close false))
+      (try
+        (let ((res (funcall xf (get ch :buf) val)))
+          (when (Collection/isReduced res)
+            (setq should-close t)))
+        (catch err
+          (let ((recovered (funcall exh err)))
+            (unless (nullish? recovered)
+              (buffer-add! (get ch :buf) recovered)))))
+      (drain-buffer-to-takers! ch)
+      should-close))
+
+  (defun drain-waiters-on-close! (ch)
+    (let ((takes (get ch :takes))
+          (puts (get ch :puts)))
+      (while (> (js-length takes) 0)
+        (let ((taker (commit-next-active! takes)))
+          (unless (nil? taker)
+            (invoke-waiter taker nil))))
+      (while (> (js-length puts) 0)
+        (let ((putter (commit-next-active! puts)))
+          (unless (nil? putter)
+            (invoke-waiter putter false))))))
+
+  (defun close! (ch)
+    (require-chan ch "close!")
+    (unless (get ch :closed)
+      (put ch :closed t)
+      (let ((xf (get ch :xform))
+            (buf (get ch :buf)))
+        (when (and (not (nil? xf)) (not (get ch :xformCompleted)))
+          (put ch :xformCompleted t)
+          (try
+            (funcall xf buf)
+            (catch err
+              (let ((recovered (funcall (get ch :exHandler) err)))
+                (unless (nullish? recovered)
+                  (buffer-add! buf recovered))))))
+        (drain-buffer-to-takers! ch))
+      (drain-waiters-on-close! ch))
+    nil)
+
+  (defun pump-buffer! (ch)
+    (let ((buf (get ch :buf)))
+      (when (and (not (nil? buf)) (not (get ch :closed)))
+        (let ((puts (get ch :puts)))
+          (while (and (not (get ch :closed))
+                      (not (buffer-full? buf))
+                      (> (js-length puts) 0))
+            (let ((putter (commit-next-active! puts)))
+              (unless (nil? putter)
+                (let ((val (get putter :val)))
+                  (if (nil? (get ch :xform))
+                    (progn
+                      (buffer-add! buf val)
+                      (invoke-waiter putter t)
+                      (drain-buffer-to-takers! ch))
+                    (let ((stop (run-xform-step ch val)))
+                      (invoke-waiter putter t)
+                      (when stop (close! ch))))))))))))
+
+  (defun try-put-with-lock! (ch val putter)
+    (require-chan ch "put!")
+    (when (nullish? val)
+      (throw (new globalThis/TypeError "cannot put nil or undefined onto a channel")))
+    (cond
+      ((get ch :closed)
+        (if (commit-handler putter)
+          (js-object :done t :accepted false)
+          (js-object :done t :accepted false)))
+      ((and (nil? (get ch :buf)) (nil? (get ch :xform)))
+        ;; Unbuffered direct rendezvous
+        (let ((taker (pop-active! (get ch :takes))))
+          (if (nil? taker)
+            (js-object :done false)
+            (if (commit-handler putter)
+              (if (commit-handler taker)
+                (progn
+                  (invoke-waiter taker val)
+                  (js-object :done t :accepted t))
+                ;; Rare concurrent alts taker consumed right between pop & commit; retry take queue
+                (progn
+                  ;; Put back lock is already spent only for taker, putter still active — re-enable lock for retry
+                  (put (get putter :lock) :active t)
+                  (try-put-with-lock! ch val putter)))
+              (progn
+                ;; Our putter lock was already taken concurrently
+                (js-call (get ch :takes) :unshift taker)
+                (js-object :done t :accepted false))))))
+      (t
+        (let ((buf (get ch :buf)))
+          (if (buffer-full? buf)
+            (js-object :done false)
+            (if (commit-handler putter)
+              (progn
+                (if (nil? (get ch :xform))
+                  (if (and (= (buffer-count buf) 0) (> (js-length (get ch :takes)) 0))
+                    (let ((taker (commit-next-active! (get ch :takes))))
+                      (if (not (nil? taker))
+                        (invoke-waiter taker val)
+                        (buffer-add! buf val)))
+                    (progn
+                      (buffer-add! buf val)
+                      (drain-buffer-to-takers! ch)))
+                  (when (run-xform-step ch val)
+                    (close! ch)))
+                (js-object :done t :accepted t))
+              (js-object :done t :accepted false)))))))
+
+  (defun try-take-with-lock! (ch taker)
+    (require-chan ch "take!")
+    (let ((buf (get ch :buf)))
+      (cond
+        ((and (not (nil? buf)) (> (buffer-count buf) 0))
+          (if (commit-handler taker)
+            (let ((val (buffer-remove! buf)))
+              (pump-buffer! ch)
+              (js-object :done t :value val))
+            (js-object :done t :value nil)))
+        ((get ch :closed)
+          (if (commit-handler taker)
+            (js-object :done t :value nil)
+            (js-object :done t :value nil)))
+        (t
+          ;; Try taking directly from a waiting putter
+          (let ((found false)
+                (res-val nil))
+            (while (and (not found) (> (js-length (get ch :puts)) 0))
+              (let ((putter (pop-active! (get ch :puts))))
+                (when (and (not (nil? putter)) (commit-handler taker))
+                  (if (commit-handler putter)
+                    (progn
+                      (setq found t res-val (get putter :val))
+                      (invoke-waiter putter t))
+                    (put (get taker :lock) :active t)))))
+            (if found
+              (js-object :done t :value res-val)
+              (js-object :done false)))))))
+
+  (defun make-waiter (lock fn &optional val)
+    (js-object :lock lock :fn fn :val val :bindings (current-async-bindings)))
+
+  (defun offer! (ch val)
+    (require-chan ch "offer!")
+    (when (nullish? val)
+      (throw (new globalThis/TypeError "cannot offer nil or undefined onto a channel")))
+    (let* ((lock (js-object :active t))
+           (waiter (make-waiter lock (lambda (_v) nil) val))
+           (res (try-put-with-lock! ch val waiter)))
+      (if (get res :done) (get res :accepted) false)))
+
+  (defun poll! (ch)
+    (require-chan ch "poll!")
+    (let* ((lock (js-object :active t))
+           (waiter (make-waiter lock (lambda (_v) nil)))
+           (res (try-take-with-lock! ch waiter)))
+      (if (get res :done) (get res :value) nil)))
+
+  (defun put! (ch val &optional on-complete)
+    (require-chan ch "put!")
+    (when (nullish? val)
+      (throw (new globalThis/TypeError "cannot put nil or undefined onto a channel")))
+    (new globalThis/Promise
+      (lambda (resolve)
+        (let* ((lock (js-object :active t))
+               (done-fn (lambda (accepted)
+                          (unless (nullish? on-complete)
+                            (funcall on-complete accepted))
+                          (funcall resolve accepted)))
+               (waiter (make-waiter lock done-fn val))
+               (res (try-put-with-lock! ch val waiter)))
+          (if (get res :done)
+            (funcall done-fn (get res :accepted))
+            (js-call (get ch :puts) :push waiter))))))
+
+  (defun take! (ch &optional on-complete)
+    (require-chan ch "take!")
+    (new globalThis/Promise
+      (lambda (resolve)
+        (let* ((lock (js-object :active t))
+               (done-fn (lambda (val)
+                          (unless (nullish? on-complete)
+                            (funcall on-complete val))
+                          (funcall resolve val)))
+               (waiter (make-waiter lock done-fn))
+               (res (try-take-with-lock! ch waiter)))
+          (if (get res :done)
+            (funcall done-fn (get res :value))
+            (js-call (get ch :takes) :push waiter))))))
+
+  (defun timeout (ms)
+    (let ((dur (Math/max 0 (if (nullish? ms) 0 ms)))
+          (ch (chan)))
+      (globalThis/setTimeout (lambda () (close! ch)) dur)
+      ch))
+
+  (defun to-chan! (coll)
+    (let ((items (js-array)))
+      (cond
+        ((nullish? coll) nil)
+        ((Array/isArray coll)
+          (let ((i 0))
+            (while (< i (js-length coll))
+              (js-call items :push (aref coll i))
+              (setq i (1+ i)))))
+        ((Collection/isSeqable coll)
+          (Collection/reduce coll (lambda (_a v) (js-call items :push v) nil) nil))
+        (t
+          (throw (new globalThis/TypeError "to-chan! expects a seqable collection or array"))))
+      (let ((ch (chan (Math/max 1 (js-length items))))
+            (i 0))
+        (while (< i (js-length items))
+          (offer! ch (aref items i))
+          (setq i (1+ i)))
+        (close! ch)
+        ch)))
+
+  (defasync onto-chan! (ch coll &optional close?)
+    (let ((should-close (if (nullish? close?) t (truthy? close?)))
+          (items (js-array)))
+      (cond
+        ((nullish? coll) nil)
+        ((Array/isArray coll) (setq items coll))
+        ((Collection/isSeqable coll)
+          (Collection/reduce coll (lambda (_a v) (js-call items :push v) nil) nil))
+        (t
+          (throw (new globalThis/TypeError "onto-chan! expects a seqable collection or array"))))
+      (let ((i 0)
+            (open t))
+        (while (and open (< i (js-length items)))
+          (setq open (await (put! ch (aref items i))))
+          (setq i (1+ i))))
+      (when should-close
+        (close! ch))
+      ch))
+
+  ;; ============================================================================
+  ;; Multiplexing: alts!
+  ;; ============================================================================
+
+  (defun normalize-alts-ports (ports)
+    (let ((raw (cond
+                 ((Array/isArray ports) ports)
+                 ((Collection/isSeqable ports)
+                   (let ((arr (js-array)))
+                     (Collection/reduce ports (lambda (_a p) (js-call arr :push p) nil) nil)
+                     arr))
+                 (t (throw (new globalThis/TypeError "alts! expects an array or vector of ports"))))))
+      (when (= (js-length raw) 0)
+        (throw (new globalThis/RangeError "alts! requires at least one port")))
+      (js-call raw :map
+        (lambda (entry)
+          (cond
+            ((chan? entry) (js-object :kind "take" :ch entry :port entry))
+            ((or (Array/isArray entry) (Collection/isVector entry))
+              (let* ((arr (if (Array/isArray entry)
+                            entry
+                            (let ((tmp (js-array)))
+                              (Collection/reduce entry (lambda (_a v) (js-call tmp :push v) nil) nil)
+                              tmp)))
+                     (_check (unless (= (js-length arr) 2)
+                               (throw (new globalThis/TypeError "alts! put port must be [ch val]"))))
+                     (ch (require-chan (aref arr 0) "alts!"))
+                     (val (aref arr 1)))
+                (when (nullish? val)
+                  (throw (new globalThis/TypeError "alts! cannot put nil or undefined onto channel")))
+                (js-object :kind "put" :ch ch :val val :port entry)))
+            (t
+              (throw (new globalThis/TypeError "alts! port must be channel or [channel value]"))))))))
+
+  (defun shuffle-indices (n)
+    (let ((indices (js-array))
+          (i 0))
+      (while (< i n)
+        (js-call indices :push i)
+        (setq i (1+ i)))
+      (let ((j (1- n)))
+        (while (> j 0)
+          (let* ((k (Math/floor (* (Math/random) (1+ j))))
+                 (tmp (aref indices j)))
+            (put indices j (aref indices k))
+            (put indices k tmp))
+          (setq j (1- j))))
+      indices))
+
+  (defun alts! (ports &optional options)
+    (let* ((normalized (normalize-alts-ports ports))
+           (priority? (truthy? (read-opt options "priority" nil false)))
+           (has-default? (has-opt? options "default"))
+           (default-val (if has-default? (read-opt options "default" nil nil) nil))
+           (n (js-length normalized))
+           (order (if priority?
+                    (let ((arr (js-array)) (i 0))
+                      (while (< i n) (js-call arr :push i) (setq i (1+ i)))
+                      arr)
+                    (shuffle-indices n))))
+      (new globalThis/Promise
+        (lambda (resolve)
+          (let ((lock (js-object :active t))
+                (settled false)
+                (idx 0))
+            (while (and (not settled) (< idx n))
+              (let* ((spec (aref normalized (aref order idx)))
+                     (ch (get spec :ch))
+                     (port (get spec :port)))
+                (if (= (get spec :kind) "take")
+                  (let* ((waiter (make-waiter lock (lambda (v) (funcall resolve (persistentVector v ch)))))
+                         (res (try-take-with-lock! ch waiter)))
+                    (when (get res :done)
+                      (setq settled t)
+                      (funcall resolve (persistentVector (get res :value) ch))))
+                  (let* ((waiter (make-waiter lock (lambda (ok) (funcall resolve (persistentVector ok ch))) (get spec :val)))
+                         (res (try-put-with-lock! ch (get spec :val) waiter)))
+                    (when (get res :done)
+                      (setq settled t)
+                      (funcall resolve (persistentVector (get res :accepted) ch)))
+                    ;; Keep original port ref unused note: standard alts returns winning channel (ch)
+                    (unless (nullish? port) nil))))
+              (setq idx (1+ idx)))
+            (when (not settled)
+              (if (and has-default? (commit-handler (js-object :lock lock)))
+                (funcall resolve (persistentVector default-val KW_DEFAULT))
+                (let ((pi 0))
+                  (while (< pi n)
+                    (let* ((spec (aref normalized (aref order pi)))
+                           (ch (get spec :ch)))
+                      (if (= (get spec :kind) "take")
+                        (js-call (get ch :takes) :push
+                          (make-waiter lock (lambda (v) (funcall resolve (persistentVector v ch)))))
+                        (js-call (get ch :puts) :push
+                          (make-waiter lock (lambda (ok) (funcall resolve (persistentVector ok ch))) (get spec :val)))))
+                    (setq pi (1+ pi)))))))))))
+
+  ;; ============================================================================
+  ;; Structured Concurrency Scopes
+  ;; ============================================================================
+
+  (defconst AsyncScope
+    (js* "(class AsyncScope { constructor() { this.cancelled = false; this.reason = null; this.tasks = []; this.channels = []; this.listeners = []; this.aborted = typeof AbortController === 'function' ? new AbortController() : null; } })"))
+
+  (defun scope-cancelled? (scope)
+    (get scope :cancelled))
+
+  (defun scope-signal (scope)
+    (let ((ctrl (get scope :aborted)))
+      (if (nil? ctrl) nil (get ctrl :signal))))
+
+  (defun scope-cancel! (scope &optional reason)
+    (unless (get scope :cancelled)
+      (put scope :cancelled t)
+      (put scope :reason (if (nullish? reason) (new globalThis/Error "Async scope cancelled") reason))
+      (let ((ctrl (get scope :aborted)))
+        (unless (nil? ctrl)
+          (js-call ctrl :abort (get scope :reason))))
+      (let ((channels (get scope :channels))
+            (i 0))
+        (while (< i (js-length channels))
+          (close! (aref channels i))
+          (setq i (1+ i))))
+      (let ((listeners (get scope :listeners))
+            (j 0))
+        (while (< j (js-length listeners))
+          (try (funcall (aref listeners j) (get scope :reason))
+            (catch _err nil))
+          (setq j (1+ j)))))
+    nil)
+
+  (defun scope-channel (scope &optional buf-or-n xform ex-handler)
+    (let ((ch (chan buf-or-n xform ex-handler)))
+      (if (get scope :cancelled)
+        (close! ch)
+        (js-call (get scope :channels) :push ch))
+      ch))
+
+  (defun scope-spawn (scope task-fn)
+    (unless (= (value-type task-fn) "function")
+      (throw (new globalThis/TypeError "scope-spawn expects a function")))
+    (let ((captured (current-async-bindings)))
+      (if (get scope :cancelled)
+        (Promise/resolve nil)
+        (let ((p (Promise/resolve)))
+          (let ((task-promise
+                  (js-call
+                    (js-call p :then
+                      (lambda ()
+                        (when (get scope :cancelled)
+                          (throw (get scope :reason)))
+                        (run-with-bindings captured task-fn)))
+                    :catch
+                    (lambda (err)
+                      (unless (get scope :cancelled)
+                        (scope-cancel! scope err)
+                        (put scope :firstError err))
+                      (throw err)))))
+            (js-call (get scope :tasks) :push task-promise)
+            task-promise)))))
+
+  (defasync with-async-scope (body-fn)
+    (unless (= (value-type body-fn) "function")
+      (throw (new globalThis/TypeError "with-async-scope expects a function")))
+    (let ((scope (new AsyncScope))
+          (body-err nil)
+          (has-body-err false)
+          (result nil))
+      (try
+        (setq result (await (funcall body-fn scope)))
+        (catch err
+          (setq body-err err has-body-err t)
+          (scope-cancel! scope err)))
+      (let ((settled (await (Promise/allSettled (get scope :tasks)))))
+        ;; Always close owned channels when scope exits so no waiters leak.
+        (let ((channels (get scope :channels))
+              (ci 0))
+          (while (< ci (js-length channels))
+            (close! (aref channels ci))
+            (setq ci (1+ ci))))
+        (when has-body-err
+          (throw body-err))
+        (unless (nil? (get scope :firstError))
+          (throw (get scope :firstError)))
+        (let ((i 0))
+          (while (< i (js-length settled))
+            (let ((s (aref settled i)))
+              (when (= (get s :status) "rejected")
+                (throw (get s :reason))))
+            (setq i (1+ i)))))
+      result))
+
+  ;; ============================================================================
+  ;; Channel Composition Combinators
+  ;; ============================================================================
+
+  (defun pipe (from to &optional close?)
+    (let ((should-close (if (nullish? close?) t (truthy? close?))))
+      (js-call
+        ((lambda ()
+           (let ((step nil))
+             (setq step
+               (lambda ()
+                 (js-call (take! from) :then
+                   (lambda (v)
+                     (if (nil? v)
+                       (when should-close (close! to))
+                       (js-call (put! to v) :then
+                         (lambda (ok)
+                           (when ok (funcall step)))))))))
+             (funcall step))))
+        :catch (lambda (_err) nil))
+      to))
+
+  (defun run-xf-to-array (xf ex-handler v)
+    (let ((out (js-array))
+          (step-fn (funcall xf (lambda (&rest args)
+                                 (let ((argc (js-length args)))
+                                   (cond
+                                     ((= argc 0) (js-array))
+                                     ((= argc 1) (aref args 0))
+                                     (t
+                                       (js-call (aref args 0) :push (aref args 1))
+                                       (aref args 0))))))))
+      (try
+        (let ((r1 (funcall step-fn out v)))
+          (let ((unr (if (Collection/isReduced r1) (Collection/unreduced r1) r1)))
+            (funcall step-fn unr)))
+        (catch err
+          (let ((recovered (funcall ex-handler err)))
+            (unless (nullish? recovered)
+              (js-call out :push recovered)))))
+      out))
+
+  (defun host-map? (x)
+    (js* "x instanceof globalThis.Map"))
+
+  (defun pipeline* (mode parallelism to fn-or-xf from close? ex-handler)
+    (unless (and (Number/isSafeInteger parallelism) (>= parallelism 1))
+      (throw (new globalThis/RangeError "pipeline parallelism n must be >= 1")))
+    (let* ((should-close (if (nullish? close?) t (truthy? close?)))
+           (exh (if (nullish? ex-handler) default-ex-handler ex-handler))
+           (jobs (chan parallelism))
+           (results (chan parallelism))
+           (stopped false))
+      ;; Feeder task
+      ((lambda ()
+         (let ((feed-step nil))
+           (setq feed-step
+             (lambda ()
+               (unless stopped
+                 (js-call (take! from) :then
+                   (lambda (v)
+                     (if (or stopped (nil? v))
+                       (progn
+                         (close! jobs)
+                         (close! results))
+                       (let ((res-ch (chan 1)))
+                         (js-call (put! jobs (js-object :val v :res res-ch)) :then
+                           (lambda (ok1)
+                             (if ok1
+                               (js-call (put! results res-ch) :then
+                                 (lambda (ok2)
+                                   (when ok2 (funcall feed-step))))
+                               (close! res-ch)))))))))))
+           (funcall feed-step))))
+      ;; Spawn n bounded workers
+      (let ((wi 0))
+        (while (< wi parallelism)
+          ((lambda ()
+             (let ((work-step nil))
+               (setq work-step
+                 (lambda ()
+                   (js-call (take! jobs) :then
+                     (lambda (job)
+                       (unless (nil? job)
+                         (let ((val (get job :val))
+                               (res-ch (get job :res)))
+                           (if (= mode "sync")
+                             (let ((items (run-xf-to-array fn-or-xf exh val)))
+                               (js-call (onto-chan! res-ch items t) :then
+                                 (lambda () (funcall work-step))))
+                             (try
+                               (let ((maybe-p (funcall fn-or-xf val res-ch)))
+                                 (if (and maybe-p (= (value-type (get maybe-p :then)) "function"))
+                                   (js-call maybe-p :then
+                                     (lambda () (funcall work-step))
+                                     (lambda () (close! res-ch) (funcall work-step)))
+                                   (funcall work-step)))
+                               (catch _err
+                                 (close! res-ch)
+                                 (funcall work-step))))))))))
+               (funcall work-step))))
+          (setq wi (1+ wi))))
+      ;; Ordered collector writing to `to`
+      ((lambda ()
+         (let ((collect-outer nil)
+               (drain-res nil))
+           (setq drain-res
+             (lambda (res-ch)
+               (js-call (take! res-ch) :then
+                 (lambda (item)
+                   (if (nil? item)
+                     (funcall collect-outer)
+                     (js-call (put! to item) :then
+                       (lambda (ok)
+                         (if ok
+                           (funcall drain-res res-ch)
+                           (progn
+                             (setq stopped t)
+                             (close! jobs)
+                             (close! results))))))))))
+           (setq collect-outer
+             (lambda ()
+               (js-call (take! results) :then
+                 (lambda (res-ch)
+                   (if (nil? res-ch)
+                     (when should-close (close! to))
+                     (funcall drain-res res-ch))))))
+           (funcall collect-outer))))
+      to))
+
+  (defun pipeline (n to xf from &optional close? ex-handler)
+    (unless (= (value-type xf) "function")
+      (throw (new globalThis/TypeError "pipeline expects a transducer function")))
+    (pipeline* "sync" n to xf from close? ex-handler))
+
+  (defun pipeline-async (n to af from &optional close?)
+    (unless (= (value-type af) "function")
+      (throw (new globalThis/TypeError "pipeline-async expects an async function")))
+    (pipeline* "async" n to af from close? nil))
+
+  (defun merge (chs &optional buf-or-n)
+    (let* ((arr (cond
+                  ((Array/isArray chs) chs)
+                  ((Collection/isSeqable chs)
+                    (let ((tmp (js-array)))
+                      (Collection/reduce chs (lambda (_a c) (js-call tmp :push c) nil) nil)
+                      tmp))
+                  (t (throw (new globalThis/TypeError "merge expects an array or collection of channels")))))
+           (out (chan buf-or-n))
+           (remaining (js-length arr)))
+      (if (= remaining 0)
+        (close! out)
+        (let ((i 0))
+          (while (< i (js-length arr))
+            (let ((src (require-chan (aref arr i) "merge")))
+              ((lambda (ch-src)
+                 (let ((pump nil))
+                   (setq pump
+                     (lambda ()
+                       (js-call (take! ch-src) :then
+                         (lambda (v)
+                           (if (nil? v)
+                             (progn
+                               (setq remaining (1- remaining))
+                               (when (= remaining 0)
+                                 (close! out)))
+                             (js-call (put! out v) :then
+                               (lambda (ok)
+                                 (when ok (funcall pump)))))))))
+                   (funcall pump)))
+               src))
+            (setq i (1+ i)))))
+      out))
+
+  (defun split (pred ch &optional t-buf f-buf)
+    (unless (= (value-type pred) "function")
+      (throw (new globalThis/TypeError "split expects a predicate function")))
+    (require-chan ch "split")
+    (let ((t-ch (chan t-buf))
+          (f-ch (chan f-buf)))
+      ((lambda ()
+         (let ((step nil))
+           (setq step
+             (lambda ()
+               (js-call (take! ch) :then
+                 (lambda (v)
+                   (if (nil? v)
+                     (progn (close! t-ch) (close! f-ch))
+                     (let ((target (if (truthy? (funcall pred v)) t-ch f-ch)))
+                       (js-call (put! target v) :then
+                         (lambda (_ok)
+                           (unless (and (closed? t-ch) (closed? f-ch))
+                             (funcall step))))))))))
+           (funcall step))))
+      (persistentVector t-ch f-ch)))
+
+  ;; ============================================================================
+  ;; Broadcast: mult / tap / untap
+  ;; ============================================================================
+
+  (defconst ChannelMult
+    (js* "(class ChannelMult { constructor(ch) { this.ch = ch; this.taps = []; this.done = false; } })"))
+
+  (defun mult? (value)
+    (js* "value instanceof ChannelMult"))
+
+  (defun mult (ch)
+    (require-chan ch "mult")
+    (let ((m (new ChannelMult ch)))
+      ((lambda ()
+         (let ((step nil))
+           (setq step
+             (lambda ()
+               (js-call (take! ch) :then
+                 (lambda (v)
+                   (if (nil? v)
+                     (progn
+                       (put m :done t)
+                       (let ((taps (js-call (get m :taps) :slice))
+                             (i 0))
+                         (while (< i (js-length taps))
+                           (let ((entry (aref taps i)))
+                             (when (get entry :close)
+                               (close! (get entry :ch))))
+                           (setq i (1+ i)))))
+                     (let ((taps (js-call (get m :taps) :slice)))
+                       (if (= (js-length taps) 0)
+                         (funcall step)
+                         (let ((puts (js-array))
+                               (i 0))
+                           (while (< i (js-length taps))
+                             (let ((entry (aref taps i)))
+                               (js-call puts :push
+                                 (js-call (put! (get entry :ch) v) :then
+                                   (lambda (ok)
+                                     (unless ok
+                                       (untap m (get entry :ch)))))))
+                             (setq i (1+ i)))
+                           (js-call (Promise/all puts) :then (lambda () (funcall step)))))))))))
+           (funcall step))))
+      m))
+
+  (defun tap (m ch &optional close?)
+    (unless (mult? m)
+      (throw (new globalThis/TypeError "tap expects a mult")))
+    (require-chan ch "tap")
+    (let ((should-close (if (nullish? close?) t (truthy? close?))))
+      (if (get m :done)
+        (when should-close (close! ch))
+        (let ((taps (get m :taps))
+              (found false)
+              (i 0))
+          (while (< i (js-length taps))
+            (when (eq (get (aref taps i) :ch) ch)
+              (put (aref taps i) :close should-close)
+              (setq found t))
+            (setq i (1+ i)))
+          (unless found
+            (js-call taps :push (js-object :ch ch :close should-close)))))
+      ch))
+
+  (defun untap (m ch)
+    (unless (mult? m)
+      (throw (new globalThis/TypeError "untap expects a mult")))
+    (put m :taps
+      (js-call (get m :taps) :filter (lambda (entry) (not (eq (get entry :ch) ch)))))
+    nil)
+
+  (defun untap-all (m)
+    (unless (mult? m)
+      (throw (new globalThis/TypeError "untap-all expects a mult")))
+    (put m :taps (js-array))
+    nil)
+
+  ;; ============================================================================
+  ;; Topic Publish/Subscribe: pub / sub / unsub
+  ;; ============================================================================
+
+  (defconst ChannelPub
+    (js* "(class ChannelPub { constructor(ch, topicFn, bufFn) { this.ch = ch; this.topicFn = topicFn; this.bufFn = bufFn; this.mults = EMPTY_MAP; this.done = false; } })"))
+
+  (defun pub? (value)
+    (js* "value instanceof ChannelPub"))
+
+  (defun ensure-topic-mult (p topic)
+    (let ((existing (Collection/get (get p :mults) topic nil)))
+      (if (not (nil? existing))
+        existing
+        (let* ((buf (if (nil? (get p :bufFn)) nil (funcall (get p :bufFn) topic)))
+               (tch (chan buf))
+               (m (mult tch)))
+          (put p :mults (Collection/assoc (get p :mults) topic (js-object :ch tch :mult m)))
+          (Collection/get (get p :mults) topic)))))
+
+  (defun pub (ch topic-fn &optional buf-fn)
+    (require-chan ch "pub")
+    (unless (= (value-type topic-fn) "function")
+      (throw (new globalThis/TypeError "pub expects a topic function")))
+    (let ((p (new ChannelPub ch topic-fn (if (nullish? buf-fn) nil buf-fn))))
+      ((lambda ()
+         (let ((step nil))
+           (setq step
+             (lambda ()
+               (js-call (take! ch) :then
+                 (lambda (v)
+                   (if (nil? v)
+                     (progn
+                       (put p :done t)
+                       (let ((topic-chs (js-array))
+                             (i 0))
+                         (Collection/reduceKV (get p :mults)
+                           (lambda (_a _k entry) (js-call topic-chs :push (get entry :ch)) nil)
+                           nil)
+                         (while (< i (js-length topic-chs))
+                           (close! (aref topic-chs i))
+                           (setq i (1+ i)))))
+                     (let* ((topic (funcall topic-fn v))
+                            (entry (Collection/get (get p :mults) topic nil)))
+                       (if (nil? entry)
+                         (funcall step)
+                         (js-call (put! (get entry :ch) v) :then (lambda (_ok) (funcall step))))))))))
+           (funcall step))))
+      p))
+
+  (defun sub (p topic ch &optional close?)
+    (unless (pub? p)
+      (throw (new globalThis/TypeError "sub expects a pub")))
+    (require-chan ch "sub")
+    (let ((should-close (if (nullish? close?) t (truthy? close?))))
+      (if (get p :done)
+        (when should-close (close! ch))
+        (let ((entry (ensure-topic-mult p topic)))
+          (tap (get entry :mult) ch should-close)))
+      ch))
+
+  (defun unsub (p topic ch)
+    (unless (pub? p)
+      (throw (new globalThis/TypeError "unsub expects a pub")))
+    (let ((entry (Collection/get (get p :mults) topic nil)))
+      (unless (nil? entry)
+        (untap (get entry :mult) ch)))
+    nil)
+
+  (defun unsub-all (p &optional topic)
+    (unless (pub? p)
+      (throw (new globalThis/TypeError "unsub-all expects a pub")))
+    (if (not (nullish? topic))
+      (let ((entry (Collection/get (get p :mults) topic nil)))
+        (unless (nil? entry)
+          (untap-all (get entry :mult))))
+      (let ((all-mults (js-array))
+            (i 0))
+        (Collection/reduceKV (get p :mults)
+          (lambda (_a _k entry) (js-call all-mults :push (get entry :mult)) nil)
+          nil)
+        (while (< i (js-length all-mults))
+          (untap-all (aref all-mults i))
+          (setq i (1+ i)))))
+    nil)
+
+  ;; ============================================================================
+  ;; Dynamic Input Mixer: mix / admix / unmix / toggle / solo-mode
+  ;; ============================================================================
+
+  (defconst ChannelMix
+    (js* "(class ChannelMix { constructor(out) { this.out = out; this.inputs = new globalThis.Map(); this.soloMode = 'mute'; this.wakeCh = null; this.running = true; } })"))
+
+  (defun mix? (value)
+    (js* "value instanceof ChannelMix"))
+
+  (defun read-mix-state (opts)
+    (let ((s (js-object :mute false :pause false :solo false)))
+      (when (not (nullish? opts))
+        (put s :mute (truthy? (read-opt opts "mute" nil false)))
+        (put s :pause (truthy? (read-opt opts "pause" nil false)))
+        (put s :solo (truthy? (read-opt opts "solo" nil false))))
+      s))
+
+  (defun mix-wake! (m)
+    (let ((old (get m :wakeCh)))
+      (unless (nil? old)
+        (close! old))
+      (put m :wakeCh (chan))))
+
+  (defun mix-run-loop (m)
+    (let ((step nil))
+      (setq step
+        (lambda ()
+          (when (and (get m :running) (not (closed? (get m :out))))
+            (let ((any-solo false)
+                  (solo-mode-val (get m :soloMode))
+                  (active-ports (js-array))
+                  (state-by-ch (new globalThis.Map))
+                  (entries (Array/from (js-call (get m :inputs) :entries)))
+                  (i 0))
+              (while (< i (js-length entries))
+                (when (get (aref (aref entries i) 1) :solo)
+                  (setq any-solo t))
+                (setq i (1+ i)))
+              (setq i 0)
+              (while (< i (js-length entries))
+                (let* ((pair (aref entries i))
+                       (ch (aref pair 0))
+                       (st (aref pair 1))
+                       (solo? (get st :solo))
+                       (paused? (get st :pause))
+                       (effectively-paused (or paused? (and any-solo (not solo?) (= solo-mode-val "pause"))))
+                       (effectively-muted (or (get st :mute) (and any-solo (not solo?) (= solo-mode-val "mute")))))
+                  (unless effectively-paused
+                    (js-call state-by-ch :set ch (js-object :muted effectively-muted))
+                    (js-call active-ports :push ch)))
+                (setq i (1+ i)))
+              (let ((wake (get m :wakeCh)))
+                (js-call active-ports :push wake)
+                (js-call (alts! active-ports) :then
+                  (lambda (pair)
+                    (let ((val (js-call pair :nth 0))
+                          (win-ch (js-call pair :nth 1)))
+                      (cond
+                        ((eq win-ch wake) (funcall step))
+                        ((nil? val)
+                          (js-call (get m :inputs) :delete win-ch)
+                          (funcall step))
+                        (t
+                          (let ((info (js-call state-by-ch :get win-ch)))
+                            (if (and info (get info :muted))
+                              (funcall step)
+                              (js-call (put! (get m :out) val) :then
+                                (lambda (ok)
+                                  (when ok (funcall step))))))))))))))))
+      (funcall step)))
+
+  (defun mix (out)
+    (require-chan out "mix")
+    (let ((m (new ChannelMix out)))
+      (put m :wakeCh (chan))
+      (mix-run-loop m)
+      m))
+
+  (defun admix (m ch)
+    (unless (mix? m) (throw (new globalThis/TypeError "admix expects a mix")))
+    (require-chan ch "admix")
+    (unless (js-call (get m :inputs) :has ch)
+      (js-call (get m :inputs) :set ch (read-mix-state nil))
+      (mix-wake! m))
+    m)
+
+  (defun unmix (m ch)
+    (unless (mix? m) (throw (new globalThis/TypeError "unmix expects a mix")))
+    (when (js-call (get m :inputs) :delete ch)
+      (mix-wake! m))
+    m)
+
+  (defun unmix-all (m)
+    (unless (mix? m) (throw (new globalThis/TypeError "unmix-all expects a mix")))
+    (js-call (get m :inputs) :clear)
+    (mix-wake! m)
+    m)
+
+  (defun solo-mode (m mode)
+    (unless (mix? m) (throw (new globalThis/TypeError "solo-mode expects a mix")))
+    (let ((name (cond
+                  ((= mode "mute") "mute")
+                  ((= mode "pause") "pause")
+                  ((= (str mode) ":mute") "mute")
+                  ((= (str mode) ":pause") "pause")
+                  (t (throw (new globalThis/RangeError "solo-mode must be :mute or :pause"))))))
+      (put m :soloMode name)
+      (mix-wake! m))
+    m)
+
+  (defun toggle (m state-map)
+    (unless (mix? m) (throw (new globalThis/TypeError "toggle expects a mix")))
+    (let ((pairs (js-array))
+          (i 0))
+      (cond
+        ((Collection/isMap state-map)
+          (Collection/reduceKV state-map
+            (lambda (_a k v) (js-call pairs :push (js-array k v)) nil)
+            nil))
+        ((host-map? state-map)
+          (js-call state-map :forEach (lambda (v k) (js-call pairs :push (js-array k v)))))
+        (t (throw (new globalThis/TypeError "toggle expects a map of channels to state maps"))))
+      (while (< i (js-length pairs))
+        (let* ((pair (aref pairs i))
+               (ch (require-chan (aref pair 0) "toggle"))
+               (next-st (read-mix-state (aref pair 1))))
+          (js-call (get m :inputs) :set ch next-st))
+        (setq i (1+ i))))
+    (mix-wake! m)
+    m)
+
+  (export
+    AsyncChannel
+    AsyncScope
+    ChannelBuffer
+    ChannelMix
+    ChannelMult
+    ChannelPub
+    admix
+    alts!
+    buffer
+    buffer-count
+    buffer-full?
+    buffer?
+    chan
+    chan?
+    close!
+    closed?
+    current-async-bindings
+    dropping-buffer
+    merge
+    mix
+    mix?
+    mult
+    mult?
+    offer!
+    onto-chan!
+    pipe
+    pipeline
+    pipeline-async
+    poll!
+    pub
+    pub?
+    put!
+    scope-cancel!
+    scope-cancelled?
+    scope-channel
+    scope-signal
+    scope-spawn
+    sliding-buffer
+    solo-mode
+    split
+    sub
+    take!
+    tap
+    timeout
+    to-chan!
+    toggle
+    unmix
+    unmix-all
+    unsub
+    unsub-all
+    untap
+    untap-all
+    with-async-bindings
+    with-async-scope))
