@@ -1,0 +1,63 @@
+(module eliscript.protocol
+  (import "../runtime/core/protocol-impl.mjs" :as Impl)
+
+  (defun protocol? (value)
+    (Impl/protocol_QMARK_ value))
+
+  (defun define-protocol (name operations)
+    (Impl/define_protocol name operations))
+
+  (defun define-protocol-from-definition (definition)
+    (Impl/define_protocol_from_definition definition))
+
+  (defun materialize-protocol-from-definition (definition slots)
+    (Impl/materialize_protocol_from_definition definition slots))
+
+  (defun read-external-protocol-method (protocol operation receiver)
+    (Impl/read_external_protocol_method protocol operation receiver))
+
+  (defun read-protocol-operations-owner (value)
+    (Impl/read_protocol_operations_owner value))
+
+  (defun read-protocol-method-owner (value)
+    (Impl/read_protocol_method_owner value))
+
+  (defun register-protocol-extension-loader (loader &optional protocols)
+    (Impl/register_protocol_extension_loader loader protocols))
+
+  (defun flush-protocol-extension-loaders (&optional protocol)
+    (Impl/flush_protocol_extension_loaders protocol))
+
+  (defun extend-protocol-category (protocol category implementations)
+    (Impl/extend_protocol_category protocol category implementations))
+
+  (defun extend-protocol-default (protocol implementations)
+    (Impl/extend_protocol_default protocol implementations))
+
+  (defun extend-protocol-type (protocol constructor implementations)
+    (Impl/extend_protocol_type protocol constructor implementations))
+
+  (defun implements-protocol-operation? (protocol operation value)
+    (Impl/implements_protocol_operation_QMARK_ protocol operation value))
+
+  (defun implements-protocol? (protocol value)
+    (Impl/implements_protocol_QMARK_ protocol value))
+
+  (defun protocol-definition (protocol)
+    (Impl/protocol_definition protocol))
+
+  (defun protocol-host-category (value)
+    (Impl/protocol_host_category value))
+
+  (defun protocol-method (protocol operation)
+    (Impl/protocol_method protocol operation))
+
+  (defun protocol-slot (protocol operation)
+    (Impl/protocol_slot protocol operation))
+
+  (export protocol? define-protocol define-protocol-from-definition materialize-protocol-from-definition read-external-protocol-method
+          read-protocol-operations-owner read-protocol-method-owner register-protocol-extension-loader flush-protocol-extension-loaders
+          extend-protocol-category extend-protocol-default
+          extend-protocol-type implements-protocol-operation?
+          implements-protocol? protocol-definition protocol-host-category
+          protocol-method protocol-slot))

@@ -231,9 +231,9 @@
                "  (js-call assert :strictEqual (get result :stdout) \"resolved real exports\\n\"))))") :join "\n") "source-project-host.eli")))
         (put record :entry "data.mjs")
         (put record :modules (js-array
-          (js-object :id "object.mjs" :filename "stdlib/object.eli"
+          (js-object :id "object.mjs" :filename "stdlib/portable/object.eli"
             :source "(defportable assoc (value) (+ value 1)) (export assoc)")
-          (js-object :id "data.mjs" :filename "stdlib/data.eli"
+          (js-object :id "data.mjs" :filename "stdlib/portable/data.eli"
             :source "(import-portable \"./object.eli\" assoc) (defun value () (assoc 41)) (export value)")))
         (put (get record :request) :resolveImports t)
         (js-call (get (get record :request) :hostSources) :push
@@ -326,7 +326,7 @@
   (defun seed-provider-fixture (id)
     (let* ((record (recipe id))
            (replacement (js-object :id "managed-runtime-identifier.mjs"
-             :filename "stdlib/managed-runtime-identifier.eli"
+             :filename "runtime/managed/managed-runtime-identifier.eli"
              :source "(module seed.shadow (defconst shadow-value 17) (export shadow-value))"))
            (libraries (js-array replacement))
            (proofs (js-call providers :map (lambda (item)
@@ -515,7 +515,7 @@
         (setq run (provider-oracle fixture (resolve directory "provider-source-proof-changed")))
         (await (js-call assert :rejects (funcall run (js-object :record record :target "javascript"))
           (lambda (error) (= (get error :message)
-            "original recipe source asset identity differs: stdlib/managed-runtime-identifier.eli"))))
+            "original recipe source asset identity differs: runtime/managed/managed-runtime-identifier.eli"))))
         (js-call assert :strictEqual (JSON/stringify record) before))))
 
   (test "Seed local package exposes only actually declared platform files through their original explicit aliases"

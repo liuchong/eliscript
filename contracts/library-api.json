@@ -1,51 +1,365 @@
 {
   "format": "eliscript-library-api-metadata",
   "modules": [
-    {"module": "bit", "spec": "0052", "source": "stdlib/bit.eli", "stability": "stable", "role": "portable", "summary": "Portable 32-bit population count and bit rotation operations."},
-    {"module": "core-collection", "spec": "0066", "source": "stdlib/core/collection.eli", "stability": "stable", "role": "runtime-core", "summary": "Protocol-driven capability inspection, persistent collection classification, bounded counting, value distinctness, O(1) subvector views, construction, lookup, reduction, removal, stack access, and reversible replayable views."},
-    {"module": "core-data", "spec": "0066", "source": "stdlib/core/data.eli", "stability": "stable", "role": "runtime-core", "summary": "Collection-native grouping, keyed projection and transformation, nested associative updates, merging, selection, and zipping."},
-    {"module": "core-data-text", "spec": "0069", "source": "stdlib/core/data-text.eli", "stability": "stable", "role": "runtime-core", "summary": "Canonical readable data text for persistent values and identifiers."},
-    {"module": "core-identifier", "spec": "0067", "source": "stdlib/core/identifier.eli", "stability": "stable", "role": "runtime-core", "summary": "First-class keyword and symbol values with qualified names."},
-    {"module": "core-lazy-sequence", "spec": "0176", "source": "stdlib/core/lazy-sequence.eli", "stability": "stable", "role": "runtime-core", "summary": "Demand-driven memoized sequences, deferred recursive tails, direct lazy transformations, and realization inspection."},
-    {"module": "core-metadata", "spec": "0068", "source": "stdlib/core/metadata.eli", "stability": "stable", "role": "runtime-core", "summary": "Immutable metadata protocols and value-preserving updates."},
-    {"module": "core-object", "spec": "0081", "source": "stdlib/core/object.eli", "stability": "stable", "role": "runtime-core", "summary": "Protocol-driven immutable keyed-object transformations."},
-    {"module": "core-order", "spec": "0066", "source": "stdlib/core/order.eli", "stability": "stable", "role": "runtime-core", "summary": "Open comparison protocol, stable sorting, comparator adaptation, and keyed extrema."},
-    {"module": "core-protocol", "spec": "0066", "source": "stdlib/core/protocol.eli", "stability": "stable", "role": "runtime-core", "summary": "Open protocol definition, extension, inspection, and dispatch policy."},
-    {"module": "core-record", "spec": "0168", "source": "stdlib/core/record.eli", "stability": "stable", "role": "runtime-core", "summary": "Declarative immutable Record types with persistent Map, value, metadata, and open protocol semantics."},
-    {"module": "core-regex", "spec": "0178", "source": "stdlib/core/regex.eli", "stability": "stable", "role": "runtime-core", "summary": "Immutable regular-expression patterns, capture-aware matching, memoized lazy scanning, and literal or callback replacement."},
-    {"module": "core-sequence", "spec": "0066", "source": "stdlib/core/seq.eli", "stability": "stable", "role": "runtime-core", "summary": "Protocol-driven replayable sources, head/tail views, finite transformation, interleaving, stepped partitioning, tree traversal, and reduction history."},
-    {"module": "core-set", "spec": "0066", "source": "stdlib/core/set.eli", "stability": "stable", "role": "runtime-core", "summary": "Protocol-driven persistent Set algebra, membership relations, and relational data operations."},
-    {"module": "core-sorted", "spec": "0175", "source": "stdlib/core/sorted.eli", "stability": "stable", "role": "runtime-core", "summary": "Persistent AVL Maps and Sets with custom comparators, reversible traversal, and bounded range queries."},
-    {"module": "core-text", "spec": "0081", "source": "stdlib/core/text.eli", "stability": "stable", "role": "runtime-core", "summary": "Portable text predicates, slicing, joining, and affix operations."},
-    {"module": "core-transducer", "spec": "0066", "source": "stdlib/core/transducer.eli", "stability": "stable", "role": "runtime-core", "summary": "Composable single-pass transducers, replayable reducible pipelines, memoized pull sequences, and effectful consumption."},
-    {"module": "core-transient", "spec": "0066", "source": "stdlib/core/transient.eli", "stability": "stable", "role": "runtime-core", "summary": "Owner-token transient builders for efficient isolated construction."},
-    {"module": "core-type", "spec": "0169", "source": "stdlib/core/type.eli", "stability": "stable", "role": "runtime-core", "summary": "Frozen positional identity types and lexical anonymous values with complete direct protocol implementations."},
-    {"module": "core-walk", "spec": "0173", "source": "stdlib/core/walk.eli", "stability": "stable", "role": "runtime-core", "summary": "Stack-safe pre-order and post-order traversal and rewriting of nested persistent values."},
-    {"module": "core-zipper", "spec": "0174", "source": "stdlib/core/zipper.eli", "stability": "stable", "role": "runtime-core", "summary": "Immutable tree locations for stack-safe navigation, editing, and persistent root reconstruction."},
-    {"module": "data", "spec": "0027", "source": "stdlib/data.eli", "stability": "stable", "role": "portable", "summary": "Portable grouping, indexing, and counting for ordinary sequences."},
-    {"module": "data-text", "spec": "0071", "source": "stdlib/data-text.eli", "stability": "stable", "role": "portable", "summary": "Portable Result-based reading and printing of canonical data text."},
-    {"module": "deferred", "spec": "0161", "source": "stdlib/deferred.eli", "stability": "stable", "role": "state", "summary": "Synchronous delayed computation and value-semantic function memoization."},
-    {"module": "function", "spec": "0149", "source": "stdlib/function.eli", "stability": "stable", "role": "portable", "summary": "Portable function composition, predicate combination, nil normalization, and trampoline execution."},
-    {"module":"gepo","spec":"0181","source":"stdlib/gepo.eli","stability":"accepted","role":"host-interop","summary":"Self-describing HTTP discovery, hierarchical indexes, safe usage, authorized invocation and Fetch request handlers."},
-    {"module": "hierarchy", "spec": "0157", "source": "stdlib/hierarchy.eli", "stability": "stable", "role": "portable", "summary": "Authenticated immutable derivation hierarchies with transitive and vector relation queries."},
-    {"module": "identifier", "spec": "0070", "source": "stdlib/identifier.eli", "stability": "stable", "role": "portable", "summary": "Portable keyword and symbol construction, classification, and naming."},
-    {"module": "interop-js", "spec": "0073", "source": "stdlib/interop/js.eli", "stability": "stable", "role": "host-interop", "summary": "Explicit shallow and bounded conversion to native JavaScript containers."},
-    {"module": "json", "spec": "0076", "source": "stdlib/json.eli", "stability": "stable", "role": "portable", "summary": "Strict bounded JSON parsing and deterministic persistent-value encoding."},
-    {"module":"mdp","spec":"0181","source":"stdlib/mdp.eli","stability":"accepted","role":"host-interop","summary":"Structured Markdown parsing and encoding for native JSON values with bounded nesting and located errors."},
-    {"module":"mds","spec":"0181","source":"stdlib/mds.eli","stability":"accepted","role":"host-interop","summary":"Open-world schema validation with field, section and semantic constraints."},
-    {"module": "metadata", "spec": "0068", "source": "stdlib/metadata.eli", "stability": "stable", "role": "portable", "summary": "Portable immutable metadata access, validation, and transformation."},
-    {"module": "multimethod", "spec": "0157", "source": "stdlib/multimethod.eli", "stability": "stable", "role": "portable", "summary": "Callable multimethods with exact and hierarchical dispatch, transitive preferences, ambiguity detection, and persistent snapshots."},
-    {"module": "numeric", "spec": "0077", "source": "stdlib/numeric.eli", "stability": "stable", "role": "portable", "summary": "Exact Number classification and checked safe-integer arithmetic."},
-    {"module": "object", "spec": "0026", "source": "stdlib/object.eli", "stability": "stable", "role": "portable", "summary": "Portable immutable operations for string-keyed host objects."},
-    {"module": "persistent-list", "spec": "0054", "source": "stdlib/persistent-list.eli", "stability": "stable", "role": "portable", "summary": "Persistent linked lists with structural sharing and immutable metadata."},
-    {"module": "persistent-map", "spec": "0055", "source": "stdlib/persistent-map.eli", "stability": "stable", "role": "portable", "summary": "Persistent HAMT maps with value semantics and collision handling."},
-    {"module": "persistent-queue", "spec": "0166", "source": "stdlib/persistent-queue.eli", "stability": "stable", "role": "runtime-core", "summary": "Persistent FIFO queues with shared Vector views, constant-time dequeue, and amortized constant-time enqueue."},
-    {"module": "persistent-set", "spec": "0056", "source": "stdlib/persistent-set.eli", "stability": "stable", "role": "portable", "summary": "Persistent map-backed sets and immutable set algebra."},
-    {"module": "persistent-vector", "spec": "0053", "source": "stdlib/persistent-vector.eli", "stability": "stable", "role": "portable", "summary": "Persistent 32-way vectors with tail optimization and structural sharing."},
-    {"module": "result", "spec": "0075", "source": "stdlib/result.eli", "stability": "stable", "role": "portable", "summary": "Inspectable Ok and Err values with composable branch operations."},
-    {"module": "sequence", "spec": "0023", "source": "stdlib/sequence.eli", "stability": "stable", "role": "portable", "summary": "Portable sequence traversal, transformation, search, and range generation."},
-    {"module": "state-atom", "spec": "0072", "source": "stdlib/state/atom.eli", "stability": "stable", "role": "state", "summary": "Synchronous atomic references with value-pair transitions, compare-and-set, validators, and ordered watches."},
-    {"module": "text", "spec": "0025", "source": "stdlib/text.eli", "stability": "stable", "role": "portable", "summary": "Portable text predicates, slicing, joining, trimming, and repetition."},
-    {"module": "value", "spec": "0057", "source": "stdlib/value.eli", "stability": "stable", "role": "portable", "summary": "Deterministic value equality, hashing, maps, and sets."}
+    {
+      "module": "bit",
+      "spec": "0052",
+      "source": "stdlib/bit.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable 32-bit population count and bit rotation operations."
+    },
+    {
+      "module": "collection",
+      "spec": "0066",
+      "source": "stdlib/collection.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Protocol-driven capability inspection, persistent collection classification, bounded counting, value distinctness, O(1) subvector views, construction, lookup, reduction, removal, stack access, and reversible replayable views."
+    },
+    {
+      "module": "data",
+      "spec": "0066",
+      "source": "stdlib/data.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Collection-native grouping, keyed projection and transformation, nested associative updates, merging, selection, and zipping."
+    },
+    {
+      "module": "data-text",
+      "spec": "0069",
+      "source": "stdlib/data-text.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Canonical readable data text for persistent values and identifiers."
+    },
+    {
+      "module": "fn",
+      "spec": "0149",
+      "source": "stdlib/fn.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable function composition, predicate combination, nil normalization, and trampoline execution."
+    },
+    {
+      "module": "hierarchy",
+      "spec": "0157",
+      "source": "stdlib/hierarchy.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Authenticated immutable derivation hierarchies with transitive and vector relation queries."
+    },
+    {
+      "module": "identifier",
+      "spec": "0067",
+      "source": "stdlib/identifier.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "First-class keyword and symbol values with qualified names."
+    },
+    {
+      "module": "interop-js",
+      "spec": "0073",
+      "source": "stdlib/interop/js.eli",
+      "stability": "stable",
+      "role": "host-interop",
+      "summary": "Explicit shallow and bounded conversion to native JavaScript containers."
+    },
+    {
+      "module": "interop-object",
+      "spec": "0081",
+      "source": "stdlib/interop/object.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Protocol-driven immutable keyed-object transformations."
+    },
+    {
+      "module": "json",
+      "spec": "0076",
+      "source": "stdlib/json.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Strict bounded JSON parsing and deterministic persistent-value encoding."
+    },
+    {
+      "module": "lazy-sequence",
+      "spec": "0176",
+      "source": "stdlib/lazy-sequence.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Demand-driven memoized sequences, deferred recursive tails, direct lazy transformations, and realization inspection."
+    },
+    {
+      "module": "meta",
+      "spec": "0068",
+      "source": "stdlib/meta.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Immutable metadata protocols and value-preserving updates."
+    },
+    {
+      "module": "multimethod",
+      "spec": "0157",
+      "source": "stdlib/multimethod.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Callable multimethods with exact and hierarchical dispatch, transitive preferences, ambiguity detection, and persistent snapshots."
+    },
+    {
+      "module": "numeric",
+      "spec": "0077",
+      "source": "stdlib/numeric.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Exact Number classification and checked safe-integer arithmetic."
+    },
+    {
+      "module": "order",
+      "spec": "0066",
+      "source": "stdlib/order.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Open comparison protocol, stable sorting, comparator adaptation, and keyed extrema."
+    },
+    {
+      "module": "persistent-list",
+      "spec": "0054",
+      "source": "stdlib/persistent-list.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Persistent linked lists with structural sharing and immutable metadata."
+    },
+    {
+      "module": "persistent-map",
+      "spec": "0055",
+      "source": "stdlib/persistent-map.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Persistent HAMT maps with value semantics and collision handling."
+    },
+    {
+      "module": "persistent-queue",
+      "spec": "0166",
+      "source": "stdlib/persistent-queue.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Persistent FIFO queues with shared Vector views, constant-time dequeue, and amortized constant-time enqueue."
+    },
+    {
+      "module": "persistent-set",
+      "spec": "0056",
+      "source": "stdlib/persistent-set.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Persistent map-backed sets and immutable set algebra."
+    },
+    {
+      "module": "persistent-vector",
+      "spec": "0053",
+      "source": "stdlib/persistent-vector.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Persistent 32-way vectors with tail optimization and structural sharing."
+    },
+    {
+      "module": "portable-data",
+      "spec": "0027",
+      "source": "stdlib/portable/data.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable grouping, indexing, and counting for ordinary sequences."
+    },
+    {
+      "module": "portable-data-text",
+      "spec": "0071",
+      "source": "stdlib/portable/data-text.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable Result-based reading and printing of canonical data text."
+    },
+    {
+      "module": "portable-identifier",
+      "spec": "0070",
+      "source": "stdlib/portable/identifier.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable keyword and symbol construction, classification, and naming."
+    },
+    {
+      "module": "portable-metadata",
+      "spec": "0068",
+      "source": "stdlib/portable/metadata.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable immutable metadata access, validation, and transformation."
+    },
+    {
+      "module": "portable-object",
+      "spec": "0026",
+      "source": "stdlib/portable/object.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable immutable operations for string-keyed host objects."
+    },
+    {
+      "module": "portable-sequence",
+      "spec": "0023",
+      "source": "stdlib/portable/sequence.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable sequence traversal, transformation, search, and range generation."
+    },
+    {
+      "module": "portable-text",
+      "spec": "0025",
+      "source": "stdlib/portable/text.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Portable text predicates, slicing, joining, trimming, and repetition."
+    },
+    {
+      "module": "protocol",
+      "spec": "0066",
+      "source": "stdlib/protocol.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Open protocol definition, extension, inspection, and dispatch policy."
+    },
+    {
+      "module": "record",
+      "spec": "0168",
+      "source": "stdlib/record.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Declarative immutable Record types with persistent Map, value, metadata, and open protocol semantics."
+    },
+    {
+      "module": "regex",
+      "spec": "0178",
+      "source": "stdlib/regex.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Immutable regular-expression patterns, capture-aware matching, memoized lazy scanning, and literal or callback replacement."
+    },
+    {
+      "module": "result",
+      "spec": "0075",
+      "source": "stdlib/result.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Inspectable Ok and Err values with composable branch operations."
+    },
+    {
+      "module": "seq",
+      "spec": "0066",
+      "source": "stdlib/seq.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Protocol-driven replayable sources, head/tail views, finite transformation, interleaving, stepped partitioning, tree traversal, and reduction history."
+    },
+    {
+      "module": "set",
+      "spec": "0066",
+      "source": "stdlib/set.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Protocol-driven persistent Set algebra, membership relations, and relational data operations."
+    },
+    {
+      "module": "sorted",
+      "spec": "0175",
+      "source": "stdlib/sorted.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Persistent AVL Maps and Sets with custom comparators, reversible traversal, and bounded range queries."
+    },
+    {
+      "module": "state",
+      "spec": "0072",
+      "source": "stdlib/state.eli",
+      "stability": "stable",
+      "role": "state",
+      "summary": "Synchronous atomic references with value-pair transitions, compare-and-set, validators, ordered watches, delayed computations, and memoization."
+    },
+    {
+      "module": "string",
+      "spec": "0081",
+      "source": "stdlib/string.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Portable text predicates, slicing, joining, and affix operations."
+    },
+    {
+      "module": "transducer",
+      "spec": "0066",
+      "source": "stdlib/transducer.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Composable single-pass transducers, replayable reducible pipelines, memoized pull sequences, and effectful consumption."
+    },
+    {
+      "module": "transient",
+      "spec": "0066",
+      "source": "stdlib/transient.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Owner-token transient builders for efficient isolated construction."
+    },
+    {
+      "module": "type",
+      "spec": "0169",
+      "source": "stdlib/type.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Frozen positional identity types and lexical anonymous values with complete direct protocol implementations."
+    },
+    {
+      "module": "value",
+      "spec": "0057",
+      "source": "stdlib/value.eli",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Deterministic value equality, hashing, maps, and sets."
+    },
+    {
+      "module": "walk",
+      "spec": "0173",
+      "source": "stdlib/walk.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Stack-safe pre-order and post-order traversal and rewriting of nested persistent values."
+    },
+    {
+      "module": "wire-gepo",
+      "spec": "0181",
+      "source": "stdlib/wire/gepo.eli",
+      "stability": "accepted",
+      "role": "host-interop",
+      "summary": "Self-describing HTTP discovery, hierarchical indexes, safe usage, authorized invocation and Fetch request handlers."
+    },
+    {
+      "module": "wire-mdp",
+      "spec": "0181",
+      "source": "stdlib/wire/mdp.eli",
+      "stability": "accepted",
+      "role": "host-interop",
+      "summary": "Structured Markdown parsing and encoding for native JSON values with bounded nesting and located errors."
+    },
+    {
+      "module": "wire-mds",
+      "spec": "0181",
+      "source": "stdlib/wire/mds.eli",
+      "stability": "accepted",
+      "role": "host-interop",
+      "summary": "Open-world schema validation with field, section and semantic constraints."
+    },
+    {
+      "module": "zipper",
+      "spec": "0174",
+      "source": "stdlib/zipper.eli",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Immutable tree locations for stack-safe navigation, editing, and persistent root reconstruction."
+    }
   ]
 }

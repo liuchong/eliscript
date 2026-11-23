@@ -404,6 +404,7 @@
           (let ((process-environment
                  (append (list (concat "EMACS=" emacs-bin)
                                (concat "ELISCRIPT_CLEAN_TEST_TRACE=" trace-file)
+                               "ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=0"
                                "ELISCRIPT_CLEAN_EXPECT_STAGE3=1")
                          process-environment))
                 (default-directory (file-name-as-directory repo)))
@@ -431,6 +432,7 @@
           (let ((process-environment
                  (append (list (concat "EMACS=" emacs-bin)
                                (concat "ELISCRIPT_CLEAN_TEST_TRACE=" trace-file)
+                               "ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=0"
                                "ELISCRIPT_CLEAN_EXPECT_STAGE3=1")
                          process-environment))
                 (default-directory (file-name-as-directory repo)))
@@ -455,6 +457,7 @@
           (let ((process-environment
                  (append (list (concat "EMACS=" emacs-bin)
                                (concat "ELISCRIPT_CLEAN_TEST_TRACE=" trace-file)
+                               "ELISCRIPT_SKIP_RETAINED_ACCEPTANCE=0"
                                "ELISCRIPT_CLEAN_EXPECT_STAGE3=1"
                                "ELISCRIPT_PREPARED_STAGE3=1")
                          process-environment))

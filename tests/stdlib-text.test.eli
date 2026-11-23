@@ -21,7 +21,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-text-"))))
            (library (resolve directory "text.mjs")) (usage (resolve directory "text-usage.mjs")))
       (try
-        (await (compile (resolve ROOT "stdlib/text.eli") library))
+        (await (compile (resolve ROOT "stdlib/portable/text.eli") library))
         (let ((output (await (compile (resolve ROOT "tests/fixtures/text-usage.eli") usage))))
 
           (same (JSON/parse (await (runSuccessful (js-array "bun" "run" usage) (js-object)))) (js-object "empty" t "not-empty" false "slice" "bcd" "slice-clamped" "abc" "slice-reversed" "" "starts-at" t "starts-at-negative" false "starts" t "starts-missing" false "ends" t "ends-too-long" false "contains" t "contains-empty" t "contains-missing" false "stripped-prefix" "article" "kept-prefix" "article" "stripped-suffix" "text" "kept-suffix" "text.mjs" "space" t "letter-space" false "trimmed" "Eliscript" "trimmed-empty" "" "blank" t "not-blank" false "joined" "a/2/false" "joined-empty" "" "repeated" "ababab" "repeat-negative" "")))

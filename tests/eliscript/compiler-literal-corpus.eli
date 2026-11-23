@@ -830,7 +830,7 @@
                     ;; even though the API entry does not import that module.
                     (js-call assert :deepStrictEqual (get request :entries)
                       (js-call (get record :modules) :map (lambda (module) (get module :id))))
-                    (js-call assert :ok (js-call (get request :entries) :includes "stdlib/core/seq.mjs"))
+                    (js-call assert :ok (js-call (get request :entries) :includes "stdlib/seq.mjs"))
                     (js-call assert :deepStrictEqual (get ground :entries) (js-array (get record :entry))))
                   (js-call assert :deepStrictEqual (get request :entries) (get ground :entries)))
                 (js-call assert :strictEqual (js-length modules) (js-length (get record :modules)))
@@ -1030,26 +1030,33 @@
           (js-array (get asset :file) (get asset :sha256) (get asset :content)))) asset-identities)
         (let* ((record (js-call (get document :records) :find (lambda (item)
                          (= (get item :id) "original-program:portable-persistent-list-complete-hosts"))))
+               (wire-record (js-call (get document :records) :find (lambda (item)
+                              (= (get item :id) "original-managed:wire:node:auto-65536"))))
+               (wire-lib (js-call libraries :find (lambda (item) (= (get item :id) "runtime/wire/http-rpc.mjs"))))
+               (list-lib (js-call libraries :find (lambda (item) (= (get item :id) "runtime/core/list.mjs"))))
                (missing (js-call assets :filter (lambda (asset) (/= (get asset :file) "runtime/wire/http-rpc.mjs"))))
                (changed (js-call assets :map (lambda (asset)
                  (if (= (get asset :file) "runtime/wire/http-rpc.mjs")
                    (Object/assign (js-object) asset (js-object :content "Y2hhbmdlZA==")) asset)))))
-          (let ((missing-host (js-call assets :filter (lambda (asset) (/= (get asset :file) "platform/http.mjs"))))
+          (let ((with-wire (funcall globalThis.structuredClone record))
+                (missing-host (js-call assets :filter (lambda (asset) (/= (get asset :file) "platform/http.mjs"))))
                 (changed-host (js-call assets :map (lambda (asset)
                   (if (= (get asset :file) "platform/http.mjs")
                     (Object/assign (js-object) asset (js-object :content "Y2hhbmdlZA==")) asset)))))
-            (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript"
+            (js-call (get with-wire :modules) :push (js-object :id "managed-wire-http-rpc.mjs"
+              :filename (get wire-lib :filename) :source (get wire-lib :source)))
+            (js-call assert :throws (lambda () (compilerCorpusRequest with-wire "javascript"
               (js-object :sourceAssets missing-host :literalSources libraries :literalSourceIdentity library-identity)))
               (lambda (error) (js-call (get error :message) :includes "platform/http.mjs")))
-            (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript"
+            (js-call assert :throws (lambda () (compilerCorpusRequest with-wire "javascript"
               (js-object :sourceAssets changed-host :literalSources libraries :literalSourceIdentity library-identity)))
               (lambda (error) (js-call (get error :message) :includes "platform/http.mjs"))))
           (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript" (js-object :sourceAssets missing)))
             (lambda (error) (js-call (get error :message) :includes "literal source declarations")))
-          (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript" (js-object :sourceAssets missing
+          (js-call assert :throws (lambda () (compilerCorpusRequest wire-record "javascript" (js-object :sourceAssets missing
                               :literalSources libraries :literalSourceIdentity library-identity)))
             (lambda (error) (js-call (get error :message) :includes "runtime/wire/http-rpc.mjs")))
-          (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript" (js-object :sourceAssets changed
+          (js-call assert :throws (lambda () (compilerCorpusRequest wire-record "javascript" (js-object :sourceAssets changed
                               :literalSources libraries :literalSourceIdentity library-identity)))
             (lambda (error) (js-call (get error :message) :includes "runtime/wire/http-rpc.mjs")))
           (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript" (js-object :sourceAssets assets
@@ -1061,20 +1068,20 @@
             (js-call assert :throws (lambda () (compilerCorpusRequest record "javascript" (js-object :sourceAssets assets
                                 :literalSources bad :literalSourceIdentity library-identity)))
               (lambda (error) (js-call (get error :message) :includes "literal source declarations")))
-            (let ((module (js-call (get correct :modules) :find (lambda (item) (= (get item :id) "managed-runtime-list.mjs")))))
-              (put module :filename "runtime/core/list.eli")
-              (let* ((before (funcall globalThis.structuredClone correct))
-                     (request (compilerCorpusRequest correct "javascript" (js-object :sourceAssets assets
-                                :literalSources libraries :literalSourceIdentity library-identity))))
-                (js-call assert :strictEqual (get (js-call (get request :modules) :find (lambda (item)
-                  (= (get item :id) "managed-runtime-list.mjs"))) :filename) "runtime/core/list.eli")
-                (js-call assert :deepStrictEqual correct before))))))))
+            (js-call (get correct :modules) :push (js-object :id "managed-runtime-list.mjs"
+              :filename "runtime/core/list.eli" :source (get list-lib :source)))
+            (let* ((before (funcall globalThis.structuredClone correct))
+                   (request (compilerCorpusRequest correct "javascript" (js-object :sourceAssets assets
+                              :literalSources libraries :literalSourceIdentity library-identity))))
+              (js-call assert :strictEqual (get (js-call (get request :modules) :find (lambda (item)
+                (= (get item :id) "managed-runtime-list.mjs"))) :filename) "runtime/core/list.eli")
+              (js-call assert :deepStrictEqual correct before)))))))
   (defun seed-source-case ()
     (let* ((source "(module seed.entry (import \"../runtime/helper.eli\" answer) (js-call (get globalThis.process :stdout) :write (funcall globalThis.String (answer))))")
-           (helper "(module seed.helper (import \"../stdlib/core/shared.eli\" value) (defun answer () (+ value 2)) (export answer))")
+           (helper "(module seed.helper (import \"../stdlib/shared.eli\" value) (defun answer () (+ value 2)) (export answer))")
            (shared "(module seed.shared (defconst value 40) (export value))")
-           (libraries (js-array (js-object :id "runtime/helper.mjs" :filename "stdlib/managed-helper.eli" :source helper)))
-           (files (js-array (js-array "stdlib/managed-helper.eli" helper) (js-array "stdlib/core/shared.eli" shared)))
+           (libraries (js-array (js-object :id "runtime/helper.mjs" :filename "runtime/managed/managed-helper.eli" :source helper)))
+           (files (js-array (js-array "runtime/managed/managed-helper.eli" helper) (js-array "stdlib/shared.eli" shared)))
            (assets (js-call files :map (lambda (pair)
              (let ((bytes (js-call Buffer :from (aref pair 1) "utf8")))
                (js-object :file (aref pair 0) :encoding "base64" :content (js-call bytes :toString "base64")
@@ -1082,7 +1089,7 @@
       (js-object :record (js-object :id "original-program:multimethod-complete-hosts" :kind "project"
           :entry "multimethod.mjs" :modules (js-array
             (js-object :id "multimethod.mjs" :filename "stdlib/multimethod.eli" :source source)
-            (js-object :id "managed-helper.mjs" :filename "stdlib/managed-helper.eli" :source helper))
+            (js-object :id "managed-helper.mjs" :filename "runtime/managed/managed-helper.eli" :source helper))
           :request (js-object :resolveImports t) :execution (js-object :kind "original-program" :hostRuntime "node" :aliases t)
           :expected (js-object :kind "seed-program" :oracleRequired t :stdout "42"))
         :proofs (js-object :sourceAssets assets :literalSources libraries
@@ -1231,7 +1238,7 @@
                   (lambda (key) (js-call key :startsWith "program:")))) 2)))
             (let* ((changed-proofs (funcall globalThis.structuredClone (get fixture :proofs)))
                    (asset (js-call (get changed-proofs :sourceAssets) :find
-                     (lambda (value) (= (get value :file) "stdlib/core/shared.eli"))))
+                     (lambda (value) (= (get value :file) "stdlib/shared.eli"))))
                    (bytes (js-call Buffer :from "(module seed.shared (defconst value 41) (export value))" "utf8")))
               (put asset :content (js-call bytes :toString "base64"))
               (put asset :bytes (js-length bytes)) (put asset :sha256 (literal-hash bytes))
@@ -1249,7 +1256,7 @@
              (fixture (seed-source-case)) (record (get fixture :record)) (proofs (get fixture :proofs))
              (assets (get proofs :sourceAssets))
              (variants (js-array
-               (js-call assets :filter (lambda (asset) (/= (get asset :file) "stdlib/core/shared.eli")))
+               (js-call assets :filter (lambda (asset) (/= (get asset :file) "stdlib/shared.eli")))
                (js-call assets :map (lambda (asset) (Object/assign (js-object) asset (js-object :sha256 "changed"))))
                (js-call assets :concat (js-array (Object/assign (js-object) (aref assets 0) (js-object :content "YQ=="))))))
              (index 0))

@@ -1061,3 +1061,11 @@ tree 与报告 SHA，保持当前性能 NOT ACCEPTED，原 run、manifest、mark
 | 94 | `original-managed:wire:bun:auto-1:part-corpus-04` | `<= 30000.0`（未超限） | `30384.5`（`4953.9` / `13992.1` / `8762.4`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
 | 95 | `original-program:declarative-record-complete-hosts` | `<= 30000.0`（未超限） | `30107.0`（`19083.1` / `7619.2` / `1986.9`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
 | 96 | `stable-compatibility:program:tests/fixtures/map-patterns.eli` | `<= 30000.0`（未超限） | `30015.8`（`15675.9` / `6695.2` / `6708.2`） | `equivalent`（完整执行通过） | `DEFERRED / NOT ACCEPTED` |
+
+### 0.1.4 延期项续办（2026-11-21）
+
+以已签名的 `v0.1.3` 为基线。表 A 的原规模容量与语义检查、表 B 的原时限性能检查仍待逐项收口，保留各自的原输入、配置与判定。继续使用未受影响的基线证据。最终候选冻结后刷新正式自举、三目标语料、性能报告和安装证据。
+
+Native typed-memory 发射器按使用次数将高频整数字和 Val64 局部量分配给 AAPCS64 被调用者保存的寄存器。现有 Native 内存四套 40 项功能用例通过，覆盖真实 WASM 对照、零初始化、异常、间接调用及 Seed 固定点。对同源完整树遍历产物比较机器码，`root-scope-enter` 的 FP 相对局部读取由 70 减至 11，写入由 32 减至 10。完整代码段由 24,854,232 字节增至 25,031,792 字节。该变化只证明生成的访存指令减少，原时限仍按完整语料执行结果判定。
+
+S1 收口实测（2026-11-23，`arm64-macos`）：Native 数值微基准（`tools/backends/results/native-macos-arm64.json`）在启用寄存器分配后 `productionPassed: true`（`recurrence-batch` **1.97x**，`1.426ms` vs `2.812ms`；`escape-grid-batch` **1.10x**，`1.799ms` vs `1.980ms`；`recurrence-tiny-batch` **1.23x**，`1.242ms` vs `1.527ms`），对照关闭寄存器分配基线 `productionPassed: false`（`0.57x` / `0.23x` / `0.11x`）；`tests/native-memory-long-branches.test.mjs` 与 `tests/native-backend.test.mjs` 合计 `41/41` 通过。Stage3 三目标 `small` 功能语料（`corpusRecordsSha256`: `58620631cce04189ac99bfbff994c44105681565f9a317c5ed2cf52c859c4e0f`）全数等价通过：`javascript` `810/810`（`2` `cancelled`、`6` `resource-deferred`、`0` 失败），`wasm` `769/769`（`35` `cancelled`、`14` `resource-deferred`、`0` 失败），`native` `769/769`（`35` `cancelled`、`14` `resource-deferred`、`0` 失败）。

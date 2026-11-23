@@ -238,29 +238,34 @@
       (let* ((targetCompilerPath (js-call path :join targetRoot "dist/bootstrap/compiler.mjs"))
              (activeCompilerPath targetCompilerPath)
              (compiler (funcall (createRequire activeCompilerPath) activeCompilerPath)))
-        (let* ((zipperSource (await (readFile (js-call path :join targetRoot "stdlib/core/zipper.eli") "utf8")))
+        (let* ((flatStdlib (await (pathExists (js-call path :join targetRoot "stdlib/zipper.eli"))))
+               (stdlibSubdir (if flatStdlib "stdlib" "stdlib/core"))
+               (runtimePrefix (if flatStdlib "\"../runtime/" "\"../../runtime/"))
+               (zipperRel (str stdlibSubdir "/zipper.eli"))
+               (seqRel (str stdlibSubdir "/seq.eli"))
+               (zipperSource (await (readFile (js-call path :join targetRoot zipperRel) "utf8")))
                (compiledZipper
                  (js-call
                    (js-call
                      (js-call
-                       (js-call (js-call compiler :compile_string zipperSource "stdlib/core/zipper.eli")
+                       (js-call (js-call compiler :compile_string zipperSource zipperRel)
                          :split "\"eliscript/runtime/prelude.mjs\"")
-                       :join "\"../../runtime/prelude.mjs\"")
+                       :join (str runtimePrefix "prelude.mjs\""))
                      :split "\"eliscript/runtime/primitives.mjs\"")
-                   :join "\"../../runtime/primitives.mjs\""))
-               (seqSource (await (readFile (js-call path :join targetRoot "stdlib/core/seq.eli") "utf8")))
+                   :join (str runtimePrefix "primitives.mjs\"")))
+               (seqSource (await (readFile (js-call path :join targetRoot seqRel) "utf8")))
                (compiledSeq
                  (js-call
                    (js-call
                      (js-call
-                       (js-call (js-call compiler :compile_string seqSource "stdlib/core/seq.eli")
+                       (js-call (js-call compiler :compile_string seqSource seqRel)
                          :split "\"eliscript/runtime/prelude.mjs\"")
-                       :join "\"../../runtime/prelude.mjs\"")
+                       :join (str runtimePrefix "prelude.mjs\""))
                      :split "\"eliscript/runtime/primitives.mjs\"")
-                   :join "\"../../runtime/primitives.mjs\""))
+                   :join (str runtimePrefix "primitives.mjs\"")))
                (tempDir (await (mkdtemp (js-call path :join (js-call os :tmpdir) "eliscript-version-bench-")))))
           (try
-            (let* ((stdlibCoreDir (js-call path :join tempDir "stdlib/core"))
+            (let* ((stdlibCoreDir (js-call path :join tempDir stdlibSubdir))
                    (nodeModulesEliscript (js-call path :join tempDir "node_modules/eliscript"))
                    (zipperMjsPath (js-call path :join stdlibCoreDir "zipper.mjs"))
                    (seqMjsPath (js-call path :join stdlibCoreDir "seq.mjs"))
@@ -269,7 +274,7 @@
                    (runnerSource (await (readFile (js-call path :join compilerRoot "tools/performance/version-comparison-workloads.eli") "utf8")))
                    (relocatedRunner (js-call (js-call runnerSource :replaceAll
                      "(import \"../../runtime/" "(import \"./runtime/") :replaceAll
-                     "(import \"../../stdlib/core/" "(import \"./stdlib/core/"))
+                     "(import \"../../stdlib/" (str "(import \"./" stdlibSubdir "/")))
                    (runnerScript
                      (js-call
                        (js-call

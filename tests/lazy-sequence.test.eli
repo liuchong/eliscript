@@ -20,8 +20,8 @@
   (defconst hostFixture (resolve root "tests/fixtures/lazy-sequence-host.mjs"))
   (defconst bunPreload (resolve root "tests/fixtures/compiled-eli-bun-preload.mjs"))
   (defconst nodeLoader (resolve root "tests/fixtures/compiled-eli-node-loader.mjs"))
-  (defconst compilationUnits (js-array (js-array "stdlib/core/lazy-sequence.eli" "stdlib/core/lazy-sequence.eli")
-    (js-array "stdlib/core/transducer.eli" "stdlib/core/transducer.eli") (js-array "tests/fixtures/lazy-sequence.eli" "tests/fixtures/lazy-sequence.mjs")))
+  (defconst compilationUnits (js-array (js-array "stdlib/lazy-sequence.eli" "stdlib/lazy-sequence.eli")
+    (js-array "stdlib/transducer.eli" "stdlib/transducer.eli") (js-array "tests/fixtures/lazy-sequence.eli" "tests/fixtures/lazy-sequence.mjs")))
 
   (defun be (actual expected) (js-call (expect actual) :toBe expected))
   (defun same (actual expected) (js-call (expect actual) :toEqual expected))

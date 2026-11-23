@@ -22,23 +22,22 @@
   (defconst core-stdlib-complete-title "Eliscript core modules compile and execute against runtime protocols")
   (defconst core-project-plans (js-array
     (js-object :id "core" :assertion "stable protocol and core algorithms build as one project across Bun and Node"
-      :marker "core/protocol.eli"
-      :names (js-call (js-array "protocol" "collection" "transient" "transducer" "seq" "data" "set" "order" "text" "object")
-               :map (lambda (name) (str "core/" name))))
+      :marker "protocol.eli"
+      :names (js-array "protocol" "collection" "transient" "transducer" "seq" "data" "set" "order" "string" "interop/object"))
     (js-object :id "utility" :assertion "stable portable utility modules build as one project across Bun and Node"
-      :marker "sequence.eli"
-      :names (js-array "sequence" "text" "object" "data"))
+      :marker "portable/sequence.eli"
+      :names (js-array "portable/sequence" "portable/text" "portable/object" "portable/data"))
     (js-object :id "persistent-values" :assertion "persistent value library builds as one project and executes under Bun and Node"
       :marker "persistent-vector.eli"
       :names (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value"))
     (js-object :id "value-text" :assertion "identifier metadata and data text build as one project across Bun and Node"
-      :marker "data-text.eli"
-      :names (js-array "bit" "data-text" "identifier" "metadata" "persistent-list" "persistent-map" "persistent-set" "persistent-vector" "value")
-      :entries (js-array "identifier" "metadata" "data-text"))
+      :marker "portable/data-text.eli"
+      :names (js-array "bit" "portable/data-text" "portable/identifier" "portable/metadata" "persistent-list" "persistent-map" "persistent-set" "persistent-vector" "value")
+      :entries (js-array "portable/identifier" "portable/metadata" "portable/data-text"))
     (js-object :id "public" :assertion "public state interop result JSON and numeric modules build across hosts"
-      :marker "state/atom.eli"
-      :names (js-array "bit" "interop/js" "json" "numeric" "persistent-list" "persistent-map" "persistent-set" "persistent-vector" "result" "state/atom" "value")
-      :entries (js-array "state/atom" "interop/js" "result" "json" "numeric"))))
+      :marker "state.eli"
+      :names (js-array "bit" "interop/js" "json" "numeric" "persistent-list" "persistent-map" "persistent-set" "persistent-vector" "result" "state" "value")
+      :entries (js-array "state" "interop/js" "result" "json" "numeric"))))
   (defconst titles (js-array
     "persistent literals and quoted data preserve language value categories"
     "hash-map rejects incomplete pairs in both compilers"
@@ -525,7 +524,7 @@
                    "(defconst product (aref (get globalThis.process :argv) 2))\n"
                    "(defconst ROOT (let ((root (get (get globalThis.process :env) :ELISCRIPT_ORIGINAL_SOURCE_ROOT))) (if (nullish? root) product root)))\n"
                    "(defconst copyHostRecord (get (funcall (createRequire (aref (get globalThis.process :argv) 1)) (resolve ROOT \"tools/backends/compiler-host-record.mjs\")) :copyHostRecord))\n"
-                   "(defconst setModule (resolve product \"stdlib/core/set.mjs\"))\n"
+                   "(defconst setModule (resolve product \"stdlib/set.mjs\"))\n"
                    "(defconst usageModule (resolve product \"core-set-usage.mjs\"))\n"
                    (form-text eli-text emacs-node) "\n"
                    (form-text eli-text same-node) "\n"
@@ -578,11 +577,11 @@
                (members (module-members eli-text core-stdlib-eli))
                (bindings (js-object
                  :usageModule "core-stdlib-usage.mjs" :apiUsageModule "core-language-api-usage.mjs"
-                 :protocolModule "stdlib/core/protocol.mjs" :identifierModule "stdlib/core/identifier.mjs"
-                 :dataTextModule "stdlib/core/data-text.mjs" :metadataModule "stdlib/core/metadata.mjs"
-                 :collectionModule "stdlib/core/collection.mjs" :transientModule "stdlib/core/transient.mjs"
-                 :transducerModule "stdlib/core/transducer.mjs" :seqModule "stdlib/core/seq.mjs"
-                 :dataModule "stdlib/core/data.mjs")))
+                 :protocolModule "stdlib/protocol.mjs" :identifierModule "stdlib/identifier.mjs"
+                 :dataTextModule "stdlib/data-text.mjs" :metadataModule "stdlib/meta.mjs"
+                 :collectionModule "stdlib/collection.mjs" :transientModule "stdlib/transient.mjs"
+                 :transducerModule "stdlib/transducer.mjs" :seqModule "stdlib/seq.mjs"
+                 :dataModule "stdlib/data.mjs")))
           (unless base (throw (new globalThis.Error "original complete core runtime graph is unavailable")))
           (js-call (Object/values bindings) :forEach (lambda (module-id)
             (unless (js-call (get base :modules) :some (lambda (m) (= (get m :id) module-id)))
@@ -684,7 +683,7 @@
                (identity (await (funcall file core-stdlib-suite)))
                (case-locators (originalRuntimeCaseLocators core-stdlib-suite original))
                (runtime-plan (js-call records :find (lambda (record)
-                               (= (get record :id) "stable-compatibility:program:stdlib/core/text.eli"))))
+                               (= (get record :id) "stable-compatibility:program:stdlib/string.eli"))))
                (members (module-members eli-text core-stdlib-eli))
                (helper-nodes (js-array
                  (find-named-member members "defconst" "EMACS")

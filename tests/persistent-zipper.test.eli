@@ -7,7 +7,7 @@
   (import "./helpers/seed-compiler.mjs" seedCompilerFixture)
   (import "./helpers/portable-stdlib.mjs" runSuccessful be same contains)
   (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
-  (defconst units (js-array (js-array "stdlib/core/zipper.eli" "stdlib/core/zipper.eli") (js-array "tests/fixtures/persistent-zipper.eli" "tests/fixtures/persistent-zipper.mjs")))
+  (defconst units (js-array (js-array "stdlib/zipper.eli" "stdlib/zipper.eli") (js-array "tests/fixtures/persistent-zipper.eli" "tests/fixtures/persistent-zipper.mjs")))
   (defconst hostFixture (resolve root "tests/fixtures/persistent-zipper-host.mjs"))
   (defasync compileFamily (command outputRoot environment)
     (await (mkdir outputRoot (js-object :recursive t)))
@@ -62,6 +62,6 @@
       (try
         (await (compileFamily (resolve root "bin/eliscript-seed") seedDirectory (js-object)))
         (await (runSuccessful (js-array "bun" "--preload" (resolve root "tests/fixtures/compiled-eli-bun-preload.mjs")
-          (resolve root "tests/fixtures/persistent-zipper-indexed-host.mjs") (resolve seedDirectory "stdlib/core/zipper.eli")) (js-object)))
+          (resolve root "tests/fixtures/persistent-zipper-indexed-host.mjs") (resolve seedDirectory "stdlib/zipper.eli")) (js-object)))
         (finally (await (rm directory (js-object :recursive t :force t))))))) 30000)
 )

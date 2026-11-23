@@ -167,17 +167,25 @@
                (js-call
                  (js-call
                    (js-call
-                     (js-array
-                       "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "managed-queue-state" "managed-literals"
-                       "managed-transient-state" "managed-vector-view-state" "managed-literal-protocols" "managed-sorted-state"
-                       "managed-value-state" "core/protocol" "core/text" "core/object" "core/set" "core/data")
-                     :map (lambda (name) (str "stdlib/" name ".mjs")))
+                     (js-call
+                       (js-array
+                         "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value"
+                         "protocol" "string" "interop/object" "set" "data")
+                       :map (lambda (name) (str "stdlib/" name ".mjs")))
+                     :concat
+                     (js-call
+                       (js-array
+                         "managed-queue-state" "managed-literals" "managed-transient-state"
+                         "managed-vector-view-state" "managed-literal-protocols" "managed-sorted-state"
+                         "managed-value-state")
+                       :map (lambda (name) (str "runtime/managed/" name ".mjs"))))
                    :concat
                    (js-call
                      (js-array
                        "protocol-error" "list" "vector" "map" "set" "queue" "identifier" "record" "value"
                        "metadata" "collection" "transient" "protocol" "type" "order" "sorted" "regex"
-                       "transducer" "lazy-sequence" "text" "object" "truth" "sequence" "set-algebra"
+                       "transducer" "lazy-sequence" "text" "text-impl" "object" "object-impl" "protocol-impl"
+                       "truth" "sequence" "set-algebra"
                        "collection-internals" "metadata-internals" "persistent-kind" "data" "data-text" "value-internals")
                      :map (lambda (name) (str "runtime/core/" name ".mjs")))
                    "runtime/literals.mjs"

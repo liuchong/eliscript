@@ -576,7 +576,7 @@
 
 (ert-deftest eliscript-project-selects-portable-standard-library-graph ()
   (eliscript-project-tests--with-directory output
-    (let* ((root (expand-file-name "stdlib" default-directory))
+    (let* ((root (expand-file-name "stdlib/portable" default-directory))
            (entry (expand-file-name "data.eli" root))
            (result
             (eliscript-project-build-portable
@@ -609,9 +609,9 @@
             (file-truename
              (expand-file-name "examples/emacs-index/index.mjs" output)))
            (data-output
-            (file-truename (expand-file-name "stdlib/data.mjs" output)))
+            (file-truename (expand-file-name "stdlib/portable/data.mjs" output)))
            (object-output
-            (file-truename (expand-file-name "stdlib/object.mjs" output)))
+            (file-truename (expand-file-name "stdlib/portable/object.mjs" output)))
            (entry-text (eliscript-project-tests--read entry-output))
            (data-text (eliscript-project-tests--read data-output))
            (object-text (eliscript-project-tests--read object-output)))

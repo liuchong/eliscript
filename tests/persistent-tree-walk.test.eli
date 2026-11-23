@@ -7,7 +7,7 @@
   (import "./helpers/seed-compiler.mjs" seedCompilerFixture)
   (import "./helpers/portable-stdlib.mjs" runSuccessful be same contains)
   (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
-  (defconst units (js-array (js-array "stdlib/core/walk.eli" "stdlib/core/walk.eli") (js-array "tests/fixtures/persistent-tree-walk.eli" "tests/fixtures/persistent-tree-walk.mjs")))
+  (defconst units (js-array (js-array "stdlib/walk.eli" "stdlib/walk.eli") (js-array "tests/fixtures/persistent-tree-walk.eli" "tests/fixtures/persistent-tree-walk.mjs")))
   (defconst hostFixture (resolve root "tests/fixtures/persistent-tree-walk-host.mjs"))
   (defasync compileFamily (command outputRoot environment)
     (await (mkdir outputRoot (js-object :recursive t)))

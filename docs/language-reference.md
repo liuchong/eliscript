@@ -178,7 +178,7 @@ runtime dispatch function. `extend-type`, `extend-category`, and
 implementations in source order.
 
 ```elisp
-(import "../stdlib/core/protocol.eli"
+(import "../stdlib/protocol.eli"
         define-protocol extend-protocol-category extend-protocol-default
         protocol-method)
 

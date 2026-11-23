@@ -1,0 +1,44 @@
+(module eliscript.string
+  (import "../runtime/core/text-impl.mjs" :as Impl)
+
+  (defun empty? (text)
+    (Impl/empty_QMARK_ text))
+
+  (defun slice (start end text)
+    (Impl/slice start end text))
+
+  (defun starts-at? (prefix offset text)
+    (Impl/starts_at_QMARK_ prefix offset text))
+
+  (defun starts-with? (prefix text)
+    (Impl/starts_with_QMARK_ prefix text))
+
+  (defun ends-with? (suffix text)
+    (Impl/ends_with_QMARK_ suffix text))
+
+  (defun contains? (needle text)
+    (Impl/contains_QMARK_ needle text))
+
+  (defun strip-prefix (prefix text)
+    (Impl/strip_prefix prefix text))
+
+  (defun strip-suffix (suffix text)
+    (Impl/strip_suffix suffix text))
+
+  (defun whitespace? (character)
+    (Impl/whitespace_QMARK_ character))
+
+  (defun trim (text)
+    (Impl/trim text))
+
+  (defun blank? (text)
+    (Impl/blank_QMARK_ text))
+
+  (defun join (separator values)
+    (Impl/join separator values))
+
+  (defun repeat (count text)
+    (Impl/repeat count text))
+
+  (export blank? contains? empty? ends-with? join repeat slice starts-at?
+          starts-with? strip-prefix strip-suffix trim whitespace?))

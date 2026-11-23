@@ -7,7 +7,7 @@
   (import "./helpers/seed-compiler.mjs" seedCompilerFixture)
   (import "./helpers/portable-stdlib.mjs" runSuccessful be same contains)
   (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
-  (defconst units (js-array (js-array "stdlib/core/protocol.eli" "stdlib/core/protocol.eli") (js-array "stdlib/core/record.eli" "stdlib/core/record.eli") (js-array "tests/fixtures/declarative-record.eli" "tests/fixtures/declarative-record.mjs")))
+  (defconst units (js-array (js-array "stdlib/protocol.eli" "stdlib/protocol.eli") (js-array "stdlib/record.eli" "stdlib/record.eli") (js-array "tests/fixtures/declarative-record.eli" "tests/fixtures/declarative-record.mjs")))
   (defconst hostFixture (resolve root "tests/fixtures/declarative-record-host.mjs"))
   (defasync compileFamily (command outputRoot environment)
     (await (mkdir outputRoot (js-object :recursive t)))

@@ -52,7 +52,8 @@
                  (let ((target (js-call posix :normalize
                                  (js-call posix :join (js-call posix :dirname id) (get node :value)))))
                    (funcall assert
-                     (js-call target :startsWith "stdlib/")
+                     (or (js-call target :startsWith "stdlib/")
+                         (js-call target :startsWith "runtime/managed/"))
                      (str "real portable module dependency: " target))
                    (await (load-module target seen out-modules))))))))))))
 
@@ -68,7 +69,7 @@
         (await (load-module "entry.mjs" seen modules
                  (await (readFile "tests/fixtures/wasm-managed-transient-state.eli" "utf8"))))
         (funcall assert
-          (js-call modules :some (lambda (m) (= (get m :id) "stdlib/managed-transient-state.eli"))))
+          (js-call modules :some (lambda (m) (= (get m :id) "runtime/managed/managed-transient-state.eli"))))
         (js-call (js-array "persistent-vector" "persistent-map" "persistent-set" "value") :forEach
           (lambda (name)
             (funcall assert

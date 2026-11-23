@@ -239,13 +239,13 @@
              " (setq current (lambda () -0.0)) (setq ready t) nil))\n"
              "(export current ready read-ready literal-kind literal-export-value literal-import-value)") "lifecycle-adapter.eli"))
            (value (js-call compiler :compile_ir_string
-             "(import \"../../stdlib/managed-literals.mjs\" current ready read-ready) (export current ready read-ready)" "lifecycle-value.eli"))
+             "(import \"../../runtime/managed/managed-literals.mjs\" current ready read-ready) (export current ready read-ready)" "lifecycle-value.eli"))
            (main (js-call compiler :compile_ir_string
              "(import \"eliscript/runtime/core/value.mjs\" current ready) (print \"lifecycle-ready\") (defun result () (js-array (current) ready)) (export result)" "lifecycle-main.eli")))
       (setq lowered (js-call (get backend :managed) :lower_managed_project
         (js-array (js-object :id "main.mjs" :program main)) "main.mjs" runtime
         (js-object :phased t :literalModules (js-array
-          (js-object :id "stdlib/managed-literals.mjs" :program adapter)
+          (js-object :id "runtime/managed/managed-literals.mjs" :program adapter)
           (js-object :id "runtime/core/value.mjs" :program value)))))
       (setq bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :emit_typed_memory_wasm
         (get lowered :typed) (js-object :initialPages 2 :maximumPages 256))))

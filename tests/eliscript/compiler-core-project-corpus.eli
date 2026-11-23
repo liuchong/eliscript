@@ -192,16 +192,16 @@
     ;; Exercise only the transport seam here, not claim the full core suite.
     ;; Retain the complete real transient program and relocate its one native
     ;; import to the same product-relative path used by corpus project output.
-    (let* ((source (await (readFile (resolve root "stdlib/core/transient.eli") "utf8")))
-           (program (js-call compiler :compile_ir_string source "stdlib/core/transient.eli"))
+    (let* ((source (await (readFile (resolve root "stdlib/transient.eli") "utf8")))
+           (program (js-call compiler :compile_ir_string source "stdlib/transient.eli"))
            (before (globalThis.structuredClone program))
            (imports (top-level-imports (get program :body)))
            (path (resolve directory "core/transient.mjs")))
       (js-call assert :strictEqual (js-length imports) 1)
-      (js-call assert :strictEqual (get (aref imports 0) :value) "../../runtime/core/transient.mjs")
+      (js-call assert :strictEqual (get (aref imports 0) :value) "../runtime/core/transient.mjs")
       (put (aref imports 0) :value "../runtime/core/transient.mjs")
       (let ((emitted (js-call compiler :emit_ir_string program)))
-        (put (aref imports 0) :value "../../runtime/core/transient.mjs")
+        (put (aref imports 0) :value "../runtime/core/transient.mjs")
         (js-call assert :deepStrictEqual program before)
         (await (mkdir (resolve directory "core") (js-object :recursive t)))
         (await (writeFile path emitted))

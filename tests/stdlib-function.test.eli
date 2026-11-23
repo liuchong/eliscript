@@ -19,18 +19,18 @@
 
   (defasync build (output json)
     (await (runSuccessful (js-call (js-array BUILD) :concat (if json (js-array "--json") (js-array))
-      (js-array "--root" (resolve ROOT "stdlib") "--out-dir" output "--no-cache" (resolve ROOT "stdlib/function.eli"))) (js-object))))
+      (js-array "--root" (resolve ROOT "stdlib") "--out-dir" output "--no-cache" (resolve ROOT "stdlib/fn.eli"))) (js-object))))
   (test "portable function combinators compile and agree across local hosts" (async ()
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-function-")))) (outputRoot (resolve directory "stdlib")) (usageModule (resolve directory "function-usage.mjs")))
       (try
         (let ((report (JSON/parse (await (build outputRoot t)))))
-          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 2 :compiled 2 :reused 0) :entries (js-array "function.eli") :entryOutputs (js-array "function.mjs"))))
+          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 2 :compiled 2 :reused 0) :entries (js-array "fn.eli") :entryOutputs (js-array "fn.mjs"))))
         (await (compile (resolve ROOT "tests/fixtures/function-usage.eli") usageModule))
         (let ((hosts (js-array (get globalThis.process :execPath) (get (get globalThis.process :env) :NODE_BINARY "node"))) (index 0))
           (while (< index (js-length hosts))
             (same (JSON/parse (await (runSuccessful (js-array (aref hosts index) usageModule) (js-object)))) (js-object "identity" 7 "constant" "fixed" "complement" t "composition" 14 "partial" 10 "juxt" (js-array 6 4) "fnil" (js-array 10 t 3) "every" t "some" 0 "trampoline" 100000))
             (setq index (1+ index))))
-        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "function.mjs")) :href) "?direct"))))
+        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "fn.mjs")) :href) "?direct"))))
                (function_ (lambda (&rest values) (Array/from values))))
           (be (js-call library :comp) (get library :identity))
           (be (js-call library :comp function_) function_)
@@ -41,7 +41,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-function-")))) (outputRoot (resolve directory "stdlib")))
       (try
         (await (build outputRoot false))
-        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "function.mjs")) :href) "?predicates"))))
+        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "fn.mjs")) :href) "?predicates"))))
                (calls (js-array))
                (all (js-call library :every_pred
                  (lambda (value) (js-call calls :push (str "first:" value)) (if (< value 3) 0 false))

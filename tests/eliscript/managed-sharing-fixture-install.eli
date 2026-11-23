@@ -18,7 +18,7 @@
     (lambda (argument) (= (resolve root argument) (resolve root suite)))))
   (js-call assert :strictEqual (js-call (js-call (createHash "sha256") :update
     (readFileSync (resolve root suite))) :digest "hex")
-    "24ecd27494349ee67ebb8165c10bc938c53ed13711dd43190898035f6beda97f")
+    "9969cdcbd09cfba3aa398e5363ad4fbaac626360bba9f82b0bfa7908cf7bf983")
   (defasync buildBackends (&rest arguments)
     (let* ((backend (await (Reflect/apply (get original :buildBackends) original arguments)))
            (directory (get (aref arguments 0) :outputRoot)))

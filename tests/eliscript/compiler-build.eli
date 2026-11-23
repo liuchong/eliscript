@@ -1214,7 +1214,7 @@
             (js-call assert :strictEqual (js-length module-ids) 36)
             (js-call assert :deepStrictEqual
               (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
-            (js-call assert :strictEqual (js-length (get sources :literalSources)) 53)
+            (js-call assert :strictEqual (js-length (get sources :literalSources)) 56)
             (let* ((artifact (await (buildIndependentCompiler
                      (js-object :host "javascript" :profile "full-runtime" :sources sources :outputRoot directory
                        :onPhase (lambda (phase counts)
@@ -1284,7 +1284,7 @@
                     (js-call assert :ok identity)
                     (js-call assert :strictEqual (get identity :bytes) (js-length scope-bytes))
                     (js-call assert :strictEqual (get identity :sha256) (sha256-text scope-bytes)))
-                  (js-call assert :strictEqual (js-length (get artifact :literalSources)) 53)
+                  (js-call assert :strictEqual (js-length (get artifact :literalSources)) 56)
                   (js-call assert :deepStrictEqual sources original)
                   (js-call assert :deepStrictEqual (get metadata :sourceIdentity) (get artifact :sourceIdentity))
                   (js-call assert :strictEqual (get (get (get artifact :sourceIdentity) :runtime) :sha256)
@@ -1317,11 +1317,11 @@
                          (bad-literals (js-call (get sources :literalSources) :map
                            (lambda (record index)
                              (js-object :id (get record :id) :filename (get record :filename)
-                               :source (if (= index 52) "(" (get record :source)))))))
+                               :source (if (= index 55) "(" (get record :source)))))))
                     (js-call assert :strictEqual (get ready :ready) t)
-                    (js-call assert :strictEqual (js-length literal-modules) 53)
+                    (js-call assert :strictEqual (js-length literal-modules) 56)
                     (let ((index 0))
-                      (while (< index 53)
+                      (while (< index 56)
                         (let* ((record (aref (get sources :literalSources) index))
                                (module (aref literal-modules index))
                                (cached (js-call literal-cache :get (get record :id))))
@@ -1344,7 +1344,7 @@
                              (lambda () (js-call driver :compiler_session_request state (JSON/stringify bad-request))))))
                       (js-call assert :strictEqual (get (get failure :eliscriptDiagnostic) :code) "ELI-R0001"))
                     (js-call assert :deepStrictEqual (get state :lastPhase)
-                      (js-object :phase "literal-read" :filename (get (aref bad-literals 52) :filename) :index 52))
+                      (js-object :phase "literal-read" :filename (get (aref bad-literals 55) :filename) :index 55))
                     (js-call assert :deepStrictEqual (Object/keys (get state :lastPhase)) (js-array "phase" "filename" "index"))
                     (js-call assert :ok (js-call (Object/values (get state :lastPhase)) :every
                       (lambda (value) (or (= (value-type value) "string") (= (value-type value) "number")))))

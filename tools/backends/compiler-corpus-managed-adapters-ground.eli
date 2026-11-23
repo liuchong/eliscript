@@ -597,11 +597,11 @@
                 (while (< f-idx (js-length families))
                   (let ((family (aref families f-idx)))
                     (js-call initial :push
-                      (js-object :id (str family ".mjs") :filename (str "stdlib/" family ".eli"))
+                      (js-object :id (str family ".mjs") :filename (str "stdlib/portable/" family ".eli"))
                       (js-object :id (str family "-usage.mjs") :filename (str "tests/fixtures/" family "-usage.eli")))
                     (when (= family "object")
                       (js-call initial :push
-                        (js-object :id "data.mjs" :filename "stdlib/data.eli"))))
+                        (js-object :id "data.mjs" :filename "stdlib/portable/data.eli"))))
                   (setq f-idx (1+ f-idx))))
               (let* ((modules (await (graph text initial)))
                      (sequence-suite "tests/wasm-managed-sequence-data-test-ground.mjs")

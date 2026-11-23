@@ -149,7 +149,7 @@ bound both directions.
 
 This is deliberately separate from executable source reading and the future
 Emacs transport codec. Portable data text is implemented independently
-in `stdlib/data-text.eli` over the same common grammar. Exact
+in `stdlib/portable/data-text.eli` over the same common grammar. Exact
 semantics are specified in [0069](../specs/0069-canonical-runtime-data-text.md)
 and [0071](../specs/0071-canonical-portable-data-text.md).
 
@@ -184,7 +184,7 @@ exposing the backing map to applications.
 ### Protocols and Collections
 
 `core/protocol-impl.mjs` and its Source Map are generated from the canonical
-`stdlib/core/protocol.eli` source by `bun run generate:runtime-protocol`.
+`core/protocol-impl.eli` source by `bun run generate:runtime-protocol`.
 `core/protocol.mjs` is a stable camel-case compatibility facade with no
 dispatch policy of its own; `core/protocol-error.mjs` contains only the host
 error type that cannot be expressed as an ordinary portable value.
@@ -285,13 +285,13 @@ and constructs the resulting persistent Vector in a single `transient` +
 `conjBang` + `persistentBang` pass without intermediate array `.map()` copies.
 
 `core/text-impl.mjs` and `core/object-impl.mjs` are generated from
-`stdlib/core/text.eli` and `stdlib/core/object.eli`. Their public modules are
+`core/text-impl.eli` and `core/object-impl.eli`. Their public modules are
 camel-case re-export facades. Text indexing uses UTF-16 code units throughout;
 keyed transformations use protocols and transducer-backed `into`, selecting
 transient construction for persistent Map targets without type branches.
 
-`stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, `stdlib/core/data.eli`,
-`stdlib/core/order.eli`, `stdlib/core/text.eli`, and `stdlib/core/object.eli`
+`stdlib/protocol.eli`, `stdlib/seq.eli`, `stdlib/data.eli`,
+`stdlib/order.eli`, `stdlib/string.eli`, and `stdlib/interop/object.eli`
 provide the maintained
 Lisp-named Eliscript implementations. Protocol definitions and extension
 tables remain process-local and are not serialized by the worker value codec.

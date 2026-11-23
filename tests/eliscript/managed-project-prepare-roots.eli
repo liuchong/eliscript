@@ -88,7 +88,7 @@
               (str "(import \"eliscript/runtime/core/value.mjs\" " (js-call names :join " ") ")\n"
                 "(export " (js-call names :join " ") ")") "prepare-value-alias.eli")))
         :literals (js-array
-          (js-object :id "stdlib/managed-literals.mjs" :program
+          (js-object :id "runtime/managed/managed-literals.mjs" :program
             (js-call compiler :compile_ir_string
               ;; This fixture exports ordinary objects, not persistent values.
               ;; The literal transport's unbranded sentinel is nil (raw zero).

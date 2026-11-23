@@ -1251,7 +1251,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-transient-analysis-allows-local-owned-construction ()
   (let ((imports
-         "(import \"./stdlib/core/transient.mjs\"
+         "(import \"./stdlib/transient.mjs\"
          transient conj! persistent!)\n"))
     (dolist
         (body
@@ -1289,7 +1289,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-transient-analysis-rejects-ownership-escape ()
   (let ((imports
-         "(import \"./stdlib/core/transient.mjs\"
+         "(import \"./stdlib/transient.mjs\"
          transient conj! persistent!)\n")
         (namespace-import
          "(import \"./runtime/core/transient.mjs\" :as Runtime)\n"))
@@ -1503,7 +1503,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-standard-library-sequence-closure-is-portable ()
   (let* ((source
-          (expand-file-name "stdlib/sequence.eli" default-directory))
+          (expand-file-name "stdlib/portable/sequence.eli" default-directory))
          (output (eliscript-compile-portable-file source '(map))))
     (should (string-match-p "function reverse(values)" output))
     (should (string-match-p "function map(function$, values)" output))
@@ -1516,7 +1516,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-standard-library-text-closure-is-portable ()
   (let* ((source
-          (expand-file-name "stdlib/text.eli" default-directory))
+          (expand-file-name "stdlib/portable/text.eli" default-directory))
          (output (eliscript-compile-portable-file source '(blank?))))
     (should (string-match-p "function slice(start, end, text)" output))
     (should (string-match-p "function whitespace" output))
@@ -1531,7 +1531,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-standard-library-object-closure-is-portable ()
   (let* ((source
-          (expand-file-name "stdlib/object.eli" default-directory))
+          (expand-file-name "stdlib/portable/object.eli" default-directory))
          (output (eliscript-compile-portable-file source '(omit))))
     (should (string-match-p "function keys(object)" output))
     (should (string-match-p "function key_in_QMARK_" output))
@@ -1548,7 +1548,7 @@ already nested suffix, or use either production emitter to build the oracle."
 
 (ert-deftest eliscript-standard-library-data-compiles-portable-imports ()
   (let* ((source
-          (expand-file-name "stdlib/data.eli" default-directory))
+          (expand-file-name "stdlib/portable/data.eli" default-directory))
          (output (eliscript-compile-file source)))
     (should (string-match-p
              (regexp-quote "import {assoc} from \"./object.eli\";") output))
@@ -2540,7 +2540,7 @@ already nested suffix, or use either production emitter to build the oracle."
   ;; completed emission, then prompted for a coding system while saving .map.
   (let* ((compiler-directory (file-name-directory (locate-library "eliscript")))
          (root (file-name-directory (directory-file-name compiler-directory)))
-         (input (expand-file-name "stdlib/managed-wire-http-rpc.eli" root))
+         (input (expand-file-name "runtime/managed/managed-wire-http-rpc.eli" root))
          (source (with-temp-buffer (insert-file-contents input) (buffer-string)))
          (directory (make-temp-file "eliscript-unicode-map-" t))
          (output (expand-file-name "wire-中😀.mjs" directory))

@@ -69,7 +69,7 @@ fi
 
 if ! grep -F 'examples/react-counter/browser.eli' "$VITE_MAP" >/dev/null || \
    ! grep -F 'examples/react-counter/main.eli' "$VITE_MAP" >/dev/null || \
-   ! grep -F 'stdlib/sequence.eli' "$VITE_MAP" >/dev/null; then
+   ! grep -F 'stdlib/portable/sequence.eli' "$VITE_MAP" >/dev/null; then
   printf 'expected Eliscript sources in bundled source map\n' >&2
   exit 1
 fi
@@ -132,9 +132,9 @@ if [ -z "$ORG_SITE_SCRIPT" ] || [ -z "$ORG_SITE_STYLE" ] || \
   exit 1
 fi
 
-if ! grep -F 'stdlib/sequence.eli' "$ORG_SITE_MAP" >/dev/null || \
-   ! grep -F 'stdlib/text.eli' "$ORG_SITE_MAP" >/dev/null || \
-   ! grep -F 'stdlib/object.eli' "$ORG_SITE_MAP" >/dev/null; then
+if ! grep -F 'stdlib/portable/sequence.eli' "$ORG_SITE_MAP" >/dev/null || \
+   ! grep -F 'stdlib/portable/text.eli' "$ORG_SITE_MAP" >/dev/null || \
+   ! grep -F 'stdlib/portable/object.eli' "$ORG_SITE_MAP" >/dev/null; then
   printf 'expected standard-library sources in Org site source map\n' >&2
   exit 1
 fi

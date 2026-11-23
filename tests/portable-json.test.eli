@@ -5,7 +5,7 @@
   (import "./helpers/portable-stdlib.mjs" withPortableLibraries pruneLibrary assertSourceMap be same contains excludes)
   (test "portable JSON values are strict, canonical, bounded, and self-hosted"
     (async () (await (withPortableLibraries
-      (js-object :module "json" :sources (js-array "bit" "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "result" "json") :fixture "tests/fixtures/portable-json-host.mjs" :loader t :parallelHosts false)
+      (js-object :module "json" :sources (js-array "bit" "portable/identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "result" "json") :fixture "tests/fixtures/portable-json-host.mjs" :loader t :parallelHosts false)
       (async (context)
         (let ((report (get context :report)))
       (same (get report :parsing) (js-object "ok" t "map" t "vector" t "vectorCount" 3 "trueValue" t "nilValue" t "stringValue" "x\n\u263a" "numberValue" (- 1250)))

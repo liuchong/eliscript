@@ -5868,11 +5868,11 @@
                    (and b (Object/hasOwn a "value") (Object/hasOwn b "value")
                         (managed-protocol-ir-equal (get a :value) (get b :value)))))))))))
   (defun managed-canonical-protocol-program-p (id program options)
-    (when (or (= id "stdlib/core/protocol.mjs") (= id "stdlib/core/protocol-impl.mjs"))
+    (when (or (= id "runtime/core/protocol-impl.mjs") (= id "stdlib/protocol-impl.mjs"))
       (let ((provided (get (or options (js-object)) :literalModules nil)))
         (and (Array/isArray provided)
           (js-call provided :some (lambda (item)
-            (and (= (get item :id) "stdlib/core/protocol.mjs")
+            (and (= (get item :id) "runtime/core/protocol-impl.mjs")
                  (managed-protocol-ir-equal program (get item :program)))))))))
   (defun managed-string-hash-shape (value)
     ;; Only source locations are irrelevant. Keep every other IR field,
@@ -5918,7 +5918,7 @@
   (defun managed-canonical-string-hash-p (id program context)
     (let ((canonical-id (if (and context (js-call id :startsWith (get context :prefix)))
                           (js-call id :slice (js-length (get context :prefix))) id)))
-      (when (= canonical-id "stdlib/managed-value-state.mjs")
+      (when (= canonical-id "runtime/managed/managed-value-state.mjs")
         (let* ((expected (managed-string-hash-expected))
                (definitions (new globalThis.Map)) (valid t)
                (declarations (collect-managed-declarations (get program :body) (js-array))))
@@ -5987,7 +5987,7 @@
       ;; This exact helper belongs to the supplied canonical protocol source.
       ;; The bridge normalizes only its private registry key; ordinary source
       ;; reflection and the foreign object's identity remain untouched.
-      (when (= id "stdlib/core/protocol.mjs")
+      (when (= id "runtime/core/protocol-impl.mjs")
         (let ((copy (managed-protocol-private-declaration
                       (if output (Object/assign (js-object) node (js-object :children output)) node))))
           (unless (eq copy node) (setq node copy output (get copy :children)))))
@@ -6090,7 +6090,7 @@
   (defun managed-literal-context (modules options)
     (when (js-call modules :some (lambda (item) (managed-literal-program-required (get item :program) (get item :id))))
       (let* ((provided (get (or options (js-object)) :literalModules nil)) (ids (new globalThis.Set))
-             (by-id (new globalThis.Map)) (selected (new globalThis.Set)) (pending (js-array "stdlib/managed-literals.mjs"))
+             (by-id (new globalThis.Map)) (selected (new globalThis.Set)) (pending (js-array "runtime/managed/managed-literals.mjs"))
              (aliases (new globalThis.Set))
              (_aliases (progn (managed-literal-json-aliases modules aliases)
                               (managed-literal-json-aliases provided aliases)))
@@ -6101,7 +6101,7 @@
           (unless (and item (managed-link-id-p (get item :id)) (get item :program) (not (js-call ids :has (get item :id))))
             (managed-fail nil "invalid persistent literal module graph"))
           (js-call ids :add (get item :id)) (js-call by-id :set (get item :id) item)))
-        (unless (js-call ids :has "stdlib/managed-literals.mjs") (managed-fail nil "persistent literal adapter module is missing"))
+        (unless (js-call ids :has "runtime/managed/managed-literals.mjs") (managed-fail nil "persistent literal adapter module is missing"))
         ;; Generated aliases pass the same binding-name contract as user IR.
         ;; Keep the reserved __eliscript_ namespace closed, and avoid lexical
         ;; names whose normalized JS spelling would shadow the private alias.
@@ -6125,7 +6125,7 @@
           (setq salt (1+ salt)) (setq alias (str "$eliscript_persistent_" salt)) (setq prefix (str alias "/")))
         (js-object :alias alias :prefix prefix :provided ids
           :modules (js-call provided :filter (lambda (item) (js-call selected :has (get item :id))))
-          :adapter (str prefix "stdlib/managed-literals.mjs")))))
+          :adapter (str prefix "runtime/managed/managed-literals.mjs")))))
   (defun managed-literal-user-import (node id context)
     (if (= (get node :kind) "module-declaration")
       (let* ((children (get node :children)) (output nil) (index 0))

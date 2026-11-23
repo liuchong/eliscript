@@ -21,7 +21,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-sequence-"))))
            (library (resolve directory "sequence.mjs")) (usage (resolve directory "sequence-usage.mjs")))
       (try
-        (await (compile (resolve ROOT "stdlib/sequence.eli") library))
+        (await (compile (resolve ROOT "stdlib/portable/sequence.eli") library))
         (let ((output (await (compile (resolve ROOT "tests/fixtures/sequence-usage.eli") usage))))
           (be output "")
           (same (JSON/parse (await (runSuccessful (js-array "bun" "run" usage) (js-object)))) (js-object "values" (js-array 1 2 3 4 5) "reversed" (js-array 5 4 3 2 1) "mapped" (js-array 2 4 6 8 10) "filtered" (js-array 2 4) "reduced" 15 "concatenated" (js-array 1 2 3 4) "descending" (js-array 5 3 1) "zero-step" (js-array ) "taken" (js-array 1 2 3) "dropped" (js-array 4 5) "take-many" (js-array 1 2 3 4 5) "take-negative" (js-array ) "drop-negative" (js-array 1 2 3 4 5) "some" t "every" t "found" 4 "empty-map" (js-array ) "empty-filter" (js-array ) "empty-reduce" 7 "empty-some" false "empty-every" t "missing" nil)))

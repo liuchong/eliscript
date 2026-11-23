@@ -881,7 +881,7 @@
             (let ((persistent (find (get repairs :suites)
                     (lambda (item) (= (get item :file) "tests/wasm-managed-persistent-literals.test.mjs")))))
               (ok persistent "source archive assertion at maintained line 866")
-              (eq-check (get persistent :sourceSha256) "162c85b3a4ead6659ab3680913e1020c1ee12ba277e71c4d10ee44b28a85810b")
+              (eq-check (get persistent :sourceSha256) "3b1acd9880ad6f194a865929805818d7e11f9c66e258c0927fde50a59e7a9b8a")
               (eq-check (get persistent :sourceSha256) (hash (await (readFile (get persistent :file))))))
             (eq-check (get repairs :targetExecution) false)
             (eq-check (get repairs :execution) "complete-original-final-make-gates")

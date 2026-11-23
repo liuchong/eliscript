@@ -188,12 +188,12 @@
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
             <p>The standard library is written in Eliscript and includes persistent hash and AVL-sorted collections, protocols, replayable and memoized lazy sequences, pull transduction, immutable tree rewriting and zipper editing, text, numeric, Result, JSON, state, and host-interop modules without adding application-framework dependencies.</p>
-            <p>The maintained <code>stdlib/core/seq.eli</code> and <code>runtime/core/sequence.eli</code> modules are authored in Eliscript. They accept persistent, native, and externally extended reducible values through collection protocols, return persistent Vectors, add <code>remove</code>, and combine O(1) / O(log32 n) indexed fast-paths for <code>first</code>, <code>last</code>, and <code>nth</code> with unboxed early termination for <code>find</code> and circular array ring buffers with transient Vector builders for <code>take-last</code> and <code>drop-last</code>.</p>
+            <p>The maintained <code>stdlib/seq.eli</code> and <code>runtime/core/sequence.eli</code> modules are authored in Eliscript. They accept persistent, native, and externally extended reducible values through collection protocols, return persistent Vectors, add <code>remove</code>, and combine O(1) / O(log32 n) indexed fast-paths for <code>first</code>, <code>last</code>, and <code>nth</code> with unboxed early termination for <code>find</code> and circular array ring buffers with transient Vector builders for <code>take-last</code> and <code>drop-last</code>.</p>
           </section>
 
           <section id="text">
             <h2>Portable text</h2>
-            <pre><code>(import "eliscript/dist/stdlib/text" contains? strip-prefix trim)
+            <pre><code>(import "eliscript/dist/stdlib/portable/text" contains? strip-prefix trim)
 
 (trim (strip-prefix "#" "# article "))</code></pre>
             <p>Thirteen functions provide literal matching, end-exclusive slicing, prefix and suffix removal, ASCII-boundary trimming, blank checks, joining, and repetition. They are written in portable Eliscript without regular expressions or host string methods. Indices follow ECMAScript UTF-16 code units rather than locale-aware grapheme clusters.</p>
@@ -201,13 +201,13 @@
 
           <section id="objects">
             <h2>Immutable objects</h2>
-            <pre><code>(import "eliscript/dist/stdlib/object" assoc pick)
-(import "eliscript/dist/stdlib/data" index-by)
+            <pre><code>(import "eliscript/dist/stdlib/portable/object" assoc pick)
+(import "eliscript/dist/stdlib/portable/data" index-by)
 
 (pick (assoc (object :name "Eliscript") :runtime "JavaScript")
       [:name :runtime])</code></pre>
             <p>Eleven object functions enumerate own keys, test own properties, associate without mutation, remove and merge keys, transform values, and select fields. The data module adds keyed lookup, grouping, and counting by importing object primitives through explicit <code>import-portable</code> edges. Graph-aware portable builds verify those targets and prune every generated module.</p>
-            <p>The runtime-backed <code>stdlib/core/data.eli</code> and <code>stdlib/core/order.eli</code> surfaces return value-semantic persistent Maps and persistent Vector groups, add <code>frequencies</code>, <code>sort</code>, and <code>sort-by</code>, and use transient HAMT and Vector builders to eliminate intermediate persistent path copying.</p>
+            <p>The runtime-backed <code>stdlib/data.eli</code> and <code>stdlib/order.eli</code> surfaces return value-semantic persistent Maps and persistent Vector groups, add <code>frequencies</code>, <code>sort</code>, and <code>sort-by</code>, and use transient HAMT and Vector builders to eliminate intermediate persistent path copying.</p>
           </section>
 
           <section id="recursion">

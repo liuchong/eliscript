@@ -40,10 +40,10 @@
 (defvar eliscript-transient--try-prefix-states nil)
 
 (defconst eliscript-transient--trusted-core-sources
-  '("stdlib/core/data.eli"
-    "stdlib/core/seq.eli"
-    "stdlib/core/set.eli"
-    "stdlib/core/transient.eli")
+  '("stdlib/data.eli"
+    "stdlib/seq.eli"
+    "stdlib/set.eli"
+    "stdlib/transient.eli")
   "Core implementation sources that currently require unchecked sync borrows.")
 
 (defun eliscript-transient--fail (format-string &rest arguments)
@@ -88,7 +88,7 @@
   "Return the canonical transient module family for SOURCE, or nil."
   (when (and (stringp source)
              (string-match-p
-              "\\(?:\\`\\|/\\)\\(?:stdlib\\|runtime\\)/core/transient\\.\\(?:mjs\\|eli\\)\\'"
+              "\\(?:\\`\\|/\\)\\(?:stdlib\\|runtime/core\\)/transient\\.\\(?:mjs\\|eli\\)\\'"
               source))
     (if (string-match-p "\\(?:\\`\\|/\\)runtime/core/" source)
         'runtime

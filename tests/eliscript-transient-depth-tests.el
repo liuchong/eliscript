@@ -21,7 +21,7 @@ Use NAMESPACE imports and ASYNCHRONOUS function syntax when requested."
   (list
    (if namespace
        '(import "./runtime/core/transient.mjs" :as Runtime)
-     '(import "./stdlib/core/transient.eli" transient conj! assoc! persistent!))
+     '(import "./stdlib/transient.eli" transient conj! assoc! persistent!))
    (list (if asynchronous 'defasync 'defun) 'build '(source ready promise) body)))
 
 (defun eliscript-transient-depth-tests--analyze (forms)
@@ -52,7 +52,7 @@ Use NAMESPACE imports and ASYNCHRONOUS function syntax when requested."
       (should-not visited))
     (dolist (source '("ordinary/transient.mjs"
                       "./runtime/core/transient.mjs.extra"
-                      "./stdlib/core/other.eli"))
+                      "./stdlib/other.eli"))
       (setq visited nil)
       (cl-letf (((symbol-function 'eliscript-transient--analyze-top-level)
                  (lambda (&rest _) (setq visited t))))

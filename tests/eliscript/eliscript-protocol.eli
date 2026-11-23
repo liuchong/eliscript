@@ -5,7 +5,7 @@
   (import "node:path" dirname resolve)
   (import "./helpers/seed-compiler.mjs" seedCompilerFixture)
   (defconst root (js-call globalThis.process :cwd))
-  (defconst source (resolve root "stdlib/core/protocol.eli"))
+  (defconst source (resolve root "runtime/core/protocol-impl.eli"))
   (defasync run (command environment)
     (let* ((child (globalThis.Bun.spawn command (js-object :cwd root
                     :env (Object/assign (js-object) (get globalThis.process :env)
@@ -49,15 +49,17 @@
              (directory (await (mkdtemp (resolve base "eliscript-protocol-"))))
              (bootstrap (resolve directory "bootstrap"))
              (seed-root (resolve directory "seed")) (self-root (resolve directory "self-hosted"))
-             (seed (resolve seed-root "stdlib/core/protocol-impl.mjs"))
-             (self (resolve self-root "stdlib/core/protocol-impl.mjs"))
+             (seed (resolve seed-root "protocol-impl.mjs"))
+             (self (resolve self-root "protocol-impl.mjs"))
              (committed-path (resolve root "runtime/core/protocol-impl.mjs")))
         (try
           (await (Promise/all (js-array
             (mkdir seed-root (js-object :recursive t)) (mkdir self-root (js-object :recursive t)))))
+          (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+          (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
           (await (Promise/all (js-array
-            (symlink (resolve root "runtime") (resolve seed-root "runtime") "dir")
-            (symlink (resolve root "runtime") (resolve self-root "runtime") "dir"))))
+            (symlink (resolve root "runtime/core/protocol-error.mjs") (resolve seed-root "protocol-error.mjs") "file")
+            (symlink (resolve root "runtime/core/protocol-error.mjs") (resolve self-root "protocol-error.mjs") "file"))))
           (await (compile (resolve root "bin/eliscript") seed (js-object)))
           (await (seedCompilerFixture bootstrap))
           (await (compile (resolve root "bin/eliscript-portable") self

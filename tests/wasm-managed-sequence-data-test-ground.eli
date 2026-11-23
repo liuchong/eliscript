@@ -163,9 +163,9 @@
                 (f-idx 0))
             (while (< f-idx (get families :length))
               (let ((family (aref families f-idx)))
-                (await (add-module modules (str family ".mjs") (str "stdlib/" family ".eli")))
+                (await (add-module modules (str family ".mjs") (str "stdlib/portable/" family ".eli")))
                 (when (= family "object")
-                  (await (add-module modules "data.mjs" "stdlib/data.eli")))
+                  (await (add-module modules "data.mjs" "stdlib/portable/data.eli")))
                 (await (add-module modules (str family "-usage.mjs") (str "tests/fixtures/" family "-usage.eli"))))
               (setq f-idx (+ f-idx 1))))
           (let ((host-names (js-call original-hosts :concat

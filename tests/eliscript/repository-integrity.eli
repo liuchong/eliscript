@@ -1,6 +1,6 @@
 (module tests.repository-integrity
   (import "bun:test" test expect)
-  (import "node:fs/promises" mkdtemp mkdir readFile writeFile rm rename)
+  (import "node:fs/promises" mkdtemp mkdir readFile writeFile rm rename readdir)
   (import "node:path" :default path)
   (import "node:os" tmpdir)
   (import "../dist/bootstrap/compiler.mjs" :as compiler)
@@ -132,4 +132,15 @@
           (await (js-call (get (expect (checkGeneratedArtifacts options)) :rejects) :toMatchObject
             (js-object :code "ENOENT")))
           (finally (await (rm directory (js-object :recursive t :force t))))))))
+
+  (test "canonical stdlib layout excludes legacy core and managed files while runtime/managed hosts managed sources"
+    (async ()
+      (let* ((stdlibEntries (await (readdir (js-call path :join ROOT "stdlib"))))
+             (managedEntries (await (readdir (js-call path :join ROOT "runtime/managed"))))
+             (managedPattern (new globalThis.RegExp "^managed-.*\\.eli$"))
+             (stdlibManaged (js-call stdlibEntries :filter (lambda (entry) (js-call managedPattern :test entry))))
+             (runtimeManaged (js-call managedEntries :filter (lambda (entry) (js-call managedPattern :test entry)))))
+        (js-call (expect (js-call stdlibEntries :includes "core")) :toBe false)
+        (js-call (expect (js-length stdlibManaged)) :toBe 0)
+        (js-call (expect (>= (js-length runtimeManaged) 40)) :toBe t))))
 )

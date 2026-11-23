@@ -132,9 +132,9 @@
            (text (async (filename) (unless (js-call cache :has filename) (js-call cache :set filename (await (readFile filename "utf8")))) (js-call cache :get filename)))
            (file (async (filename) (js-object :file filename :sha256 (sha (await (text filename))))))
            (manifest (JSON/parse (await (text "tests/conformance/manifest.json")))) (suites (js-array "tests/core-stdlib.test.mjs" "tests/core-set.test.mjs")) (locators (js-array))
-           (coreNames (js-array "protocol" "identifier" "data-text" "metadata" "collection" "transient" "transducer" "seq" "data")) (modules (js-array))
+           (coreNames (js-array "protocol" "identifier" "data-text" "meta" "collection" "transient" "transducer" "seq" "data")) (modules (js-array))
            (pairs (js-call (js-array (js-array "core-stdlib-usage.mjs" "tests/fixtures/core-stdlib-usage.eli") (js-array "core-language-api-usage.mjs" "tests/fixtures/core-language-api-usage.eli"))
-              :concat (js-call coreNames :map (lambda (name) (js-array (str "stdlib/core/" name ".mjs") (str "stdlib/core/" name ".eli")))))) (i 0))
+              :concat (js-call coreNames :map (lambda (name) (js-array (str "stdlib/" name ".mjs") (str "stdlib/" name ".eli")))))) (i 0))
       (js-call (get manifest :features) :forEach (lambda (feature)
         (js-call (if (nullish? (get feature :evidence)) (js-array) (get feature :evidence)) :forEach (lambda (locator index)
           (when (js-call suites :includes (get locator :file)) (js-call locators :push (Object/assign
@@ -146,9 +146,9 @@
              (records (js-array (js-object :id "stable-compatibility:program:tests/fixtures/core-stdlib-usage.eli" :modules modules :entry (get (aref modules 0) :id) :request request)
                (js-object :id "stable-compatibility:program:tests/fixtures/core-set-usage.eli" :entry "core-set-usage.mjs"
                  :modules (js-array (js-object :id "core-set-usage.mjs" :filename "tests/fixtures/core-set-usage.eli" :source (await (text "tests/fixtures/core-set-usage.eli")))
-                   (js-object :id "stdlib/core/set.mjs" :filename "stdlib/core/set.eli" :source (await (text "stdlib/core/set.eli"))))
+                   (js-object :id "stdlib/set.mjs" :filename "stdlib/set.eli" :source (await (text "stdlib/set.eli"))))
                  :request (js-object :operation "project" :resolveImports t :sourceMap t))
-               (js-object :id "stable-compatibility:program:stdlib/core/text.eli" :request (js-object :operation "project" :sourceMap t))))
+               (js-object :id "stable-compatibility:program:stdlib/string.eli" :request (js-object :operation "project" :sourceMap t))))
              (saved (globalThis.structuredClone records)) (output (js-array)) (parity (JSON/parse (await (text "contracts/compiler-parity-corpus.json")))))
         (await (addOriginalStdlibRuntimeAdapters (js-object :add (lambda (record) (js-call output :push record)) :records records :locators locators :text text :file file :region exactRegion
           :data (lambda () (js-call assert :fail "these original core bodies must not be evaluated during corpus collection")) :bootstrapSources (get parity :bootstrapSources))))

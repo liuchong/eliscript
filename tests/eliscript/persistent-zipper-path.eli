@@ -28,11 +28,11 @@
       (await (mkdir parent (js-object :recursive t)))
       (setq directory (await (mkdtemp (resolve parent "run-")))))
     (let* ((backend (await (buildBackends (js-object :outputRoot (resolve directory "compiler")))))
-           (source (await (readFile (resolve root "stdlib/core/zipper.eli") "utf8")))
-           (destination (resolve directory "program/stdlib/core/zipper.mjs")))
+           (source (await (readFile (resolve root "stdlib/zipper.eli") "utf8")))
+           (destination (resolve directory "program/stdlib/zipper.mjs")))
       (await (mkdir (dirname destination) (js-object :recursive t)))
       (await (symlink (resolve root "runtime") (resolve directory "program/runtime") "dir"))
-      (await (writeFile destination (js-call (get backend :compiler) :compile_string source "stdlib/core/zipper.eli")))
+      (await (writeFile destination (js-call (get backend :compiler) :compile_string source "stdlib/zipper.eli")))
       (let* ((url (get (pathToFileURL destination) :href))
              (descriptor (js-object :hostModules (js-array (js-object
                :id "zipper-path-contract" :specifier url :referrer "zipper-path-contract.mjs" :namespace t

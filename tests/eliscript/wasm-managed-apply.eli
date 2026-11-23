@@ -24,8 +24,8 @@
     (setq runtime-ir (js-call (get backend :compiler) :compile_ir_string
       (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
     (setq fixture (wrapper-program (get backend :compiler)
-      (await (readFile (resolve root "stdlib/managed-runtime-transient.eli") "utf8"))
-      (await (readFile (resolve root "stdlib/managed-runtime-data.eli") "utf8"))))
+      (await (readFile (resolve root "runtime/managed/managed-runtime-transient.eli") "utf8"))
+      (await (readFile (resolve root "runtime/managed/managed-runtime-data.eli") "utf8"))))
     (setq lowered (js-call (get backend :managed) :lower_managed_program (get fixture :program) runtime-ir))
     (setq bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm (get fixture :program) runtime-ir)))
     (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))

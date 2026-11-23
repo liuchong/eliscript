@@ -1,0 +1,335 @@
+(module eliscript.state
+  (import-portable "./value.eli" empty-value-map value-equal?)
+  (import-portable "./persistent-map.eli"
+                   persistent-map-assoc
+                   persistent-map-count
+                   persistent-map-dissoc
+                   persistent-map-get
+                   persistent-map-has?
+                   persistent-map-reduce)
+  (import-portable "./persistent-vector.eli"
+                   empty-persistent-vector
+                   persistent-vector-conj
+                   persistent-vector-count
+                   persistent-vector-from-array
+                   persistent-vector-nth)
+
+  (defconst atom-registry (js* "new WeakSet()"))
+  (defconst deferred-kind "eliscript/delay")
+  (defconst deferred-pending "pending")
+  (defconst deferred-running "running")
+  (defconst deferred-realized "realized")
+  (defconst deferred-registry (js* "new WeakSet()"))
+
+  (defun atom-fail (code message)
+    (throw
+     (js-object :kind "eliscript/atom-error"
+             :code code
+             :message message)))
+
+  (defun atom? (reference)
+    (if (= (value-type reference) "object")
+        (try
+          (js-call atom-registry :has reference)
+          (catch _error false))
+      false))
+
+  (defun atom-method (reference name)
+    (if (atom? reference)
+        (get reference name nil)
+      (atom-fail
+       "ELI-ATOM-INVALID-REFERENCE"
+       "operation requires an Atom")))
+
+  (defun atom-option-validator (options)
+    (if (nullish? options)
+        nil
+      (if (not (= (value-type options) "object"))
+          (atom-fail
+           "ELI-ATOM-INVALID-OPTIONS"
+           "Atom options must be an object or nil")
+        (let ((keys (object-keys options))
+              (index 0))
+          (while (< index (js-length keys))
+            (unless (= (js-nth index keys) "validator")
+              (atom-fail
+               "ELI-ATOM-INVALID-OPTIONS"
+               (str "unknown Atom option: " (js-nth index keys))))
+            (setq index (1+ index)))
+          (let ((validator
+                 (if (object-has? options "validator")
+                     (get options "validator" nil)
+                   nil)))
+            (if (or (nil? validator)
+                    (= (value-type validator) "function"))
+                validator
+              (atom-fail
+               "ELI-ATOM-INVALID-VALIDATOR"
+               "Atom validator must be a function or nil")))))))
+
+  (defun atom-validate-candidate (validator candidate)
+    (when (and (not (nil? validator))
+               (not (funcall validator candidate)))
+      (atom-fail
+       "ELI-ATOM-VALIDATION"
+       "Atom validator rejected the new value"))
+    candidate)
+
+  (defun atom (initial &optional options)
+    (let* ((current initial)
+           (validator (atom-option-validator options))
+           (watches (empty-value-map))
+           (phase nil)
+           (notifications (empty-persistent-vector))
+           (notification-index 0)
+           (notifying false)
+           (reference nil)
+           (ensure-transition-allowed nil)
+           (validate nil)
+           (drain-notifications nil)
+           (transform-candidate nil)
+           (commit nil))
+      (atom-validate-candidate validator initial)
+
+      (setq ensure-transition-allowed
+            (lambda ()
+              (unless (nil? phase)
+                (atom-fail
+                 "ELI-ATOM-REENTRANT"
+                 (str "Atom transition is not allowed during " phase)))))
+
+      (setq validate
+            (lambda (candidate candidate-validator)
+              (funcall ensure-transition-allowed)
+              (setq phase "validation")
+              (try
+                (atom-validate-candidate candidate-validator candidate)
+                (finally (setq phase nil)))))
+
+      (setq drain-notifications
+            (lambda ()
+              (unless notifying
+                (let ((first-error nil)
+                      (failed false))
+                  (setq notifying t)
+                  (try
+                    (while
+                        (< notification-index
+                           (persistent-vector-count notifications))
+                      (let* ((transition
+                              (persistent-vector-nth
+                               notifications notification-index nil))
+                             (old-value (get transition "old-value" nil))
+                             (new-value (get transition "new-value" nil))
+                             (snapshot (get transition "watches" nil)))
+                        (setq notification-index (1+ notification-index))
+                        (persistent-map-reduce
+                         (lambda (_result key watch)
+                           (try
+                             (funcall watch key reference old-value new-value)
+                             (catch error
+                               (unless failed
+                                 (setq first-error error
+                                       failed t))))
+                           nil)
+                         nil
+                         snapshot)))
+                    (finally
+                     (setq notifications (empty-persistent-vector)
+                           notification-index 0
+                           notifying false)))
+                  (when failed (throw first-error))))))
+
+      (setq transform-candidate
+            (lambda (transform arguments)
+              (when (not (= (value-type transform) "function"))
+                (atom-fail
+                 "ELI-ATOM-INVALID-TRANSFORM"
+                 "Atom swap transform must be a function"))
+              (funcall ensure-transition-allowed)
+              (let ((candidate nil))
+                (setq phase "swap")
+                (try
+                  (setq candidate
+                        (apply transform (js-cons current arguments)))
+                  (finally (setq phase nil)))
+                candidate)))
+
+      (setq commit
+            (lambda (candidate return-values)
+              (funcall validate candidate validator)
+              (let ((old-value current))
+                (setq current candidate)
+                (when (> (persistent-map-count watches) 0)
+                  (setq notifications
+                        (persistent-vector-conj
+                         notifications
+                         (js-object :old-value old-value
+                                 :new-value candidate
+                                 :watches watches)))
+                  (funcall drain-notifications))
+                (if return-values
+                    (persistent-vector-conj
+                     (persistent-vector-conj
+                      (empty-persistent-vector)
+                      old-value)
+                     candidate)
+                  candidate))))
+
+      (setq reference
+            (js-object
+             :kind "eliscript/atom"
+             :read (lambda () current)
+             :reset (lambda (candidate) (funcall commit candidate false))
+             :reset-values (lambda (candidate) (funcall commit candidate t))
+             :swap
+             (lambda (transform arguments)
+               (funcall
+                commit
+                (funcall transform-candidate transform arguments)
+                false))
+             :swap-values
+             (lambda (transform arguments)
+               (funcall
+                commit
+                (funcall transform-candidate transform arguments)
+                t))
+             :compare-and-set
+             (lambda (expected candidate)
+               (funcall ensure-transition-allowed)
+               (let ((matches false))
+                 (setq phase "comparison")
+                 (try
+                   (setq matches (value-equal? current expected))
+                   (finally (setq phase nil)))
+                 (if matches
+                   (progn (funcall commit candidate false) t)
+                   false)))
+             :add-watch
+             (lambda (key watch)
+               (funcall ensure-transition-allowed)
+               (when (not (= (value-type watch) "function"))
+                 (atom-fail
+                  "ELI-ATOM-INVALID-WATCH"
+                  "Atom watch must be a function"))
+               (setq watches (persistent-map-assoc watches key watch))
+               reference)
+             :remove-watch
+             (lambda (key)
+               (funcall ensure-transition-allowed)
+               (setq watches (persistent-map-dissoc watches key))
+               reference)
+             :get-validator (lambda () validator)
+             :set-validator
+             (lambda (candidate-validator)
+               (funcall ensure-transition-allowed)
+               (when
+                   (not
+                    (or (nil? candidate-validator)
+                        (= (value-type candidate-validator) "function")))
+                 (atom-fail
+                  "ELI-ATOM-INVALID-VALIDATOR"
+                  "Atom validator must be a function or nil"))
+               (funcall validate current candidate-validator)
+               (setq validator candidate-validator)
+               validator)))
+      (js-call atom-registry :add reference)
+      reference))
+
+  (defun deref (reference)
+    (funcall (atom-method reference "read")))
+
+  (defun reset! (reference candidate)
+    (funcall (atom-method reference "reset") candidate))
+
+  (defun reset-vals! (reference candidate)
+    (funcall (atom-method reference "reset-values") candidate))
+
+  (defun swap! (reference transform &rest arguments)
+    (funcall (atom-method reference "swap") transform arguments))
+
+  (defun swap-vals! (reference transform &rest arguments)
+    (funcall (atom-method reference "swap-values") transform arguments))
+
+  (defun compare-and-set! (reference expected candidate)
+    (funcall
+     (atom-method reference "compare-and-set")
+     expected
+     candidate))
+
+  (defun add-watch (reference key watch)
+    (funcall (atom-method reference "add-watch") key watch))
+
+  (defun remove-watch (reference key)
+    (funcall (atom-method reference "remove-watch") key))
+
+  (defun get-validator (reference)
+    (funcall (atom-method reference "get-validator")))
+
+  (defun set-validator! (reference validator)
+    (funcall (atom-method reference "set-validator") validator))
+
+  (defun deferred-fail (code message)
+    (throw (js-object :kind "eliscript/deferred-error" :code code :message message)))
+
+  (defun delay (producer)
+    (when (not (= (value-type producer) "function"))
+      (deferred-fail
+        "ELI-DEFERRED-INVALID-PRODUCER"
+        "delay producer must be a function"))
+    (let ((state deferred-pending) (value nil) (reference nil))
+      (setq
+        reference
+        (js-call
+          globalThis.Object
+          :freeze
+          (js-object
+            :kind
+            deferred-kind
+            :realized
+            (lambda () (= state deferred-realized))
+            :force
+            (lambda
+              ()
+              (cond ((= state deferred-realized) value)
+                ((= state deferred-running)
+                  (deferred-fail
+                    "ELI-DEFERRED-REENTRANT-FORCE"
+                    "delay cannot force itself while it is running"))
+                (t
+                  (setq state deferred-running)
+                  (try
+                    (let ((computed (funcall producer)))
+                      (setq value computed state deferred-realized)
+                      computed)
+                    (catch error (setq state deferred-pending) (throw error)))))))))
+      (js-call deferred-registry :add reference)
+      reference))
+
+  (defun delay? (value)
+    (if (= (value-type value) "object")
+      (try (js-call deferred-registry :has value) (catch _error false))
+      false))
+
+  (defun realized? (value)
+    (and (delay? value) (funcall (get value "realized" nil))))
+
+  (defun force (value)
+    (if (delay? value) (funcall (get value "force" nil)) value))
+
+  (defun memoize (function)
+    (when (not (= (value-type function) "function"))
+      (deferred-fail "ELI-DEFERRED-INVALID-FUNCTION" "memoize value must be a function"))
+    (let ((cache (empty-value-map)))
+      (lambda
+        (&rest arguments)
+        (let ((key (persistent-vector-from-array arguments)))
+          (if (persistent-map-has? cache key)
+            (persistent-map-get cache key nil)
+            (let ((result (apply function arguments)))
+              (setq cache (persistent-map-assoc cache key result))
+              result))))))
+
+  (export add-watch atom atom? compare-and-set! delay delay? deref force
+          get-validator memoize realized? remove-watch reset! reset-vals!
+          set-validator! swap! swap-vals!))

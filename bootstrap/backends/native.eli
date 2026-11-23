@@ -316,14 +316,20 @@
            (data (if (nullish? operand) 0 operand)))
       (if (<= register -2)
           (let ((physical (- (- register) 2)))
-            (word state (+ (if wide 2852127712 704644064) (if store physical (* physical 65536)))))
+            (word state (+ (if wide 2852127712 704644064)
+                           (if store physical data)
+                           (* (if store data physical) 65536))))
       (if (>= register 0)
           (word state (if (= type "f64")
             (+ 509624320 (if store register (* register 32)))
             (if wide
               (if store (+ 2657550336 register) (+ 2657484800 (* register 32)))
               (if store (+ 505872384 register) (+ 505806848 (* register 32))))))
-        (let ((offset (* (1+ index) 8)))
+        (let* ((local-offsets (get state :localOffsets nil))
+               (offset (if (and (get state :memory nil) local-offsets (< index (js-length local-offsets))
+                                (> (js-nth index local-offsets) 0))
+                           (js-nth index local-offsets)
+                         (* (1+ index) 8))))
           (if (and (get state :memory nil) (<= offset 256))
               ;; LDUR/STUR use a signed nine-bit byte offset from FP (x29).
               ;; Rt is the low 5 bits; 31 is WZR/XZR.
@@ -350,6 +356,17 @@
         (when (register-weights (js-nth i children) counts) (setq call t))
         (setq i (1+ i)))
       call))
+
+  (defun memory-register-weights (node counts weight)
+    (let* ((kind (get node :kind)) (children (get node :children)) (i 0)
+           (loop (or (= kind "while") (= kind "remainder-while") (= kind "guarded-while")))
+           (child-weight (if loop (Math/min 1024 (* weight 8)) weight)))
+      (when (or (= kind "local") (= kind "set") (= kind "initialize"))
+        (let ((index (get node :value)))
+          (js-call counts :splice index 1 (+ (js-nth index counts) weight))))
+      (while (< i (js-length children))
+        (memory-register-weights (js-nth i children) counts child-weight)
+        (setq i (1+ i)))))
 
   (defun live-union (left right)
     (let ((result (js-call left :slice)) (i 0))
@@ -425,6 +442,40 @@
       (assign-register-class counts locals registers available "f64" graph)
       (assign-register-class counts locals registers integers "i32" graph)
       (js-object :registers registers :leaf t)))
+
+  (defun allocate-memory-registers (body locals)
+    ;; All allocated locals are initialized on entry and have distinct homes.
+    ;; Weight loop references so hot induction/accumulator locals win x20-x28,
+    ;; and pack remaining spilled locals into contiguous FP-relative slots.
+    ;; The AAPCS64 preserves x20-x28 across calls; x19 belongs to the context.
+    (let* ((count (js-length locals))
+           (counts (js-call (new globalThis.Array count) :fill 0))
+           (registers (js-call (new globalThis.Array count) :fill -1))
+           (offsets (js-call (new globalThis.Array count) :fill 0))
+           (candidates (js-array))
+           (index 0)
+           (spilled 0))
+      (memory-register-weights body counts 1)
+      (while (< index count)
+        (let ((type (get (js-nth index locals) :type)))
+          (when (and (> (js-nth index counts) 1)
+                     (or (memory-word-type type) (memory-wide-type type)))
+            (js-call candidates :push index)))
+        (setq index (1+ index)))
+      (js-call candidates :sort (lambda (left right)
+        (- (js-nth right counts) (js-nth left counts))))
+      (let ((saved (Math/min 9 (js-length candidates))))
+        (setq index 0)
+        (while (< index saved)
+          (put registers (js-nth index candidates) (- -22 index))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index count)
+          (when (= (js-nth index registers) -1)
+            (setq spilled (1+ spilled))
+            (put offsets index (* spilled 8)))
+          (setq index (1+ index)))
+        (js-object :registers registers :saved saved :offsets offsets :spilled spilled))))
 
   (defun assign-register-class (counts locals registers available type graph)
     (let ((i 0) (count (js-length locals)) (processed (js-array)))
@@ -1617,10 +1668,11 @@
             ((= count 2)
              (let ((right (js-nth 1 children)))
                (if (and (get state :memory nil) (not (get state :compact nil))
-                        (not (get state :leaf nil)) (= (js-length (get state :registers)) 0)
+                        (not (get state :leaf nil))
                         (memory-word-type (get right :type))
                         (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
-                   ;; These RHS forms touch only x0/x9 in the memory backend.
+                   ;; These forms write only x0/x9 even when the local is
+                   ;; read from a callee-saved register.
                    ;; Capture the evaluated LHS without changing evaluation order.
                    (progn (word state 704644065) (expression state right)) ;; mov w1,w0
                  (progn
@@ -2009,8 +2061,7 @@
          (progn (emit-sp-address-x9 state offset) (word state (+ 3103785248 reg)))))))
 
   (defun memory-move-to-reg (state node reg wide)
-    ;; Memory locals live in frame slots. Load directly into the call's GPR
-    ;; while keeping the expression's normal debug range.
+    ;; Move the local directly into the call's GPR and keep its debug range.
     (let ((type (get node :type)))
       (if (and (= (get node :kind) "local")
                (or (memory-word-type type) (memory-wide-type type)))
@@ -2143,7 +2194,7 @@
            (debug (get (or options (js-object)) :debug nil))
            (functions (get program :functions))
            (state (js-object :words (if (get (or options (js-object)) :packedWords nil) (native-word-buffer) (js-array)) :calls (js-array) :constants (js-array)
-                    :compact nil :leaf nil :memory t :linux linux :registers (js-array)
+                    :compact nil :leaf nil :memory t :linux linux :registers (js-array) :localOffsets nil
                     :functions functions
                     :signatureMap (get program :signatureMap nil)
                     :debugRanges (if debug (js-array) nil)
@@ -2158,8 +2209,13 @@
                (layout (compute-native-param-layout param-types linux))
                (slots (get layout :slots))
                (return-type (function-return-type function))
-               (frame (* (js-call globalThis.Math :ceil (/ (1+ (js-length locals)) 2)) 16)) (j 0))
+               (allocation (allocate-memory-registers (get function :body) locals))
+               (saved (get allocation :saved))
+               (spilled (get allocation :spilled))
+               (frame (* (js-call globalThis.Math :ceil (/ (+ 1 saved spilled) 2)) 16)) (j 0))
           (js-call offsets :push (* (js-length (get state :words)) 4))
+          (put state :registers (get allocation :registers))
+          (put state :localOffsets (get allocation :offsets))
           (put state :depth 0) (put state :memoryErrors (js-array))
           (when debug
             (put state :debugFunction (get function :name)) (put state :debugFunctionIndex i)
@@ -2171,6 +2227,10 @@
               (put state :debugFunctionRange range) (js-call (get state :debugRanges) :push range)))
           (word state 2847898621) (word state 2432697341)
           (stack-adjust state frame t) (word state 4177527795) ;; save caller x19
+          (let ((index 0))
+            (while (< index saved)
+              (word state (+ 4177527796 (* (1+ index) 1024) index)) ;; str x20+index,[sp,#8*(1+index)]
+              (setq index (1+ index))))
           (word state 2852127731) ;; mov x19,x0
           (while (< j arity)
             (let* ((slot (js-nth j slots))
@@ -2198,8 +2258,7 @@
               (if (= type "f64")
                   (progn (word state 2657551328) ;; fmov d0,xzr: positive zero
                     (local-access state j type t))
-                ;; Integer and wide zeros are WZR/XZR stores. MOVZ w0,#0 only
-                ;; existed to feed the following STUR, and that COPY is dead.
+                ;; Initialize the register or frame slot directly from WZR/XZR.
                 (local-access state j type t 31))) (setq j (1+ j)))
           (expression state (get function :body))
           (let ((normal (jump state "jump")))
@@ -2208,8 +2267,14 @@
                 (word state 2657551328)
               (memory-integer-register state 0 0))
             (patch-jump state normal (js-length (get state :words))))
-          (integer-register state 9 frame 0) (word state 3406365609) ;; sub x9,fp,x9
+          (if (<= frame 4095)
+              (word state (+ 3506439081 (* frame 1024))) ;; sub x9,fp,#frame
+            (progn (integer-register state 9 frame 0) (word state 3406365609))) ;; sub x9,fp,x9
           (word state 4181721395) ;; restore x19 independently of temporary stack depth
+          (let ((index 0))
+            (while (< index saved)
+              (word state (+ 4181721396 (* (1+ index) 1024) index)) ;; ldr x20+index,[x9,#8*(1+index)]
+              (setq index (1+ index))))
           (word state 2432697279) (word state 2831252477) (word state 3596551104)
           (when debug
             (put (get state :debugFunctionRange) :end (* 4 (js-length (get state :words))))))

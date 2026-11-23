@@ -1,0 +1,18 @@
+(module eliscript.managed-runtime-value
+  (import "../../stdlib/protocol.eli" extend-protocol-type)
+  (import "../managed/managed-literal-protocols.eli"
+    managed-literal-protocol managed-literal-equal-values managed-literal-hash-value)
+  (defconst IEquiv (managed-literal-protocol "value.IEquiv"))
+  (defconst IHash (managed-literal-protocol "value.IHash"))
+  (defun callable? (value) (= (js* "typeof value") "function"))
+  (defun extendValueType (constructor implementations)
+    (unless (and (not (nil? implementations)) (= (js* "typeof implementations") "object")
+                 (callable? (aref implementations "equal"))
+                 (callable? (aref implementations "hash")))
+      (throw (new globalThis/TypeError "value type extension requires equal and hash functions")))
+    (extend-protocol-type IEquiv constructor (js-object :equal (aref implementations "equal")))
+    (extend-protocol-type IHash constructor (js-object :hash (aref implementations "hash")))
+    constructor)
+  (defun equalValues (left right) (managed-literal-equal-values left right))
+  (defun hashValue (value) (managed-literal-hash-value value))
+  (export IEquiv IHash extendValueType equalValues hashValue))

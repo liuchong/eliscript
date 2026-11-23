@@ -270,6 +270,8 @@
     (async ()
       (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-suite-runner-")))))
         (try
+          (await (mkdir (resolve directory "node_modules") (js-object :recursive t)))
+          (await (symlink root (resolve directory "node_modules/eliscript") "dir"))
           (let* ((ledger-path (resolve directory "suite-unit.json"))
                  (script-a (resolve directory "pass-a.test.mjs"))
                  (script-b (resolve directory "fail-b.test.mjs"))

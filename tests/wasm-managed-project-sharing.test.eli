@@ -477,7 +477,7 @@
                        s))
              (modules (js-array (js-object :id "entry.mjs" :program program)))
              (provided-item (let ((p (js-object
-                                       :id "stdlib/managed-literals.mjs"
+                                       :id "runtime/managed/managed-literals.mjs"
                                        :program adapter
                                        :source "$eliscript_persistent_4"
                                        :filename "$eliscript_persistent_50"
@@ -508,7 +508,7 @@
               (js-call assert :equal (get context :alias) expected)
               (js-call assert :equal (get context :prefix) (str expected "/"))
               (js-call assert :equal (aref (get context :modules) 0) (aref provided 0))
-              (js-call assert :equal (get context :adapter) (str expected "/stdlib/managed-literals.mjs")))
+              (js-call assert :equal (get context :adapter) (str expected "/runtime/managed/managed-literals.mjs")))
             (let ((found (new globalThis.Set))
                   (index 0))
               (js-call literal-aliases :managed_literal_json_aliases (js-array modules provided) found)
@@ -552,7 +552,7 @@
                                          (str "$eliscript_persistent_" (get trace :length))))))
              (provided (js-array
                          (js-object
-                           :id "stdlib/managed-literals.mjs"
+                           :id "runtime/managed/managed-literals.mjs"
                            :program adapter
                            :first shared
                            :second shared
@@ -1251,7 +1251,7 @@
           (funcall assert (> (get (get linked :privateModules) :length) 0))
           (funcall assert
             (js-call (get linked :privateModules) :some
-              (lambda (id) (js-call id :endsWith "/stdlib/managed-literals.mjs"))))
+              (lambda (id) (js-call id :endsWith "/runtime/managed/managed-literals.mjs"))))
           (let ((leaves (js-call (nodes (get linked :program)) :filter
                           (lambda (node) (= (get node :kind) "literal")))))
             (funcall assert

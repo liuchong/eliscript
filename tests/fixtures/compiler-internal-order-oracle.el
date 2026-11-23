@@ -49,7 +49,7 @@
            (condition-case error-data
                (progn
                  (eliscript-compile-string
-                  (format "(import \"./stdlib/core/transient.mjs\" transient) (defasync build (source promise) (let ((%s (transient source)) (%s (transient source))) (await promise) nil))"
+                  (format "(import \"./stdlib/transient.mjs\" transient) (defasync build (source promise) (let ((%s (transient source)) (%s (transient source))) (await promise) nil))"
                           (car pair) (cadr pair)) "order.eli")
                  (error "expected transient ownership error"))
              (eliscript-analyze-error

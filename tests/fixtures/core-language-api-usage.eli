@@ -1,5 +1,5 @@
 (module test.core-language-api-usage
-  (import "./stdlib/core/protocol.mjs"
+  (import "./stdlib/protocol.mjs"
     define-protocol
     extend-protocol-category
     extend-protocol-default
@@ -8,7 +8,7 @@
     protocol-host-category
     protocol-method
     protocol-slot)
-  (import "./stdlib/core/collection.mjs"
+  (import "./stdlib/collection.mjs"
     assoc
     associative?
     bounded-count
@@ -39,7 +39,7 @@
     subvec
     unreduced
     vector?)
-  (import "./stdlib/core/identifier.mjs"
+  (import "./stdlib/identifier.mjs"
     identifier-name
     identifier-namespace
     identifier?
@@ -48,10 +48,10 @@
     qualified-name
     symbol
     symbol?)
-  (import "./stdlib/core/data-text.mjs" print-value read-value)
-  (import "./stdlib/core/metadata.mjs" meta supports-metadata? vary-meta with-meta)
-  (import "./stdlib/core/transient.mjs" assoc! conj! persistent! transient)
-  (import "./stdlib/core/transducer.mjs"
+  (import "./stdlib/data-text.mjs" print-value read-value)
+  (import "./stdlib/meta.mjs" meta supports-metadata? vary-meta with-meta)
+  (import "./stdlib/transient.mjs" assoc! conj! persistent! transient)
+  (import "./stdlib/transducer.mjs"
     catting
     compose-transducers
     deduping

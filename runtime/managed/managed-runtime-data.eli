@@ -1,0 +1,17 @@
+(module eliscript.managed-runtime-data
+  (import "../../stdlib/data.eli"
+    assoc-in count-by frequencies get-in group-by index-by keys merge
+    merge-with select-keys update update-in update-keys update-vals vals zipmap)
+  (defun indexBy (keyFunction collection) (index-by keyFunction collection))
+  (defun groupBy (keyFunction collection) (group-by keyFunction collection))
+  (defun countBy (keyFunction collection) (count-by keyFunction collection))
+  (defun getIn (collection path &optional notFound) (get-in collection path notFound))
+  (defun assocIn (collection path value) (assoc-in collection path value))
+  (defun updateIn (collection path transform &rest arguments)
+    (apply update-in (js-cons collection (js-cons path (js-cons transform arguments)))))
+  (defun updateKeys (collection transform) (update-keys collection transform))
+  (defun updateVals (collection transform) (update-vals collection transform))
+  (defun selectKeys (collection keys) (select-keys collection keys))
+  (defun mergeWith (combine &rest collections)
+    (apply merge-with (js-cons combine collections)))
+  (export indexBy groupBy countBy frequencies getIn assocIn update updateIn keys vals updateKeys updateVals selectKeys merge mergeWith zipmap))

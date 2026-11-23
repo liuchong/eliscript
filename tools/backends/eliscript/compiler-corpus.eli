@@ -603,7 +603,7 @@
                  (= (resource-field original "suite") "tests/wasm-managed-sorted-core.test.mjs")
                  (= (resource-field original "fixture") "tests/fixtures/wasm-managed-sorted.eli")
                  (= (resource-field (get original :maintainedAssertions) "sourceSha256")
-                   "4b3a0b8c14372cf61085c42a0a6c92a5e1b8a0b298831c91457f247e38c842b1")
+                   "ddbb4e210f322eb6ec5a54e16bd699078df073de0d47f15977995cdcfe43757e")
                  (= (resource-field declared "maxSlots") 8192)
                  (= (resource-field declared "initialBytes") 262144)
                  (= (resource-field declared "maxBytes") 16777216)
@@ -711,7 +711,7 @@
                          (complete-library-functional-resource-recipe-p record))
                 (put result :functionalExecutionDeadlineMs 720000))
               (when (and (= (get (get globalThis.process :env) :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-                         (js-call (js-array "stable-compatibility:program:stdlib/core/protocol.eli"
+                         (js-call (js-array "stable-compatibility:program:stdlib/protocol.eli"
                            "original-program:interop-js-complete-hosts") :includes id)
                          (complete-library-functional-resource-recipe-p record))
                 (put result :functionalExecutionDeadlineMs 1200000))

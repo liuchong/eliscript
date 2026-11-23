@@ -17,7 +17,7 @@
            (entry "tests/type-construction.mjs")
            (literal-modules (js-call sources :map (lambda (record)
              (let ((source (get record :source)))
-               (when (= (get record :filename) "stdlib/managed-runtime-type.eli")
+               (when (= (get record :filename) "runtime/managed/managed-runtime-type.eli")
                  (js-call assert :strictEqual (js-length (js-call source :split "  (export defineType")) 2)
                  (setq source (js-call source :replace "  (export defineType"
                    "  (export normalize-name normalize-fields protocol-shape normalize-methods normalize-plans method install-protocol-methods defineType")))

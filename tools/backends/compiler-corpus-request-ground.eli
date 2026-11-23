@@ -280,7 +280,7 @@
                   (ps-idx 0))
               (while (< ps-idx (js-length ps-names))
                 (let ((name (aref ps-names ps-idx)))
-                  (put portableSources name (await (funcall text (str "stdlib/" name ".eli")))))
+                  (put portableSources name (await (funcall text (str "stdlib/portable/" name ".eli")))))
                 (setq ps-idx (1+ ps-idx)))
               (addOriginalRequestRecipes (js-object :add add :locators locators :irCases irCases :portableSources portableSources)))
             (let* ((formatterSuite (await (addOriginalFormatterRecipes (js-object :add add :locators locators :text text :file file :sourceRoot sourceRoot))))
@@ -382,12 +382,12 @@
                            "(defasync run-original-literal-host () (await (run-host-main)))\n"
                            originalRuntimeHostCompletionSource "\n)\n")
                          "original-inline-core-set-host.eli"))
-                     (coreLibraryNames (js-array "protocol" "identifier" "data-text" "metadata" "collection" "transient" "transducer" "seq" "data"))
-                     (coreLibraryModules (js-call coreLibraryNames :map (lambda (name) (js-object :id (str "stdlib/core/" name ".mjs") :filename (str "stdlib/core/" name ".eli")))))
+                     (coreLibraryNames (js-array "protocol" "identifier" "data-text" "meta" "collection" "transient" "transducer" "seq" "data"))
+                     (coreLibraryModules (js-call coreLibraryNames :map (lambda (name) (js-object :id (str "stdlib/" name ".mjs") :filename (str "stdlib/" name ".eli")))))
                      (coreModuleBindings
                        (Object/assign (js-object :usageModule "core-stdlib-usage.mjs" :apiUsageModule "core-language-api-usage.mjs")
                          (Object/fromEntries (js-call coreLibraryNames :map (lambda (name)
-                           (js-array (str (if (= name "data-text") "dataText" name) "Module") (str "stdlib/core/" name ".mjs")))))))
+                           (js-array (str (cond ((= name "data-text") "dataText") ((= name "meta") "metadata") (t name)) "Module") (str "stdlib/" name ".mjs")))))))
                      (coreBindingEli
                        (js-call (js-call (Object/entries coreModuleBindings) :map (lambda (pair)
                          (str "(defconst " (aref pair 0) " (resolve directory " (JSON/stringify (aref pair 1)) "))")))
@@ -469,7 +469,7 @@
                      (inlinePlans
                        (js-array
                          (js-object :source "tests/fixtures/core-set-usage.eli" :entry "core-set-usage.mjs" :layout "source" :runtime t
-                           :extraModules (js-array (js-object :id "stdlib/core/set.mjs" :filename "stdlib/core/set.eli"))
+                           :extraModules (js-array (js-object :id "stdlib/set.mjs" :filename "stdlib/set.eli"))
                            :hostOrigin "tests/core-set.test.mjs"
                            :generatedHost (js-object :id "tests/__eliscript_original_core_set.mjs" :source coreSetGeneratedHost)
                            :stdoutJSON coreSetExpectedValue
@@ -501,10 +501,17 @@
                              (js-object :source (str "tests/fixtures/" (aref row 0) ".eli")
                                :hostEval (funcall originalInlineHost (aref row 1))
                                :environment (aref row 2) :stdoutText (aref row 3) :hostOrigin "tests/cli-test.sh")))
-                         (js-call (js-array "deferred-usage" "function-usage" "sequence-usage" "text-usage" "object-usage")
-                           :map (lambda (name)
-                             (js-object :source (str "tests/fixtures/" name ".eli")
-                               :stdlib (if (js-call (js-array "sequence-usage" "text-usage" "object-usage") :includes name) "flat" "nested"))))
+                         (js-call (js-array "deferred-usage" "function-usage")
+                           :map (lambda (name) (js-object :source (str "tests/fixtures/" name ".eli") :stdlib "nested")))
+                         (js-array
+                           (js-object :source "tests/fixtures/sequence-usage.eli"
+                             :extraModules (js-array (js-object :id "tests/fixtures/sequence.mjs" :filename "stdlib/portable/sequence.eli")))
+                           (js-object :source "tests/fixtures/text-usage.eli"
+                             :extraModules (js-array (js-object :id "tests/fixtures/text.mjs" :filename "stdlib/portable/text.eli")))
+                           (js-object :source "tests/fixtures/object-usage.eli"
+                             :extraModules (js-array
+                                             (js-object :id "tests/fixtures/object.mjs" :filename "stdlib/portable/object.eli")
+                                             (js-object :id "tests/fixtures/data.mjs" :filename "stdlib/portable/data.eli"))))
                          (js-call (js-array "core-expression-forms" "language-equality" "local-recursive-functions" "multi-arity" "value-dispatch")
                            :map (lambda (name)
                              (js-object :source (str "tests/fixtures/" name ".eli")
@@ -523,7 +530,7 @@
                              :hostImports (js-array "persistent-vector" "persistent-map" "persistent-set")
                              :arguments (js-array (js-object :directory t) (js-object :literal collection)))))
                          (js-array
-                           (js-object :source "stdlib/state/atom.eli" :entry "state/atom.mjs" :host "tests/fixtures/atom-host.mjs" :stdlib "flat"
+                           (js-object :source "stdlib/state.eli" :entry "state.mjs" :host "tests/fixtures/atom-host.mjs" :stdlib "flat"
                              :dependencies (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value")
                              :hostImports (js-array "persistent-vector"))
                            (js-object :source "stdlib/interop/js.eli" :host "tests/fixtures/interop-js-host.mjs" :layout "source" :stdlib t :runtime t
@@ -544,27 +551,28 @@
                              (js-object :source (str "tests/fixtures/" (aref pair 0) ".eli")
                                :host (str "tests/fixtures/" (aref pair 0) "-host.mjs") :layout "source" :runtime t
                                :extraModules (js-call (aref pair 1) :map (lambda (dependency)
-                                 (js-object :id (str "stdlib/core/" dependency ".mjs") :filename (str "stdlib/core/" dependency ".eli")))))))
+                                 (js-object :id (str "stdlib/" dependency ".mjs") :filename (str "stdlib/" dependency ".eli")))))))
                          (js-array
                            (js-object :source "tests/fixtures/wire.eli" :host "tests/fixtures/wire-host.mjs" :layout "source" :runtime t
                              :extraModules (js-call (js-array "mdp" "mds" "gepo") :map (lambda (name)
-                               (js-object :id (str "stdlib/" name ".mjs") :filename (str "stdlib/" name ".eli")))))
-                           (js-object :source "stdlib/core/text.eli" :host "tests/fixtures/core-text-object-host.mjs" :layout "source" :runtime t
-                             :extraModules (js-array (js-object :id "stdlib/core/object.mjs" :filename "stdlib/core/object.eli"))
-                             :argumentModules (js-array "stdlib/core/text.mjs" "stdlib/core/object.mjs"))
-                           (js-object :source "stdlib/core/protocol.eli" :entry "stdlib/core/protocol-impl.mjs"
+                               (js-object :id (str "stdlib/wire/" name ".mjs") :filename (str "stdlib/wire/" name ".eli")))))
+                           (js-object :source "stdlib/string.eli" :host "tests/fixtures/core-text-object-host.mjs" :layout "source" :runtime t
+                             :extraModules (js-array (js-object :id "stdlib/interop/object.mjs" :filename "stdlib/interop/object.eli"))
+                             :argumentModules (js-array "stdlib/string.mjs" "stdlib/interop/object.mjs"))
+                           (js-object :source "stdlib/protocol.eli" :entry "stdlib/protocol.mjs"
                              :host "tests/fixtures/eliscript-protocol-host.mjs" :layout "source" :runtime t)
                            (js-object :source "stdlib/multimethod.eli" :host "tests/fixtures/multimethod-host.mjs" :stdlib "flat"
                              :extraModules (js-array (js-object :id "declarative-multimethod.mjs" :filename "tests/fixtures/declarative-multimethod.eli"))
                              :argumentModules (js-array "multimethod.mjs" "declarative-multimethod.mjs")
                              :hostImports (js-array "hierarchy" "persistent-map" "persistent-set" "persistent-vector")))
-                         (let ((host-map (js-object :identifier "identifier" :persistent-list "list" :persistent-vector "vector" :persistent-map "map" :persistent-set "set"))
-                               (imports-map (js-object :json (js-array "result" "persistent-vector" "persistent-map" "value" "identifier" "persistent-list" "persistent-set")
-                                              :result (js-array "persistent-vector" "persistent-map" "value" "data-text")
-                                              :metadata (js-array "value" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
-                                              :data-text (js-array "identifier" "persistent-list" "persistent-map" "metadata" "persistent-set" "value" "persistent-vector")
-                                              :value (js-array "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set"))))
-                           (js-call (js-array "json" "numeric" "result" "metadata" "data-text" "value" "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
+                         (let ((host-map (js-object "portable/identifier" "identifier" "portable/metadata" "metadata" "portable/data-text" "data-text"
+                                                    :persistent-list "list" :persistent-vector "vector" :persistent-map "map" :persistent-set "set"))
+                               (imports-map (js-object :json (js-array "result" "persistent-vector" "persistent-map" "value" "portable/identifier" "persistent-list" "persistent-set")
+                                              :result (js-array "persistent-vector" "persistent-map" "value" "portable/data-text")
+                                              "portable/metadata" (js-array "value" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
+                                              "portable/data-text" (js-array "portable/identifier" "persistent-list" "persistent-map" "portable/metadata" "persistent-set" "value" "persistent-vector")
+                                              :value (js-array "portable/identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set"))))
+                           (js-call (js-array "json" "numeric" "result" "portable/metadata" "portable/data-text" "value" "portable/identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set")
                              :map (lambda (name)
                                (let ((p (js-object :source (str "stdlib/" name ".eli") :stdlib "flat"
                                           :host (str "tests/fixtures/portable-" (nullish-or (get host-map name) name) "-host.mjs")
@@ -575,8 +583,15 @@
                                    (put p :extraEntries (js-array "host-identity-token.mjs")))
                                  p))))))
                      (topLevelStdlib
-                       (js-call (js-call (await (readdir (sourcePath sourceRoot "stdlib")))
-                                  :filter (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z-]*[.]eli$") :test name)))
+                       (js-call
+                         (js-call
+                           (js-call (await (readdir (sourcePath sourceRoot "stdlib")))
+                             :filter (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z-]*[.]eli$") :test name)))
+                           :concat
+                           (js-call
+                             (js-call (await (readdir (sourcePath sourceRoot "stdlib/portable")))
+                               :filter (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z-]*[.]eli$") :test name)))
+                             :map (lambda (name) (str "portable/" name))))
                          :sort))
                      (pp-idx 0))
                 (while (< pp-idx (js-length programPlans))
@@ -610,9 +625,11 @@
                               (let* ((name (aref dep-names dn-idx))
                                      (filename (str "stdlib/" name)))
                                 (unless (= filename (get plan :source))
-                                  (js-call modules :push
-                                    (js-object :id (str prefix (js-call name :slice 0 -4) ".mjs")
-                                      :filename filename :source (await (funcall text filename))))))
+                                  (let ((source (await (funcall text filename))))
+                                    (unless (and (not (get plan :runtime)) (js-call source :includes "../runtime/"))
+                                      (js-call modules :push
+                                        (js-object :id (str prefix (js-call name :slice 0 -4) ".mjs")
+                                          :filename filename :source source))))))
                               (setq dn-idx (1+ dn-idx)))))
                         (let ((coverage (js-array (str "stable-compatibility:" (get plan :source)))))
                           (js-call extra-mods :forEach (lambda (item)
@@ -657,9 +674,7 @@
                                       (put original-meta :maintainedHost
                                         (await (maintained-fixture-proof source (get plan :host) text file))))))
                                 (when (get plan :runtime)
-                                  (let ((emitted-bit (js-call modules :some (lambda (module)
-                                          (and (= (get module :id) "stdlib/bit.mjs")
-                                               (= (get module :filename) "stdlib/bit.eli"))))))
+                                  (let ((emitted-bit (js-call modules :some (lambda (module) (= (get module :id) "stdlib/bit.mjs")))))
                                     (put request :hostSources
                                       (js-call (await (funcall originalRuntimeSources)) :filter
                                         (lambda (provider)
@@ -1158,7 +1173,7 @@
               (let ((name (aref pair 0))
                     (source (aref pair 1)))
                 (js-object :id (str "stdlib-" name)
-                  :request (js-object :operation "compile" :source source :filename (str "stdlib/" name ".eli")
+                  :request (js-object :operation "compile" :source source :filename (str "stdlib/portable/" name ".eli")
                              :portableEntries (js-array (get p-entry-map name)))
                   :includesJavascript (get p-inc-map name)
                   :excludesJavascript (get p-exc-map name))))))))

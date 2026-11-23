@@ -23,7 +23,7 @@
   (defconst bunPreload (resolve root "tests/fixtures/compiled-eli-bun-preload.mjs"))
   (defconst nodeLoader (resolve root "tests/fixtures/compiled-eli-node-loader.mjs"))
   (defconst emacs (get (get globalThis.process :env) :EMACS "emacs"))
-  (defconst compilationUnits (js-array (js-array "stdlib/core/sorted.eli" "stdlib/core/sorted.eli")
+  (defconst compilationUnits (js-array (js-array "stdlib/sorted.eli" "stdlib/sorted.eli")
     (js-array "tests/fixtures/persistent-sorted.eli" "tests/fixtures/persistent-sorted.mjs")))
   (defun numericOrder (left right) (- left right))
   (defun be (actual expected) (js-call (expect actual) :toBe expected))

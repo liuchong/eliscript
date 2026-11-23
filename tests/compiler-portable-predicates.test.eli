@@ -29,11 +29,11 @@
       (not (js-call (js-call value :split (new globalThis.RegExp "[\\\\/]+" "u")) :includes "..")))))
     (js-array "transient-analysis" "canonical-transient-family" (lambda (value)
       (if (or (not (= (funcall host-typeof value) "string"))
-        (not (js-call (new globalThis.RegExp "(^|/)(stdlib|runtime)/core/transient\\.(mjs|eli)$") :test value))) nil
+        (not (js-call (new globalThis.RegExp "(^|/)(stdlib|runtime/core)/transient\\.(mjs|eli)$") :test value))) nil
         (if (js-call (new globalThis.RegExp "(^|/)runtime/core/") :test value) "runtime" "stdlib"))))
     (js-array "transient-analysis" "trusted-core-source-p" (lambda (value)
       (and (= (funcall host-typeof value) "string")
-        (js-call (js-array "stdlib/core/data.eli" "stdlib/core/seq.eli" "stdlib/core/set.eli" "stdlib/core/transient.eli") :some
+        (js-call (js-array "stdlib/data.eli" "stdlib/seq.eli" "stdlib/set.eli" "stdlib/transient.eli") :some
           (lambda (suffix) (or (= value suffix) (js-call value :endsWith (str "/" suffix))))))))))
   (defvar directory undefined) (defvar backend undefined) (defvar runtime undefined)
   (defconst units (new globalThis.Map))
@@ -85,7 +85,7 @@
             (js-call a :auto 1)
             (js-call (js-array undefined nil false t (js* "-0") 0 1 -1 0.5 globalThis.NaN globalThis.Infinity (- globalThis.Infinity)
               globalThis.Number.MIN_VALUE globalThis.Number.MAX_SAFE_INTEGER (+ globalThis.Number.MAX_SAFE_INTEGER 1) "" "a" "中😀" "../x" "a/../b" "a\\..\\b"
-              (resolve "predicate-input") (js-call win32 :resolve "C:" "predicate-input") "stdlib/core/transient.eli" "runtime/core/transient.mjs" "x/stdlib/core/data.eli")
+              (resolve "predicate-input") (js-call win32 :resolve "C:" "predicate-input") "stdlib/transient.eli" "runtime/core/transient.mjs" "x/stdlib/data.eli")
               :forEach (lambda (value)
                 (let* ((input (cond ((= (funcall host-typeof value) "number") (js-call a :number value))
                              ((= (funcall host-typeof value) "string") (js-call a :string value)) (t value)))

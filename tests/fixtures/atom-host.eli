@@ -87,7 +87,7 @@
   (defvar scale undefined)
   (defasync run-host-main ()
     (setq atomModule (await (funcall load-module (get (pathToFileURL modulePath) :href))))
-    (setq vectorModule (await (funcall load-module (get (pathToFileURL (resolve (dirname modulePath) "../persistent-vector.eli")) :href))))
+    (setq vectorModule (await (funcall load-module (get (pathToFileURL (resolve (dirname modulePath) "./persistent-vector.eli")) :href))))
     (setq addWatch atomModule.add_watch)
     (setq atom atomModule.atom)
     (setq isAtom atomModule.atom_QMARK_)

@@ -19,12 +19,12 @@
 
   (defasync build (output json)
     (await (runSuccessful (js-call (js-array BUILD) :concat (if json (js-array "--json") (js-array))
-      (js-array "--root" (resolve ROOT "stdlib") "--out-dir" output "--no-cache" (resolve ROOT "stdlib/deferred.eli"))) (js-object))))
+      (js-array "--root" (resolve ROOT "stdlib") "--out-dir" output "--no-cache" (resolve ROOT "stdlib/state.eli"))) (js-object))))
   (test "deferred computations compile and agree across local hosts" (async ()
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-deferred-")))) (outputRoot (resolve directory "stdlib")) (usageModule (resolve directory "deferred-usage.mjs")))
       (try
         (let ((report (JSON/parse (await (build outputRoot t)))))
-          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 7 :compiled 7 :reused 0) :entries (js-array "deferred.eli") :entryOutputs (js-array "deferred.mjs"))))
+          (js-call (expect report) :toMatchObject (js-object :format "eliscript-build-report" :counts (js-object :modules 7 :compiled 7 :reused 0) :entries (js-array "state.eli") :entryOutputs (js-array "state.mjs"))))
         (await (compile (resolve ROOT "tests/fixtures/deferred-usage.eli") usageModule))
         (let ((hosts (js-array (get globalThis.process :execPath) (get (get globalThis.process :env) :NODE_BINARY "node"))) (index 0))
           (while (< index (js-length hosts))
@@ -35,7 +35,7 @@
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-deferred-")))) (outputRoot (resolve directory "stdlib")))
       (try
         (await (build outputRoot false))
-        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "deferred.mjs")) :href) "?failures"))))
+        (let* ((library (await (funcall load-module (str (get (pathToFileURL (resolve outputRoot "state.mjs")) :href) "?failures"))))
                (forged (js-object :kind "eliscript/delay" :realized (lambda () t) :force (lambda () 42))))
           (be (js-call library :delay_QMARK_ forged) false) (be (js-call library :realized_QMARK_ forged) false)
           (be (js-call library :realized_QMARK_ 9) false) (be (js-call library :force forged) forged)

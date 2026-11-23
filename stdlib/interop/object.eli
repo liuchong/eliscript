@@ -1,0 +1,39 @@
+(module eliscript.interop.object
+  (import "../../runtime/core/object-impl.mjs" :as Impl)
+
+  (defun keys (object)
+    (Impl/keys object))
+
+  (defun has? (object key)
+    (Impl/has_QMARK_ object key))
+
+  (defun assoc (object key value &rest key-values)
+    (apply Impl/assoc
+           (js-cons object (js-cons key (js-cons value key-values)))))
+
+  (defun key-in? (key key-list)
+    (Impl/key_in_QMARK_ key key-list))
+
+  (defun dissoc (object key)
+    (Impl/dissoc object key))
+
+  (defun merge (left right)
+    (Impl/merge left right))
+
+  (defun map-values (function object)
+    (Impl/map_values function object))
+
+  (defun filter-values (predicate object)
+    (Impl/filter_values predicate object))
+
+  (defun pick (object wanted-keys)
+    (Impl/pick object wanted-keys))
+
+  (defun omit (object omitted-keys)
+    (Impl/omit object omitted-keys))
+
+  (defun update (object key function)
+    (Impl/update object key function))
+
+  (export assoc dissoc filter-values has? key-in? keys map-values merge omit
+          pick update))

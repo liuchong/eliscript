@@ -129,11 +129,11 @@
     (rejects (lambda () (join (js-array) (js-array) (js-object) (js-object))) "join expects 2 or 3 relations")))
   (test "Eliscript-authored set algebra compiles and agrees across local hosts" (async ()
     (let* ((directory (await (mkdtemp (resolve ROOT ".eliscript-core-set-"))))
-           (runtimeLink (resolve directory "runtime")) (setModule (resolve directory "stdlib/core/set.mjs"))
+           (runtimeLink (resolve directory "runtime")) (setModule (resolve directory "stdlib/set.mjs"))
            (usageModule (resolve directory "core-set-usage.mjs")))
       (try
         (await (symlink (resolve ROOT "runtime") runtimeLink "dir"))
-        (await (compile (resolve ROOT "stdlib/core/set.eli") setModule))
+        (await (compile (resolve ROOT "stdlib/set.eli") setModule))
         (await (compile USAGE_SOURCE usageModule))
         (let ((expected (js-object "converted" (js-array 1 2 3) "united" (js-array 1 2 3 4 5) "intersected" (js-array 2 3) "subtracted" (js-array 1 3) "subset" t "superset" t "disjoint" t "selected" (js-array (js-object "id" 1 "name" "Ada" "team" "compiler") (js-object "id" 3 "name" "Mira" "team" "compiler")) "projected" (js-array (js-object "team" "compiler") (js-object "team" "runtime")) "renamed" (js-array (js-object "id" 1 "display" "Ada" "team" "compiler") (js-object "id" 2 "display" "Lin" "team" "runtime") (js-object "id" 3 "display" "Mira" "team" "compiler")) "renamedKeys" (js-object "left" 2 "right" 1) "indexSizes" (js-array 1 2) "inverted" (js-array (js-array 1 "left") (js-array 2 "right")) "joined" (js-array (js-object "id" 1 "name" "Ada" "role" "admin" "team" "compiler")) "mappedJoined" (js-array (js-object "id" 2 "name" "Lin" "role" "maintainer" "team" "runtime" "user-id" 2)))))
           (same (await (runUsageHost (get globalThis.process :execPath) usageModule)) expected)

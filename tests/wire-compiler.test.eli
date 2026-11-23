@@ -28,7 +28,7 @@
       (let ((directory (await (mkdtemp (resolve (tmpdir) "eliscript-wire-")))))
         (try
           (let ((bootstrap (resolve directory "compiler"))
-                (sources (js-array "stdlib/mdp.eli" "stdlib/mds.eli" "stdlib/gepo.eli" "tests/fixtures/wire.eli"))
+                (sources (js-array "stdlib/wire/mdp.eli" "stdlib/wire/mds.eli" "stdlib/wire/gepo.eli" "tests/fixtures/wire.eli"))
                 (outputs (js-array))
                 (compilers (js-array (js-array "eliscript-seed" "seed")
                                      (js-array "eliscript-portable" "portable")))

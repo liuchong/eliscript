@@ -25,7 +25,7 @@ persistent value categories. Capability predicates such as `counted?` and
 own persistent values and logical sequence views:
 
 ```elisp
-(import "../../stdlib/core/collection.eli"
+(import "../../stdlib/collection.eli"
         bounded-count collection? distinct? sequence? subvec vector?)
 
 [(collection? [1 2 3])
@@ -67,7 +67,7 @@ bindings. Both require complete protocol implementations; see
 algorithms over the runtime's open `IComparable` protocol:
 
 ```elisp
-(import "../../stdlib/core/order.eli"
+(import "../../stdlib/order.eli"
         compare-values reverse-comparator sort sort-by)
 
 [(sort [3 1 2 1])
@@ -88,7 +88,7 @@ value on an equal key, matching the stable tie contract.
 Eliscript, without compiler intrinsics or host-framework helpers:
 
 ```elisp
-(import "../../stdlib/function.eli"
+(import "../../stdlib/fn.eli"
         comp every-pred fnil juxt partial trampoline)
 
 [(funcall (comp (lambda (value) (* value 2)) +) 3 4)
@@ -110,7 +110,7 @@ and portability contracts are specified in
 memoization without compiler syntax or framework policy:
 
 ```elisp
-(import "../../stdlib/deferred.eli" delay force memoize realized?)
+(import "../../stdlib/state.eli" delay force memoize realized?)
 
 (let* ((answer (delay (lambda () (expensive-computation))))
        (cached-score (memoize score)))
@@ -345,7 +345,7 @@ Symbol values. `identifier.eli` provides matching constructors implemented
 entirely with `defportable`:
 
 ```elisp
-(import "../../stdlib/core/identifier.eli"
+(import "../../stdlib/identifier.eli"
         identifier-name keyword keyword? qualified-name symbol symbol?)
 
 (let ((key (keyword "article/title"))
@@ -372,7 +372,7 @@ Vectors, Maps, and Sets. `core/metadata.eli` exposes the optimized runtime
 protocols to ordinary Eliscript source:
 
 ```elisp
-(import "../../stdlib/core/metadata.eli"
+(import "../../stdlib/meta.eli"
         meta supports-metadata? vary-meta with-meta)
 (import "eliscript/runtime/core/map" persistentHashMap)
 (import "eliscript/runtime/core/vector" persistentVector)
@@ -399,7 +399,7 @@ are specified in
 Lisp-named functions:
 
 ```elisp
-(import "../../stdlib/core/data-text.eli"
+(import "../../stdlib/data-text.eli"
         print-value read-value read-values)
 
 (read-value
@@ -422,7 +422,7 @@ Map, Set, and metadata values without importing the JavaScript collection
 runtime:
 
 ```elisp
-(import "../../stdlib/data-text.eli"
+(import "../../stdlib/portable/data-text.eli"
         data-text-result-value print-value read-value)
 
 (data-text-result-value
@@ -444,7 +444,7 @@ the runtime format. See
 `state/atom.eli` separates changing identity from immutable persistent values:
 
 ```elisp
-(import "../../stdlib/state/atom.eli"
+(import "../../stdlib/state.eli"
         add-watch atom compare-and-set! deref reset-vals! swap-vals!)
 
 (let ((counter (atom 0)))
@@ -546,14 +546,14 @@ Exact semantics and cross-compiler/cross-host evidence are specified in
 protocol-driven runtime algorithms through Lisp-named Eliscript modules:
 
 ```elisp
-(import "../../stdlib/core/seq.eli"
+(import "../../stdlib/seq.eli"
         cycle distinct flatten generate interleave iterate map mapcat
         partition partition-all range reductions repeat repeatedly tree-seq
         first sequence-nth take-last drop-last split-at split-with)
-(import "../../stdlib/core/data.eli"
+(import "../../stdlib/data.eli"
         assoc-in get-in group-by frequencies keys vals
         update-keys update-vals merge-with select-keys zipmap)
-(import "../../stdlib/core/set.eli"
+(import "../../stdlib/set.eli"
         difference disjoint? index intersection join map-invert project
         rename rename-keys select set subset? superset? union)
 ```
@@ -672,7 +672,7 @@ Reversible traversal and the `last`/`reverse` fast path are specified in
 non-mutating sequence operations:
 
 ```elisp
-(import "../../stdlib/sequence.eli" map filter reduce range)
+(import "../../stdlib/portable/sequence.eli" map filter reduce range)
 
 (map (lambda (value) (* value 2)) (range 1 5))
 ```
@@ -707,7 +707,7 @@ matching, prefix and suffix removal, ASCII-boundary trimming, blank checks,
 joining, and repetition:
 
 ```elisp
-(import "../../stdlib/text.eli" contains? strip-prefix trim)
+(import "../../stdlib/portable/text.eli" contains? strip-prefix trim)
 
 (trim (strip-prefix "#" "# article "))
 ```
@@ -731,7 +731,7 @@ shallow association, removal, merging, value transforms, selection, omission,
 and updates:
 
 ```elisp
-(import "../../stdlib/object.eli" assoc merge pick)
+(import "../../stdlib/portable/object.eli" assoc merge pick)
 
 (pick (assoc (object :name "Eliscript") :runtime "JavaScript")
       [:name :runtime])
@@ -778,9 +778,9 @@ project build follows the dependency into `object.eli`, emits only `count-by`,
 Import the wire libraries directly from Eliscript:
 
 ```elisp
-(import "./stdlib/mdp.eli" mdp-parse mdp-encode)
-(import "./stdlib/mds.eli" mds-validate)
-(import "./stdlib/gepo.eli" gepo-client gepo-service gepo-operation)
+(import "./stdlib/wire/mdp.eli" mdp-parse mdp-encode)
+(import "./stdlib/wire/mds.eli" mds-validate)
+(import "./stdlib/wire/gepo.eli" gepo-client gepo-service gepo-operation)
 
 (defconst data (mdp-parse "# User\n- name: Ada\n- age: 42\n"))
 (defconst wire (mdp-encode data))

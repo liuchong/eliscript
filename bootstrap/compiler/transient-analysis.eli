@@ -8,7 +8,7 @@
     (cond ((< left right) -1) ((> left right) 1) (t 0)))
 
   (defconst transient-module-pattern
-    (new globalThis.RegExp "(^|/)(stdlib|runtime)/core/transient\\.(mjs|eli)$"))
+    (new globalThis.RegExp "(^|/)(stdlib|runtime/core)/transient\\.(mjs|eli)$"))
   (defconst typeof-value (lambda (value) (js* "typeof value")))
   (defconst runtime-core-pattern
     (new globalThis.RegExp "(^|/)runtime/core/"))
@@ -51,7 +51,7 @@
   (defconst trusted-core-source-p
     (lambda (value)
       (and (= (js* "typeof value") "string")
-        (js-call (js-array "stdlib/core/data.eli" "stdlib/core/seq.eli" "stdlib/core/set.eli" "stdlib/core/transient.eli")
+        (js-call (js-array "stdlib/data.eli" "stdlib/seq.eli" "stdlib/set.eli" "stdlib/transient.eli")
           :some (lambda (suffix) (or (= value suffix) (js-call value :endsWith (str "/" suffix))))))))
 
   (defun symbol-node-p (node)

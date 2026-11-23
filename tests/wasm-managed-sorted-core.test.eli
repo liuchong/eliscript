@@ -20,7 +20,7 @@
   (defconst entry "tests/sorted-entry.mjs")
   (defconst units (js-array (js-array entry "tests/fixtures/wasm-managed-sorted.eli")
     (js-array "tests/fixtures/persistent-sorted.mjs" "tests/fixtures/persistent-sorted.eli")
-    (js-array "stdlib/core/sorted.eli" "stdlib/core/sorted.eli")))
+    (js-array "stdlib/sorted.eli" "stdlib/sorted.eli")))
   (defconst brand-body
     (js-call (js-array
       "  (defvar brand-trace-values nil)"
@@ -103,7 +103,7 @@
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))
         (js-call assert :deepStrictEqual (js-call (Array/from (get lowered :modules)) :sort)
           (js-call (js-call units :map (lambda (unit) (aref unit 0))) :sort))
-        (js-call (js-array "runtime/core/order.mjs" "runtime/core/sorted.mjs" "stdlib/managed-sorted-state.mjs") :forEach
+        (js-call (js-array "runtime/core/order.mjs" "runtime/core/sorted.mjs" "runtime/managed/managed-sorted-state.mjs") :forEach
           (lambda (id) (js-call assert :ok (js-call (get lowered :privateModules) :some
             (lambda (privateId) (js-call privateId :endsWith (str "/" id)))) (str "actual private source: " id))))
         (when native?

@@ -24,7 +24,7 @@
           :schemas (js-object :total 26) :adapters (js-object :adapters 9 :exports 31)
           :platformPackages (js-object :packages 2 :exports 37)
           :runtimeModules (js-object :modules 45 :exports 487 :public 32 :internal 13)
-          :standardLibrary (js-object :modules 46 :exports 601)
+          :standardLibrary (js-object :modules 45 :exports 601)
           :emacs (js-object :functions 158 :records 47 :publicRecords 28 :internalRecords 19)))
       ;; The new counts correspond to declared foreign-protocol boundaries.
       (let* ((surface (await (surface-document)))
@@ -45,9 +45,9 @@
   (test "public surface checker rejects standard library export drift"
     (async ()
       (let ((surface (await (surface-document))))
-        (js-call (get (find-entry (get surface :standardLibrary) "module" "object") :exports) :shift)
+        (js-call (get (find-entry (get surface :standardLibrary) "module" "interop-object") :exports) :shift)
         (js-call (expect (await (validation-errors surface))) :toContain
-          "object export inventory is missing current entries: assoc"))))
+          "interop-object export inventory is missing current entries: assoc"))))
   (test "public surface checker rejects CLI option drift"
     (async ()
       (let* ((surface (await (surface-document))) (options (get (aref (get surface :commands) 0) :options)))

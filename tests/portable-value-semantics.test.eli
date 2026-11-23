@@ -7,7 +7,7 @@
   (import "./helpers/portable-structure.mjs" nextRandom)
   (import "../runtime/core/list.mjs" :as runtimeList)
   (import "../runtime/core/value.mjs" :as runtimeValue)
-  (defconst sources (js-array "bit" "identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value"))
+  (defconst sources (js-array "bit" "portable/identifier" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value"))
   (defconst load-module (js* "(specifier) => import(specifier)"))
   (defvar generatedModuleBuild undefined)
   (defasync generatedModules (label)
@@ -18,7 +18,7 @@
     (let ((suffix (str "?" label "=" (Date/now))) (modules (js-object)) (index 0))
       (while (< index (js-length sources))
         (let ((name (aref sources index)))
-          (unless (= name "identifier")
+          (unless (= name "portable/identifier")
             (put modules name (await (funcall load-module (str (get (pathToFileURL (resolve projectDirectory (str "dist/stdlib/" name ".mjs"))) :href) suffix))))))
         (setq index (1+ index))) modules))
   (test "Eliscript-authored value semantics compile and agree across hosts"

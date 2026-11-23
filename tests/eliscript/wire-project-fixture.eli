@@ -312,11 +312,11 @@
     (js-object :timeout 5000)
     (async ()
       (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
-             (filename "stdlib/managed-wire-http-rpc.eli")
+             (filename "runtime/managed/managed-wire-http-rpc.eli")
              (source (await (readFile (resolve root filename) "utf8")))
-             (literal-source (await (readFile (resolve root "stdlib/managed-literals.eli") "utf8")))
+             (literal-source (await (readFile (resolve root "runtime/managed/managed-literals.eli") "utf8")))
              (points (Array/from literal-source))
-             (pending (read-string literal-source "stdlib/managed-literals.eli")) (helper undefined))
+             (pending (read-string literal-source "runtime/managed/managed-literals.eli")) (helper undefined))
         (try
           (progn
             (while (> (js-length pending) 0)
@@ -333,7 +333,7 @@
               "(import \"../../platform/http.mjs\" :as Host)"
               (str "(import " (JSON/stringify (get (pathToFileURL (resolve root "platform/http.mjs")) :href)) " :as Host)")))
             (setq source (js-call source :replace
-              "(import \"../../stdlib/managed-literals.eli\" literal-each)" helper))
+              "(import \"../managed/managed-literals.eli\" literal-each)" helper))
             (await (writeFile (resolve (get fixture :directory) "compiler.mjs") (compile-string source filename)))
             (let ((api (await (loadCompiler (get fixture :directory)))) (index 0)
                   (scenarios (js-array "timeout" "limit" "redirect"))
@@ -386,8 +386,8 @@
              (runtimeIR (js-call compiler :compile_ir_string (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
              (literalModules (get (await (js-call backend :loadLiteralModules)) :literalModules))
              (modules (js-array))
-             (sources (js-array (js-array "stdlib/mdp.eli" "stdlib/mdp.eli") (js-array "stdlib/mds.eli" "stdlib/mds.eli")
-               (js-array "stdlib/gepo.eli" "stdlib/gepo.eli") (js-array "tests/fixtures/wire.mjs" "tests/fixtures/wire.eli")
+             (sources (js-array (js-array "stdlib/wire/mdp.eli" "stdlib/wire/mdp.eli") (js-array "stdlib/wire/mds.eli" "stdlib/wire/mds.eli")
+               (js-array "stdlib/wire/gepo.eli" "stdlib/wire/gepo.eli") (js-array "tests/fixtures/wire.mjs" "tests/fixtures/wire.eli")
                (js-array "tests/fixtures/wasm-managed-wire.mjs" "tests/fixtures/wasm-managed-wire.eli")))
              (cursor 0) (memory (js-object :initialPages 4 :maximumPages 1024)))
         (while (< cursor (js-length sources))
@@ -583,7 +583,7 @@
   (test "the actual internal wire key collector preserves native single-level key order duplicates mixed items and holes"
     (async ()
       (let* ((fixture (prepareFixtureEnvironment root (get globalThis.process :env)))
-             (filename "stdlib/managed-wire-markdown.eli") (source (await (readFile (resolve root filename) "utf8")))
+             (filename "runtime/managed/managed-wire-markdown.eli") (source (await (readFile (resolve root filename) "utf8")))
              (points (Array/from source)) (pending (read-string source filename)) (forms (js-array))
              (cases (js-array
                (js-array (js-object :a 1 :b "x") (js-object :b false))
@@ -619,7 +619,7 @@
             (declarations (js-array)) (requests (js-array)) (expected (js-array)))
         (try
           (progn
-            (let ((files (js-array "stdlib/managed-wire-http-rpc.eli" "stdlib/managed-wire-schema.eli")) (file-index 0))
+            (let ((files (js-array "runtime/managed/managed-wire-http-rpc.eli" "runtime/managed/managed-wire-schema.eli")) (file-index 0))
               (while (< file-index (js-length files))
                 (let* ((filename (aref files file-index)) (source (await (readFile (resolve root filename) "utf8")))
                        (points (Array/from source)) (pending (read-string source filename)))

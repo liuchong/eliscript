@@ -168,8 +168,8 @@
     (setq directory (await (mkdtemp (resolve (tmpdir) "eliscript-protocol-reasons-"))))
     (setq backend (await (buildBackends (js-object :outputRoot directory))))
     (let* ((compiler (get backend :compiler))
-           (source (await (readFile (resolve root "stdlib/managed-protocol-error.eli") "utf8")))
-           (original (js-call compiler :compile_ir_string source "stdlib/managed-protocol-error.eli"))
+           (source (await (readFile (resolve root "runtime/managed/managed-protocol-error.eli") "utf8")))
+           (original (js-call compiler :compile_ir_string source "runtime/managed/managed-protocol-error.eli"))
            (before (JSON/stringify original))
            (program (js-call compiler :compile_ir_string report-source "protocol-reasons.eli"))
            (actual (get (aref (get original :body) 0) :children))
@@ -210,7 +210,7 @@
   (test "the actual canonical protocol defconst lambda receives the private exact registry bridge without changing its original source tree"
     (async ()
       (let* ((libraries (get (await (js-call backend :loadLiteralModules)) :literalModules))
-             (core (js-call libraries :find (lambda (item) (= (get item :id) "stdlib/core/protocol.mjs"))))
+             (core (js-call libraries :find (lambda (item) (= (get item :id) "runtime/core/protocol-impl.mjs"))))
              (program (get core :program)) (before (JSON/stringify program))
              (pending (js-call (get program :body) :slice)) (declaration undefined))
         (while (> (js-length pending) 0)
@@ -241,7 +241,7 @@
             (js-call assert :ok exact)
             (js-call assert :strictEqual (get exact :kind) "function-expression")
             (js-call assert :strictEqual (get exact :span) (get initializer :span))
-            (js-call assert :strictEqual (get (get exact :span) :filename) "stdlib/core/protocol.eli")))
+            (js-call assert :strictEqual (get (get exact :span) :filename) "runtime/core/protocol-impl.eli")))
         (js-call assert :strictEqual (JSON/stringify program) before))))
 
   (defun protocol-bridge-nodes (program)
@@ -312,15 +312,15 @@
   (test "only all four canonical hash definitions without writes or shadows receive the private whole-hash lowering"
     (async ()
       (let* ((compiler (get backend :compiler))
-             (source (await (readFile (resolve root "stdlib/managed-value-state.eli") "utf8")))
-             (canonical (js-call compiler :compile_ir_string source "stdlib/managed-value-state.eli"))
+             (source (await (readFile (resolve root "runtime/managed/managed-value-state.eli") "utf8")))
+             (canonical (js-call compiler :compile_ir_string source "runtime/managed/managed-value-state.eli"))
              (before (JSON/stringify canonical)) (helpers (canonical-hash-helpers canonical))
              (program (canonical-hash-test-program compiler helpers "(export hashString)"))
              (lower (lambda (input id)
                (js-call (get backend :managed) :lower_managed_project
                  (js-array (js-object :id id :program input)) id runtime-ir))))
         (js-call assert :strictEqual (js-length helpers) 4)
-        (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower program "stdlib/managed-value-state.mjs")) 1)
+        (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower program "runtime/managed/managed-value-state.mjs")) 1)
         (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower program "user/managed-value-state.mjs")) 0)
         (let ((changed (globalThis.structuredClone program)) (pending undefined) (replaced false))
           (setq pending (js-call (get changed :body) :slice))
@@ -330,15 +330,15 @@
                 (put node :value 2246822509) (setq replaced t))
               (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))
           (js-call assert :strictEqual replaced t)
-          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower changed "stdlib/managed-value-state.mjs")) 0))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower changed "runtime/managed/managed-value-state.mjs")) 0))
         (let ((shadow (canonical-hash-test-program compiler helpers
                         "(defun shadow (mixHash) mixHash) (export hashString)")))
-          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower shadow "stdlib/managed-value-state.mjs")) 0))
+          (js-call assert :strictEqual (canonical-hash-fast-call-count (funcall lower shadow "runtime/managed/managed-value-state.mjs")) 0))
         (let ((written (canonical-hash-test-program compiler helpers
                          "(defun replaceHash () (setq hashString undefined)) (export hashString)")))
           ;; The original backend refuses assignment to a function declaration.
           ;; Neither authentication nor a caller marker may bypass that error.
-          (js-call assert :throws (lambda () (funcall lower written "stdlib/managed-value-state.mjs"))
+          (js-call assert :throws (lambda () (funcall lower written "runtime/managed/managed-value-state.mjs"))
             (lambda (error) (js-call (get error :message "") :includes "existing mutable managed binding"))))
         (let ((forged (globalThis.structuredClone program)))
           (put forged :canonicalStringHash t)
@@ -350,14 +350,14 @@
         ;; A serialized or cloned linked program carries no private admission,
         ;; even when it retains all of the linker's visible ordinary fields.
         (let* ((linked (js-call (get backend :managed) :link_managed_project
-                        (js-array (js-object :id "stdlib/managed-value-state.mjs" :program program))
-                        "stdlib/managed-value-state.mjs"))
+                        (js-array (js-object :id "runtime/managed/managed-value-state.mjs" :program program))
+                        "runtime/managed/managed-value-state.mjs"))
                (copy (globalThis.structuredClone (get linked :program)))
                (plain (js-call (get backend :managed) :lower_managed_program copy runtime-ir t)))
           (js-call assert :strictEqual (canonical-hash-fast-call-count plain) 0))
         (let* ((linked (js-call (get backend :managed) :link_managed_project
-                        (js-array (js-object :id "stdlib/managed-value-state.mjs" :program (globalThis.structuredClone program)))
-                        "stdlib/managed-value-state.mjs"))
+                        (js-array (js-object :id "runtime/managed/managed-value-state.mjs" :program (globalThis.structuredClone program)))
+                        "runtime/managed/managed-value-state.mjs"))
                (same (get linked :program)) (pending (js-call (get same :body) :slice)))
           (while (> (js-length pending) 0)
             (let ((node (js-call pending :pop)))
@@ -384,7 +384,7 @@
     (async ()
       (let* ((compiler (get backend :compiler))
              (canonical (js-call compiler :compile_ir_string
-               (await (readFile (resolve root "stdlib/managed-value-state.eli") "utf8")) "stdlib/managed-value-state.eli"))
+               (await (readFile (resolve root "runtime/managed/managed-value-state.eli") "utf8")) "runtime/managed/managed-value-state.eli"))
              (helpers (canonical-hash-helpers canonical))
              (program (canonical-hash-test-program compiler helpers canonical-hash-report-source))
              (body (get program :body))
@@ -395,8 +395,8 @@
         (let* ((reference (await (loadReference (resolve directory "canonical-hash-reference.mjs")
                             (js-call compiler :emit_ir_string program))))
                (actual (js-call (get backend :managed) :lower_managed_project
-                 (js-array (js-object :id "stdlib/managed-value-state.mjs" :program program))
-                 "stdlib/managed-value-state.mjs" (await (canonical-hash-counted-runtime))))
+                 (js-array (js-object :id "runtime/managed/managed-value-state.mjs" :program program))
+                 "runtime/managed/managed-value-state.mjs" (await (canonical-hash-counted-runtime))))
                (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
                  (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
                  "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
@@ -465,7 +465,7 @@
     ;; no source resolver: supply the same explicit host edge, not a substitute
     ;; managed implementation or an implicit filename-based external exemption.
     (js-array (js-object :id "runtime/core/protocol-error.mjs"
-      :specifier "../../runtime/core/protocol-error.mjs" :referrer referrer
+      :specifier "./protocol-error.mjs" :referrer referrer
       :allowedExports (js-array "ProtocolDispatchError") :namespace false)))
   (defconst definition-consumer (js-call (js-array
     "(import \"./protocol-impl.mjs\" define-protocol-from-definition protocol-definition)"
@@ -504,33 +504,33 @@
   (test "direct canonical protocol IR authenticates the private reader and rejects renamed or changed user IR without mutation"
     (async ()
       (let* ((libraries (get (await (js-call backend :loadLiteralModules)) :literalModules))
-             (canonical (get (js-call libraries :find (lambda (item) (= (get item :id) "stdlib/core/protocol.mjs"))) :program))
+             (canonical (get (js-call libraries :find (lambda (item) (= (get item :id) "runtime/core/protocol-impl.mjs"))) :program))
              (compiler (get backend :compiler))
              (program (js-call compiler :compile_ir_string
-               (await (readFile (resolve root "stdlib/core/protocol.eli") "utf8")) "stdlib/core/protocol.eli"))
+               (await (readFile (resolve root "runtime/core/protocol-impl.eli") "utf8")) "runtime/core/protocol-impl.eli"))
              (before (globalThis.structuredClone program)))
         (js-call assert :strictEqual
           (get (aref (get (aref (get program :body) 0) :children) 0) :value)
-          "../../runtime/core/protocol-error.mjs")
+          "./protocol-error.mjs")
         ;; Keep the original direct linker boundary strict. A declaration in
         ;; the runtime factory cannot repair an undeclared compile-time edge.
         (js-call assert :throws
           (lambda () (js-call (get backend :managed) :link_managed_project
-            (js-array (js-object :id "stdlib/core/protocol-impl.mjs" :program program))
-            "stdlib/core/protocol-impl.mjs" (js-object :literalModules libraries)))
+            (js-array (js-object :id "runtime/core/protocol-impl.mjs" :program program))
+            "runtime/core/protocol-impl.mjs" (js-object :literalModules libraries)))
           (lambda (error)
             (let ((diagnostic (get error :eliscriptDiagnostic)))
               (and (= (get diagnostic :code) "ELI-B0001")
                    (= (get diagnostic :phase) "managed-link")
                    (= (get diagnostic :message) "missing managed project module: runtime/core/protocol-error.mjs")))))
         (let ((linked (js-call (get backend :managed) :link_managed_project
-                (js-array (js-object :id "stdlib/core/protocol-impl.mjs" :program program))
-                "stdlib/core/protocol-impl.mjs" (js-object :literalModules libraries
-                  :hostModules (direct-protocol-host-declarations "stdlib/core/protocol-impl.mjs")))))
+                (js-array (js-object :id "runtime/core/protocol-impl.mjs" :program program))
+                "runtime/core/protocol-impl.mjs" (js-object :literalModules libraries
+                  :hostModules (direct-protocol-host-declarations "runtime/core/protocol-impl.mjs")))))
           (js-call assert :strictEqual (js-length (protocol-bridge-nodes (get linked :program))) 2))
         (js-call (js-array "renamed" "changed") :forEach (lambda (kind)
           (let* ((copy (globalThis.structuredClone program))
-                 (id (if (= kind "renamed") "user/core/protocol-impl.mjs" "stdlib/core/protocol-impl.mjs")))
+                 (id (if (= kind "renamed") "user/protocol-impl.mjs" "runtime/core/protocol-impl.mjs")))
             (when (= kind "changed")
               ;; IR programs are closed records with only body/filename.
               ;; Change a genuine source literal within that schema, so the
@@ -559,8 +559,8 @@
     (async ()
       (let* ((compiler (get backend :compiler))
              (libraries (get (await (js-call backend :loadLiteralModules)) :literalModules))
-             (source (await (readFile (resolve root "stdlib/core/protocol.eli") "utf8")))
-             (program (js-call compiler :compile_ir_string source "stdlib/core/protocol.eli"))
+             (source (await (readFile (resolve root "runtime/core/protocol-impl.eli") "utf8")))
+             (program (js-call compiler :compile_ir_string source "runtime/core/protocol-impl.eli"))
              (before (globalThis.structuredClone program))
              (consumer (js-call compiler :compile_ir_string definition-consumer "definition-consumer.eli"))
              (reference-program (globalThis.structuredClone program))
@@ -573,10 +573,10 @@
         (let* ((independent (await (loadReference (resolve directory "definition-consumer-reference.mjs")
                  (js-call compiler :emit_ir_string reference-consumer))))
                (actual (js-call (get backend :managed) :lower_managed_project
-                 (js-array (js-object :id "stdlib/core/protocol-impl.mjs" :program program)
-                   (js-object :id "stdlib/core/main.mjs" :program consumer)) "stdlib/core/main.mjs" runtime-ir
-                 (js-object :literalModules libraries :foreignEntry t :entries (js-array "stdlib/core/main.mjs")
-                   :hostModules (direct-protocol-host-declarations "stdlib/core/protocol-impl.mjs"))))
+                 (js-array (js-object :id "runtime/core/protocol-impl.mjs" :program program)
+                   (js-object :id "runtime/core/main.mjs" :program consumer)) "runtime/core/main.mjs" runtime-ir
+                 (js-object :literalModules libraries :foreignEntry t :entries (js-array "runtime/core/main.mjs")
+                   :hostModules (direct-protocol-host-declarations "runtime/core/protocol-impl.mjs"))))
                (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
                  (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
                  "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
@@ -585,10 +585,10 @@
             (js-call assert :strictEqual (js-length hosts) 1)
             (js-call assert :deepStrictEqual (aref hosts 0)
               (Object/assign (js-object)
-                (aref (direct-protocol-host-declarations "stdlib/core/protocol-impl.mjs") 0)
+                (aref (direct-protocol-host-declarations "runtime/core/protocol-impl.mjs") 0)
                 (js-object :edges (js-array (js-object
-                  :specifier "../../runtime/core/protocol-error.mjs"
-                  :referrer "stdlib/core/protocol-impl.mjs"
+                  :specifier "./protocol-error.mjs"
+                  :referrer "runtime/core/protocol-impl.mjs"
                   :allowedExports (js-array "ProtocolDispatchError") :namespace false))))))
           (exercise-definition independent)
           (let ((position 0))
@@ -596,7 +596,7 @@
               (let* ((target (aref targets position)) (adapter undefined) (handles (js-array)) (failed false)
                      (descriptor (get actual :descriptor))
                      (deployment (resolve directory "protocol-definition-project" target))
-                     (entry "stdlib/core/main.mjs")
+                     (entry "runtime/core/main.mjs")
                      (graph (createManagedModuleGraph descriptor))
                      (base (get (pathToFileURL (+ deployment "/")) :href))
                      (options (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 1

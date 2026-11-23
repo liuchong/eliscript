@@ -15,9 +15,9 @@ OUTPUT=$(
 )
 
 ENTRY="$TMP_DIR/build/examples/stdlib-cli/main.mjs"
-SEQUENCE="$TMP_DIR/build/stdlib/sequence.mjs"
-TEXT="$TMP_DIR/build/stdlib/text.mjs"
-OBJECT="$TMP_DIR/build/stdlib/object.mjs"
+SEQUENCE="$TMP_DIR/build/stdlib/portable/sequence.mjs"
+TEXT="$TMP_DIR/build/stdlib/portable/text.mjs"
+OBJECT="$TMP_DIR/build/stdlib/portable/object.mjs"
 MANIFEST="$TMP_DIR/build/eliscript-project.json"
 
 test "$OUTPUT" = "$ENTRY"
@@ -71,9 +71,9 @@ test -f "$OBJECT.map"
 test -f "$MANIFEST"
 grep -q '"entries":\["examples/stdlib-cli/main.mjs"\]' "$MANIFEST"
 grep -q '"digest":"[0-9a-f][0-9a-f]*"' "$MANIFEST"
-grep -q 'from "../../stdlib/sequence.mjs"' "$ENTRY"
-grep -q 'from "../../stdlib/text.mjs"' "$ENTRY"
-grep -q 'from "../../stdlib/object.mjs"' "$ENTRY"
+grep -q 'from "../../stdlib/portable/sequence.mjs"' "$ENTRY"
+grep -q 'from "../../stdlib/portable/text.mjs"' "$ENTRY"
+grep -q 'from "../../stdlib/portable/object.mjs"' "$ENTRY"
 ! grep -q '\.eli"' "$ENTRY"
 
 RESULT=$(bun run "$ENTRY")
@@ -90,9 +90,9 @@ NODE_OUTPUT=$(
 test "$NODE_OUTPUT" = "$TMP_DIR/node-build/examples/stdlib-cli/main.mjs"
 for artifact in \
   examples/stdlib-cli/main.mjs examples/stdlib-cli/main.mjs.map \
-  stdlib/sequence.mjs stdlib/sequence.mjs.map \
-  stdlib/text.mjs stdlib/text.mjs.map \
-  stdlib/object.mjs stdlib/object.mjs.map; do
+  stdlib/portable/sequence.mjs stdlib/portable/sequence.mjs.map \
+  stdlib/portable/text.mjs stdlib/portable/text.mjs.map \
+  stdlib/portable/object.mjs stdlib/portable/object.mjs.map; do
   cmp "$TMP_DIR/build/$artifact" "$TMP_DIR/node-build/$artifact"
 done
 
@@ -107,9 +107,9 @@ SEED_OUTPUT=$(
 test "$SEED_OUTPUT" = "$TMP_DIR/seed-build/examples/stdlib-cli/main.mjs"
 for artifact in \
   examples/stdlib-cli/main.mjs examples/stdlib-cli/main.mjs.map \
-  stdlib/sequence.mjs stdlib/sequence.mjs.map \
-  stdlib/text.mjs stdlib/text.mjs.map \
-  stdlib/object.mjs stdlib/object.mjs.map; do
+  stdlib/portable/sequence.mjs stdlib/portable/sequence.mjs.map \
+  stdlib/portable/text.mjs stdlib/portable/text.mjs.map \
+  stdlib/portable/object.mjs stdlib/portable/object.mjs.map; do
   cmp "$TMP_DIR/node-build/$artifact" "$TMP_DIR/seed-build/$artifact"
 done
 PUBLIC_MANIFEST="$TMP_DIR/node-build/eliscript-project.json" \
@@ -302,10 +302,10 @@ DIAGNOSTIC_FILE="$TMP_DIR/diagnostic-stderr" bun -e '
 PORTABLE_OUTPUT=$(
   cd "$PROJECT_DIR"
   "$PROJECT_DIR/bin/eliscript-build" \
-    --root "$PROJECT_DIR/stdlib" \
+    --root "$PROJECT_DIR/stdlib/portable" \
     --portable group-by \
     --out-dir "$TMP_DIR/portable" \
-    "$PROJECT_DIR/stdlib/data.eli"
+    "$PROJECT_DIR/stdlib/portable/data.eli"
 )
 
 PORTABLE_DATA="$TMP_DIR/portable/data.mjs"

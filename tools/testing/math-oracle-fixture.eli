@@ -103,11 +103,7 @@
            (unless (js-call visited :has id)
             (js-call visited :add id)
             (let* (
-                 (input-path (resolve root (cond
-                   ((= id "runtime/core/protocol-impl") "stdlib/core/protocol.eli")
-                   ((= id "runtime/core/text-impl") "stdlib/core/text.eli")
-                   ((= id "runtime/core/object-impl") "stdlib/core/object.eli")
-                   (t (str id ".eli"))))) (output-path (resolve root (str id ".mjs")))
+                 (input-path (resolve root (str id ".eli"))) (output-path (resolve root (str id ".mjs")))
                  (map-path (str output-path ".map")) (map-directory (dirname map-path))
                  (map-url (relative (dirname output-path) map-path))
                  (source-bytes (await (readFile input-path))) (source (js-call source-bytes :toString "utf8"))

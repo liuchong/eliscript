@@ -5,10 +5,10 @@
   (import "./helpers/portable-stdlib.mjs" withPortableLibraries pruneLibrary assertSourceMap be same contains excludes)
   (test "Eliscript-authored metadata is byte-identical and portable"
     (async () (await (withPortableLibraries
-      (js-object :module "metadata" :sources (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "metadata") :fixture "tests/fixtures/portable-metadata-host.mjs" :loader t :parallelHosts false)
+      (js-object :module "portable/metadata" :sources (js-array "bit" "persistent-list" "persistent-vector" "persistent-map" "persistent-set" "value" "portable/metadata") :fixture "tests/fixtures/portable-metadata-host.mjs" :loader t :parallelHosts false)
       (async (context)
         (let ((report (get context :report)))
       (same report (js-object "support" (js-object "list" t "vector" t "map" t "set" t "host" false) "metadata" (js-object "valid" t "invalid" false "unsupported" nil "invalidAttachment" nil "source" "portable" "variedLine" 9) "semantics" (js-object "equal" t "hashEqual" t "childMetadata" nil) "sharing" (js-object "list" t "vector" t "map" t "set" t) "updates" (js-object "list" t "vector" t "map" t "set" t) "hostValues" (js-object "list" (js-array 1 2 3) "vector" (js-array 1 2 3) "mapCount" 2 "setCount" 3)))
-      (await (assertSourceMap (get context :seedDirectory) "metadata" (js-array "(defportable with-meta" "(defportable vary-meta")))
+      (await (assertSourceMap (get context :seedDirectory) "portable/metadata" (js-array "(defportable with-meta" "(defportable vary-meta")))
         ))))) 90000)
 )

@@ -655,8 +655,8 @@
     (async ()
       (let* ((compiler (get backend :compiler))
              (state (js-call compiler :compile_ir_string
-               (await (readFile (resolve root "stdlib/managed-value-state.eli") "utf8"))
-               "stdlib/managed-value-state.eli"))
+               (await (readFile (resolve root "runtime/managed/managed-value-state.eli") "utf8"))
+               "runtime/managed/managed-value-state.eli"))
              (helpers (js-call (get (aref (get state :body) 0) :children) :filter
                (lambda (node) (and (= (get node :kind) "function-declaration")
                  (js-call (js-array "avalancheHash" "mixHash" "finishHash" "hashString")
@@ -719,8 +719,8 @@
     (async ()
       (let* ((compiler (get backend :compiler))
              (wire (js-call compiler :compile_ir_string
-               (await (readFile (resolve root "stdlib/managed-wire-http-rpc.eli") "utf8"))
-               "stdlib/managed-wire-http-rpc.eli"))
+               (await (readFile (resolve root "runtime/managed/managed-wire-http-rpc.eli") "utf8"))
+               "runtime/managed/managed-wire-http-rpc.eli"))
              (helpers (js-call (get (aref (get wire :body) 0) :children) :filter
                (lambda (node) (and (= (get node :kind) "function-declaration")
                  (js-call (js-array "fail" "instance?") :includes (get node :value))))))

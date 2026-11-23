@@ -141,7 +141,7 @@
         :forEach (lambda (specifier)
           (js-call (expect (lambda () (validateImportRecords
             (js-array (Object/assign (js-object) record (js-object :specifier specifier))) contract))) :toThrow)))
-      (js-call (js-array "runtime/core/unlisted.mjs" "tools/unrelated.mjs" "stdlib/core/protocol.eli") :forEach (lambda (file)
+      (js-call (js-array "runtime/core/unlisted.mjs" "tools/unrelated.mjs" "stdlib/protocol.eli") :forEach (lambda (file)
         (js-call (expect (lambda () (validateImportRecords
           (js-array (Object/assign (js-object) record (js-object :file file))) contract))) :toThrow "outside its allowed boundary")))))
 ))

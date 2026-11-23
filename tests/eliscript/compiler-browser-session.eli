@@ -396,7 +396,7 @@
   (register "runtime source identity binds the complete explicit library input while ordinary compile identity remains stable"
     (async ()
       (let* ((source "\uFEFF(module runtime (defun value () \"中😀\"))")
-             (library (js-object :id "runtime/core/value.mjs" :filename "stdlib/managed-runtime-value.eli" :source "\uFEFF(module values (defun value () \"é😀\"))"))
+             (library (js-object :id "runtime/core/value.mjs" :filename "runtime/managed/managed-runtime-value.eli" :source "\uFEFF(module values (defun value () \"é😀\"))"))
              (request (js-object :operation "runtime" :source source :filename "bootstrap/runtime/memory.eli" :literalSources (js-array library)))
              (before (JSON/stringify request)) (identity (await (compilerSourceIdentity request)))
              (changes (js-array (merge library (js-object :id "runtime/core/other.mjs")) (merge library (js-object :filename "stdlib/renamed-value.eli"))
@@ -411,7 +411,7 @@
           (setq index (1+ index)))
         (js-call assert :notStrictEqual (await (compilerSourceIdentity (merge request (js-object :source (js-call source :slice 1))))) identity)
         (let* ((omitted (js-object :operation "runtime" :source source :filename (get request :filename)))
-               (second (js-object :id "runtime/core/list.mjs" :filename "stdlib/managed-runtime-list.eli" :source "(module list)"))
+               (second (js-object :id "runtime/core/list.mjs" :filename "runtime/managed/managed-runtime-list.eli" :source "(module list)"))
                (options (merge request (js-object :target "native" :nativeTarget "arm64-linux" :memory (js-object :initialPages 4 :maximumPages 1024)
                  :options (js-object :debug t) :sourceMap (js-object :generatedFile "ignored.mjs")))))
           (js-call assert :notStrictEqual (await (compilerSourceIdentity omitted)) (await (compilerSourceIdentity (merge omitted (js-object :literalSources (js-array))))))

@@ -30,35 +30,35 @@
   (test "generated library API index matches every declared module and export"
     (async ()
       (let ((index (await (buildApiIndex (js-object :root ROOT)))))
-        (js-call (expect (get index :moduleCount)) :toBe 46)
+        (js-call (expect (get index :moduleCount)) :toBe 45)
         (js-call (expect (get index :exportCount)) :toBe 601)
-        (js-call (expect (get (named-module index "core-protocol") :exports)) :toContain "read-external-protocol-method")
-        (js-call (expect (named-module index "core-regex")) :toEqual
-          (expected-module "core-regex" "stdlib/core/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"
+        (js-call (expect (get (named-module index "protocol") :exports)) :toContain "read-external-protocol-method")
+        (js-call (expect (named-module index "regex")) :toEqual
+          (expected-module "regex" "stdlib/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"
             "Immutable regular-expression patterns, capture-aware matching, memoized lazy scanning, and literal or callback replacement."
             (js-array "re-find" "re-matches" "re-replace" "re-seq" "regex" "regex-flags" "regex-source" "regex?")))
-        (js-call (expect (named-module index "deferred")) :toEqual
-          (expected-module "deferred" "stdlib/deferred.eli" "0161" "specs/0161-deferred-and-memoized-computation.md" "state"
-            "Synchronous delayed computation and value-semantic function memoization."
-            (js-array "delay" "delay?" "force" "memoize" "realized?")))
-        (js-call (expect (named-module index "core-walk")) :toEqual
-          (expected-module "core-walk" "stdlib/core/walk.eli" "0173" "specs/0173-persistent-tree-walk.md" "runtime-core"
+        (js-call (expect (named-module index "state")) :toEqual
+          (expected-module "state" "stdlib/state.eli" "0072" "specs/0072-atomic-state-references.md" "state"
+            "Synchronous atomic references with value-pair transitions, compare-and-set, validators, ordered watches, delayed computations, and memoization."
+            (js-array "add-watch" "atom" "atom?" "compare-and-set!" "delay" "delay?" "deref" "force" "get-validator" "memoize" "realized?" "remove-watch" "reset!" "reset-vals!" "set-validator!" "swap!" "swap-vals!")))
+        (js-call (expect (named-module index "walk")) :toEqual
+          (expected-module "walk" "stdlib/walk.eli" "0173" "specs/0173-persistent-tree-walk.md" "runtime-core"
             "Stack-safe pre-order and post-order traversal and rewriting of nested persistent values."
             (js-array "postwalk" "postwalk-replace" "prewalk" "prewalk-replace" "walk")))
-        (js-call (expect (named-module index "core-zipper")) :toEqual
-          (expected-module "core-zipper" "stdlib/core/zipper.eli" "0174" "specs/0174-persistent-zipper-navigation.md" "runtime-core"
+        (js-call (expect (named-module index "zipper")) :toEqual
+          (expected-module "zipper" "stdlib/zipper.eli" "0174" "specs/0174-persistent-zipper-navigation.md" "runtime-core"
             "Immutable tree locations for stack-safe navigation, editing, and persistent root reconstruction."
             (js-array "append-child" "branch?" "children" "down" "edit" "end?" "insert-child" "insert-left" "insert-right"
               "left" "leftmost" "lefts" "list-zipper" "make-node" "next" "node" "path" "prev" "remove" "replace"
               "right" "rightmost" "rights" "root" "up" "vector-zipper" "zipper" "zipper?")))
-        (js-call (expect (named-module index "core-sorted")) :toEqual
-          (expected-module "core-sorted" "stdlib/core/sorted.eli" "0175" "specs/0175-persistent-sorted-collections.md" "runtime-core"
+        (js-call (expect (named-module index "sorted")) :toEqual
+          (expected-module "sorted" "stdlib/sorted.eli" "0175" "specs/0175-persistent-sorted-collections.md" "runtime-core"
             "Persistent AVL Maps and Sets with custom comparators, reversible traversal, and bounded range queries."
             (js-array "comparator" "empty-sorted-map" "empty-sorted-map-by" "empty-sorted-set" "empty-sorted-set-by" "rsubseq"
               "sorted-map" "sorted-map-by" "sorted-map?" "sorted-seq" "sorted-seq-from" "sorted-set" "sorted-set-by"
               "sorted-set?" "sorted?" "subseq")))
-        (js-call (expect (named-module index "core-lazy-sequence")) :toEqual
-          (expected-module "core-lazy-sequence" "stdlib/core/lazy-sequence.eli" "0176" "specs/0176-memoized-lazy-sequences.md" "runtime-core"
+        (js-call (expect (named-module index "lazy-sequence")) :toEqual
+          (expected-module "lazy-sequence" "stdlib/lazy-sequence.eli" "0176" "specs/0176-memoized-lazy-sequences.md" "runtime-core"
             "Demand-driven memoized sequences, deferred recursive tails, direct lazy transformations, and realization inspection."
             (js-array "lazy-cons" "lazy-dedupe" "lazy-distinct" "lazy-drop" "lazy-drop-while" "lazy-filter" "lazy-interpose"
               "lazy-keep" "lazy-keep-indexed" "lazy-map" "lazy-map-indexed" "lazy-mapcat" "lazy-partition-all" "lazy-partition-by"
@@ -92,9 +92,9 @@
   (test "library API metadata must match specification stability"
     (async ()
       (let ((metadata (await (read-json "contracts/library-api.json"))))
-        (put (named-module metadata "sequence") :stability "accepted")
+        (put (named-module metadata "portable-sequence") :stability "accepted")
         (js-call (expect (await (validation-errors metadata))) :toContain
-          "sequence stability must match specification 0023 status stable"))))
+          "portable-sequence stability must match specification 0023 status stable"))))
   (test "library API metadata rejects an unknown owning specification"
     (async ()
       (let ((metadata (await (read-json "contracts/library-api.json"))))

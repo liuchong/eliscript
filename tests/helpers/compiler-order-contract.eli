@@ -3,7 +3,7 @@
   ;; Compare UTF16 code units, deliberately independent of Lisp/locale ordering.
   (defconst native-order (js* "(left, right) => left < right ? -1 : left > right ? 1 : 0"))
   (defun transientSource (left right)
-    (str "(import \"./stdlib/core/transient.mjs\" transient) (defasync build (source promise) (let (("
+    (str "(import \"./stdlib/transient.mjs\" transient) (defasync build (source promise) (let (("
       left " (transient source)) (" right " (transient source))) (await promise) nil))"))
   (defun nodes (node)
     (js-call (js-array node) :concat

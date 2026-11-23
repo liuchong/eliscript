@@ -10,7 +10,7 @@
 ## Summary
 
 The maintained protocol production implementation is
-`stdlib/core/protocol.eli`. Its checked-in ESM and Source Map artifacts are
+`runtime/core/protocol-impl.eli`. Its checked-in ESM and Source Map artifacts are
 `runtime/core/protocol-impl.mjs` and
 `runtime/core/protocol-impl.mjs.map`. The seed compiler generates these
 artifacts, and the self-hosted compiler must reach the same bytes.
@@ -65,7 +65,7 @@ implementation.
 
 ## Acceptance Criteria
 
-- **GPR-01:** `stdlib/core/protocol.eli` is the only maintained source of
+- **GPR-01:** `runtime/core/protocol-impl.eli` is the only maintained source of
   protocol definition, registration, dispatch, and implementation-query policy.
 - **GPR-02:** The package exposes one deterministic command that regenerates
   the committed protocol ESM and Source Map.

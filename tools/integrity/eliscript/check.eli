@@ -262,9 +262,9 @@
             (setq index (1+ index)))
           (js-call (js-array
             (js-array "tools/project/project.eli" "bootstrap/host/project.mjs")
-            (js-array "stdlib/core/object.eli" "runtime/core/object-impl.mjs")
-            (js-array "stdlib/core/protocol.eli" "runtime/core/protocol-impl.mjs")
-            (js-array "stdlib/core/text.eli" "runtime/core/text-impl.mjs")) :forEach
+            (js-array "runtime/core/object-impl.eli" "runtime/core/object-impl.mjs")
+            (js-array "runtime/core/protocol-impl.eli" "runtime/core/protocol-impl.mjs")
+            (js-array "runtime/core/text-impl.eli" "runtime/core/text-impl.mjs")) :forEach
             (lambda (pair)
               (when (js-call known :has (aref pair 0))
                 (js-call known :add (aref pair 1)))))

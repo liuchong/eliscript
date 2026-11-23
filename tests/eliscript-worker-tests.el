@@ -444,8 +444,8 @@
                      3))
           (let ((entry
                  (eliscript-index-session-module session))
-                (data (expand-file-name "stdlib/data.mjs" directory))
-                (object (expand-file-name "stdlib/object.mjs" directory)))
+                (data (expand-file-name "stdlib/portable/data.mjs" directory))
+                (object (expand-file-name "stdlib/portable/object.mjs" directory)))
             (should (string-suffix-p
                      "examples/emacs-index/index.mjs" entry))
             (dolist (module (list entry data object))
