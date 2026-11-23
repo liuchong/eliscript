@@ -10,6 +10,7 @@
   (defconst cacheFormat "eliscript-project-cache")
   (defconst hostDirectory (dirname (fileURLToPath (js* "import.meta.url"))))
   (defconst sha256-pattern (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))
+  (defvar cachedCoreBarrelExportMap undefined)
 
   (defun host-typeof (value)
     (js* "typeof value"))
@@ -594,32 +595,204 @@
                   :reason "verified")
                 undefined))))))
 
-  (defun standardPlan (compiler entries root outDir sourceCache programCache records decisions sourceOverrides macroContext macroDependencies)
-    (js-call compiler :project_plan
-      entries
-      (lambda (source)
-        (let ((cached
-                (cachedModule
-                  (js-object
-                    :compiler compiler
-                    :source source
-                    :root root
-                    :outDir outDir
-                    :record (js-call records :get (relative root source))
-                    :expectedPortableEntries (js-array)
-                    :expectedMacroDependencies macroDependencies))))
-          (js-call decisions :set source cached)
-          (if (not (undefined? (get cached :module)))
-            (get (get cached :module) :dependencies)
-            (let* ((overrideText (js-call sourceOverrides :get source))
-                   (sourceText (if (not (undefined? overrideText))
-                                 overrideText
-                                 (readFileSync source "utf8")))
-                   (program (js-call compiler :compile_ir_string sourceText source macroContext)))
-              (js-call sourceCache :set source sourceText)
-              (js-call programCache :set source program)
-              (js-call (projectImports program source root false) :map
-                (lambda (imp) (get imp :dependency)))))))))
+  (defun loadCoreBarrelExportMap (compiler)
+    (when (undefined? cachedCoreBarrelExportMap)
+      (let ((corePath (resolve hostDirectory "../../stdlib/core.eli")))
+        (setq cachedCoreBarrelExportMap
+          (try
+            (let* ((coreText (readFileSync corePath "utf8"))
+                   (coreProgram (js-call compiler :compile_ir_string coreText corePath))
+                   (analyzed (js-call compiler :analyze_pure_barrel coreProgram)))
+              (if analyzed analyzed nil))
+            (catch _err nil)))))
+    cachedCoreBarrelExportMap)
+
+  (defun mergeDemand (requests source incoming)
+    (let ((existing (js-call requests :get source)))
+      (cond
+        ((= existing "*") false)
+        ((= incoming "*")
+         (js-call requests :set source "*")
+         t)
+        ((undefined? existing)
+         (let ((created (new globalThis.Set)))
+           (js-call incoming :forEach (lambda (n) (js-call created :add n)))
+           (js-call requests :set source created)
+           t))
+        (t
+         (let ((changed false))
+           (js-call incoming :forEach
+             (lambda (n)
+               (unless (js-call existing :has n)
+                 (js-call existing :add n)
+                 (setq changed t))))
+           changed)))))
+
+  (defun standardPlan (compiler entries root outDir sourceCache programCache records decisions sourceOverrides macroContext macroDependencies &optional treeShake)
+    (if (not treeShake)
+      (js-call compiler :project_plan
+        entries
+        (lambda (source)
+          (let ((cached
+                  (cachedModule
+                    (js-object
+                      :compiler compiler
+                      :source source
+                      :root root
+                      :outDir outDir
+                      :record (js-call records :get (relative root source))
+                      :expectedPortableEntries (js-array)
+                      :expectedMacroDependencies macroDependencies))))
+            (js-call decisions :set source cached)
+            (if (not (undefined? (get cached :module)))
+              (get (get cached :module) :dependencies)
+              (let* ((overrideText (js-call sourceOverrides :get source))
+                     (sourceText (if (not (undefined? overrideText))
+                                   overrideText
+                                   (readFileSync source "utf8")))
+                     (program (js-call compiler :compile_ir_string sourceText source macroContext)))
+                (js-call sourceCache :set source sourceText)
+                (js-call programCache :set source program)
+                (js-call (projectImports program source root false) :map
+                  (lambda (imp) (get imp :dependency))))))))
+      (let* ((coreExportMap (loadCoreBarrelExportMap compiler))
+             (requests (new globalThis.Map))
+             (pending (new globalThis.Set))
+             (compiledRaw (new globalThis.Map))
+             (forceCompile (new globalThis.Set))
+             (recordMap (new globalThis.Map))
+             (iterations 0))
+        (js-call entries :forEach
+          (lambda (entry)
+            (js-call requests :set entry "*")
+            (js-call pending :add entry)))
+        (while (> (get pending :size) 0)
+          (setq iterations (+ iterations 1))
+          (when (> iterations 10000)
+            (projectError "project graph exceeded the planning iteration limit"))
+          (let* ((ordered (js-call (Array/from pending) :sort))
+                 (source (aref ordered 0)))
+            (js-call pending :delete source)
+            (let* ((demand (js-call requests :get source))
+                   (existingDecision (js-call decisions :get source))
+                   (cached (if (js-call forceCompile :has source)
+                             undefined
+                             (or existingDecision
+                                 (let ((c
+                                         (cachedModule
+                                           (js-object
+                                             :compiler compiler
+                                             :source source
+                                             :root root
+                                             :outDir outDir
+                                             :record (js-call records :get (relative root source))
+                                             :expectedPortableEntries (js-array)
+                                             :expectedMacroDependencies macroDependencies))))
+                                   (js-call decisions :set source c)
+                                   c)))))
+              (if (and cached (not (undefined? (get cached :module))))
+                (let ((deps (get (get cached :module) :dependencies))
+                      (d-idx 0))
+                  (js-call recordMap :set source
+                    (Object/freeze (js-object :id source :dependencies (Object/freeze deps))))
+                  (while (< d-idx (js-length deps))
+                    (let ((dep (aref deps d-idx)))
+                      (when (mergeDemand requests dep "*")
+                        (unless (js-call recordMap :has dep)
+                          (js-call pending :add dep))))
+                    (setq d-idx (+ d-idx 1))))
+                (let* ((rawInfo
+                         (or (js-call compiledRaw :get source)
+                             (let* ((overrideText (js-call sourceOverrides :get source))
+                                    (sourceText (if (not (undefined? overrideText))
+                                                  overrideText
+                                                  (readFileSync source "utf8")))
+                                    (parsedProgram (js-call compiler :compile_ir_string sourceText source macroContext))
+                                    (coreRewritten (if coreExportMap
+                                                     (js-call compiler :rewrite_package_barrel_imports
+                                                       parsedProgram "eliscript/core" coreExportMap "eliscript/")
+                                                     parsedProgram))
+                                    (barrelMap (js-call compiler :analyze_pure_barrel coreRewritten))
+                                    (info (js-object
+                                            :sourceText sourceText
+                                            :rawProgram coreRewritten
+                                            :barrelMap barrelMap)))
+                               (js-call sourceCache :set source sourceText)
+                               (js-call compiledRaw :set source info)
+                               info)))
+                       (effectiveProgram
+                         (if (and (get rawInfo :barrelMap) (not (= demand "*")))
+                           (js-call compiler :prune_barrel_program (get rawInfo :rawProgram) (Array/from demand))
+                           (get rawInfo :rawProgram)))
+                       (imports (projectImports effectiveProgram source root false))
+                       (deps (js-call (Array/from (new globalThis.Set
+                                        (js-call imports :map (lambda (imp) (get imp :dependency)))))
+                               :sort)))
+                  (when (js-call forceCompile :has source)
+                    (js-call decisions :set source
+                      (js-object :decision (js-object :reused false :reason "barrel-demand-changed") :module undefined)))
+                  (js-call programCache :set source effectiveProgram)
+                  (js-call recordMap :set source
+                    (Object/freeze (js-object :id source :dependencies (Object/freeze deps))))
+                  (let ((i-idx 0))
+                    (while (< i-idx (js-length imports))
+                      (let* ((imp (aref imports i-idx))
+                             (dep (get imp :dependency))
+                             (impNode (get imp :node))
+                             (children (or (get impNode :children) (js-array)))
+                             (allNamed (and (> (js-length children) 0)
+                                            (js-call children :every
+                                              (lambda (c) (= (get c :kind) "import-named")))))
+                             (childDemand (if allNamed
+                                            (js-call children :map (lambda (c) (get c :value)))
+                                            "*")))
+                        (let ((widened (mergeDemand requests dep childDemand)))
+                          (cond
+                            ((not (js-call recordMap :has dep))
+                             (js-call pending :add dep))
+                            (widened
+                             (let ((depDecision (js-call decisions :get dep)))
+                               (if (and depDecision (not (undefined? (get depDecision :module))))
+                                 (let* ((dOverride (js-call sourceOverrides :get dep))
+                                        (dText (if (not (undefined? dOverride)) dOverride (readFileSync dep "utf8")))
+                                        (dProg (js-call compiler :compile_ir_string dText dep macroContext))
+                                        (dRewritten (if coreExportMap
+                                                      (js-call compiler :rewrite_package_barrel_imports
+                                                        dProg "eliscript/core" coreExportMap "eliscript/")
+                                                      dProg))
+                                        (dBarrel (js-call compiler :analyze_pure_barrel dRewritten)))
+                                   (when dBarrel
+                                     (js-call sourceCache :set dep dText)
+                                     (js-call compiledRaw :set dep
+                                       (js-object :sourceText dText :rawProgram dRewritten :barrelMap dBarrel))
+                                     (js-call forceCompile :add dep)
+                                     (js-call pending :add dep)))
+                                 (let ((dRaw (js-call compiledRaw :get dep)))
+                                   (when (and dRaw (get dRaw :barrelMap))
+                                     (js-call pending :add dep)))))))))
+                      (setq i-idx (+ i-idx 1)))))))))
+        (let* ((reachable (new globalThis.Set))
+               (walk (Array/from entries)))
+          (while (> (js-length walk) 0)
+            (let ((cur (js-call walk :pop)))
+              (unless (js-call reachable :has cur)
+                (js-call reachable :add cur)
+                (let ((rec (js-call recordMap :get cur)))
+                  (when rec
+                    (js-call (get rec :dependencies) :forEach
+                      (lambda (d) (js-call walk :push d))))))))
+          (let ((finalModules (js-array))
+                (keys (js-call (Array/from reachable) :sort))
+                (k-idx 0))
+            (while (< k-idx (js-length keys))
+              (js-call finalModules :push (js-call recordMap :get (aref keys k-idx)))
+              (setq k-idx (+ k-idx 1)))
+            (Object/freeze
+              (js-object
+                :format "eliscript-project-plan"
+                :mode "standard"
+                :entries (Object/freeze (Array/from entries))
+                :modules (Object/freeze finalModules))))))))
 
   (defun portablePlan (compiler entry entries root sourceCache programCache sourceOverrides macroContext)
     (js-call compiler :portable_project_plan
@@ -673,7 +846,7 @@
           (unless (js-call plannedSources :has source)
             (projectError "project source override is outside the project graph" source))))))
 
-  (defun checkStandardPlan (compiler entries root sourceOverrides macroContext)
+  (defun checkStandardPlan (compiler entries root sourceOverrides macroContext &optional sourceCache)
     (js-call compiler :project_plan
       entries
       (lambda (source)
@@ -682,10 +855,12 @@
                              overrideText
                              (readFileSync source "utf8")))
                (program (js-call compiler :compile_ir_string sourceText source macroContext)))
+          (when sourceCache
+            (js-call sourceCache :set source sourceText))
           (js-call (projectImports program source root false) :map
             (lambda (imp) (get imp :dependency)))))))
 
-  (defun checkPortablePlan (compiler entry entries root sourceOverrides macroContext)
+  (defun checkPortablePlan (compiler entry entries root sourceOverrides macroContext &optional sourceCache)
     (js-call compiler :portable_project_plan
       (js-array (js-object :id entry :entries entries))
       (lambda (source requestedEntries)
@@ -699,6 +874,8 @@
                    requestedEntries
                    source
                    macroContext)))
+          (when sourceCache
+            (js-call sourceCache :set source sourceText))
           (js-call (projectImports program source root t) :map
             (lambda (dependency)
               (js-object
@@ -759,9 +936,11 @@
         (let* ((macro (macroInputs request root (aref entries 0)))
                (sourceOverrides (sourceOverridesOption (get options :sourceOverrides) root))
                (portableEntries (Array/from (get request :portableEntries)))
+               (sourceCache (new globalThis.Map))
+               (lintEnabled (globalThis.Boolean (get options :lint)))
                (plan (if (> (js-length portableEntries) 0)
-                       (checkPortablePlan compiler (aref entries 0) portableEntries root sourceOverrides (get macro :context))
-                       (checkStandardPlan compiler entries root sourceOverrides (get macro :context)))))
+                       (checkPortablePlan compiler (aref entries 0) portableEntries root sourceOverrides (get macro :context) sourceCache)
+                       (checkStandardPlan compiler entries root sourceOverrides (get macro :context) sourceCache))))
           (validateSourceOverrides sourceOverrides plan)
           (let* ((mode (get plan :mode))
                  (modules
@@ -780,25 +959,65 @@
                            (if (undefined? (get record :entries))
                              (js-array)
                              (Array/from (get record :entries)))))))
-                 (report
+                 (diagnostics
+                   (if lintEnabled
+                     (let ((collected (js-array))
+                           (m-idx 0))
+                       (while (< m-idx (js-length (get plan :modules)))
+                         (let* ((record (aref (get plan :modules) m-idx))
+                                (mod-id (get record :id))
+                                (mod-src (if (js-call sourceCache :has mod-id)
+                                           (js-call sourceCache :get mod-id)
+                                           (readFileSync mod-id "utf8")))
+                                (found (js-call compiler :lint_string mod-src mod-id (get options :lintOptions))))
+                           (when (Array/isArray found)
+                             (js-call found :forEach (lambda (d) (js-call collected :push d)))))
+                         (setq m-idx (+ m-idx 1)))
+                       (js-call collected :sort
+                         (lambda (left right)
+                           (let* ((ll (get left :location))
+                                  (lr (get right :location))
+                                  (fl (if ll (get ll :file) ""))
+                                  (fr (if lr (get lr :file) ""))
+                                  (sl (and ll (get ll :start)))
+                                  (sr (and lr (get lr :start)))
+                                  (ol (if sl (get sl :offset) 0))
+                                  (or_ (if sr (get sr :offset) 0)))
+                             (cond
+                               ((/= fl fr) (if (< fl fr) -1 1))
+                               ((/= ol or_) (- ol or_))
+                               ((/= (get left :code) (get right :code))
+                                (if (< (get left :code) (get right :code)) -1 1))
+                               (t 0)))))
+                       (Object/freeze collected))
+                     undefined))
+                 (baseReport
                    (js-call compiler :project_check_report
                      (js-object
                        :mode mode
                        :root root
                        :entries (js-call entries :map (lambda (entry) (relative root entry)))
                        :portableEntries portableEntries
-                       :modules modules))))
-            (Object/freeze
-              (js-object
-                :format "eliscript-project-check"
-                :root root
-                :entries (Object/freeze entries)
-                :mode mode
-                :portableEntries (Object/freeze portableEntries)
-                :macroCapabilities (get request :macroCapabilities)
-                :macroFileDependencies (Object/freeze (get macro :dependencies))
-                :report report
-                :plan plan)))))))
+                       :modules modules)))
+                 (report
+                   (if lintEnabled
+                     (Object/freeze
+                       (Object/assign (js-object) baseReport (js-object :diagnostics diagnostics)))
+                     baseReport)))
+            (let ((out
+                    (js-object
+                      :format "eliscript-project-check"
+                      :root root
+                      :entries (Object/freeze entries)
+                      :mode mode
+                      :portableEntries (Object/freeze portableEntries)
+                      :macroCapabilities (get request :macroCapabilities)
+                      :macroFileDependencies (Object/freeze (get macro :dependencies))
+                      :report report
+                      :plan plan)))
+              (when lintEnabled
+                (put out :diagnostics diagnostics))
+              (Object/freeze out)))))))
 
   (defasync buildProject (options)
     (let ((startedAt (js-call performance :now)))
@@ -873,11 +1092,13 @@
                 (mkdirSync requestedOutDir (js-object :recursive t))))
             (let* ((outDir (realpathSync requestedOutDir))
                    (sourceMapReference (not (= (get options :sourceMapReference) false)))
+                   (treeShake (not (= (get options :treeShake) false)))
                    (useCache
                      (globalThis.Boolean
                        (and (get request :useCache)
                             (= (get sourceOverrides :size) 0)
-                            sourceMapReference)))
+                            sourceMapReference
+                            treeShake)))
                    (compilerDigest
                      (if (undefined? (get options :compiler))
                        (compilerDirectoryDigest moduleDirectory)
@@ -905,7 +1126,7 @@
                    (plan
                      (if (= mode "portable")
                        (portablePlan compiler (aref entries 0) requestedPortableEntries root sourceCache programCache sourceOverrides (get macro :context))
-                       (standardPlan compiler entries root outDir sourceCache programCache records decisions sourceOverrides (get macro :context) (get macro :dependencies)))))
+                       (standardPlan compiler entries root outDir sourceCache programCache records decisions sourceOverrides (get macro :context) (get macro :dependencies) treeShake))))
               (validateSourceOverrides sourceOverrides plan)
               (validateOutputIsolation
                 (js-object

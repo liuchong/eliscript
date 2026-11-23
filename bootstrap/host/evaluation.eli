@@ -19,6 +19,11 @@
   (defconst evaluationCompilerDigest
     (js-call (js-call (createHash "sha256") :update "eliscript-evaluation-session") :digest "hex"))
 
+  (defconst tapHostSymbol (js-call globalThis.Symbol :for "eliscript.tap.host"))
+  (defconst replOnceSymbol (js-call globalThis.Symbol :for "eliscript.repl.once"))
+  (defvar evaluationSessionCounter 0)
+  (defvar cachedApiIndex nil)
+
   (defun host-typeof (value)
     (js* "typeof value"))
 
@@ -146,6 +151,451 @@
         (let ((out (remapPoint location adjustment)))
           (put out :file (get adjustment :filename))
           out))))
+
+  (defconst mjs-frame-global-pattern (new globalThis.RegExp "(?:file:\\/\\/)?([^\\s()?]+\\.mjs)(?:[?#][^\\s():]*)?:(\\d+):(\\d+)" "gu"))
+  (defconst eli-frame-global-pattern (new globalThis.RegExp "(?:file:\\/\\/)?([^\\s()]+\\.eli):(\\d+):(\\d+)" "gu"))
+
+  (defun resolveMjsFrameLocation (generatedFile rawLine rawColumn)
+    (let ((mapFile (str (globalThis.decodeURIComponent (js-call generatedFile :trim)) ".map")))
+      (if (not (existsSync mapFile))
+        nil
+        (try
+          (let* ((sourceMap (new SourceMap (JSON/parse (readFileSync mapFile "utf8"))))
+                 (entry (js-call sourceMap :findEntry (- rawLine 1) (- rawColumn 1))))
+            (if (not (and entry (get entry :originalSource)))
+              nil
+              (let* ((orig (get entry :originalSource))
+                     (originalSource (if (js-call orig :startsWith "file://")
+                                       (fileURLToPath orig)
+                                       orig)))
+                (js-object
+                  :file (if (isAbsolute originalSource)
+                          originalSource
+                          (resolve (dirname mapFile) originalSource))
+                  :line (+ (get entry :originalLine) 1)
+                  :column (+ (get entry :originalColumn) 1)))))
+          (catch _err nil)))))
+
+  (defun formatStackTrace (error &optional adjustment)
+    (if (not error)
+      "No recent exception."
+      (let* ((stack (if (= (host-typeof (get error :stack)) "string")
+                      (get error :stack)
+                      (str (if (host-error-instance? error) (get error :message) (globalThis.String error)))))
+             (lines (js-call stack :split "\n"))
+             (out (js-array))
+             (idx 0))
+        (while (< idx (js-length lines))
+          (let ((line (aref lines idx)))
+            (setq line
+              (js-call line :replace mjs-frame-global-pattern
+                (lambda (full file lineStr colStr)
+                  (let ((mapped (resolveMjsFrameLocation file (globalThis.Number lineStr) (globalThis.Number colStr))))
+                    (if (not mapped)
+                      full
+                      (let ((remapped (remapLocation mapped adjustment)))
+                        (str (get remapped :file) ":" (get remapped :line) ":" (get remapped :column))))))))
+            (setq line
+              (js-call line :replace eli-frame-global-pattern
+                (lambda (full file lineStr colStr)
+                  (let ((remapped
+                          (remapLocation
+                            (js-object :file file :line (globalThis.Number lineStr) :column (globalThis.Number colStr))
+                            adjustment)))
+                    (str (get remapped :file) ":" (get remapped :line) ":" (get remapped :column))))))
+            (js-call out :push line))
+          (setq idx (+ idx 1)))
+        (js-call out :join "\n"))))
+
+  (defun loadApiMetadata ()
+    (when (nil? cachedApiIndex)
+      (let ((indexPath (join projectDirectory "docs" "pages" "api-index.json"))
+            (fallbackPath (join projectDirectory "contracts" "library-api.json")))
+        (setq cachedApiIndex
+          (try
+            (cond
+              ((existsSync indexPath) (JSON/parse (readFileSync indexPath "utf8")))
+              ((existsSync fallbackPath) (JSON/parse (readFileSync fallbackPath "utf8")))
+              (t (js-object :modules (js-array))))
+            (catch _err (js-object :modules (js-array)))))))
+    cachedApiIndex)
+
+  (defun scanWhitespaceOrComment (source start)
+    (let ((pos start)
+          (len (js-length source))
+          (done false))
+      (while (and (not done) (< pos len))
+        (let ((ch (aref source pos)))
+          (cond
+            ((or (= ch " ") (= ch "\t") (= ch "\n") (= ch "\r") (= ch ","))
+             (setq pos (+ pos 1)))
+            ((= ch ";")
+             (while (and (< pos len) (not (= (aref source pos) "\n")))
+               (setq pos (+ pos 1))))
+            (t (setq done t)))))
+      pos))
+
+  (defun scanBalancedForm (source start)
+    (let ((len (js-length source)))
+      (if (>= start len)
+        start
+        (let ((ch (aref source start)))
+          (cond
+            ((or (= ch "(") (= ch "[") (= ch "{"))
+             (let ((depth 0)
+                   (pos start)
+                   (inString false)
+                   (done false))
+               (while (and (not done) (< pos len))
+                 (let ((c (aref source pos)))
+                   (cond
+                     (inString
+                      (cond
+                        ((= c "\\") (setq pos (+ pos 2)))
+                        ((= c "\"") (setq inString false) (setq pos (+ pos 1)))
+                        (t (setq pos (+ pos 1)))))
+                     ((= c "\"")
+                      (setq inString t)
+                      (setq pos (+ pos 1)))
+                     ((= c ";")
+                      (while (and (< pos len) (not (= (aref source pos) "\n")))
+                        (setq pos (+ pos 1))))
+                     ((or (= c "(") (= c "[") (= c "{"))
+                      (setq depth (+ depth 1))
+                      (setq pos (+ pos 1)))
+                     ((or (= c ")") (= c "]") (= c "}"))
+                      (setq depth (- depth 1))
+                      (setq pos (+ pos 1))
+                      (when (= depth 0)
+                        (setq done t)))
+                     (t (setq pos (+ pos 1))))))
+               pos))
+            ((= ch "\"")
+             (let ((pos (+ start 1))
+                   (done false))
+               (while (and (not done) (< pos len))
+                 (let ((c (aref source pos)))
+                   (cond
+                     ((= c "\\") (setq pos (+ pos 2)))
+                     ((= c "\"") (setq pos (+ pos 1)) (setq done t))
+                     (t (setq pos (+ pos 1))))))
+               pos))
+            (t
+             (let ((pos start))
+               (while (and (< pos len)
+                           (not (js-call (new globalThis.RegExp "[\\s()\\[\\]{}\";]" "u") :test (aref source pos))))
+                 (setq pos (+ pos 1)))
+               pos)))))))
+
+  (defun countLinesUpTo (source offset)
+    (let ((lines 1)
+          (pos 0)
+          (limit (Math/min offset (js-length source))))
+      (while (< pos limit)
+        (when (= (aref source pos) "\n")
+          (setq lines (+ lines 1)))
+        (setq pos (+ pos 1)))
+      lines))
+
+  (defun parseFormChildren (source openOffset closeOffset)
+    (let ((children (js-array))
+          (pos (scanWhitespaceOrComment source (+ openOffset 1)))
+          (limit (- closeOffset 1)))
+      (while (< pos limit)
+        (let ((end (scanBalancedForm source pos)))
+          (when (> end pos)
+            (js-call children :push
+              (js-object
+                :start pos
+                :end end
+                :text (js-call source :slice pos end))))
+          (setq pos (scanWhitespaceOrComment source end))))
+      children))
+
+  (defun extractDefinitionDoc (head items)
+    (if (and (or (= head "defun") (= head "defn") (= head "defportable")
+                 (= head "defasync") (= head "defmacro"))
+             (>= (js-length items) 5))
+      (let ((raw (get (aref items 3) :text)))
+        (if (and (js-call raw :startsWith "\"") (js-call raw :endsWith "\""))
+          (try (JSON/parse raw) (catch _err nil))
+          nil))
+      nil))
+
+  (defun collectDefinitionFormsFromSource (source &optional filename)
+    (let ((forms (js-array))
+          (pos (scanWhitespaceOrComment source 0))
+          (len (js-length source)))
+      (while (< pos len)
+        (let ((end (scanBalancedForm source pos)))
+          (when (> end pos)
+            (let ((formText (js-call source :slice pos end)))
+              (when (js-call formText :startsWith "(")
+                (let* ((items (parseFormChildren source pos end))
+                       (head (if (> (js-length items) 0) (get (aref items 0) :text) "")))
+                  (cond
+                    ((= head "module")
+                     (let ((idx 2))
+                       (while (< idx (js-length items))
+                         (let* ((child (aref items idx))
+                                (ctext (get child :text)))
+                           (when (js-call ctext :startsWith "(")
+                             (let* ((citems (parseFormChildren source (get child :start) (get child :end)))
+                                    (chead (if (> (js-length citems) 0) (get (aref citems 0) :text) ""))
+                                    (cname (if (> (js-length citems) 1) (get (aref citems 1) :text) "")))
+                               (js-call forms :push
+                                 (js-object
+                                   :head chead
+                                   :name cname
+                                   :params (if (> (js-length citems) 2) (get (aref citems 2) :text) nil)
+                                   :doc (extractDefinitionDoc chead citems)
+                                   :items citems
+                                   :start (get child :start)
+                                   :end (get child :end)
+                                   :line (countLinesUpTo source (get child :start))
+                                   :file filename
+                                   :text ctext)))))
+                         (setq idx (+ idx 1)))))
+                    (t
+                     (js-call forms :push
+                       (js-object
+                         :head head
+                         :name (if (> (js-length items) 1) (get (aref items 1) :text) "")
+                         :params (if (> (js-length items) 2) (get (aref items 2) :text) nil)
+                         :doc (extractDefinitionDoc head items)
+                         :items items
+                         :start pos
+                         :end end
+                         :line (countLinesUpTo source pos)
+                         :file filename
+                         :text formText))))))))
+          (setq pos (scanWhitespaceOrComment source end))))
+      forms))
+
+  (defun findDefinitionInSource (source targetName &optional filename)
+    (let ((forms (collectDefinitionFormsFromSource source filename))
+          (defHeads (new globalThis.Set
+                      (js-array "defun" "defn" "defportable" "defasync" "defmacro"
+                        "defvar" "defconst" "defvar-once" "defmulti" "defprotocol"
+                        "defrecord" "deftype")))
+          (idx 0)
+          (found nil))
+      (while (and (not found) (< idx (js-length forms)))
+        (let ((form (aref forms idx)))
+          (when (and (js-call defHeads :has (get form :head))
+                     (= (get form :name) targetName))
+            (setq found form)))
+        (setq idx (+ idx 1)))
+      found))
+
+  (defun rewriteDefvarOnce (source sessionId)
+    (let ((forms (collectDefinitionFormsFromSource source))
+          (replacements (js-array))
+          (idx 0))
+      (while (< idx (js-length forms))
+        (let ((form (aref forms idx)))
+          (when (and (= (get form :head) "defvar-once")
+                     (>= (js-length (get form :items)) 3))
+            (let* ((nameNode (aref (get form :items) 1))
+                   (initNode (aref (get form :items) 2))
+                   (name (get nameNode :text))
+                   (initText (get initNode :text))
+                   (keyLiteral (JSON/stringify (str sessionId ":" name)))
+                   (rebuilt
+                     (str "(defvar " name
+                          " (let ((__eli_once_root (js* \"globalThis\"))"
+                          " (__eli_once_sym (js-call globalThis.Symbol :for \"eliscript.repl.once\")))"
+                          " (let ((__eli_once_store (or (aref __eli_once_root __eli_once_sym)"
+                          " (let ((__m (js-object))) (put __eli_once_root __eli_once_sym __m) __m))))"
+                          " (if (js-call globalThis.Object :hasOwn __eli_once_store " keyLiteral ")"
+                          " (aref __eli_once_store " keyLiteral ")"
+                          " (let ((__eli_once_val " initText "))"
+                          " (put __eli_once_store " keyLiteral " __eli_once_val) __eli_once_val)))))")))
+              (js-call replacements :push
+                (js-object :start (get form :start) :end (get form :end) :name name :replacement rebuilt)))))
+        (setq idx (+ idx 1)))
+      (if (= (js-length replacements) 0)
+        (js-object :source source :names (js-array))
+        (let ((out source)
+              (names (js-array))
+              (r-idx (- (js-length replacements) 1)))
+          (while (>= r-idx 0)
+            (let ((rep (aref replacements r-idx)))
+              (js-call names :unshift (get rep :name))
+              (setq out
+                (str (js-call out :slice 0 (get rep :start))
+                     (get rep :replacement)
+                     (js-call out :slice (get rep :end)))))
+            (setq r-idx (- r-idx 1)))
+          (js-object :source out :names names)))))
+
+  (defun clearSessionReplOnce (sessionId)
+    (let* ((root (js* "globalThis"))
+           (store (aref root replOnceSymbol))
+           (prefix (str sessionId ":")))
+      (when (and store (= (host-typeof store) "object"))
+        (let ((keys (Object/keys store))
+              (idx 0))
+          (while (< idx (js-length keys))
+            (let ((k (aref keys idx)))
+              (when (js-call k :startsWith prefix)
+                (Reflect/deleteProperty store k)))
+            (setq idx (+ idx 1)))))))
+
+  (defun normalizeTargetSymbolName (raw)
+    (let ((text (js-call (globalThis.String raw) :trim)))
+      (cond
+        ((js-call text :startsWith "'") (js-call text :slice 1))
+        ((js-call text :startsWith ":") (js-call text :slice 1))
+        ((and (js-call text :startsWith "\"") (js-call text :endsWith "\"") (>= (js-length text) 2))
+         (try (JSON/parse text) (catch _err text)))
+        (t text))))
+
+  (defun findApiModulesForSymbol (targetName)
+    (let* ((index (loadApiMetadata))
+           (modules (or (get index :modules) (js-array)))
+           (matches (js-array))
+           (idx 0))
+      (while (< idx (js-length modules))
+        (let* ((mod (aref modules idx))
+               (exportsList (or (get mod :exports) (js-array))))
+          (when (js-call exportsList :includes targetName)
+            (js-call matches :push mod)))
+        (setq idx (+ idx 1)))
+      matches))
+
+  (defun findApiModuleByName (modQuery)
+    (let* ((index (loadApiMetadata))
+           (modules (or (get index :modules) (js-array)))
+           (needle (normalizeTargetSymbolName modQuery))
+           (stripped (if (js-call needle :startsWith "eliscript/")
+                       (js-call needle :slice 10)
+                       needle))
+           (idx 0)
+           (found nil))
+      (while (and (not found) (< idx (js-length modules)))
+        (let* ((mod (aref modules idx))
+               (modName (get mod :module))
+               (source (get mod :source)))
+          (when (or (= modName needle)
+                    (= modName stripped)
+                    (= modName (str "stdlib/" stripped))
+                    (= source needle)
+                    (= source (str "stdlib/" stripped ".eli"))
+                    (js-call modName :endsWith (str "/" stripped)))
+            (setq found mod)))
+        (setq idx (+ idx 1)))
+      found))
+
+  (defun inspectDoc (session rawName)
+    (let ((name (normalizeTargetSymbolName rawName))
+          (ns (get session :namespace))
+          (lines (js-array)))
+      (when (and ns (get ns :source))
+        (let ((localDef (findDefinitionInSource (get ns :source) name (get ns :filename))))
+          (when localDef
+            (js-call lines :push "-------------------------")
+            (js-call lines :push (str (or (get ns :filename) "<repl>") ":" (get localDef :line) " :: " name))
+            (if (or (= (get localDef :head) "defun") (= (get localDef :head) "defn")
+                    (= (get localDef :head) "defportable") (= (get localDef :head) "defasync")
+                    (= (get localDef :head) "defmacro"))
+              (js-call lines :push (str "(" (get localDef :head) " " name " " (or (get localDef :params) "()") ")"))
+              (js-call lines :push (str "(" (get localDef :head) " " name ")")))
+            (when (get localDef :doc)
+              (js-call lines :push (get localDef :doc)))
+            (js-call lines :push "Session namespace binding."))))
+      (when (= (js-length lines) 0)
+        (let ((mods (findApiModulesForSymbol name)))
+          (if (> (js-length mods) 0)
+            (let* ((mod (aref mods 0))
+                   (sourcePath (resolve projectDirectory (get mod :source)))
+                   (def (when (existsSync sourcePath)
+                          (findDefinitionInSource (readFileSync sourcePath "utf8") name (get mod :source)))))
+              (js-call lines :push "-------------------------")
+              (js-call lines :push (str (get mod :module) " (" (get mod :source) ") :: " name))
+              (js-call lines :push (str "Role: " (or (get mod :role) "library") " | Spec: " (or (get mod :spec) "-")))
+              (when def
+                (if (or (= (get def :head) "defun") (= (get def :head) "defn")
+                        (= (get def :head) "defportable") (= (get def :head) "defasync")
+                        (= (get def :head) "defmacro"))
+                  (js-call lines :push (str "(" (get def :head) " " name " " (or (get def :params) "()") ")"))
+                  (js-call lines :push (str "(" (get def :head) " " name ")")))
+                (when (get def :doc)
+                  (js-call lines :push (get def :doc))))
+              (when (get mod :summary)
+                (js-call lines :push (get mod :summary))))
+            (let ((mod (findApiModuleByName name)))
+              (when mod
+                (js-call lines :push "-------------------------")
+                (js-call lines :push (str (get mod :module) " (" (get mod :source) ")"))
+                (js-call lines :push (str "Role: " (or (get mod :role) "library") " | Spec: " (or (get mod :spec) "-")))
+                (when (get mod :summary)
+                  (js-call lines :push (get mod :summary)))
+                (js-call lines :push (str "Exports: " (js-length (or (get mod :exports) (js-array))))))))))
+      (if (= (js-length lines) 0)
+        (str "No documentation found for " name ".")
+        (js-call lines :join "\n"))))
+
+  (defun inspectSource (session rawName)
+    (let ((name (normalizeTargetSymbolName rawName))
+          (ns (get session :namespace)))
+      (let ((found nil))
+        (when (and ns (get ns :source))
+          (let ((localDef (findDefinitionInSource (get ns :source) name (get ns :filename))))
+            (when localDef
+              (setq found (str ";; " (or (get ns :filename) "<repl>") ":" (get localDef :line) "\n" (get localDef :text))))))
+        (unless found
+          (let ((mods (findApiModulesForSymbol name))
+                (idx 0))
+            (while (and (not found) (< idx (js-length mods)))
+              (let* ((mod (aref mods idx))
+                     (sourcePath (resolve projectDirectory (get mod :source))))
+                (when (existsSync sourcePath)
+                  (let ((def (findDefinitionInSource (readFileSync sourcePath "utf8") name (get mod :source))))
+                    (when def
+                      (setq found (str ";; " (get mod :source) ":" (get def :line) "\n" (get def :text)))))))
+              (setq idx (+ idx 1)))))
+        (if found found (str "No source found for " name ".")))))
+
+  (defun inspectApropos (session rawQuery)
+    (let* ((query (js-call (normalizeTargetSymbolName rawQuery) :toLowerCase))
+           (index (loadApiMetadata))
+           (modules (or (get index :modules) (js-array)))
+           (results (new globalThis.Set))
+           (ns (get session :namespace)))
+      (when (and ns (get ns :bindings))
+        (js-call (get ns :bindings) :forEach
+          (lambda (name)
+            (when (js-call (js-call name :toLowerCase) :includes query)
+              (js-call results :add name)))))
+      (let ((m-idx 0))
+        (while (< m-idx (js-length modules))
+          (let* ((mod (aref modules m-idx))
+                 (modName (get mod :module))
+                 (exportsList (or (get mod :exports) (js-array)))
+                 (e-idx 0))
+            (while (< e-idx (js-length exportsList))
+              (let ((sym (aref exportsList e-idx)))
+                (when (or (js-call (js-call sym :toLowerCase) :includes query)
+                          (js-call (js-call modName :toLowerCase) :includes query))
+                  (js-call results :add (str modName "/" sym))))
+              (setq e-idx (+ e-idx 1))))
+          (setq m-idx (+ m-idx 1))))
+      (js-call (Array/from results) :sort)))
+
+  (defun inspectDir (session &optional rawModuleName)
+    (if (or (nil? rawModuleName) (undefined? rawModuleName) (= (js-call (globalThis.String rawModuleName) :trim) ""))
+      (let ((ns (get session :namespace)))
+        (if (and ns (get ns :bindings))
+          (js-call (Array/from (get ns :bindings)) :sort)
+          (js-array)))
+      (let ((mod (findApiModuleByName rawModuleName)))
+        (if (and mod (Array/isArray (get mod :exports)))
+          (js-call (Array/from (get mod :exports)) :sort)
+          (js-array)))))
+
+  (defun inspectPst (session)
+    (formatStackTrace (get session :lastError) (get session :lastAdjustment)))
 
   (defun normalizeDiagnostic (error &optional adjustment)
     (let ((existing (if error (get error :eliscriptDiagnostic) nil)))
@@ -347,7 +797,7 @@
         :modulePath modulePath
         :url url)))
 
-  (defasync sessionBuildNamespace (session source filename root label)
+  (defasync sessionBuildNamespace (session source filename root label &optional displaySource)
     (let* ((description (js-call (get session :compiler) :evaluation_module_description source filename))
            (compiledSource (namespaceSource source description))
            (absoluteFilename (requestFilename filename))
@@ -368,7 +818,7 @@
           artifact
           (js-object
             :filename filename
-            :source source
+            :source (if (nullish? displaySource) source displaySource)
             :bindings (get description :bindings)
             :exports (get description :exports)
             :macroSources (get description :macroSources))))))
@@ -391,13 +841,16 @@
               :valuePrinter "eliscript-data-text")))))
 
   (defasync sessionLoad (session request)
-    (let ((namespace
-            (await
-              (js-call session :buildNamespace
-                (get request :source)
-                (get request :filename)
-                (get request :root)
-                (str "namespace-" (+ (get session :revision) 1))))))
+    (let* ((rawSource (get request :source))
+           (rewritten (rewriteDefvarOnce rawSource (get session :sessionId)))
+           (namespace
+             (await
+               (js-call session :buildNamespace
+                 (get rewritten :source)
+                 (get request :filename)
+                 (get request :root)
+                 (str "namespace-" (+ (get session :revision) 1))
+                 rawSource))))
       (put session :definitions (new globalThis.Map))
       (put session :definitionFilename nil)
       (js-call session :commitNamespace namespace "loaded")
@@ -408,7 +861,7 @@
           :value nil
           :valueCategory "module"))))
 
-  (defasync sessionEvaluateDefinition (session request description)
+  (defasync sessionEvaluateDefinition (session request description &optional compiledUnitSource rawUnitSource)
     (when (= (get session :mode) "loaded")
       (throw (diagnosticError
                "evaluate a complete updated source to replace definitions from a loaded module"
@@ -418,17 +871,24 @@
       (throw (diagnosticError
                "one definition journal cannot mix logical filenames"
                (get request :filename))))
-    (let ((definitions (new globalThis.Map (get session :definitions))))
-      (js-call definitions :set (get description :name) (get request :source))
+    (let ((definitions (new globalThis.Map (get session :definitions)))
+          (rawDefinitions (new globalThis.Map (get session :rawDefinitions))))
+      (js-call definitions :set (get description :name)
+        (if (nullish? compiledUnitSource) (get request :source) compiledUnitSource))
+      (js-call rawDefinitions :set (get description :name)
+        (if (nullish? rawUnitSource) (get request :source) rawUnitSource))
       (let* ((source (js-call (Array/from (js-call definitions :values)) :join "\n"))
+             (rawSource (js-call (Array/from (js-call rawDefinitions :values)) :join "\n"))
              (namespace
                (await
                  (js-call session :buildNamespace
                    source
                    (get request :filename)
                    (get request :root)
-                   (str "namespace-" (+ (get session :revision) 1))))))
+                   (str "namespace-" (+ (get session :revision) 1))
+                   rawSource))))
         (put session :definitions definitions)
+        (put session :rawDefinitions rawDefinitions)
         (put session :definitionFilename (get request :filename))
         (js-call session :commitNamespace namespace "journal")
         (let* ((hasValue
@@ -446,7 +906,7 @@
               :value (if hasValue (printValue value) nil)
               :valueCategory (if hasValue (runtimeCategory value) "macro")))))))
 
-  (defasync sessionEvaluateExpression (session request)
+  (defasync evaluateRawExpressionValue (session request)
     (let ((prepared (expressionSource request (get session :namespace)))
           (artifact nil))
       (try
@@ -456,34 +916,147 @@
               (get prepared :source)
               (get (get prepared :adjustment) :syntheticFilename)
               (str "expression-" (+ (get session :artifact) 1)))))
+        (let ((val (await (get (get artifact :module) :default))))
+          val)
         (catch error
-          (put error :eliscriptEvaluationAdjustment (get prepared :adjustment))
-          (throw error)))
-      (let ((value (await (get (get artifact :module) :default))))
-        (success request (get session :revision)
-          (js-object
-            :kind "expression"
-            :hasValue t
-            :value (printValue value)
-            :valueCategory (runtimeCategory value))))))
+          (when (and error (= (host-typeof error) "object"))
+            (put error :eliscriptEvaluationAdjustment (get prepared :adjustment)))
+          (throw error)))))
+
+  (defasync sessionEvaluateExpression (session request)
+    (let ((value (await (evaluateRawExpressionValue session request))))
+      (success request (get session :revision)
+        (js-object
+          :kind "expression"
+          :hasValue t
+          :value (printValue value)
+          :valueCategory (runtimeCategory value)))))
+
+  (defun userShadowedSpecial? (session name)
+    (let ((ns (get session :namespace)))
+      (and ns
+           (Array/isArray (get ns :bindings))
+           (js-call (get ns :bindings) :includes name))))
+
+  (defun parseSingleSpecialCall (source)
+    (let ((start (scanWhitespaceOrComment source 0))
+          (len (js-length source)))
+      (if (or (>= start len) (not (= (aref source start) "(")))
+        nil
+        (let ((end (scanBalancedForm source start)))
+          (if (< (scanWhitespaceOrComment source end) len)
+            nil
+            (let* ((items (parseFormChildren source start end))
+                   (head (if (> (js-length items) 0) (get (aref items 0) :text) nil)))
+              (if head
+                (js-object :head head :items items)
+                nil)))))))
 
   (defasync sessionEvaluate (session request)
-    (let ((description
-            (js-call (get session :compiler)
-              :evaluation_form_description (get request :source) (get request :filename))))
-      (when (= (get description :kind) "module")
-        (throw (diagnosticError
-                 "module forms require a complete-source load operation"
-                 (get request :filename))))
-      (if (= (get description :kind) "definition")
-        (await (js-call session :evaluateDefinition request description))
-        (await (js-call session :evaluateExpression request)))))
+    (let* ((rawSource (get request :source))
+           (special (parseSingleSpecialCall rawSource))
+           (specialHead (and special (get special :head))))
+      (cond
+        ((and (= specialHead "defvar-once")
+              (>= (js-length (get special :items)) 3))
+         (let* ((nameNode (aref (get special :items) 1))
+                (name (get nameNode :text))
+                (rewritten (rewriteDefvarOnce rawSource (get session :sessionId))))
+           (await
+             (js-call session :evaluateDefinition
+               request
+               (js-object :kind "definition" :head "defvar" :name name :runtimeBinding t)
+               (get rewritten :source)
+               rawSource))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "doc")
+              (= (js-length (get special :items)) 2))
+         (let ((text (inspectDoc session (get (aref (get special :items) 1) :text))))
+           (js-call (get globalThis.process :stdout) :write (str text "\n"))
+           (success request (get session :revision)
+             (js-object :kind "expression" :hasValue t :value (printValue nil) :valueCategory "nil"))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "source")
+              (= (js-length (get special :items)) 2))
+         (let ((text (inspectSource session (get (aref (get special :items) 1) :text))))
+           (js-call (get globalThis.process :stdout) :write (str text "\n"))
+           (success request (get session :revision)
+             (js-object :kind "expression" :hasValue t :value (printValue nil) :valueCategory "nil"))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "apropos")
+              (= (js-length (get special :items)) 2))
+         (let* ((matches (inspectApropos session (get (aref (get special :items) 1) :text))))
+           (when (> (js-length matches) 0)
+             (js-call (get globalThis.process :stdout) :write (str (js-call matches :join "\n") "\n")))
+           (success request (get session :revision)
+             (js-object :kind "expression" :hasValue t :value (JSON/stringify matches) :valueCategory "object"))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "dir")
+              (<= (js-length (get special :items)) 2))
+         (let* ((arg (if (= (js-length (get special :items)) 2)
+                       (get (aref (get special :items) 1) :text)
+                       nil))
+                (entries (inspectDir session arg)))
+           (when (> (js-length entries) 0)
+             (js-call (get globalThis.process :stdout) :write (str (js-call entries :join "\n") "\n")))
+           (success request (get session :revision)
+             (js-object :kind "expression" :hasValue t :value (JSON/stringify entries) :valueCategory "object"))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "pst")
+              (= (js-length (get special :items)) 1))
+         (let ((text (inspectPst session)))
+           (js-call (get globalThis.process :stdout) :write (str text "\n"))
+           (success request (get session :revision)
+             (js-object :kind "expression" :hasValue t :value (printValue nil) :valueCategory "nil"))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "load-file")
+              (= (js-length (get special :items)) 2))
+         (let* ((rawPath (normalizeTargetSymbolName (get (aref (get special :items) 1) :text)))
+                (baseDir (if (and (get request :root) (not (nil? (get request :root))))
+                           (resolve (get request :root))
+                           (js-call globalThis.process :cwd)))
+                (targetPath (if (isAbsolute rawPath) rawPath (resolve baseDir rawPath)))
+                (loaded (readEvaluationFile targetPath)))
+           (await
+             (js-call session :load
+               (Object/assign (js-object) request
+                 (js-object :operation "load"
+                   :source (get loaded :source)
+                   :filename (get loaded :filename)))))))
+        ((and specialHead (not (userShadowedSpecial? session specialHead))
+              (= specialHead "tap>")
+              (= (js-length (get special :items)) 2))
+         (let* ((exprSource (get (aref (get special :items) 1) :text))
+                (exprRequest (Object/assign (js-object) request (js-object :source exprSource)))
+                (val (await (evaluateRawExpressionValue session exprRequest))))
+           (if (nil? val)
+             (success request (get session :revision)
+               (js-object :kind "expression" :hasValue t :value "false" :valueCategory "boolean"))
+             (progn
+               (js-call (get globalThis.process :stdout) :write (str "[tap>] " (printValue val) "\n"))
+               (success request (get session :revision)
+                 (js-object :kind "expression" :hasValue t :value "true" :valueCategory "boolean"))))))
+        (t
+         (let ((description
+                 (js-call (get session :compiler)
+                   :evaluation_form_description rawSource (get request :filename))))
+           (when (= (get description :kind) "module")
+             (throw (diagnosticError
+                      "module forms require a complete-source load operation"
+                      (get request :filename))))
+           (if (= (get description :kind) "definition")
+             (await (js-call session :evaluateDefinition request description))
+             (await (js-call session :evaluateExpression request))))))))
 
   (defasync sessionReset (session request)
     (put session :namespace nil)
     (put session :mode "empty")
     (put session :definitions (new globalThis.Map))
+    (put session :rawDefinitions (new globalThis.Map))
     (put session :definitionFilename nil)
+    (put session :lastError nil)
+    (put session :lastAdjustment nil)
+    (clearSessionReplOnce (get session :sessionId))
     (put session :revision (+ (get session :revision) 1))
     (success request (get session :revision)
       (js-object
@@ -491,6 +1064,24 @@
         :hasValue false
         :value nil
         :valueCategory "none")))
+
+  (defun installSessionTapObserver ()
+    (let* ((root (js* "globalThis"))
+           (bridge (or (aref root tapHostSymbol)
+                       (let ((created (js-object :observers (new globalThis.Set) :flushFns (new globalThis.Set))))
+                         (put root tapHostSymbol created)
+                         created)))
+           (observer (lambda (value)
+                       (js-call (get globalThis.process :stdout) :write
+                         (str "[tap>] " (printValue value) "\n")))))
+      (js-call (get bridge :observers) :add observer)
+      (lambda ()
+        (try
+          (when (get bridge :flushFns)
+            (js-call (get bridge :flushFns) :forEach
+              (lambda (fn) (funcall fn))))
+          (finally
+            (js-call (get bridge :observers) :delete observer))))))
 
   (defasync sessionExecute (session rawRequest)
     (js-call session :ensureOpen)
@@ -501,15 +1092,22 @@
                 (await
                   (captureStandardOutput
                     (async ()
-                      (let ((op (get request :operation)))
-                        (cond
-                          ((= op "describe") (await (js-call session :describe request)))
-                          ((= op "evaluate") (await (js-call session :evaluate request)))
-                          ((= op "load") (await (js-call session :load request)))
-                          ((= op "reset") (await (js-call session :reset request)))
-                          (t (throw (diagnosticError "unsupported evaluation operation"))))))))))
+                      (let ((teardownTap (installSessionTapObserver)))
+                        (try
+                          (let ((op (get request :operation)))
+                            (cond
+                              ((= op "describe") (await (js-call session :describe request)))
+                              ((= op "evaluate") (await (js-call session :evaluate request)))
+                              ((= op "load") (await (js-call session :load request)))
+                              ((= op "reset") (await (js-call session :reset request)))
+                              (t (throw (diagnosticError "unsupported evaluation operation")))))
+                          (finally
+                            (funcall teardownTap)))))))))
           (appendCapturedOutput (get executed :value) (get executed :stdout)))
         (catch error
+          (put session :lastError error)
+          (put session :lastAdjustment
+            (if error (get error :eliscriptEvaluationAdjustment) undefined))
           (appendCapturedOutput
             (failure rawRequest request (get session :revision) error
               (if error (get error :eliscriptEvaluationAdjustment) undefined))
@@ -520,9 +1118,12 @@
   (defun sessionClose (session)
     (unless (get session :closed)
       (put session :closed t)
+      (clearSessionReplOnce (get session :sessionId))
       (rmSync (get session :directory) (js-object :recursive t :force t))))
 
   (defun sessionInitialize (self options)
+    (setq evaluationSessionCounter (+ evaluationSessionCounter 1))
+    (put self :sessionId (str "session-" evaluationSessionCounter))
     (put self :compiler (get options :compiler))
     (put self :directory (get options :directory))
     (put self :revision 0)
@@ -530,7 +1131,10 @@
     (put self :namespace nil)
     (put self :mode "empty")
     (put self :definitions (new globalThis.Map))
+    (put self :rawDefinitions (new globalThis.Map))
     (put self :definitionFilename nil)
+    (put self :lastError nil)
+    (put self :lastAdjustment nil)
     (put self :closed false))
 
   (defconst EvaluationSession
@@ -541,15 +1145,20 @@
       nextArtifactDirectory(label) { return sessionNextArtifactDirectory(this, label); }
       compileSingle(source, filename, label) { return sessionCompileSingle(this, source, filename, label); }
       compileProject(source, filename, root, label) { return sessionCompileProject(this, source, filename, root, label); }
-      buildNamespace(source, filename, root, label) { return sessionBuildNamespace(this, source, filename, root, label); }
+      buildNamespace(source, filename, root, label, displaySource) { return sessionBuildNamespace(this, source, filename, root, label, displaySource); }
       commitNamespace(namespace, mode) { return sessionCommitNamespace(this, namespace, mode); }
       describe(request) { return sessionDescribe(this, request); }
       load(request) { return sessionLoad(this, request); }
-      evaluateDefinition(request, description) { return sessionEvaluateDefinition(this, request, description); }
+      evaluateDefinition(request, description, compiledUnitSource, rawUnitSource) { return sessionEvaluateDefinition(this, request, description, compiledUnitSource, rawUnitSource); }
       evaluateExpression(request) { return sessionEvaluateExpression(this, request); }
       evaluate(request) { return sessionEvaluate(this, request); }
       reset(request) { return sessionReset(this, request); }
       execute(rawRequest) { return sessionExecute(this, rawRequest); }
+      doc(name) { return inspectDoc(this, name); }
+      source(name) { return inspectSource(this, name); }
+      apropos(query) { return inspectApropos(this, query); }
+      dir(moduleName) { return inspectDir(this, moduleName); }
+      pst() { return inspectPst(this); }
       close() { return sessionClose(this); }
     }"))
 

@@ -3835,6 +3835,225 @@
         }
       ]
     },
-    {"id":"stdlib.markdown-wire-http-rpc","title":"Markdown wire data, schema validation and self-describing HTTP RPC","status":"accepted","spec":"0181","contracts":["Preserves nested structured wire values with located errors","Validates open-world schemas and semantic constraints","Discovers hierarchical paths safely and invokes authorized POST once","Compiles identically and executes under Bun and Node"],"evidence":[{"kind":"bun-test","file":"tests/markdown-wire.test.mjs","contains":"structured Markdown preserves nested data, comments, tables and element arrays"},{"kind":"bun-test","file":"tests/http-rpc.test.mjs","contains":"hierarchical HTTP discovery and usage never execute operations"},{"kind":"bun-test","file":"tests/wire-compiler.test.mjs","contains":"wire modules compile identically with both compilers"}]}
+    {"id":"stdlib.markdown-wire-http-rpc","title":"Markdown wire data, schema validation and self-describing HTTP RPC","status":"accepted","spec":"0181","contracts":["Preserves nested structured wire values with located errors","Validates open-world schemas and semantic constraints","Discovers hierarchical paths safely and invokes authorized POST once","Compiles identically and executes under Bun and Node"],"evidence":[{"kind":"bun-test","file":"tests/markdown-wire.test.mjs","contains":"structured Markdown preserves nested data, comments, tables and element arrays"},{"kind":"bun-test","file":"tests/http-rpc.test.mjs","contains":"hierarchical HTTP discovery and usage never execute operations"},{"kind":"bun-test","file":"tests/wire-compiler.test.mjs","contains":"wire modules compile identically with both compilers"}]},
+    {
+      "id": "stdlib.core-barrel-and-domain-layout",
+      "title": "Standard library domain layout and core barrel entrypoint",
+      "status": "stable",
+      "spec": "0182",
+      "contracts": [
+        "Separates managed runtime internals into runtime/managed/ and groups domain modules under stdlib/",
+        "Exposes single curated eliscript/core barrel entrypoint with full cross-domain re-exports"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "sequence algorithms use protocols and Eliscript truthiness"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-test-devtools.test.mjs",
+          "contains": "stdlib/core barrel compiles cleanly and re-exports representative core symbols across all domains"
+        }
+      ]
+    },
+    {
+      "id": "runtime.native-register-allocation",
+      "title": "Native callee-saved register allocation and local frame optimization",
+      "status": "stable",
+      "spec": "0183",
+      "contracts": [
+        "Allocates hot integer and Val64 locals to AAPCS64 callee-saved registers x20-x28",
+        "Matches reference WASM execution and fixed-point machine encoding across benchmarks"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/native-memory-long-branches.test.mjs",
+          "contains": "short branches keep deterministic images and preserve typed local registers"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/native-memory-long-branches.test.mjs",
+          "contains": "loop-weighted register allocation ranks hot locals above cold spills and matches WASM execution"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.array-map-and-map-entry",
+      "title": "Persistent Array Map and first-class MapEntry values",
+      "status": "stable",
+      "spec": "0184",
+      "contracts": [
+        "Stores small maps up to 8 entries in compact flat PersistentArrayMap with zero trie allocation and upgrades on the 9th key",
+        "Provides first-class PersistentMapEntry values equal in value semantics and hash to 2-element PersistentVectors"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-array-map.test.mjs",
+          "contains": "small maps up to 8 keys stay in PersistentArrayMap with zero HAMT node allocations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-map-entry.test.mjs",
+          "contains": "PersistentMapEntry equals and hashes identically to 2-element PersistentVector both ways"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.chunked-sequences-and-transients",
+      "title": "Chunked lazy sequences, flattened subvectors, and transient builders",
+      "status": "stable",
+      "spec": "0185",
+      "contracts": [
+        "Realizes range, repeat, and chunk-aware combinators in bounded 32-element chunks",
+        "Flattens nested subvector slices in O(1) and routes set/data builders through TransientHashSet and TransientHashMap"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-chunked-seq.test.mjs",
+          "contains": "range and repeat are chunked seqs enforcing bounded chunk evaluation <= 32"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-transient-subvec.test.mjs",
+          "contains": "nested subvec flattens root reference and supports direct zero-iterator reduce"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-transient-subvec.test.mjs",
+          "contains": "TransientHashSet supports disj!, has, count, rejects persistent protocols and sealing reuse"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.extended-text-math-bit-and-state",
+      "title": "Extended string, regex, math, bit, volatile state, and tap broadcast libraries",
+      "status": "stable",
+      "spec": "0186",
+      "contracts": [
+        "Completes string transformation/search, transcendental/IEEE math, bitwise operators, volatile cells, bound-fn, and bounded tap broadcast"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-string-regex.test.mjs",
+          "contains": "stdlib/string covers casing, trimming, indexing, splitting, escape, and replacement"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-math-bit.test.mjs",
+          "contains": "stdlib/math constants, trig/hyperbolic/log, IEEE rounding/division, and sampling"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-seq-data-state.test.mjs",
+          "contains": "state volatile!, bound-fn, and error-isolated bounded tap> channel"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.diff-pprint-and-tagged-data",
+      "title": "Structural diff, pretty printer, extensible tagged data, uuid, and time",
+      "status": "stable",
+      "spec": "0187",
+      "contracts": [
+        "Computes recursive structural diffs, formats cyclic structures cleanly within width bounds, and supports extensible tagged readers with immutable uuid/time"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-diff-pprint.test.mjs",
+          "contains": "stdlib/diff computes recursive only-a, only-b, and both tuples across collections"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-diff-pprint.test.mjs",
+          "contains": "stdlib/pprint respects line widths, round-trips data-text, guards cycles, and formats tables"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-tagged-time-uuid.test.mjs",
+          "contains": "stdlib/uuid supports immutable UUIDv4, monotonic UUIDv7, equality, hashing, ordering, and #uuid round-trip"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.schema-and-generators",
+      "title": "Composable runtime schema validation and seeded property generators",
+      "status": "stable",
+      "spec": "0188",
+      "contracts": [
+        "Validates, conforms, explains failing nested paths, and shrinks counterexamples deterministically from seeds"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-schema.test.mjs",
+          "contains": "stdlib/schema validates, conforms, unforms, and explains nested paths accurately"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-schema.test.mjs",
+          "contains": "stdlib/schema deterministic seeded generation, minimal counterexample shrinking, and edge cases"
+        }
+      ]
+    },
+    {
+      "id": "stdlib.async-test-and-devtools",
+      "title": "Structured async channels, declarative testing, and DevTools formatters",
+      "status": "stable",
+      "spec": "0189",
+      "contracts": [
+        "Provides buffered CSP async channels, declarative unit testing with CLI runner, and browser DevTools persistent object formatters"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-async.test.mjs",
+          "contains": "stdlib/async buffers, transducers, offer!/poll!, alts!, timeout, and close! broadcast"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-test-devtools.test.mjs",
+          "contains": "stdlib/test runs assertions, async fixtures (including on throw), and structured diff reports"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-test-devtools.test.mjs",
+          "contains": "stdlib/devtools renders JsonML headers/bodies across persistent types and installs idempotently"
+        }
+      ]
+    },
+    {
+      "id": "toolchain.linter-repl-and-tree-shaking",
+      "title": "Static linter, REPL introspection, export tree-shaking, and editor integration",
+      "status": "stable",
+      "spec": "0190",
+      "contracts": [
+        "Emits identical ELI-L0001..L0009 lint diagnostics in Seed and Self-hosted compilers and enforces --lint/--strict",
+        "Supports interactive REPL introspection, Source Map stack traces, export-level barrel tree-shaking, and Emacs ElDoc/Flymake integration"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/linter-parity.test.mjs",
+          "contains": "Seed and Self-hosted linters emit identical ELI-L0001..L0009 diagnostics and honor CLI flags"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repl-introspection.test.mjs",
+          "contains": "REPL supports doc, source, apropos, dir, Source-Map pst, tap> echo, load-file, and defvar-once"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/build-tree-shaking.test.mjs",
+          "contains": "eliscript-build tree-shakes pure barrels and stdlib/core imports identically in Seed and Self-hosted"
+        }
+      ]
+    }
   ]
 }

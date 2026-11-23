@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'compile)
+(require 'eldoc)
 (require 'imenu)
 (require 'json)
 (require 'flymake)
@@ -52,6 +53,16 @@
   :type '(repeat string)
   :group 'eliscript)
 
+(defcustom eliscript-mode-test-command '("eliscript-test")
+  "Command and fixed arguments used to run Eliscript test suites."
+  :type '(repeat string)
+  :group 'eliscript)
+
+(defcustom eliscript-mode-lint-enabled t
+  "When non-nil, include `--lint' diagnostics in Flymake project checks."
+  :type 'boolean
+  :group 'eliscript)
+
 (defcustom eliscript-mode-build-directory "dist"
   "Output directory used for builds without `eliscript.json'.
 
@@ -68,16 +79,16 @@ Relative paths are resolved from the discovered project root."
   "Canonical project roots mapped to their live watch processes.")
 
 (defconst eliscript-mode--function-heads
-  '("defasync" "defmulti" "defn" "defportable" "defprotocol" "defun"))
+  '("defasync" "defmulti" "defn" "defportable" "defprotocol" "deftest" "defun"))
 
 (defconst eliscript-mode--macro-heads '("defmacro"))
 
-(defconst eliscript-mode--variable-heads '("defconst" "defvar"))
+(defconst eliscript-mode--variable-heads '("defconst" "defvar" "defvar-once"))
 
 (defconst eliscript-mode--top-level-heads
   '("defasync" "defconst" "defmacro" "defmethod" "defmulti" "defn"
-    "defportable" "defprotocol" "defun" "defvar" "export" "export-default"
-    "extend-category" "extend-default" "extend-type"
+    "defportable" "defprotocol" "deftest" "defun" "defvar" "defvar-once"
+    "export" "export-default" "extend-category" "extend-default" "extend-type"
     "import" "import-portable" "module"))
 
 (defconst eliscript-mode--special-heads
@@ -85,7 +96,7 @@ Relative paths are resolved from the discovered project root."
     "do" "finally" "fn" "funcall" "if" "if-let" "if-some" "js*" "js-array" "js-call"
     "js-cons" "js-length" "js-nth" "js-object" "lambda" "let"
     "let*" "letfn" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
-    "some->" "some->>" "throw" "try" "unless" "when" "when-let" "when-some" "while"))
+    "some->" "some->>" "testing" "throw" "try" "unless" "when" "when-let" "when-some" "while"))
 
 (defconst eliscript-mode--definition-heads
   (append eliscript-mode--function-heads
@@ -198,10 +209,15 @@ Relative paths are resolved from the discovered project root."
     (define-key map (kbd "C-c C-l") #'eliscript-mode-eval-buffer)
     (define-key map (kbd "C-c C-z") #'eliscript-mode-show-repl)
     (define-key map (kbd "C-c C-q") #'eliscript-mode-stop-repl)
+    (define-key map (kbd "C-c C-t") #'eliscript-mode-run-test-at-point)
+    (define-key map (kbd "C-c C-a") #'eliscript-mode-run-tests)
     map)
   "Keymap used by `eliscript-mode'.")
 
 (defvar-local eliscript-mode--flymake-process nil)
+
+(defvar eliscript-mode--eldoc-cache (make-hash-table :test #'equal)
+  "Cache mapping canonical project roots to loaded API symbol tables.")
 
 (define-compilation-mode eliscript-compilation-mode "Eliscript-Compilation"
   "Compilation mode for Eliscript project builds."
@@ -649,6 +665,7 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
             (list "--root" root buffer-file-name))))
     (append (cdr eliscript-mode-check-command)
             project-arguments
+            (when eliscript-mode-lint-enabled (list "--lint"))
             (list "--stdin-file" buffer-file-name
                   "--json" "--diagnostic-format" "json"))))
 
@@ -659,40 +676,69 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
         (min (point-max) (+ (point-min) offset))
       fallback)))
 
+(defun eliscript-mode--flymake-diagnostic (value)
+  "Convert parsed JSON alist VALUE into a Flymake diagnostic, or nil."
+  (when (and (listp value)
+             (equal (alist-get 'format value) "eliscript-diagnostic"))
+    (let* ((location (alist-get 'location value))
+           (filename (alist-get 'file location))
+           (same-file
+            (or (null filename)
+                (and buffer-file-name
+                     (equal (ignore-errors (file-truename filename))
+                            (ignore-errors
+                              (file-truename buffer-file-name)))))))
+      (when same-file
+        (let* ((start (eliscript-mode--diagnostic-position
+                       (alist-get 'start location) (point-min)))
+               (raw-end (eliscript-mode--diagnostic-position
+                         (alist-get 'end location) start))
+               (end (max start (min (point-max) raw-end)))
+               (severity (alist-get 'severity value))
+               (type (cond
+                      ((equal severity "warning") :warning)
+                      ((equal severity "info") :note)
+                      (t :error))))
+          (flymake-make-diagnostic
+           (current-buffer) start end type
+           (format "%s: %s"
+                   (or (alist-get 'code value) "ELI-C0001")
+                   (or (alist-get 'message value)
+                       "Eliscript check failed"))))))))
+
 (defun eliscript-mode--diagnostic-from-json (source)
   "Return a Flymake diagnostic decoded from JSON SOURCE, or nil."
   (condition-case nil
-      (let* ((value (json-parse-string source
-                                       :object-type 'alist
-                                       :array-type 'list
-                                       :null-object nil
-                                       :false-object nil))
-             (location (alist-get 'location value))
-             (filename (alist-get 'file location))
-             (same-file
-              (or (null filename)
-                  (and buffer-file-name
-                       (equal (ignore-errors (file-truename filename))
-                              (ignore-errors
-                                (file-truename buffer-file-name)))))))
-        (when (and (equal (alist-get 'format value) "eliscript-diagnostic")
-                   same-file)
-          (let* ((start (eliscript-mode--diagnostic-position
-                         (alist-get 'start location) (point-min)))
-                 (raw-end (eliscript-mode--diagnostic-position
-                           (alist-get 'end location) start))
-                 (end (max start (min (point-max) raw-end)))
-                 (severity (alist-get 'severity value))
-                 (type (cond
-                         ((equal severity "warning") :warning)
-                         ((equal severity "info") :note)
-                         (t :error))))
-            (flymake-make-diagnostic
-             (current-buffer) start end type
-             (format "%s: %s"
-                     (or (alist-get 'code value) "ELI-C0001")
-                     (or (alist-get 'message value)
-                         "Eliscript check failed"))))))
+      (let ((value (json-parse-string source
+                                      :object-type 'alist
+                                      :array-type 'list
+                                      :null-object nil
+                                      :false-object nil)))
+        (eliscript-mode--flymake-diagnostic value))
+    (error nil)))
+
+(defun eliscript-mode--diagnostics-from-json (source)
+  "Return list of Flymake diagnostics decoded from JSON SOURCE."
+  (condition-case nil
+      (let* ((trimmed (string-trim (or source ""))))
+        (if (string-empty-p trimmed)
+            nil
+          (let* ((value (json-parse-string trimmed
+                                           :object-type 'alist
+                                           :array-type 'list
+                                           :null-object nil
+                                           :false-object nil))
+                 (items
+                  (cond
+                   ((and (listp value)
+                         (equal (alist-get 'format value) "eliscript-diagnostic"))
+                    (list value))
+                   ((and (listp value)
+                         (equal (alist-get 'format value) "eliscript-check-report"))
+                    (alist-get 'diagnostics value))
+                   ((listp value) value)
+                   (t nil))))
+            (delq nil (mapcar #'eliscript-mode--flymake-diagnostic items)))))
     (error nil)))
 
 (defun eliscript-mode--stop-flymake-process ()
@@ -729,18 +775,19 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
                             eliscript-mode--flymake-process)
                         (= generation (buffer-chars-modified-tick)))
                    (setq eliscript-mode--flymake-process nil)
-                   (if (and
-                        (eq (process-status finished-process) 'exit)
-                        (zerop (process-exit-status finished-process)))
-                       (funcall report-fn nil)
-                     (let* ((json-source
-                             (with-current-buffer error-buffer
-                               (string-trim (buffer-string))))
-                            (diagnostic
-                             (eliscript-mode--diagnostic-from-json
-                              json-source)))
-                       (funcall report-fn
-                                (if diagnostic (list diagnostic) nil)))))))
+                   (let ((stdout-diags
+                          (eliscript-mode--diagnostics-from-json
+                           (with-current-buffer output-buffer
+                             (buffer-string))))
+                         (stderr-diags
+                          (eliscript-mode--diagnostics-from-json
+                           (with-current-buffer error-buffer
+                             (buffer-string)))))
+                     (if (and
+                          (eq (process-status finished-process) 'exit)
+                          (zerop (process-exit-status finished-process)))
+                         (funcall report-fn stdout-diags)
+                       (funcall report-fn (or stderr-diags stdout-diags)))))))
            (when (buffer-live-p output-buffer)
              (kill-buffer output-buffer))
            (when (buffer-live-p error-buffer)
@@ -847,6 +894,116 @@ The visited file is not saved.  On failure the buffer remains unchanged."
       (delete-file source-file)
       (delete-file error-file))))
 
+(defun eliscript-mode--find-api-index-file ()
+  "Locate `docs/pages/api-index.json' from project root or mode path."
+  (let* ((mode-dir (file-name-directory (or load-file-name
+                                            (locate-library "eliscript-mode")
+                                            default-directory)))
+         (candidates (delq nil
+                           (list
+                            (when-let* ((root (eliscript-mode-project-root)))
+                              (expand-file-name "docs/pages/api-index.json" root))
+                            (expand-file-name "../docs/pages/api-index.json" mode-dir)
+                            (when-let* ((root (eliscript-mode-project-root)))
+                              (expand-file-name "contracts/library-api.json" root))))))
+    (cl-find-if #'file-regular-p candidates)))
+
+(defun eliscript-mode--eldoc-table ()
+  "Return cached hash table of Eliscript stdlib documentation entries."
+  (let* ((index-file (eliscript-mode--find-api-index-file))
+         (cache-key (or index-file ""))
+         (cached (and index-file (gethash cache-key eliscript-mode--eldoc-cache))))
+    (or cached
+        (when index-file
+          (condition-case nil
+              (let* ((data (json-parse-string
+                            (eliscript-mode--read-file index-file)
+                            :object-type 'alist
+                            :array-type 'list
+                            :null-object nil
+                            :false-object nil))
+                     (modules (alist-get 'modules data))
+                     (table (make-hash-table :test #'equal)))
+                (dolist (mod modules)
+                  (let ((mod-name (alist-get 'module mod))
+                        (role (or (alist-get 'role mod) "library"))
+                        (summary (or (alist-get 'summary mod) "")))
+                    (dolist (sym (alist-get 'exports mod))
+                      (unless (gethash sym table)
+                        (puthash sym
+                                 (format "%s [%s] (%s) — %s"
+                                         sym mod-name role summary)
+                                 table)))))
+                (puthash cache-key table eliscript-mode--eldoc-cache)
+                table)
+            (error nil))))))
+
+(defun eliscript-mode-eldoc-function (&optional callback &rest _ignored)
+  "Provide ElDoc documentation for Eliscript standard library symbol at point."
+  (let* ((table (eliscript-mode--eldoc-table))
+         (direct (thing-at-point 'symbol t))
+         (enclosing
+          (save-excursion
+            (when (ignore-errors (backward-up-list 1) t)
+              (forward-char 1)
+              (thing-at-point 'symbol t))))
+         (doc (and table
+                   (or (and direct (gethash direct table))
+                       (and enclosing (gethash enclosing table))))))
+    (when (and callback doc)
+      (funcall callback doc))
+    (if callback (and doc t) doc)))
+
+(defun eliscript-mode--test-program ()
+  "Resolve and validate `eliscript-mode-test-command'."
+  (unless (and (consp eliscript-mode-test-command)
+               (seq-every-p #'stringp eliscript-mode-test-command)
+               (not (string-empty-p (car eliscript-mode-test-command))))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-test-command must be non-empty strings")))
+  (let* ((configured (car eliscript-mode-test-command))
+         (program (if (file-name-absolute-p configured)
+                      (and (file-executable-p configured) configured)
+                    (executable-find configured))))
+    (or program
+        (signal 'eliscript-mode-error
+                (list (format "test runner executable not found: %s"
+                              configured))))))
+
+(defun eliscript-mode--deftest-at-point ()
+  "Return the name of the enclosing `(deftest NAME ...)' form, or nil."
+  (save-excursion
+    (let ((start (eliscript-mode--current-definition-start)))
+      (when start
+        (goto-char start)
+        (when (looking-at "^[ \t]*(deftest\\_>[ \t]+\\([^][(){}\"; \t\r\n]+\\)")
+          (match-string-no-properties 1))))))
+
+(defun eliscript-mode-run-tests (&optional filter target)
+  "Run `eliscript-test' with optional FILTER and TARGET path."
+  (interactive)
+  (let* ((program (eliscript-mode--test-program))
+         (root (or (eliscript-mode-project-root)
+                   (and buffer-file-name (file-name-directory buffer-file-name))
+                   default-directory))
+         (default-directory root)
+         (args (append (cdr eliscript-mode-test-command)
+                       (list "--root" root)
+                       (when (and filter (not (string-empty-p filter)))
+                         (list "--filter" filter))
+                       (list (or target buffer-file-name root))))
+         (command (mapconcat #'shell-quote-argument (cons program args) " ")))
+    (compilation-start command 'eliscript-compilation-mode
+                       (lambda (_mode) "*Eliscript Tests*"))))
+
+(defun eliscript-mode-run-test-at-point ()
+  "Run the `deftest' enclosing point using `eliscript-test'."
+  (interactive)
+  (unless buffer-file-name
+    (signal 'eliscript-mode-error
+            '("running tests requires a file-backed buffer")))
+  (eliscript-mode-run-tests (eliscript-mode--deftest-at-point) buffer-file-name))
+
 ;;;###autoload
 (define-derived-mode eliscript-mode prog-mode "Eliscript"
   "Major mode for editing Eliscript source."
@@ -863,6 +1020,8 @@ The visited file is not saved.  On failure the buffer remains unchanged."
               #'eliscript-mode--beginning-of-defun)
   (setq-local end-of-defun-function #'eliscript-mode--end-of-defun)
   (setq-local parse-sexp-ignore-comments t)
+  (add-hook 'eldoc-documentation-functions
+            #'eliscript-mode-eldoc-function nil t)
   (add-hook 'flymake-diagnostic-functions
             #'eliscript-mode-flymake-backend nil t)
   (add-hook 'kill-buffer-hook #'eliscript-mode--stop-flymake-process nil t))

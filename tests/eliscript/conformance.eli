@@ -16,11 +16,11 @@
   (test "repository specifications have complete conformance evidence"
     (async ()
       (js-call (expect (await (checkContracts (js-object :root root)))) :toEqual
-        (js-object :specifications (js-object :total 181
-            :statuses (js-object :draft 2 :accepted 3 :stable 175 :superseded 1)
-            :implementations (js-object "in-progress" 3 :implemented 176 :pending 1 :superseded 1)
-            :coveredImplemented 176)
-          :features (js-object :total 176 :evidence 689 :domains (js-object
+        (js-object :specifications (js-object :total 190
+            :statuses (js-object :draft 2 :accepted 3 :stable 184 :superseded 1)
+            :implementations (js-object "in-progress" 3 :implemented 185 :pending 1 :superseded 1)
+            :coveredImplemented 185)
+          :features (js-object :total 185 :evidence 712 :domains (js-object
             :acceleration (js-object :features 1 :evidence 2)
             :bootstrap (js-object :features 13 :evidence 37)
             :compiler (js-object :features 15 :evidence 45)
@@ -32,13 +32,13 @@
             :project (js-object :features 5 :evidence 7)
             :publishing (js-object :features 1 :evidence 2)
             :quality (js-object :features 25 :evidence 83)
-            :runtime (js-object :features 16 :evidence 105)
-            :stdlib (js-object :features 43 :evidence 170)
-            :toolchain (js-object :features 5 :evidence 20)
+            :runtime (js-object :features 17 :evidence 107)
+            :stdlib (js-object :features 50 :evidence 188)
+            :toolchain (js-object :features 6 :evidence 23)
             :tooling (js-object :features 1 :evidence 2)
             :worker (js-object :features 8 :evidence 33)))
-          :baseline (js-object :stableSpecifications 175 :provisionalSpecifications 1
-            :planningSpecifications 4 :supersededSpecifications 1 :stableFeatures 175 :provisionalFeatures 1)))))
+          :baseline (js-object :stableSpecifications 184 :provisionalSpecifications 1
+            :planningSpecifications 4 :supersededSpecifications 1 :stableFeatures 184 :provisionalFeatures 1)))))
   (test "contract checker rejects specification metadata drift"
     (async ()
       (let ((index (await (read-json "specs/index.json"))))

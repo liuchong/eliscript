@@ -22,6 +22,12 @@
     filename macro-context)
    filename))
 
+(defun eliscript-lint-string (source &optional filename options macro-context)
+  "Read, expand, analyze, and lint SOURCE from FILENAME using OPTIONS."
+  (eliscript-lint-module
+   (eliscript--analyzed-string source filename macro-context)
+   filename options))
+
 (defun eliscript-compile-ir-string (source &optional filename macro-context)
   "Compile Eliscript SOURCE from FILENAME into an IR program."
   (eliscript-lower-module

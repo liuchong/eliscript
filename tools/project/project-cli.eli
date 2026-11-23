@@ -7,7 +7,7 @@
   (defconst parseConfigurationJson (get ground :parseConfigurationJson))
   (defconst parseArguments (get ground :parseArguments))
   (defconst readProjectConfiguration (get ground :readProjectConfiguration))
-  (defconst usage "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --json            Print the build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
+  (defconst usage "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --no-tree-shake   Disable pure-barrel export tree-shaking\n  --json            Print the build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
   (defasync execute (arguments &rest supplied)
     (let* ((options (if (or (= (js-length supplied) 0) (undefined? (aref supplied 0)))
                         (js-object) (aref supplied 0)))

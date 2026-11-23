@@ -57,7 +57,7 @@
         (js-call assert :equal (get (get module :values) :length) (js-length tokens))
         (js-call (get module :values) :forEach (lambda (value) (funcall assert (Object/is value (js* "-0"))) (js-call assert :equal (/ 1 value) (- globalThis.Infinity))))
         (js-call (Array/from (get module :nested)) :forEach (lambda (container)
-          (js-call (Array/from container) :forEach (lambda (item) (let ((value (if (Array/isArray item) (aref item 1) item)))
+          (js-call (Array/from container) :forEach (lambda (item) (let ((value (if (or (Array/isArray item) (and item (= (js* "typeof item") "object") (not (undefined? (aref item 1))))) (aref item 1) item)))
             (funcall assert (Object/is value (js* "-0"))) (js-call assert :equal (/ 1 value) (- globalThis.Infinity))))))))))))
   (test "Seed and JS retain complete IR values spans emitted JavaScript and source map bytes" (async ()
     (let ((fixture (resolve directory "ir.json")))

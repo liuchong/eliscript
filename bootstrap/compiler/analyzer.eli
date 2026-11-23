@@ -1565,4 +1565,694 @@
         (validate-portable-module flattened context))
       forms))
 
-  (export analyze-module select-portable-module))
+  (defconst lint-transient-constructors
+    (new globalThis.Set
+      (js-array "transient" "as-transient" "asTransient"
+        "transient-vector" "transientVector"
+        "transient-map" "transientMap"
+        "transient-set" "transientSet")))
+
+  (defconst lint-transient-updaters
+    (new globalThis.Set
+      (js-array "conj!" "conjBang" "assoc!" "assocBang"
+        "dissoc!" "dissocBang" "disj!" "disjBang")))
+
+  (defconst lint-transient-finalizers
+    (new globalThis.Set (js-array "persistent!" "persistentBang")))
+
+  (defun lint-ignored-name-p (name)
+    (and (= (funcall typeof-value name) "string")
+         (js-call name :startsWith "_")))
+
+  (defun lint-rule-level (options code)
+    (let* ((rules (and options (= (funcall typeof-value options) "object")
+                       (get options :rules nil)))
+           (raw (and rules (= (funcall typeof-value rules) "object")
+                     (aref rules code))))
+      (cond
+        ((= raw "off") "off")
+        ((= raw "error") "error")
+        (t "warning"))))
+
+  (defun lint-emit (state code span message)
+    (let ((severity (lint-rule-level (get state :options) code)))
+      (unless (= severity "off")
+        (let* ((effective-span (or span (get state :currentSpan)))
+               (file (or (get state :filename)
+                         (and effective-span (get effective-span :filename))
+                         "<input>"))
+               (loc (if effective-span
+                      (js-object
+                        :file file
+                        :start
+                        (js-object
+                          :offset (get effective-span :start)
+                          :line (get effective-span :line)
+                          :column (get effective-span :column))
+                        :end
+                        (js-object
+                          :offset (get effective-span :end)
+                          :line (get effective-span :endLine)
+                          :column (get effective-span :endColumn)))
+                      (js-object :file file)))
+               (diag (js-object
+                       :format "eliscript-diagnostic"
+                       :code code
+                       :severity severity
+                       :phase "lint"
+                       :message message
+                       :location loc)))
+          (js-call (get state :diagnostics) :push diag)))))
+
+  (defun lint-make-scope (parent fn-depth)
+    (js-object
+      :parent parent
+      :fnDepth fn-depth
+      :bindings (new globalThis.Map)
+      :order (js-array)))
+
+  (defun lint-lookup (scope name)
+    (let ((current scope)
+          (found nil))
+      (while (and current (not found))
+        (setq found (js-call (get current :bindings) :get name))
+        (unless found
+          (setq current (get current :parent))))
+      found))
+
+  (defun lint-declare (scope name-node kind fn-depth mutable state &optional check-shadow is-transient)
+    (when (symbol-node-p name-node)
+      (let* ((name (node-name name-node))
+             (span (or (node-span name-node) (get state :currentSpan))))
+        (when (and check-shadow
+                   (not (lint-ignored-name-p name))
+                   (get scope :parent)
+                   (lint-lookup (get scope :parent) name))
+          (lint-emit state "ELI-L0003" span
+            (str "binding shadows outer binding: " name)))
+        (let ((binding (js-object
+                         :name name
+                         :kind kind
+                         :fnDepth fn-depth
+                         :span span
+                         :mutable mutable
+                         :used false
+                         :isTransient (if is-transient t false)
+                         :transientFinalized false
+                         :transientEscaped false
+                         :transientEscapeSpan nil)))
+          (unless (js-call (get scope :bindings) :has name)
+            (js-call (get scope :order) :push binding))
+          (js-call (get scope :bindings) :set name binding)
+          binding))))
+
+  (defun lint-finalize-scope (scope state)
+    (let ((order (get scope :order))
+          (index 0))
+      (while (< index (get order :length))
+        (let* ((binding (js-nth index order))
+               (name (get binding :name))
+               (kind (get binding :kind)))
+          (when (and (or (= kind "local") (= kind "parameter")
+                         (= kind "loop") (= kind "catch"))
+                     (not (get binding :used))
+                     (not (lint-ignored-name-p name)))
+            (lint-emit state "ELI-L0001" (get binding :span)
+              (str "unused local binding: " name)))
+          (when (and (get binding :isTransient)
+                     (or (get binding :transientEscaped)
+                         (not (get binding :transientFinalized))))
+            (lint-emit state "ELI-L0009"
+              (or (get binding :transientEscapeSpan) (get binding :span))
+              (str "transient binding escapes or is not finalized with persistent!: " name))))
+        (setq index (1+ index)))))
+
+  (defun lint-transient-init-p (node)
+    (let ((items (and node (= (node-kind node) "list") (node-items node))))
+      (and items
+           (> (get items :length) 0)
+           (symbol-node-p (js-nth 0 items))
+           (js-call lint-transient-constructors :has (node-name (js-nth 0 items))))))
+
+  (defun lint-mark-finalized-transient (arg scope)
+    (when arg
+      (cond
+        ((symbol-node-p arg)
+         (let ((binding (lint-lookup scope (node-name arg))))
+           (when (and binding
+                      (get binding :isTransient)
+                      (= (get binding :fnDepth) (get scope :fnDepth)))
+             (put binding :transientFinalized t))))
+        ((= (node-kind arg) "list")
+         (let* ((items (node-items arg))
+                (head (and (> (get items :length) 0) (js-nth 0 items))))
+           (when (and head
+                      (symbol-node-p head)
+                      (js-call lint-transient-updaters :has (node-name head))
+                      (> (get items :length) 1))
+             (lint-mark-finalized-transient (js-nth 1 items) scope)))))))
+
+  (defun lint-constant-condition-p (node)
+    (if (not node)
+        nil
+      (let ((kind (node-kind node)))
+        (or (= kind "literal")
+            (= kind "undefined")
+            (= kind "keyword")
+            (and (= kind "list")
+                 (> (get (node-items node) :length) 0)
+                 (symbol-node-p (js-nth 0 (node-items node)))
+                 (= (node-name (js-nth 0 (node-items node))) "quote"))))))
+
+  (defun lint-useless-expr-p (node)
+    (if (not node)
+        nil
+      (let ((kind (node-kind node)))
+        (or (= kind "literal")
+            (= kind "undefined")
+            (= kind "keyword")
+            (and (= kind "symbol") (not (lint-ignored-name-p (node-name node))))
+            (and (= kind "list")
+                 (> (get (node-items node) :length) 0)
+                 (symbol-node-p (js-nth 0 (node-items node)))
+                 (= (node-name (js-nth 0 (node-items node))) "quote"))))))
+
+  (defun lint-literal-key (node)
+    (if (not node)
+        nil
+      (let ((kind (node-kind node)))
+        (cond
+          ((= kind "undefined") "undef:undefined")
+          ((= kind "keyword") (str "kw:" (node-name node)))
+          ((= kind "literal")
+           (let ((val (node-value node)))
+             (cond
+               ((null val) "nil:nil")
+               ((eq val t) "bool:t")
+               ((eq val false) "bool:false")
+               ((= (funcall typeof-value val) "string") (str "str:" val))
+               ((= (funcall typeof-value val) "number")
+                (str "num:" (if (= val 0) 0 val)))
+               (t nil))))
+          (t nil)))))
+
+  (defun lint-key-display (node)
+    (if (not node)
+        "nil"
+      (let ((kind (node-kind node)))
+        (cond
+          ((= kind "undefined") "undefined")
+          ((= kind "keyword") (str ":" (node-name node)))
+          ((= kind "literal")
+           (let ((val (node-value node)))
+             (cond
+               ((null val) "nil")
+               ((eq val t) "t")
+               ((eq val false) "false")
+               ((= (funcall typeof-value val) "string") (JSON/stringify val))
+               (t (str val)))))
+          (t (node-display node))))))
+
+  (defun lint-collect-arities (forms)
+    (let ((arities (new globalThis.Map))
+          (context (js-object :filename "<lint>"))
+          (index 0))
+      (while (< index (get forms :length))
+        (let ((form (js-nth index forms)))
+          (when (= (node-kind form) "list")
+            (let* ((items (node-items form))
+                   (op (and (> (get items :length) 0)
+                            (symbol-node-p (js-nth 0 items))
+                            (node-name (js-nth 0 items)))))
+              (when (and (>= (get items :length) 3)
+                         (or (= op "defun") (= op "defn")
+                             (= op "defportable") (= op "defasync"))
+                         (symbol-node-p (js-nth 1 items)))
+                (let ((name (node-name (js-nth 1 items)))
+                      (params-node (js-nth 2 items)))
+                  (try
+                    (let ((parsed (function-parameters params-node context))
+                          (min-arity 0)
+                          (max-arity 0)
+                          (variadic false)
+                          (p-idx 0))
+                      (while (< p-idx (get parsed :length))
+                        (let ((kind (get (js-nth p-idx parsed) :kind)))
+                          (cond
+                            ((= kind "required")
+                             (setq min-arity (1+ min-arity))
+                             (setq max-arity (1+ max-arity)))
+                            ((= kind "optional")
+                             (setq max-arity (1+ max-arity)))
+                            ((= kind "rest")
+                             (setq variadic t))))
+                        (setq p-idx (1+ p-idx)))
+                      (js-call arities :set name
+                        (js-object :min min-arity :max (if variadic nil max-arity))))
+                    (catch _err nil)))))))
+        (setq index (1+ index)))
+      arities))
+
+  (defun lint-sequence (forms scope tail state)
+    (let ((index 0)
+          (len (get forms :length)))
+      (while (< index len)
+        (let ((item (js-nth index forms))
+              (is-last (= index (1- len))))
+          (when (and (not is-last) (lint-useless-expr-p item))
+            (lint-emit state "ELI-L0008"
+              (or (node-span item) (get state :currentSpan))
+              "useless literal expression in sequence"))
+          (lint-expression item scope (and tail is-last) state))
+        (setq index (1+ index)))))
+
+  (defun lint-pattern-defaults (pattern scope state)
+    (let ((context (js-object :filename (or (get state :filename) "<input>"))))
+      (try
+        (cond
+          ((vector-node-p pattern)
+           (js-call (node-items pattern) :forEach
+             (lambda (element)
+               (unless (or (null-node-p element)
+                           (and (symbol-node-p element) (= (node-name element) "&rest")))
+                 (lint-pattern-defaults element scope state)))))
+          ((map-node-p pattern)
+           (let ((spec (map-binding-spec pattern context)))
+             (js-call (get spec :entries) :forEach
+               (lambda (entry)
+                 (when (get entry :hasDefault)
+                   (lint-expression (get entry :default) scope nil state))
+                 (lint-pattern-defaults (get entry :target) scope state))))))
+        (catch _err nil))))
+
+  (defun lint-declare-pattern (scope pattern kind fn-depth mutable state &optional check-shadow is-transient)
+    (let ((context (js-object :filename (or (get state :filename) "<input>"))))
+      (try
+        (let* ((single (and (symbol-node-p pattern)
+                            (not (binding-marker-p (node-name pattern)))))
+               (nodes (if single (js-array pattern) (binding-nodes pattern context)))
+               (index 0))
+          (while (< index (get nodes :length))
+            (lint-declare scope (js-nth index nodes) kind fn-depth mutable state
+              check-shadow (and single is-transient))
+            (setq index (1+ index))))
+        (catch _err nil))))
+
+  (defun lint-let-binding-pair (binding)
+    (cond
+      ((binding-pattern-p binding) (js-array binding nil))
+      (t
+       (let ((items (list-items binding)))
+         (if (and (not (eq items undefined))
+                  (>= (get items :length) 1)
+                  (<= (get items :length) 2)
+                  (binding-pattern-p (js-nth 0 items)))
+             (js-array (js-nth 0 items) (if (> (get items :length) 1) (js-nth 1 items) nil))
+           nil)))))
+
+  (defun lint-let (args scope sequential tail state)
+    (when (> (get args :length) 0)
+      (let* ((bindings (list-items (js-nth 0 args)))
+             (body (js-call args :slice 1))
+             (child (lint-make-scope scope (get scope :fnDepth))))
+        (when (not (eq bindings undefined))
+          (if sequential
+              (let ((index 0))
+                (while (< index (get bindings :length))
+                  (let ((pair (lint-let-binding-pair (js-nth index bindings))))
+                    (when pair
+                      (let ((pat (js-nth 0 pair))
+                            (init (js-nth 1 pair)))
+                        (when init
+                          (lint-expression init child nil state))
+                        (lint-pattern-defaults pat child state)
+                        (lint-declare-pattern child pat "local" (get child :fnDepth)
+                          t state t (lint-transient-init-p init)))))
+                  (setq index (1+ index))))
+            (let ((parsed (js-array))
+                  (index 0))
+              (while (< index (get bindings :length))
+                (let ((pair (lint-let-binding-pair (js-nth index bindings))))
+                  (when pair (js-call parsed :push pair)))
+                (setq index (1+ index)))
+              (setq index 0)
+              (while (< index (get parsed :length))
+                (let ((pair (js-nth index parsed)))
+                  (when (js-nth 1 pair)
+                    (lint-expression (js-nth 1 pair) scope nil state))
+                  (lint-pattern-defaults (js-nth 0 pair) scope state))
+                (setq index (1+ index)))
+              (setq index 0)
+              (while (< index (get parsed :length))
+                (let ((pair (js-nth index parsed)))
+                  (lint-declare-pattern child (js-nth 0 pair) "local" (get child :fnDepth)
+                    t state t (lint-transient-init-p (js-nth 1 pair))))
+                (setq index (1+ index))))))
+        (lint-sequence body child tail state)
+        (lint-finalize-scope child state))))
+
+  (defun lint-loop (args scope tail state)
+    (when (> (get args :length) 0)
+      (let* ((bindings (list-items (js-nth 0 args)))
+             (body (js-call args :slice 1))
+             (child (lint-make-scope scope (get scope :fnDepth)))
+             (pairs (js-array)))
+        (when (not (eq bindings undefined))
+          (let ((index 0))
+            (while (< index (get bindings :length))
+              (let ((items (list-items (js-nth index bindings))))
+                (when (and (not (eq items undefined)) (= (get items :length) 2))
+                  (let ((pair (lint-let-binding-pair (js-nth index bindings))))
+                    (when pair (js-call pairs :push pair)))))
+              (setq index (1+ index))))
+          (let ((index 0))
+            (while (< index (get pairs :length))
+              (let ((pair (js-nth index pairs)))
+                (when (js-nth 1 pair)
+                  (lint-expression (js-nth 1 pair) scope nil state))
+                (lint-pattern-defaults (js-nth 0 pair) scope state))
+              (setq index (1+ index)))
+            (setq index 0)
+            (while (< index (get pairs :length))
+              (let ((pair (js-nth index pairs)))
+                (lint-declare-pattern child (js-nth 0 pair) "loop" (get child :fnDepth)
+                  t state t (lint-transient-init-p (js-nth 1 pair))))
+              (setq index (1+ index)))))
+        (lint-sequence body child tail state)
+        (lint-finalize-scope child state))))
+
+  (defun lint-function (parameters body scope state)
+    (let* ((context (js-object :filename (or (get state :filename) "<input>")))
+           (parsed (try (function-parameters parameters context) (catch _err (js-array))))
+           (first-body (and (> (get body :length) 0) (js-nth 0 body)))
+           (first-items (and first-body (= (node-kind first-body) "list") (node-items first-body)))
+           (clean-body
+            (if (and first-items (> (get first-items :length) 0)
+                     (symbol-node-p (js-nth 0 first-items))
+                     (= (node-name (js-nth 0 first-items)) "memory-sig"))
+                (js-call body :slice 1)
+              body))
+           (child (lint-make-scope scope (1+ (get scope :fnDepth))))
+           (index 0))
+      (while (< index (get parsed :length))
+        (lint-pattern-defaults (get (js-nth index parsed) :node) scope state)
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (get parsed :length))
+        (lint-declare-pattern child (get (js-nth index parsed) :node) "parameter"
+          (get child :fnDepth) t state t false)
+        (setq index (1+ index)))
+      (lint-sequence clean-body child t state)
+      (lint-finalize-scope child state)))
+
+  (defun lint-assignment (form-span args scope state)
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let ((target-node (js-nth index args))
+              (value-node (and (< (1+ index) (get args :length)) (js-nth (1+ index) args))))
+          (when value-node
+            (lint-expression value-node scope nil state))
+          (when (symbol-node-p target-node)
+            (let* ((target (node-name target-node))
+                   (binding (lint-lookup scope target)))
+              (when binding
+                (when (and (not (lint-ignored-name-p target))
+                           (or (= (get binding :kind) "parameter")
+                               (and (> (get binding :fnDepth) 0)
+                                    (< (get binding :fnDepth) (get scope :fnDepth)))))
+                  (lint-emit state "ELI-L0006" form-span
+                    (str "mutating parameter or captured binding with setq: " target)))
+                (when (and value-node (lint-transient-init-p value-node))
+                  (put binding :isTransient t))))))
+        (setq index (+ index 2)))))
+
+  (defun lint-call (form scope tail state)
+    (let* ((items (node-items form))
+           (op-node (js-nth 0 items))
+           (op (and (symbol-node-p op-node) (node-name op-node)))
+           (args (js-call items :slice 1))
+           (form-span (or (node-span form) (get state :currentSpan))))
+      (cond
+        ((or (= op "lambda") (= op "fn") (= op "async"))
+         (when (> (get args :length) 0)
+           (lint-function (js-nth 0 args) (js-call args :slice 1) scope state)))
+        ((= op "let") (lint-let args scope false tail state))
+        ((= op "let*") (lint-let args scope t tail state))
+        ((= op "loop") (lint-loop args scope tail state))
+        ((or (= op "setq") (= op "set!"))
+         (lint-assignment form-span args scope state))
+        ((= op "if")
+         (when (and (> (get args :length) 0)
+                    (lint-constant-condition-p (js-nth 0 args)))
+           (lint-emit state "ELI-L0005" form-span "constant condition in if expression"))
+         (when (> (get args :length) 0)
+           (lint-expression (js-nth 0 args) scope nil state)
+           (let ((index 1))
+             (while (< index (get args :length))
+               (lint-expression (js-nth index args) scope tail state)
+               (setq index (1+ index))))))
+        ((or (= op "when") (= op "unless"))
+         (when (> (get args :length) 0)
+           (lint-expression (js-nth 0 args) scope nil state)
+           (lint-sequence (js-call args :slice 1) scope tail state)))
+        ((or (= op "progn") (= op "do"))
+         (if (= (get args :length) 0)
+             (lint-emit state "ELI-L0008" form-span "empty progn/do expression")
+           (lint-sequence args scope tail state)))
+        ((or (= op "and") (= op "or"))
+         (lint-sequence args scope tail state))
+        ((= op "cond")
+         (js-call args :forEach
+           (lambda (clause)
+             (let ((c-items (list-items clause)))
+               (when (and (not (eq c-items undefined)) (> (get c-items :length) 0))
+                 (lint-expression (js-nth 0 c-items) scope nil state)
+                 (lint-sequence (js-call c-items :slice 1) scope tail state))))))
+        ((= op "try")
+         (js-call args :forEach
+           (lambda (arg)
+             (let ((aop (clause-operator arg)))
+               (cond
+                 ((= aop "catch")
+                  (let* ((c-items (list-items arg))
+                         (pat (js-nth 1 c-items))
+                         (child (lint-make-scope scope (get scope :fnDepth))))
+                    (lint-pattern-defaults pat scope state)
+                    (lint-declare-pattern child pat "catch" (get child :fnDepth) t state t false)
+                    (lint-sequence (js-call c-items :slice 2) child tail state)
+                    (lint-finalize-scope child state)))
+                 ((= aop "finally")
+                  (lint-sequence (js-call (list-items arg) :slice 1) scope nil state))
+                 (t
+                  (lint-expression arg scope tail state)))))))
+        ((= op "hash-map")
+         (let ((seen (new globalThis.Set))
+               (index 0))
+           (while (< index (get args :length))
+             (let ((k (js-nth index args))
+                   (v (and (< (1+ index) (get args :length)) (js-nth (1+ index) args))))
+               (when k
+                 (let ((canon (lint-literal-key k)))
+                   (when canon
+                     (if (js-call seen :has canon)
+                         (lint-emit state "ELI-L0007"
+                           (or (node-span k) form-span)
+                           (str "duplicate map literal key: " (lint-key-display k)))
+                       (js-call seen :add canon))))
+                 (lint-expression k scope nil state))
+               (when v
+                 (lint-expression v scope nil state)))
+             (setq index (+ index 2)))))
+        ((= op "hash-set")
+         (let ((seen (new globalThis.Set))
+               (index 0))
+           (while (< index (get args :length))
+             (let* ((elem (js-nth index args))
+                    (canon (lint-literal-key elem)))
+               (when canon
+                 (if (js-call seen :has canon)
+                     (lint-emit state "ELI-L0007"
+                       (or (node-span elem) form-span)
+                       (str "duplicate set literal element: " (lint-key-display elem)))
+                   (js-call seen :add canon)))
+               (lint-expression elem scope nil state))
+             (setq index (1+ index)))))
+        ((= op "js-object")
+         (let ((index 0))
+           (while (< index (get args :length))
+             (let ((k (js-nth index args))
+                   (v (and (< (1+ index) (get args :length)) (js-nth (1+ index) args))))
+               (when k
+                 (unless (or (keyword-node-p k) (string-node-p k) (symbol-node-p k))
+                   (lint-expression k scope nil state)))
+               (when v
+                 (lint-expression v scope nil state)))
+             (setq index (+ index 2)))))
+        ((or (= op "get") (= op "put") (= op "js-call"))
+         (when (> (get args :length) 0)
+           (lint-expression (js-nth 0 args) scope nil state)
+           (when (> (get args :length) 1)
+             (let ((k (js-nth 1 args)))
+               (unless (or (keyword-node-p k) (string-node-p k))
+                 (lint-expression k scope nil state))))
+           (let ((index 2))
+             (while (< index (get args :length))
+               (lint-expression (js-nth index args) scope nil state)
+               (setq index (1+ index))))))
+        ((or (= op "quote") (= op "js*")) nil)
+        (t
+         (let ((is-builtin (and op (js-call builtin-operator-set :has op))))
+           (unless is-builtin
+             (lint-expression op-node scope nil state))
+           (when (and op (not is-builtin))
+             (let* ((binding (lint-lookup scope op))
+                    (sig (and binding
+                              (= (get binding :kind) "function")
+                              (= (get binding :fnDepth) 0)
+                              (js-call (get state :arities) :get op))))
+               (when sig
+                 (let ((min-a (get sig :min))
+                       (max-a (get sig :max))
+                       (argc (get args :length)))
+                   (when (or (< argc min-a) (and (not (nil? max-a)) (> argc max-a)))
+                     (lint-emit state "ELI-L0004" form-span
+                       (str "function " op " expects "
+                            (cond
+                              ((nil? max-a) (str "at least " min-a))
+                              ((= min-a max-a) (str min-a))
+                              (t (str min-a ".." max-a)))
+                            " arguments, got " argc)))))))
+           (when (and op
+                      (js-call lint-transient-finalizers :has op)
+                      (> (get args :length) 0))
+             (lint-mark-finalized-transient (js-nth 0 args) scope))
+           (let ((index 0))
+             (while (< index (get args :length))
+               (lint-expression (js-nth index args) scope nil state)
+               (setq index (1+ index)))))))))
+
+  (defun lint-expression (form scope tail state)
+    (when form
+      (let* ((prev-span (get state :currentSpan))
+             (span (or (node-span form) prev-span))
+             (kind (node-kind form)))
+        (put state :currentSpan span)
+        (cond
+          ((or (= kind "literal") (= kind "undefined") (= kind "keyword")) nil)
+          ((= kind "symbol")
+           (let ((name (node-name form)))
+             (unless (qualified-name-p name)
+               (let ((binding (lint-lookup scope name)))
+                 (when binding
+                   (put binding :used t)
+                   (when (get binding :isTransient)
+                     (cond
+                       ((> (get scope :fnDepth) (get binding :fnDepth))
+                        (put binding :transientEscaped t)
+                        (unless (get binding :transientEscapeSpan)
+                          (put binding :transientEscapeSpan span)))
+                       (tail
+                        (put binding :transientEscaped t)
+                        (unless (get binding :transientEscapeSpan)
+                          (put binding :transientEscapeSpan span))))))))))
+          ((= kind "vector")
+           (let ((items (node-items form))
+                 (index 0))
+             (while (< index (get items :length))
+               (lint-expression (js-nth index items) scope nil state)
+               (setq index (1+ index)))))
+          ((= kind "list")
+           (lint-call form scope tail state)))
+        (put state :currentSpan prev-span))))
+
+  (defun lint-module (forms filename &optional options)
+    (let* ((diag-context (js-object :filename filename))
+           (flattened (flatten-modules forms diag-context))
+           (scope (lint-make-scope nil 0))
+           (arities (lint-collect-arities flattened))
+           (state (js-object
+                    :filename filename
+                    :options options
+                    :arities arities
+                    :currentSpan nil
+                    :diagnostics (js-array))))
+      (js-call flattened :forEach
+        (lambda (form)
+          (when (= (node-kind form) "list")
+            (let* ((items (node-items form))
+                   (op (and (> (get items :length) 0)
+                            (symbol-node-p (js-nth 0 items))
+                            (node-name (js-nth 0 items))))
+                   (args (js-call items :slice 1)))
+              (cond
+                ((or (= op "import") (= op "import-portable"))
+                 (js-call
+                   (import-bindings args diag-context (node-span form)
+                     (= op "import-portable"))
+                   :forEach
+                   (lambda (name)
+                     (lint-declare scope name "import" 0 false state))))
+                ((= op "defvar")
+                 (lint-declare scope (js-nth 0 args) "variable" 0 t state))
+                ((= op "defconst")
+                 (lint-declare scope (js-nth 0 args) "constant" 0 false state))
+                ((or (= op "defun") (= op "defn")
+                     (= op "defportable") (= op "defasync"))
+                 (lint-declare scope (js-nth 0 args) "function" 0 false state)))))))
+      (js-call flattened :forEach
+        (lambda (form)
+          (let ((prev-span (get state :currentSpan)))
+            (put state :currentSpan (or (node-span form) prev-span))
+            (if (not (= (node-kind form) "list"))
+                (lint-expression form scope nil state)
+              (let* ((items (node-items form))
+                     (op (and (> (get items :length) 0)
+                              (symbol-node-p (js-nth 0 items))
+                              (node-name (js-nth 0 items))))
+                     (args (js-call items :slice 1)))
+                (cond
+                  ((or (= op "import") (= op "import-portable")) nil)
+                  ((or (= op "defvar") (= op "defconst"))
+                   (when (> (get args :length) 1)
+                     (lint-expression (js-nth 1 args) scope nil state)))
+                  ((or (= op "defun") (= op "defn")
+                       (= op "defportable") (= op "defasync"))
+                   (when (>= (get args :length) 2)
+                     (lint-function (js-nth 1 args) (js-call args :slice 2) scope state)))
+                  ((= op "export")
+                   (js-call args :forEach
+                     (lambda (name)
+                       (when (symbol-node-p name)
+                         (let ((binding (lint-lookup scope (node-name name))))
+                           (when binding (put binding :used t)))))))
+                  ((= op "export-default")
+                   (when (> (get args :length) 0)
+                     (lint-expression (js-nth 0 args) scope nil state)))
+                  (t
+                   (lint-expression form scope nil state)))))
+            (put state :currentSpan prev-span))))
+      (let ((order (get scope :order))
+            (index 0))
+        (while (< index (get order :length))
+          (let ((binding (js-nth index order)))
+            (when (and (= (get binding :kind) "import")
+                       (not (get binding :used))
+                       (not (lint-ignored-name-p (get binding :name))))
+              (lint-emit state "ELI-L0002" (get binding :span)
+                (str "unused import binding: " (get binding :name)))))
+          (setq index (1+ index))))
+      (js-call (get state :diagnostics) :sort
+        (lambda (left right)
+          (let* ((sl (get (get left :location) :start))
+                 (sr (get (get right :location) :start))
+                 (ol (if sl (get sl :offset) 0))
+                 (or_ (if sr (get sr :offset) 0)))
+            (cond
+              ((/= ol or_) (- ol or_))
+              ((/= (get left :code) (get right :code))
+               (if (< (get left :code) (get right :code)) -1 1))
+              ((/= (get left :message) (get right :message))
+               (if (< (get left :message) (get right :message)) -1 1))
+              (t 0)))))))
+
+  (export analyze-module select-portable-module lint-module))

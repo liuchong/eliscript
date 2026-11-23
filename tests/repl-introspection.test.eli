@@ -1,0 +1,161 @@
+(module tests.repl-introspection.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" mkdir mkdtemp rm writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" join resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "../bootstrap/host/evaluation.mjs" EvaluationSession)
+  (import "../tools/backends/compiler-host-record.mjs" copyHostRecord)
+
+  (defconst dynamicImport (js* "(specifier) => import(specifier)"))
+  (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
+  (defconst bootstrapPath (resolve root "bin/eliscript-bootstrap"))
+  (defconst evalPath (resolve root "bin/eliscript-eval"))
+
+  (defvar workDir undefined)
+  (defvar compilerDir undefined)
+  (defvar compiler undefined)
+
+  (defasync runCmd (cmd &rest __opt)
+    (let* ((opts (if (undefined? (aref __opt 0)) (js-object) (aref __opt 0)))
+           (child (Bun/spawn cmd (js-object :cwd (if (get opts :cwd) (get opts :cwd) root)
+                                   :stdin (if (undefined? (get opts :stdin)) "ignore" "pipe")
+                                   :stdout "pipe" :stderr "pipe"
+                                   :env (if (get opts :env) (get opts :env) (get globalThis.process :env))))))
+      (when (not (undefined? (get opts :stdin)))
+        (js-call (get child :stdin) :write (get opts :stdin))
+        (js-call (get child :stdin) :end))
+      (let ((parts (await (Promise/all (js-array (get child :exited)
+                                         (js-call (new globalThis.Response (get child :stdout)) :text)
+                                         (js-call (new globalThis.Response (get child :stderr)) :text))))))
+        (js-object :exitCode (aref parts 0) :stdout (aref parts 1) :stderr (aref parts 2)))))
+
+  (defun runtimeEnv (rt)
+    (copyHostRecord (get globalThis.process :env)
+      (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR compilerDir :ELISCRIPT_JS_RUNTIME rt)))
+
+  (beforeAll (async ()
+    (setq workDir (await (mkdtemp (join (tmpdir) "eliscript-repl-introspection-"))))
+    (setq compilerDir (resolve workDir "compiler"))
+    (let ((built (await (runCmd (js-array bootstrapPath)
+                          (js-object :env (copyHostRecord (get globalThis.process :env)
+                                            (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR compilerDir)))))))
+      (js-call (expect (get built :exitCode)) :toBe 0))
+    (setq compiler (await (funcall dynamicImport (str (get (pathToFileURL (resolve compilerDir "compiler.mjs")) :href) "?repl"))))) 30000)
+
+  (afterAll (async ()
+    (when workDir
+      (await (rm workDir (js-object :recursive t :force t))))))
+
+  (test "REPL supports doc, source, apropos, dir, Source-Map pst, tap> echo, load-file, and defvar-once"
+    (async ()
+      (let* ((projDir (resolve workDir "proj"))
+             (modFile (resolve projDir "sample.eli"))
+             (helperFile (resolve projDir "reloaded.eli"))
+             (modSrc (js-call (js-array
+                                "(module repl.sample"
+                                "  (defun add-five (x)"
+                                "    \"Adds 5 to x.\""
+                                "    (+ x 5))"
+                                "  (defun explode-here (flag)"
+                                "    (if flag"
+                                "      (throw (new globalThis.Error \"repl-boom\"))"
+                                "      0))"
+                                "  (export add-five explode-here))")
+                       :join "\n"))
+             (helperSrc1 "(defvar-once reload-counter 10)\n(defun read-counter () reload-counter)\n")
+             (helperSrc2 "(defvar-once reload-counter 999)\n(defun read-counter () (+ reload-counter 1))\n"))
+        (await (mkdir projDir (js-object :recursive t)))
+        (await (writeFile modFile modSrc "utf8"))
+        (await (writeFile helperFile helperSrc1 "utf8"))
+
+        ;; Programmatic EvaluationSession checks
+        (let ((session (await (js-call EvaluationSession :create (js-object :compiler compiler)))))
+          (try
+            ;; doc from api-index.json
+            (js-call (expect (js-call session :doc "map")) :toContain "seq")
+            ;; load module and inspect doc/source/apropos/dir
+            (let ((loaded (await (js-call session :execute
+                                   (js-object :id 1 :operation "load" :source modSrc :filename modFile :root projDir)))))
+              (js-call (expect (get loaded :status)) :toBe "ok"))
+            (let ((docOut (js-call session :doc "add-five"))
+                  (srcOut (js-call session :source "add-five"))
+                  (apOut (js-call session :apropos "add-five"))
+                  (dirOut (js-call session :dir)))
+              (js-call (expect docOut) :toContain "Adds 5 to x.")
+              (js-call (expect srcOut) :toContain "(defun add-five")
+              (js-call (expect apOut) :toContain "add-five")
+              (js-call (expect dirOut) :toContain "add-five"))
+
+            ;; tap> live broadcast echo
+            (let ((tapRes (await (js-call session :execute
+                                   (js-object :id 2 :operation "evaluate" :source "(tap> {:event :ping :n 42})" :filename modFile)))))
+              (js-call (expect (get tapRes :status)) :toBe "ok")
+              (js-call (expect (get tapRes :stdout)) :toContain "[tap>]")
+              (js-call (expect (get tapRes :stdout)) :toContain ":event"))
+
+            ;; Source Map mapped pst trace on runtime exception
+            (let ((errRes (await (js-call session :execute
+                                   (js-object :id 3 :operation "evaluate" :source "(explode-here t)" :filename modFile)))))
+              (js-call (expect (get errRes :status)) :toBe "error")
+              (let ((trace (js-call session :pst)))
+                (js-call (expect trace) :toContain "repl-boom")
+                (js-call (expect trace) :toContain "sample.eli:7:")))
+
+            ;; defvar-once preserves state across re-evaluation, reset clears it
+            (await (js-call session :execute (js-object :id 4 :operation "reset")))
+            (let ((r1 (await (js-call session :execute
+                               (js-object :id 5 :operation "evaluate" :source "(defvar-once keep-val 7)" :filename helperFile))))
+                  (r2 (await (js-call session :execute
+                               (js-object :id 6 :operation "evaluate" :source "(defvar-once keep-val 1234)" :filename helperFile))))
+                  (checkKept (await (js-call session :execute
+                                      (js-object :id 7 :operation "evaluate" :source "keep-val" :filename helperFile)))))
+              (js-call (expect (get r1 :status)) :toBe "ok")
+              (js-call (expect (get r2 :status)) :toBe "ok")
+              (js-call (expect (get checkKept :value)) :toBe "7")
+              (await (js-call session :execute (js-object :id 8 :operation "reset")))
+              (let ((afterReset (await (js-call session :execute
+                                         (js-object :id 9 :operation "evaluate" :source "(defvar-once keep-val 1234)" :filename helperFile))))
+                    (readReset (await (js-call session :execute
+                                        (js-object :id 10 :operation "evaluate" :source "keep-val" :filename helperFile)))))
+                (js-call (expect (get afterReset :status)) :toBe "ok")
+                (js-call (expect (get readReset :value)) :toBe "1234")))
+
+            ;; load-file reloads updated source while preserving defvar-once across reloads
+            (let ((lf1 (await (js-call session :execute
+                                (js-object :id 11 :operation "evaluate" :source (str "(load-file " (JSON/stringify helperFile) ")") :filename modFile :root projDir))))
+                  (c1 (await (js-call session :execute
+                               (js-object :id 12 :operation "evaluate" :source "(read-counter)" :filename modFile)))))
+              (js-call (expect (get lf1 :status)) :toBe "ok")
+              (js-call (expect (get c1 :value)) :toBe "10"))
+            (await (writeFile helperFile helperSrc2 "utf8"))
+            (let ((lf2 (await (js-call session :execute
+                                (js-object :id 13 :operation "evaluate" :source (str "(load-file " (JSON/stringify helperFile) ")") :filename modFile :root projDir))))
+                  (c2 (await (js-call session :execute
+                               (js-object :id 14 :operation "evaluate" :source "(read-counter)" :filename modFile)))))
+              (js-call (expect (get lf2 :status)) :toBe "ok")
+              (js-call (expect (get c2 :value)) :toBe "11"))
+            (finally
+              (js-call session :close))))
+
+        ;; Terminal --repl colon commands (:doc, :source, :apropos, :dir, :pst, :reset)
+        (let* ((replScript (js-call (js-array
+                                      (str ":load " modFile)
+                                      ":doc add-five"
+                                      ":source add-five"
+                                      ":apropos add-five"
+                                      ":dir"
+                                      "(explode-here t)"
+                                      ":pst"
+                                      ":reset"
+                                      ":quit")
+                             :join "\n"))
+               (termRes (await (runCmd (js-array evalPath "--repl" "--no-prompt" "--root" projDir)
+                                 (js-object :env (runtimeEnv "bun") :stdin (str replScript "\n"))))))
+          (js-call (expect (get termRes :exitCode)) :toBe 0)
+          (js-call (expect (get termRes :stdout)) :toContain "Adds 5 to x.")
+          (js-call (expect (get termRes :stdout)) :toContain "(defun add-five")
+          (js-call (expect (get termRes :stdout)) :toContain "add-five")
+          (js-call (expect (get termRes :stdout)) :toContain "repl-boom")
+          (js-call (expect (get termRes :stdout)) :toContain "sample.eli:7:")))))
+)

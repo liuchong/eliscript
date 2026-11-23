@@ -593,7 +593,35 @@
                                :filter (lambda (name) (js-call (new globalThis.RegExp "^[a-z][a-z-]*[.]eli$") :test name)))
                              :map (lambda (name) (str "portable/" name))))
                          :sort))
+                     (stdlibSources (new globalThis.Map))
+                     (stdlibNeedsRuntime (new globalThis.Set))
+                     (st-idx 0)
+                     (rel-re (new globalThis.RegExp "\\(import(?:-portable)?\\s+[\"']\\./([a-z][a-z0-9-/]*)\\.mjs[\"']" "g"))
+                     (rel-changed t)
                      (pp-idx 0))
+                (while (< st-idx (js-length topLevelStdlib))
+                  (let* ((st-name (aref topLevelStdlib st-idx))
+                         (st-source (await (funcall text (str "stdlib/" st-name)))))
+                    (js-call stdlibSources :set st-name st-source)
+                    (when (js-call st-source :includes "../runtime/")
+                      (js-call stdlibNeedsRuntime :add st-name)))
+                  (setq st-idx (1+ st-idx)))
+                (while rel-changed
+                  (setq rel-changed false)
+                  (let ((rk-idx 0))
+                    (while (< rk-idx (js-length topLevelStdlib))
+                      (let ((rk-name (aref topLevelStdlib rk-idx)))
+                        (unless (js-call stdlibNeedsRuntime :has rk-name)
+                          (let* ((rk-src (js-call stdlibSources :get rk-name))
+                                 (rk-matches (Array/from (js-call rk-src :matchAll rel-re)))
+                                 (rm-idx 0))
+                            (while (< rm-idx (js-length rk-matches))
+                              (let ((dep-name (str (aref (aref rk-matches rm-idx) 1) ".eli")))
+                                (when (js-call stdlibNeedsRuntime :has dep-name)
+                                  (js-call stdlibNeedsRuntime :add rk-name)
+                                  (setq rel-changed t)))
+                              (setq rm-idx (1+ rm-idx))))))
+                      (setq rk-idx (1+ rk-idx)))))
                 (while (< pp-idx (js-length programPlans))
                   (let ((plan (aref programPlans pp-idx)))
                     (unless (or (and (get plan :host) (not (stable-fixture-source stableFiles (get plan :host))))
@@ -625,8 +653,11 @@
                               (let* ((name (aref dep-names dn-idx))
                                      (filename (str "stdlib/" name)))
                                 (unless (= filename (get plan :source))
-                                  (let ((source (await (funcall text filename))))
-                                    (unless (and (not (get plan :runtime)) (js-call source :includes "../runtime/"))
+                                  (let ((source (or (js-call stdlibSources :get name) (await (funcall text filename)))))
+                                    (unless (and (not (get plan :runtime))
+                                                 (if (js-call stdlibSources :has name)
+                                                   (js-call stdlibNeedsRuntime :has name)
+                                                   (js-call source :includes "../runtime/")))
                                       (js-call modules :push
                                         (js-object :id (str prefix (js-call name :slice 0 -4) ".mjs")
                                           :filename filename :source source))))))
@@ -757,6 +788,19 @@
                    (originalGateCoverage (js-array))
                    (hostOnlyDependencies (js-array))
                    (semanticFeature (new globalThis.RegExp "^(?:language|portable|compiler|project|macro|bootstrap|stdlib|runtime)[.]"))
+                   (maintainedStdlibGateSuites
+                     (new globalThis.Set
+                       (js-array
+                         "tests/native-memory-long-branches.test.mjs"
+                         "tests/collection-transient-subvec.test.mjs"
+                         "tests/stdlib-async.test.mjs"
+                         "tests/stdlib-test-devtools.test.mjs"
+                         "tests/stdlib-diff-pprint.test.mjs"
+                         "tests/stdlib-tagged-time-uuid.test.mjs"
+                         "tests/stdlib-string-regex.test.mjs"
+                         "tests/stdlib-math-bit.test.mjs"
+                         "tests/stdlib-seq-data-state.test.mjs"
+                         "tests/stdlib-schema.test.mjs")))
                    (byLocator (new globalThis.Map (js-call locators :map (lambda (item) (js-array (get item :id) item)))))
                    (u-idx 0))
               (while (< u-idx (js-length unadapted))
@@ -903,6 +947,17 @@
                                       :byteStart (get region :byteStart) :byteEnd (get region :byteEnd) :sha256 (get region :sha256))
                             :reason "unchanged original source constructor audit; all compiled-language cases retain selected-session execution"))
                         (setq handled t))))
+                  (when (and (not handled) locator (js-call maintainedStdlibGateSuites :has (get locator :file)))
+                    (let* ((suite (get locator :file))
+                           (proof (await (funcall file suite)))
+                           (case-region (suite-case-region suite (await (funcall text suite)) (get locator :contains))))
+                      (js-call originalGateCoverage :push id)
+                      (js-call hostOnlyDependencies :push
+                        (js-object :coverageId id :file suite :sourceSha256 (get proof :sha256)
+                          :kind "maintained-stdlib-suite-case" :originalAssertion (get locator :contains)
+                          :locator (globalThis.structuredClone locator) :region case-region
+                          :reason "maintained S1-S5 suite verified by make test-core; binding authenticates source bytes without asserting execution"))
+                      (setq handled t)))
                   (when (and (not handled) locator (= (js-call originalReportOnlyLocators :get (get locator :file)) (get locator :contains)))
                     (js-call originalGateCoverage :push id)
                     (setq handled t))
@@ -920,6 +975,7 @@
                                               (js-call filename :endsWith ".el")
                                               (js-call filename :endsWith "/package.json")
                                               (js-call filename :endsWith "/.gitkeep")
+                                              (= filename "tests/fixtures/sample.test.eli")
                                               transport)))
                           (if auxiliary
                             (js-call originalGateCoverage :push id)

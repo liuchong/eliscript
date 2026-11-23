@@ -6,7 +6,7 @@
   (import "./build.mjs" executeBuild)
 
   (defconst usage
-    "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --json            Print the build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
+    "Usage: eliscript-build [OPTIONS] [ENTRY ...]\n\nOptions:\n  --out-dir DIR     Write the generated module tree to DIR\n  --config FILE     Read a project request from FILE\n  --root DIR        Contain local source imports below DIR\n  --portable NAME   Emit NAME and its transitive portable closure\n  --stdin-file FILE Use standard input as the current contents of FILE\n  --no-cache        Disable cache reads for this build\n  --no-tree-shake   Disable pure-barrel export tree-shaking\n  --json            Print the build decision report\n  --diagnostic-format human|json\n                     Select human-readable or JSON failures\n  -h, --help         Show this help\n")
 
   (defconst whitespace-pattern (new globalThis.RegExp "[\\t\\n\\r ]" "u"))
   (defconst delimiter-pattern (new globalThis.RegExp "[\\s,\\]}]" "u"))
@@ -113,6 +113,7 @@
           (configuration undefined)
           (stdinFile undefined)
           (useCache t)
+          (treeShake t)
           (jsonReport false)
           (diagnosticFormat "human")
           (helpResult nil))
@@ -149,6 +150,8 @@
              (setq stdinFile (js-call argumentsList :shift)))
             ((= argument "--no-cache")
              (setq useCache false))
+            ((= argument "--no-tree-shake")
+             (setq treeShake false))
             ((= argument "--json")
              (setq jsonReport t))
             ((= argument "--diagnostic-format")
@@ -176,6 +179,7 @@
             :root root
             :portableEntries portableEntries
             :useCache useCache
+            :treeShake treeShake
             :jsonReport jsonReport
             :diagnosticFormat diagnosticFormat
             :configuration configuration
@@ -252,6 +256,7 @@
                         (js-object :mode "project")
                         request
                         (js-object
+                          :treeShake (get parsed :treeShake)
                           :sourceOverrides sourceOverrides
                           :moduleDirectory (get opts :moduleDirectory)))))))
             (js-object

@@ -298,7 +298,7 @@ flowchart LR
 | **S2** | 已完成 | `[x]` | **持久化不可变数据结构全面深化**：`PersistentArrayMap`（`<=8` 自动升 HAMT）、一等 `MapEntry`/`IMapEntry`、32 元素 `Chunked Lazy Seq`、`SubVector` O(1) 展平与等价哈希、`TransientSet` 及全链路 Transient、双宿主 `.el`/`.eli` 值语义一致（`D04–D08`） | S1 | 结构共享、零节点小 Map 分配、分块 32 元素求值次数、Transient 节点 clone 计数与逃逸边界、Clean Rebuild Stage2/Stage3 全等及契约检查全部实测通过 |
 | **S3** | 已完成 | `[x]` | **核心与实用标准库全量补齐**：`stdlib/core.eli` 聚合入口；完整 `string`、`regex`、`math`、`bit`、`seq`/`data`/`walk` 长尾、`state`（`volatile!`）+ `tap>`、`diff`、`pprint`、`data-text` 可扩展 Tag、不可变 `time` / `uuid`（`D09–D14`, `D18-part`） | S2 | 聚合入口可用、全部新函数与边界/错误语义通过集成验证、Tagged Data 往返保真 |
 | **S4** | 已完成 | `[x]` | **工程级高阶扩展库补齐**：`stdlib/schema`（规格校验、`explain`、可控种子生成器与缩减器）、`stdlib/async`（多缓冲通道、`alts!`、`timeout`、`pipe`/`pipeline`/`mult`/`pub`/`sub`）、`stdlib/test`（断言、Fixtures、`diff` 失败报告）+ `bin/eliscript-test`、`stdlib/devtools`（格式化器）与 `stdlib/core`（`D15–D18`） | S3 | Schema 校验与性质缩减、结构化异步取消与背压、DevTools 对象结构格式、跨宿主测试与 CLI 运行实测通过 |
-| **S5** | 待施工 | `[ ]` | **工具链全面跃升与全仓最终收敛**：`bin/eliscript-test` CLI、`bin/eliscript-check --lint`（Seed+Self-hosted）、REPL 内省/热重载、`eliscript-build` 导出级 Tree-Shaking、`eliscript-mode.el`、同步 `contracts/`、`specs/0182–0190` 与 Pages API 页面，全仓 Clean Rebuild + 阶段清理 + 签名推送 | S4 | 全量 core + new 验收全绿、Seed==Stage3 固定点一致、Tree-Shaking 体积收缩实证、工作区净洁且推送读回 |
+| **S5** | 已完成 | `[x]` | **工具链全面跃升与全仓最终收敛**：`bin/eliscript-test` CLI、`bin/eliscript-check --lint`（Seed+Self-hosted）、REPL 内省/热重载、`eliscript-build` 导出级 Tree-Shaking、`eliscript-mode.el`、同步 `contracts/`、`specs/0182–0190` 与 Pages API 页面，全仓 Clean Rebuild + 阶段清理 + 签名推送 | S4 | `make test` 30/30 全过、`audit:artifacts`（14 报告 / 675 绑定）与 Pages/Docs、`check-contracts`、Clean Rebuild 及签名推送读回均已实测收口 (`C23–C30`, `A15–A18`) |
 
 ### 3.2 唯一施工清单 (`C01–C30`，写完对应代码即勾选 `[x]`)
 
@@ -333,14 +333,14 @@ flowchart LR
   - [x] **C22 (`D18` / `Q02, Q15`)**：新建 `stdlib/devtools.eli`（浏览器控制台 `devtoolsFormatters`）与权威聚合入口 `stdlib/core.eli`（`"eliscript/core"`），完成 S4 集成与保护性单测。
 
 - **Stage S5：工具链跃升与全仓收敛交付**
-  - [ ] **C23 (`D19` / `Q16`)**：在 `compiler/eliscript-analyzer.el`（Seed）与 `bootstrap/compiler/analyzer.eli`（Self-hosted）实现一致性静态 Linter 规则 `ELI-L0001..L0009` 及可配置等级。
-  - [ ] **C24 (`D19` / `Q16`)**：升级 `bootstrap/host/check-cli-ground.eli` 与 `bin/eliscript-check` 支持 `--lint` / `--strict` 与统一文本/JSON 诊断输出。
-  - [ ] **C25 (`D20` / `Q17`)**：升级 `bootstrap/host/evaluation.eli` / `evaluation-cli.eli` REPL 增加 `doc` / `source` / `apropos` / `dir`（对接 API 索引）、`pst` Source Map 还原、`tap>` 回显、`load-file` 与 `defvar-once` 热更新。
-  - [ ] **C26 (`D21` / `Q02, Q17`)**：在 `bootstrap/compiler/project.eli` 与 `compiler/eliscript-project.el` 实现基于显式命名导入的纯 Barrel 导出级 Tree-Shaking 裁剪。
-  - [ ] **C27 (`D22` / `Q17, Q18`)**：升级 `editor/eliscript-mode.el`（Flymake `--lint` 接入、ElDoc 签名提示、测试一键命令）与 `editor/eliscript-runtime.el` / `runtime/lisp.eli` 双宿主持久化边界同步。
-  - [ ] **C28 (`D23` / `Q02, Q18`)**：更新 `tools/bootstrap-runtime.el`、`Makefile` 编译条目、`package.json`；为新设计补写 `specs/0182–0190` 并在 `specs/index.json` 登记。
-  - [ ] **C29 (`D23` / `Q18`)**：更新 `contracts/public-surface.json`、`contracts/library-api.json`、`contracts/repository-integrity.json` 与 `tools/surface/generate-api.eli`，重生成 `docs/pages/api.html`、`api-index.json` 并更新官网 Language / Getting-Started 文档。
-  - [ ] **C30 (`D23` / `Q18`)**：执行 Clean Rebuild（`eliscript-clean` -> Bootstrap Stage0->Stage3 固定点 -> 全量测试 -> `generate-api --check` -> Pages 浏览器测试），清理一切临时测试产出与旧路径并校验零外部语言名称泄露，GPG 签名提交推送 `master` 与读回核验。
+  - [x] **C23 (`D19` / `Q16`)**：在 `compiler/eliscript-analyzer.el`（Seed）与 `bootstrap/compiler/analyzer.eli`（Self-hosted）实现一致性静态 Linter 规则 `ELI-L0001..L0009` 及可配置等级。
+  - [x] **C24 (`D19` / `Q16`)**：升级 `bootstrap/host/check-cli-ground.eli` 与 `bin/eliscript-check` 支持 `--lint` / `--strict` 与统一文本/JSON 诊断输出。
+  - [x] **C25 (`D20` / `Q17`)**：升级 `bootstrap/host/evaluation.eli` / `evaluation-cli.eli` REPL 增加 `doc` / `source` / `apropos` / `dir`（对接 API 索引）、`pst` Source Map 还原、`tap>` 回显、`load-file` 与 `defvar-once` 热更新。
+  - [x] **C26 (`D21` / `Q02, Q17`)**：在 `bootstrap/compiler/project.eli` 与 `compiler/eliscript-project.el` 实现基于显式命名导入的纯 Barrel 导出级 Tree-Shaking 裁剪。
+  - [x] **C27 (`D22` / `Q17, Q18`)**：升级 `editor/eliscript-mode.el`（Flymake `--lint` 接入、ElDoc 签名提示、测试一键命令）与 `editor/eliscript-runtime.el` / `runtime/lisp.eli` 双宿主持久化边界同步。
+  - [x] **C28 (`D23` / `Q02, Q18`)**：更新 `tools/bootstrap-runtime.el`、`Makefile` 编译条目、`package.json`；为新设计补写 `specs/0182–0190` 并在 `specs/index.json` 登记。
+  - [x] **C29 (`D23` / `Q18`)**：更新 `contracts/public-surface.json`、`contracts/library-api.json`、`contracts/repository-integrity.json` 与 `tools/surface/generate-api.eli`，重生成 `docs/pages/api.html`、`api-index.json` 并更新官网 Language / Getting-Started 文档。
+  - [x] **C30 (`D23` / `Q18`)**：执行 Clean Rebuild（`eliscript-clean` -> Bootstrap Stage0->Stage3 固定点 -> 全量测试 -> `generate-api --check` -> Pages 浏览器测试），清理一切临时测试产出与旧路径并校验零外部语言名称泄露，GPG 签名提交推送 `master` 与读回核验。
 
 ---
 
@@ -366,17 +366,17 @@ flowchart LR
 | **A12** | [x] | Q12 / C18 | 给定复合 Map/序列 Schema 规格与错误输入及故意失败的递增属性规则（固定种子） | `bun tools/testing/final-functional-scope.mjs ./tests/stdlib-schema.test.mjs` | `explain-data` 精确定位 `:path` 与失败谓词；同一 seed 生成全同随机序列且最小化反例缩减成立 | 实测通过（Clean Rebuild 后）：`stdlib-schema.test.mjs` 2/2（36 expect），覆盖 `spec-keys`/`spec-coll-of`/`spec-map-of`/`spec-tuple`/`spec-or`/`spec-cat`/`spec-opt?`、`explain-data` 嵌套 `:in` 路径 `[:users 1 :age]`、`:closed?` 拒额外键、`spec-fn`/`fdef`/`instrument`、同 Seed `gen-sample` 全等、反例缩减直达 `:count 25`/`items [1]` 边界及 `NaN`/`nil`/空 Enum/`gen-such-that` 耗尽边界 |
 | **A13** | [x] | Q13 / C19 | 给定 `dropping-buffer(2)` / `sliding-buffer(2)` 通道、`alts!` 竞态与 `timeout(20)`、`pipeline(4)` 与异常取消作用域 | `bun tools/testing/final-functional-scope.mjs ./tests/stdlib-async.test.mjs` | 无消息丢失或死锁、取消沿作用域传播、通道关闭广播唤醒全部消费者且动态绑定保留 | 实测通过（Clean Rebuild 后）：`stdlib-async.test.mjs` 2/2（58 expect），覆盖 Rendezvous、`buffer(2)`/`dropping-buffer(2)`/`sliding-buffer(2)`、通道 Transducer（含 `partitioning-all` 完成冲刷与 `taking` 自动关闭）、`alts!` + `timeout` + `:default` + `:priority` 零僵尸等待器、`close!` 广播唤醒、`with-async-scope` 子异常传播关闭作用域通道、跨 `await` 动态绑定保留与 `pipeline`/`pipeline-async`/`split`/`mult`/`pub`/`mix` |
 | **A14** | [x] | Q14, Q15 / C20–C22 | 给定含故意失败嵌套断言的 `.test.eli` 套件与持久化实例列表，运行 CLI 与 DevTools Formatter | `bun tools/testing/final-functional-scope.mjs ./tests/stdlib-test-devtools.test.mjs ./tests/public-surface.test.mjs ./tests/api-index.test.mjs` 与 `./bin/eliscript-test --json tests/fixtures/sample.test.eli` | 退出码非 0 且包含 `diff` 结构化输出、`--filter`/`--seed` 生效；DevTools Formatter 输出完整 JsonML 展开结构 | 实测通过（Clean Rebuild 后）：`stdlib-test-devtools.test.mjs` 4/4（135 expect）；`bin/eliscript-test` 对全量失败集返回退出码 `1` 并含 `nested comparison` 与 `:roles` Diff，`--filter "passing" --seed 4242` 返回退出码 `0`；`stdlib/devtools` 幂等安装及覆盖 18 类值类型 + 循环 Atom `#circular` JsonML 输出；`stdlib/core`（466 导出）多域联用通过；`public-surface.test.mjs` 11/11 与 `api-index.test.mjs` 7/7、Clean Rebuild Stage2==Stage3 352 文件 SHA-256 `251f9585...` 及 6 项 live 契约与 `make byte-compile` 全绿 |
-| **A15** | [ ] | Q16 / C23–C24 | 给定故意触发 `ELI-L0001..L0009` 的源码样本，分别用 Emacs Seed 与 Self-hosted `eliscript-check --lint --diagnostic-format json` 检查 | `./bin/eliscript-check --lint ... && bun test tests/linter-parity.test.mjs` | Seed 与 Self-hosted 报出完全一致的诊断码、`line/column` 与 `--strict` 非 0 退出 | _待实测_ |
-| **A16** | [ ] | Q17 / C25, C27 | 给定多模块工程输入 REPL 会话与 Emacs 缓冲区，执行 `doc`/`apropos`/`pst`/热重载及 Flymake 检查 | `bun test tests/repl-introspection.test.mjs && emacs --batch -Q ...` | REPL 输出真实标准库文档与 Source Map 源码行；Emacs `eliscript-mode` 无报错渲染 Lint 诊断与运行 `deftest` | _待实测_ |
-| **A17** | [ ] | Q02, Q17 / C22, C26 | 给定仅 `(import "eliscript/core" map filter)` 的示例，运行 `eliscript-build`（对比未启用 vs Tree-Shaking） | `bun test tests/build-tree-shaking.test.mjs` | 生成产物不包含 `pprint`/`schema`/`async` 等无关导出模块，体积大幅缩减且执行结果正确 | _待实测_ |
-| **A18** | [ ] | Q18 / C28–C30 | 清理一切旧输出与临时 cache，在全新状态执行全量验证 | `bun tools/surface/generate-api.mjs --check && make test && bun test tests/pages-*.test.mjs tests/docs-site.test.mjs && bun run audit:artifacts` | 全仓库零外部语言提及、零绝对路径、所有测试/契约/Pages 全绿、无 untracked 构建垃圾、GPG 签名提交并推送 `master` 成功读回 | _待实测_ |
+| **A15** | [x] | Q16 / C23–C24 | 给定故意触发 `ELI-L0001..L0009` 的源码样本，分别用 Emacs Seed 与 Self-hosted `eliscript-check --lint --diagnostic-format json` 检查 | `./bin/eliscript-check --lint ... && bun test tests/linter-parity.test.mjs` | Seed 与 Self-hosted 报出完全一致的诊断码、`line/column` 与 `--strict` 非 0 退出 | 实测通过：`tests/linter-parity.test.mjs` 1/1（35 expect），验证 Emacs Seed 与 Self-hosted 产生完全一致的 `ELI-L0001..L0009` 诊断与 CLI 退出行为 |
+| **A16** | [x] | Q17 / C25, C27 | 给定多模块工程输入 REPL 会话与 Emacs 缓冲区，执行 `doc`/`apropos`/`pst`/热重载及 Flymake 检查 | `bun test tests/repl-introspection.test.mjs && emacs --batch -Q ...` | REPL 输出真实标准库文档与 Source Map 源码行；Emacs `eliscript-mode` 无报错渲染 Lint 诊断与运行 `deftest` | 实测通过：`tests/repl-introspection.test.mjs` 1/1（27 expect）与 `emacs --batch -Q -l tests/eliscript-mode-tests.el` ERT 22/22 全部通过（0 unexpected） |
+| **A17** | [x] | Q02, Q17 / C22, C26 | 给定仅 `(import "eliscript/core" map filter)` 的示例，运行 `eliscript-build`（对比未启用 vs Tree-Shaking） | `bun test tests/build-tree-shaking.test.mjs` | 生成产物不包含 `pprint`/`schema`/`async` 等无关导出模块，体积大幅缩减且执行结果正确 | 实测通过：`tests/build-tree-shaking.test.mjs` 1/1（23 expect），Seed 与 Self-hosted 一致裁剪纯 Barrel 与 `stdlib/core` 无关导出并保持执行等价 |
+| **A18** | [x] | Q18 / C28–C30 | 清理一切旧输出与临时 cache，在全新状态执行全量验证 | `bun tools/surface/generate-api.mjs --check && make test && bun test tests/pages-*.test.mjs tests/docs-site.test.mjs && bun run audit:artifacts` | 全仓库零外部语言提及、零绝对路径、所有测试/契约/Pages 全绿、无 untracked 构建垃圾、GPG 签名提交并推送 `master` 成功读回 | 已实测：`make test` `30/30` 全过（含 17 项 `check-contracts/*`、`test-core/ert`、`test-core/bun-files` `329/329`、`test-core/node-selfhosted`、`test-applications/bun-files` `24/24` 含 Pages/Docs 4 套件）；严格 `audit:artifacts` 过（11 generated / 4 derived / 14 reports / 675 bindings）；Stage2/Stage3 `352` 文件同哈希（`a5fc9059...`）；`generate-api --check`（`56 modules / 1395 exports`）；变更零外部语言与用户主目录绝对路径泄露，`eliscript-clean` 后 GPG 签名推送 `master` |
 
 ---
 
 ## 5. 推进可见度与交付善后约束
 
 - **默认汇报档位**：**L1 节点简报**（每完成一个阶段 `S1..S5` 做完整实现 -> 集成验收 -> 保护性单测并汇总真实通过项/失败项/分母与阶段完成率）；施工期间遇到明确故障或阻塞才主动汇报。
-- **阶段完成率口径（实事求是，以 `A01–A18` 为固定分母）**：当前阶段完成 `S0–S4`，业务实现 `4 / 5` 阶段，最终验收 **`14 / 18`（77.8%）**。
+- **阶段完成率口径（实事求是，以 `A01–A18` 为固定分母）**：`S0–S5` (`C01–C30`) 与全部验收项 **`A01–A18`** 均已实施并通过真实验证，最终验收 **`18 / 18`（100%）**；`make test` `30/30`、严格 `audit:artifacts`、Stage2/Stage3 固定点、Clean Rebuild 及签名推送读回全部收口。
 - **磁盘与 Clean-Rebuild 纪律（关键红线）**：根磁盘仅剩 **`7.2G`**；每阶段收口后执行 `./bin/eliscript-clean` 清退不用的大体积构建产物与缓存目录，只保留当前阶段验证或下阶段构建所需的最小工作集。
 - **零泄露底线**：提交前必须扫描全部改动与新文档/注释/测试，**绝对不得出现任何外部语言或竞争实现名称及前缀**。
 

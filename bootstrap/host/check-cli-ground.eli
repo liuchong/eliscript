@@ -14,6 +14,8 @@
          "  --root DIR        Contain local source imports below DIR\n"
          "  --portable NAME   Check NAME and its transitive portable closure\n"
          "  --stdin-file FILE Use standard input as the current contents of FILE\n"
+         "  --lint            Run static lint rules ELI-L0001..ELI-L0009\n"
+         "  --strict          Fail with non-zero exit status on lint diagnostics\n"
          "  --json            Print the project check report\n"
          "  --diagnostic-format human|json\n"
          "                     Select human-readable or JSON failures\n"
@@ -26,6 +28,8 @@
           (configuration undefined)
           (root undefined)
           (stdinFile undefined)
+          (lint false)
+          (strict false)
           (jsonReport false)
           (diagnosticFormat "human")
           (helpResult nil))
@@ -56,6 +60,11 @@
               (unless (undefined? stdinFile)
                 (throw (new globalThis.Error "multiple --stdin-file values are not supported")))
               (setq stdinFile (js-call argumentsList :shift)))
+            ((= argument "--lint")
+              (setq lint t))
+            ((= argument "--strict")
+              (setq strict t)
+              (setq lint t))
             ((= argument "--json")
               (setq jsonReport t))
             ((= argument "--diagnostic-format")
@@ -79,6 +88,8 @@
             :portableEntries portableEntries
             :configuration configuration
             :stdinFile stdinFile
+            :lint lint
+            :strict strict
             :jsonReport jsonReport
             :diagnosticFormat diagnosticFormat)))))
 
@@ -118,9 +129,26 @@
             (let ((result (await (checkProject
                                    (Object/assign (js-object) request
                                      (js-object :sourceOverrides sourceOverrides
+                                       :lint (get parsed :lint)
                                        :compiler compiler
                                        :moduleDirectory (get actual-options :moduleDirectory)))))))
-              (js-object :result result :jsonReport (get parsed :jsonReport))))))))
+              (js-object :result result
+                :jsonReport (get parsed :jsonReport)
+                :lint (get parsed :lint)
+                :strict (get parsed :strict)
+                :diagnosticFormat (get parsed :diagnosticFormat))))))))
+
+  (defun formatLintHuman (diagnostics moduleCount)
+    (let ((lines (js-array))
+          (index 0))
+      (while (< index (js-length diagnostics))
+        (let ((diag (aref diagnostics index)))
+          (js-call lines :push
+            (str (renderDiagnostic diag) " [" (get diag :severity) " " (get diag :code) "]")))
+        (setq index (+ index 1)))
+      (js-call lines :push
+        (str "Checked " moduleCount " modules (" (js-length diagnostics) " lint diagnostics)."))
+      (str (js-call lines :join "\n") "\n")))
 
   (defasync main (&rest __opt)
     (let* ((arguments_ (aref __opt 0))
@@ -130,10 +158,24 @@
            (execution (await (execute actual-args))))
       (if (get execution :help)
         (js-call (get globalThis.process :stdout) :write usage)
-        (js-call (get globalThis.process :stdout) :write
-          (if (get execution :jsonReport)
-            (str (JSON/stringify (get (get execution :result) :report)) "\n")
-            (str "Checked " (get (get (get (get execution :result) :report) :counts) :modules) " modules.\n"))))))
+        (let* ((result (get execution :result))
+               (report (get result :report))
+               (diagnostics (if (Array/isArray (get result :diagnostics))
+                              (get result :diagnostics)
+                              (js-array)))
+               (hasError (js-call diagnostics :some (lambda (d) (= (get d :severity) "error")))))
+          (when (or hasError (and (get execution :strict) (> (js-length diagnostics) 0)))
+            (put globalThis.process :exitCode 1))
+          (js-call (get globalThis.process :stdout) :write
+            (cond
+              ((get execution :jsonReport)
+               (str (JSON/stringify report) "\n"))
+              ((and (get execution :lint) (= (get execution :diagnosticFormat) "json"))
+               (str (JSON/stringify diagnostics) "\n"))
+              ((get execution :lint)
+               (formatLintHuman diagnostics (get (get report :counts) :modules)))
+              (t
+               (str "Checked " (get (get report :counts) :modules) " modules.\n"))))))))
 
   (let ((entry (aref (get globalThis.process :argv) 1)))
     (when (and (not (undefined? entry))

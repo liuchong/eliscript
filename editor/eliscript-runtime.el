@@ -21,7 +21,9 @@
 (defconst eliscript-runtime--extension-exports
   '((eliscript-data
      persistent-list persistent-list-p persistent-vector persistent-vector-p
-     persistent-map persistent-map-p persistent-set persistent-set-p
+     persistent-subvector-p subvec
+     persistent-map persistent-map-p map-entry map-entry-p key val entry-key entry-val
+     persistent-set persistent-set-p
      persistent-queue persistent-queue-p persistent-sorted-map persistent-sorted-map-p
      persistent-sorted-set persistent-sorted-set-p
      value-get value-nth value-put value-assoc value-remove value-dissoc
@@ -31,9 +33,10 @@
      defprotocol extend-protocol defclass-protocol reify-protocol
      cl-defgeneric-value cl-defmethod-value
      state-cell state-cell-p cell-value cell-update! cell-reset! cell-watch
-     delay force realized-p memoize lazy-seq lazy-map lazy-filter lazy-take lazy-range
+     volatile! volatile-p vderef vreset! vswap!
+     delay force realized-p memoize lazy-seq lazy-seq-p chunked-seq-p lazy-range lazy-map lazy-filter lazy-take
      map-transducer filter-transducer take-transducer seq-transduce
-     with-transient conj! assoc! dissoc!
+     with-transient conj! assoc! dissoc! disj! mapv filterv
      result-ok result-error result-ok-p result-error-p result-value result-error-value result-bind
      option-some option-none option-some-p option-none-p option-value
      data-symbol data-symbol-p data-symbol-name data-symbol-namespace)

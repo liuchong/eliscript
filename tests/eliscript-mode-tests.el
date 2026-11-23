@@ -196,7 +196,7 @@
             (eliscript-mode)
             (should (equal
                      (eliscript-mode--check-arguments)
-                     (list "--fixed" "--config" configuration
+                     (list "--fixed" "--config" configuration "--lint"
                            "--stdin-file" source "--json"
                            "--diagnostic-format" "json")))))
       (delete-directory directory t))))
@@ -551,6 +551,119 @@
       (insert "(module unchanged)\n")
       (should-error (eliscript-mode-format-buffer)
                     :type 'eliscript-mode-error))))
+
+(ert-deftest eliscript-mode-omits-lint-flag-when-disabled ()
+  (let* ((directory (make-temp-file "eliscript-mode-nolint-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (eliscript-mode-check-command '("eliscript-check"))
+         (eliscript-mode-lint-enabled nil))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "{}" nil configuration nil 'silent)
+          (write-region "(print 42)\n" nil source nil 'silent)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (eliscript-mode)
+            (should (equal
+                     (eliscript-mode--check-arguments)
+                     (list "--config" configuration
+                           "--stdin-file" source "--json"
+                           "--diagnostic-format" "json")))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-flymake-reports-stdout-lint-warnings-on-exit-zero ()
+  (let* ((directory (make-temp-file "eliscript-mode-flymake-lint-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (script (expand-file-name "mock-check.sh" directory))
+         (eliscript-mode-check-command (list script))
+         (eliscript-mode-lint-enabled t)
+         (reported nil)
+         (done nil))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "{}" nil configuration nil 'silent)
+          (write-region "(let ((unused 1)) 2)\n" nil source nil 'silent)
+          (write-region
+           (concat
+            "#!/bin/sh\n"
+            "printf '[{\"format\":\"eliscript-diagnostic\",\"code\":\"ELI-L0001\",\"severity\":\"warning\",\"phase\":\"lint\",\"message\":\"unused local binding: unused\",\"location\":{\"file\":\"%s\",\"start\":{\"offset\":7,\"line\":1,\"column\":8},\"end\":{\"offset\":13,\"line\":1,\"column\":14}}}]\\n' "
+            (shell-quote-argument source)
+            "\n")
+           nil script nil 'silent)
+          (set-file-modes script #o755)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (insert "(let ((unused 1)) 2)\n")
+            (eliscript-mode)
+            (eliscript-mode-flymake-backend
+             (lambda (diags &rest _rest)
+               (setq reported diags
+                     done t)))
+            (let ((deadline (+ (float-time) 10)))
+              (while (and (not done) (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should done)
+            (should (= (length reported) 1))
+            (should (eq (flymake-diagnostic-type (car reported)) :warning))
+            (should (string-match-p "ELI-L0001"
+                                    (flymake-diagnostic-text (car reported))))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-eldoc-reads-api-index-and-finds-symbol ()
+  (with-temp-buffer
+    (setq buffer-file-name
+          (expand-file-name "examples/stdlib-cli/main.eli" eliscript-mode-tests--root))
+    (setq default-directory eliscript-mode-tests--root)
+    (eliscript-mode)
+    (insert "(map ")
+    (let ((doc (eliscript-mode-eldoc-function)))
+      (should (stringp doc))
+      (should (string-match-p "map" doc)))))
+
+(ert-deftest eliscript-mode-run-test-at-point-invokes-test-runner ()
+  (let* ((directory (make-temp-file "eliscript-mode-run-test-" t))
+         (source (expand-file-name "sample.test.eli" directory))
+         (script (expand-file-name "eliscript-test" directory))
+         (eliscript-mode-test-command (list script))
+         (captured-command nil))
+    (unwind-protect
+        (progn
+          (write-region "#!/bin/sh\nexit 0\n" nil script nil 'silent)
+          (set-file-modes script #o755)
+          (write-region "(deftest sample-case ()\n  (is (= 1 1)))\n" nil source nil 'silent)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (insert "(deftest sample-case ()\n  (is (= 1 1)))\n")
+            (goto-char (point-min))
+            (search-forward "is")
+            (eliscript-mode)
+            (cl-letf (((symbol-function 'compilation-start)
+                       (lambda (command &rest _args)
+                         (setq captured-command command))))
+              (eliscript-mode-run-test-at-point))
+            (should (stringp captured-command))
+            (should (string-match-p "--filter sample-case" captured-command))
+            (should (string-match-p "--root" captured-command))
+            (should (string-match-p "sample\\.test\\.eli" captured-command))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-runtime-syncs-volatile-and-map-entry-helpers ()
+  (require 'eliscript-runtime)
+  (let ((cell (volatile! 10))
+        (pair (map-entry :alpha 9)))
+    (should (volatile-p cell))
+    (should-not (volatile-p 10))
+    (should (= (vderef cell) 10))
+    (should (= (vreset! cell 25) 25))
+    (should (= (vswap! cell (lambda (n) (+ n 17))) 42))
+    (should (= (vderef cell) 42))
+    (should (equal (entry-key pair) :alpha))
+    (should (equal (entry-val pair) 9))
+    (should-not (chunked-seq-p '(1 2)))))
 
 (provide 'eliscript-mode-tests)
 

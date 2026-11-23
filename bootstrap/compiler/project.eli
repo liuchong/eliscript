@@ -1009,6 +1009,177 @@
             (js-object :modules (get modules :length)))
           :modules modules))))
 
+  (defun unwrap-program-statements (body)
+    (let ((result (js-array))
+          (index 0))
+      (while (< index (get body :length))
+        (let ((node (js-nth index body)))
+          (if (= (get node :kind) "module-declaration")
+              (let ((sub (unwrap-program-statements (get node :children)))
+                    (s-idx 0))
+                (while (< s-idx (get sub :length))
+                  (js-call result :push (js-nth s-idx sub))
+                  (setq s-idx (1+ s-idx))))
+            (js-call result :push node)))
+        (setq index (1+ index)))
+      result))
+
+  (defun analyze-pure-barrel (program)
+    (if (or (not program) (not (funcall array-p (get program :body))))
+        nil
+      (let ((statements (unwrap-program-statements (get program :body)))
+            (imported (new globalThis.Map))
+            (export-map (js-object))
+            (valid t)
+            (index 0))
+        (while (and valid (< index (get statements :length)))
+          (let* ((node (js-nth index statements))
+                 (kind (get node :kind)))
+            (cond
+              ((= kind "import-declaration")
+               (let ((specifier (get node :value))
+                     (children (or (get node :children) (js-array))))
+                 (if (= (get children :length) 0)
+                     (setq valid false)
+                   (let ((c-idx 0))
+                     (while (and valid (< c-idx (get children :length)))
+                       (let ((child (js-nth c-idx children)))
+                         (if (= (get child :kind) "import-named")
+                             (js-call imported :set (get child :value) specifier)
+                           (setq valid false)))
+                       (setq c-idx (1+ c-idx)))))))
+              ((= kind "export-declaration")
+               (let ((children (or (get node :children) (js-array)))
+                     (c-idx 0))
+                 (while (and valid (< c-idx (get children :length)))
+                   (let* ((child (js-nth c-idx children))
+                          (name (get child :value)))
+                     (if (and (= (get child :kind) "reference")
+                              (js-call imported :has name))
+                         (put export-map name (js-call imported :get name))
+                       (setq valid false)))
+                   (setq c-idx (1+ c-idx)))))
+              (t (setq valid false))))
+          (setq index (1+ index)))
+        (if (and valid (> (get (globalThis.Object/keys export-map) :length) 0))
+            export-map
+          nil))))
+
+  (defun prune-barrel-statements (body needed-set)
+    (let ((out (js-array))
+          (index 0))
+      (while (< index (get body :length))
+        (let* ((node (js-nth index body))
+               (kind (get node :kind)))
+          (cond
+            ((= kind "module-declaration")
+             (let ((pruned-sub (prune-barrel-statements (get node :children) needed-set)))
+               (js-call out :push
+                 (js-call globalThis.Object :assign (js-object) node
+                   (js-object :children pruned-sub)))))
+            ((= kind "import-declaration")
+             (let* ((children (or (get node :children) (js-array)))
+                    (kept (js-call children :filter
+                            (lambda (child)
+                              (and (= (get child :kind) "import-named")
+                                   (js-call needed-set :has (get child :value)))))))
+               (when (> (get kept :length) 0)
+                 (js-call out :push
+                   (js-call globalThis.Object :assign (js-object) node
+                     (js-object :children kept))))))
+            ((= kind "export-declaration")
+             (let* ((children (or (get node :children) (js-array)))
+                    (kept (js-call children :filter
+                            (lambda (child)
+                              (and (= (get child :kind) "reference")
+                                   (js-call needed-set :has (get child :value)))))))
+               (when (> (get kept :length) 0)
+                 (js-call out :push
+                   (js-call globalThis.Object :assign (js-object) node
+                     (js-object :children kept))))))
+            (t (js-call out :push node))))
+        (setq index (1+ index)))
+      out))
+
+  (defun prune-barrel-program (program requested-names)
+    (let ((export-map (analyze-pure-barrel program)))
+      (if (not export-map)
+          program
+        (let ((needed (new globalThis.Set)))
+          (js-call (globalThis.Array/from requested-names) :forEach
+            (lambda (name)
+              (when (js-call globalThis.Object :hasOwn export-map name)
+                (js-call needed :add name))))
+          (js-call globalThis.Object :assign (js-object) program
+            (js-object :body (prune-barrel-statements (get program :body) needed)))))))
+
+  (defun rewrite-barrel-target-specifier (raw-specifier target-prefix)
+    (let ((spec raw-specifier))
+      (when (js-call spec :startsWith "./")
+        (setq spec (js-call spec :slice 2)))
+      (cond
+        ((js-call spec :endsWith ".mjs")
+         (setq spec (js-call spec :slice 0 -4)))
+        ((js-call spec :endsWith ".eli")
+         (setq spec (js-call spec :slice 0 -4))))
+      (str target-prefix spec)))
+
+  (defun rewrite-barrel-statements (body barrel-specifier export-map target-prefix)
+    (let ((out (js-array))
+          (index 0))
+      (while (< index (get body :length))
+        (let* ((node (js-nth index body))
+               (kind (get node :kind)))
+          (cond
+            ((= kind "module-declaration")
+             (js-call out :push
+               (js-call globalThis.Object :assign (js-object) node
+                 (js-object :children
+                   (rewrite-barrel-statements (get node :children)
+                     barrel-specifier export-map target-prefix)))))
+            ((and (= kind "import-declaration")
+                  (= (get node :value) barrel-specifier))
+             (let* ((children (or (get node :children) (js-array)))
+                    (all-mappable (and (> (get children :length) 0)
+                                       (js-call children :every
+                                         (lambda (child)
+                                           (and (= (get child :kind) "import-named")
+                                                (js-call globalThis.Object :hasOwn export-map (get child :value))))))))
+               (if (not all-mappable)
+                   (js-call out :push node)
+                 (let ((grouped (new globalThis.Map))
+                       (c-idx 0))
+                   (while (< c-idx (get children :length))
+                     (let* ((child (js-nth c-idx children))
+                            (target (rewrite-barrel-target-specifier
+                                      (aref export-map (get child :value))
+                                      target-prefix))
+                            (bucket (or (js-call grouped :get target)
+                                        (let ((arr (js-array)))
+                                          (js-call grouped :set target arr)
+                                          arr))))
+                       (js-call bucket :push child))
+                     (setq c-idx (1+ c-idx)))
+                   (let ((targets (funcall sorted-set-values (js-call grouped :keys)))
+                         (t-idx 0))
+                     (while (< t-idx (get targets :length))
+                       (let ((target (js-nth t-idx targets)))
+                         (js-call out :push
+                           (js-call globalThis.Object :assign (js-object) node
+                             (js-object :value target :children (js-call grouped :get target)))))
+                       (setq t-idx (1+ t-idx))))))))
+            (t (js-call out :push node))))
+        (setq index (1+ index)))
+      out))
+
+  (defun rewrite-package-barrel-imports (program barrel-specifier export-map target-prefix)
+    (if (or (not program) (not export-map) (not (funcall array-p (get program :body))))
+        program
+      (js-call globalThis.Object :assign (js-object) program
+        (js-object :body
+          (rewrite-barrel-statements (get program :body)
+            barrel-specifier export-map target-prefix)))))
+
   (export
     project-plan-format
     project-plan
@@ -1026,4 +1197,7 @@
     project-check-report
     project-cache-format
     project-cache-lookup
-    project-cache-decision))
+    project-cache-decision
+    analyze-pure-barrel
+    prune-barrel-program
+    rewrite-package-barrel-imports))

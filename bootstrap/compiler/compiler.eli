@@ -8,7 +8,7 @@
     format-source)
   (import "./expander.mjs" expand-module expand-module-with-origins
     expand-owned-module expand-owned-module-with-origins)
-  (import "./analyzer.mjs" analyze-module select-portable-module)
+  (import "./analyzer.mjs" analyze-module select-portable-module lint-module)
   (import "./lower.mjs" lower-module lower-owned-module)
   (import "./ir.mjs" ir-format serialize-program deserialize-program)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
@@ -29,7 +29,10 @@
     project-check-report
     project-cache-format
     project-cache-lookup
-    project-cache-decision)
+    project-cache-decision
+    analyze-pure-barrel
+    prune-barrel-program
+    rewrite-package-barrel-imports)
   (defconst evaluation-operation-format "eliscript-evaluation-operation")
   (defconst evaluation-input-format "eliscript-evaluation-input")
   (defconst evaluation-form-format "eliscript-evaluation-form")
@@ -76,6 +79,12 @@
            (forms (get expansion :forms)))
       (analyze-module forms filename)
       (js-object :program (lower-owned-module forms filename) :macroOrigins (get expansion :macroOrigins))))
+  (defun lint-string (source filename &optional options macro-context)
+    (let* ((read-forms (read-string source filename))
+           (expanded-forms (expand-owned-module read-forms filename macro-context)))
+      (setq read-forms nil)
+      (analyze-module expanded-forms filename)
+      (lint-module expanded-forms filename options)))
   (defun evaluation-object-field
     (value key fallback)
     (if (js-call globalThis.Object :hasOwn value key) (get value key) fallback))
@@ -420,6 +429,7 @@
   (export
     compile-ir-string
     compile-ir-string-with-origins
+    lint-string
     compile-project-portable-ir-string
     compile-string
     compile-portable-ir-string
@@ -459,4 +469,7 @@
     project-check-report
     project-cache-format
     project-cache-lookup
-    project-cache-decision))
+    project-cache-decision
+    analyze-pure-barrel
+    prune-barrel-program
+    rewrite-package-barrel-imports))

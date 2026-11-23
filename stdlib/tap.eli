@@ -21,6 +21,28 @@
       (throw (new globalThis/TypeError "tap listener must be a function")))
     listener)
 
+  (defconst tap-host-symbol (js-call globalThis/Symbol :for "eliscript.tap.host"))
+
+  (defun get-tap-host-bridge ()
+    (let ((root (js* "globalThis")))
+      (let ((existing (aref root tap-host-symbol)))
+        (if existing
+          existing
+          (let ((created (js-object
+                           :observers (new globalThis/Set)
+                           :flushFns (new globalThis/Set))))
+            (put root tap-host-symbol created)
+            created)))))
+
+  (defun dispatch-host-observers (value)
+    (let ((observers (get (get-tap-host-bridge) :observers)))
+      (when (and observers (> (get observers :size) 0))
+        (js-call observers :forEach
+          (lambda (observer)
+            (try
+              (funcall observer value)
+              (catch _err nil)))))))
+
   (defun dispatch-item (value)
     (let ((snapshot tap-listeners))
       (reduce snapshot
@@ -32,7 +54,8 @@
               (setq tap-errors (1+ tap-errors)
                     tap-last-error error)))
           nil)
-        nil)))
+        nil)
+      (dispatch-host-observers value)))
 
   (defun drain-queue ()
     (if tap-draining
@@ -86,6 +109,8 @@
 
   (defun flush-taps! ()
     (drain-queue))
+
+  (js-call (get (get-tap-host-bridge) :flushFns) :add flush-taps!)
 
   (defun clear-taps! ()
     (setq tap-listeners EMPTY_SET

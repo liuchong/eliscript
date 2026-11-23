@@ -30,6 +30,12 @@
   (defun digest (bytes) (js-call (js-call (createHash "sha256") :update bytes) :digest "hex"))
   (defun git-read (root arguments)
     (spawnSync "git" arguments (js-object :cwd root :encoding nil :maxBuffer 33554432 :timeout 30000)))
+  (defun revision-has-legacy-stdlib-core-p (root revision)
+    (let ((legacy-core (git-read root (js-array "ls-tree" "-d" "--name-only" revision "stdlib/core"))))
+      (and legacy-core
+           (= (get legacy-core :status) 0)
+           (get legacy-core :stdout)
+           (> (js-length (get legacy-core :stdout)) 0))))
   (defun checked-output (result)
     (unless (and (= (get result :status) 0) (not (get result :error)))
       (throw (new globalThis.Error "retained performance snapshot: measured Git snapshot is unavailable")))
@@ -112,9 +118,14 @@
                (compiled (new globalThis.Map)))
           (try
             (progn
-              (writeFileSync archive (checked-output (git-read root
-                (js-array "archive" "--format=tar" revision
-                  "compiler" "stdlib/core" "runtime" "tools"))))
+              (writeFileSync
+                archive
+                (checked-output
+                  (git-read
+                    root
+                    (if (revision-has-legacy-stdlib-core-p root revision)
+                      (js-array "archive" "--format=tar" revision "compiler" "stdlib/core" "runtime" "tools")
+                      (js-array "archive" "--format=tar" revision "compiler" "runtime" "tools")))))
               (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
                 (js-object :encoding nil :timeout 30000)))
               (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
@@ -197,7 +208,9 @@
                      (source (when (js-call filename :endsWith ".mjs")
                                (git-read root (js-array "show" (str revision ":" (js-call filename :slice 0 -4) ".eli"))))))
                 (setq bytes (when (and source (= (get source :status) 0)) (capsule-bytes (get source :stdout))))
-                (when (and (not bytes) (Object/hasOwn generated-runtime filename))
+                (when (and (not bytes)
+                           (Object/hasOwn generated-runtime filename)
+                           (revision-has-legacy-stdlib-core-p root revision))
                   (setq bytes (compile-historical-runtime root revision filename)))
                 (when (and (not bytes) (js-call stage-runtime-capsules :has filename))
                   (setq bytes (compile-historical-stage-capsules root revision filename)))

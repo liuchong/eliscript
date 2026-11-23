@@ -20,12 +20,12 @@
     (async ()
       (js-call (expect (await (checkPublicSurface (js-object :root ROOT)))) :toEqual
         (js-object :language (js-object :groups 19 :entries 194)
-          :ir (js-object :nodeKinds 58) :commands (js-object :commands 10 :options 55)
+          :ir (js-object :nodeKinds 58) :commands (js-object :commands 10 :options 58)
           :schemas (js-object :total 26) :adapters (js-object :adapters 9 :exports 31)
           :platformPackages (js-object :packages 2 :exports 37)
           :runtimeModules (js-object :modules 46 :exports 535 :public 33 :internal 13)
           :standardLibrary (js-object :modules 56 :exports 1395)
-          :emacs (js-object :functions 158 :records 47 :publicRecords 28 :internalRecords 19)))
+          :emacs (js-object :functions 163 :records 49 :publicRecords 28 :internalRecords 21)))
       ;; The new counts correspond to declared foreign-protocol boundaries.
       (let* ((surface (await (surface-document)))
              (protocol (find-entry (get surface :runtimeModules) "id" "protocol-dispatch")))

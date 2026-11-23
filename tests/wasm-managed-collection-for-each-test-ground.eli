@@ -197,7 +197,7 @@
   (test "Given callback allocation pressure, when live iteration exhausts capacity, then prior effects remain and only private roots unwind" (lambda ()
     (js-call (js-array false t) :forEach
       (lambda (set-mode)
-        (let* ((a (instance (js-object :maxSlots 192 :initialBytes 65536 :maxBytes 262144)))
+        (let* ((a (instance (js-object :maxSlots 96 :initialBytes 65536 :maxBytes 262144)))
                (values (if set-mode
                          (Array/from (js-object :length 128) (lambda (_ i) i))
                          (js-call (globalThis.Array 128) :fill t)))

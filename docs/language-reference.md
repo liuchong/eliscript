@@ -253,3 +253,30 @@ combinators), `eliscript-module` (`defmodule` lexical privacy and
 (`js-false`/`js-null`/`js-undefined` sentinels and handle revocation), and
 `eliscript-abi` (`:numeric-f64` and `:memory-u32` across Emacs, JS, WASM, and
 ARM64 Native). See `docs/core-syntax.md` for full syntax rules.
+
+
+## Standard Library Domains And Toolchain
+
+High-frequency primitives, persistent constructors, sequence combinators,
+transducers, formatting (`pprint`, `diff`), runtime `schema`, and `async`
+channels are re-exported from the single aggregate entry point
+`eliscript/core` (`stdlib/core.eli`). Dedicated domain modules live directly
+under `stdlib/` (such as `stdlib/string.eli`, `stdlib/regex.eli`,
+`stdlib/math.eli`, `stdlib/bit.eli`, `stdlib/state.eli` including `volatile!`,
+`stdlib/tap.eli`, `stdlib/time.eli`, `stdlib/uuid.eli`, `stdlib/test.eli`, and
+`stdlib/devtools.eli`), while zero-runtime subsets reside in
+`stdlib/portable/`. When building projects with `eliscript-build`, pure barrel
+imports from `"eliscript/core"` undergo static export-level tree-shaking unless
+`--no-tree-shake` is passed.
+
+Small maps up to 8 keys use compact `PersistentArrayMap` storage with zero HAMT
+node allocation and automatically upgrade on the 9th key; `MapEntry`
+(`map-entry`, `key`, `val`) is a first-class 2-element value matching
+2-element `PersistentVector` equality and hashing; `range`, `repeat`, and lazy
+combinators realize in bounded 32-element chunks (`IChunk` / `IChunkedSeq`); and
+nested `subvec` slices collapse bounds in O(1).
+
+Static linting (`eliscript-check --lint` and `--strict`) checks `ELI-L0001`
+through `ELI-L0009` identically in both the Emacs Lisp seed and self-hosted
+compilers, while `bin/eliscript-test` executes declarative `deftest` suites
+with structural `diff`/`pprint` mismatch reports.

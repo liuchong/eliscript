@@ -133,6 +133,14 @@
     (error "Expected a map-entry, got %S" entry))
   (eliscript-map-entry-val entry))
 
+(defun entry-key (entry)
+  "Alias for `key' returning map ENTRY's key."
+  (key entry))
+
+(defun entry-val (entry)
+  "Alias for `val' returning map ENTRY's value."
+  (val entry))
+
 (defun subvec (vec start &optional end)
   "Return an O(1) persistent subvector slice of VEC from START to END."
   (unless (or (eliscript-persistent-vector-p vec)
@@ -1441,6 +1449,43 @@
 (defun lazy-seq-p (obj)
   "Return t if OBJ is a lazy sequence."
   (and (eliscript-lazy-seq-p obj) t))
+
+(defun chunked-seq-p (_obj)
+  "Return nil in Emacs host representation unless chunk metadata is attached."
+  nil)
+
+(progn
+  (cl-defstruct (eliscript-volatile (:constructor eliscript-volatile--create))
+    val))
+
+(defun volatile! (init)
+  "Create a fast unsynchronized mutable box initialized to INIT."
+  (eliscript-volatile--create :val init))
+
+(defun volatile-p (obj)
+  "Return t if OBJ is a volatile box."
+  (and (eliscript-volatile-p obj) t))
+
+(defun vderef (v)
+  "Read the current value inside volatile box V."
+  (unless (eliscript-volatile-p v)
+    (error "Expected a volatile, got %S" v))
+  (eliscript-volatile-val v))
+
+(defun vreset! (v new-val)
+  "Set volatile box V's value to NEW-VAL and return NEW-VAL."
+  (unless (eliscript-volatile-p v)
+    (error "Expected a volatile, got %S" v))
+  (setf (eliscript-volatile-val v) new-val)
+  new-val)
+
+(defun vswap! (v fn &rest args)
+  "Apply FN to volatile box V's value and ARGS, storing and returning result."
+  (unless (eliscript-volatile-p v)
+    (error "Expected a volatile, got %S" v))
+  (let ((next (apply fn (eliscript-volatile-val v) args)))
+    (setf (eliscript-volatile-val v) next)
+    next))
 
 (defmacro lazy-seq (&rest body)
   "Construct a lazy sequence whose elements are computed by BODY."

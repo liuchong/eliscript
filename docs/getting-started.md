@@ -165,6 +165,12 @@ diagnostic located in `src/main.eli`. A virtual source must name an existing
 file inside the configured source graph. The same `--stdin-file` boundary is
 used by unsaved-buffer builds and Emacs Flymake.
 
+Pass `--lint` to include static lint warnings (`ELI-L0001..L0009`) without
+failing the check, or `--strict` to exit non-zero on any lint diagnostic. When
+building consumers of `"eliscript/core"` or pure barrel modules,
+`eliscript-build` automatically tree-shakes unused re-exports unless
+`--no-tree-shake` is supplied.
+
 ## Terminal REPL
 
 Start one persistent project-scoped session:
@@ -181,9 +187,16 @@ Use these commands while no form is pending:
 | --- | --- |
 | `:load src/main.eli` | Load and commit the file namespace |
 | `:reload` | Reload the most recently loaded file |
+| `:doc SYM` / `:source SYM` | Inspect API metadata or source definition |
+| `:apropos Q` / `:dir MOD` | Search symbols by substring or list module exports |
+| `:pst` | Print the last evaluation failure mapped back to `.eli` frames |
 | `:reset` | Clear committed session state |
 | `:help` | Show terminal commands |
 | `:quit` | Shut down the session cleanly |
+
+Evaluated forms also support `(doc sym)`, `(source sym)`, `(apropos query)`,
+`(dir mod)`, `(pst)`, `(load-file path)`, `(defvar-once name init)`, and live
+`(tap> val)` broadcast observation.
 
 For scripts and tests, `--no-prompt` suppresses presentation text. One-shot
 evaluation uses the same compiler and source-mapped runtime boundary:
@@ -228,9 +241,20 @@ The absolute command configuration works for terminal and GUI Emacs. Opening a
 | `eliscript-mode-eval-buffer` | `C-c C-l` | Load the unsaved buffer namespace |
 | `eliscript-mode-show-repl` | `C-c C-z` | Show the project result buffer |
 | `eliscript-mode-stop-repl` | `C-c C-q` | Stop and forget the project session |
+| `eliscript-mode-run-test-at-point` | `C-c C-t` | Run the `deftest` at point via `eliscript-test` |
+| `eliscript-mode-run-tests` | `C-c C-a` | Run project native `eliscript-test` suite |
 
 Build diagnostics use compilation-mode; `C-c C-n` and `C-c C-r` navigate their
-source locations. Evaluation failures are source mapped to `.eli` locations.
+source locations. Flymake enables `--lint` diagnostics and ElDoc queries
+`docs/pages/api-index.json`. Evaluation failures are source mapped to `.eli`
+locations.
+
+For project-level declarative tests written with `eliscript/test` (`deftest`,
+`testing`, `is`, `are`, `thrown?`), run:
+
+```sh
+./bin/eliscript-test --root "$PWD"
+```
 
 ## Project Watch
 

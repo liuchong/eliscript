@@ -86,3 +86,18 @@ process for the project. Structured change events refresh Flymake for matching
 live buffers and run `eliscript-mode-watch-event-hook`.
 `M-x eliscript-mode-stop-watch` releases the shared process. Customize
 `eliscript-mode-watch-command` when the public command is not on `PATH`.
+
+
+## Linting, ElDoc, And Native Test Runner
+
+- Flymake passes `--lint` to `eliscript-check` by default when
+  `eliscript-mode-lint-enabled` is non-nil, surfacing `ELI-L0001..L0009`
+  warnings alongside compiler errors.
+- ElDoc integrates `eliscript-mode-eldoc-function` using `docs/pages/api-index.json`
+  for interactive signature and docstring hints at point.
+- `C-c C-t` (`eliscript-mode-run-test-at-point`) and `C-c C-a`
+  (`eliscript-mode-run-tests`) invoke `eliscript-test` in a compilation buffer
+  to run declarative `deftest` suites.
+- `editor/eliscript-runtime.el` mirrors standalone runtime additions including
+  `entry-key`, `entry-val`, `chunked-seq-p`, `volatile!`, `volatile-p`,
+  `vderef`, `vreset!`, and `vswap!`.

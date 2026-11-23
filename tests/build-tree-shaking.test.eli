@@ -1,0 +1,176 @@
+(module tests.build-tree-shaking.test
+  (import "bun:test" afterAll beforeAll expect test)
+  (import "node:fs/promises" mkdir mkdtemp readdir readFile rm stat symlink writeFile)
+  (import "node:os" tmpdir)
+  (import "node:path" join resolve)
+  (import "node:url" fileURLToPath pathToFileURL)
+  (import "../bootstrap/host/project.mjs" buildProject)
+  (import "../tools/backends/compiler-host-record.mjs" copyHostRecord)
+
+  (defconst dynamicImport (js* "(specifier) => import(specifier)"))
+  (defconst root (resolve (fileURLToPath (new globalThis.URL "." (js* "import.meta.url"))) ".."))
+  (defconst bootstrapPath (resolve root "bin/eliscript-bootstrap"))
+  (defconst buildBin (resolve root "bin/eliscript-build"))
+  (defconst emacsBin (let ((v (get (get globalThis.process :env) :EMACS))) (if (nullish? v) "emacs" v)))
+  (defconst nodeBin (let ((v (get (get globalThis.process :env) :NODE))) (if (nullish? v) "node" v)))
+
+  (defvar workDir undefined)
+  (defvar compilerDir undefined)
+  (defvar compiler undefined)
+
+  (defasync runCmd (cmd &rest __opt)
+    (let* ((opts (if (undefined? (aref __opt 0)) (js-object) (aref __opt 0)))
+           (child (Bun/spawn cmd (js-object :cwd (if (get opts :cwd) (get opts :cwd) root)
+                                   :stdin (if (undefined? (get opts :stdin)) "ignore" "pipe")
+                                   :stdout "pipe" :stderr "pipe"
+                                   :env (if (get opts :env) (get opts :env) (get globalThis.process :env))))))
+      (when (not (undefined? (get opts :stdin)))
+        (js-call (get child :stdin) :write (get opts :stdin))
+        (js-call (get child :stdin) :end))
+      (let ((parts (await (Promise/all (js-array (get child :exited)
+                                         (js-call (new globalThis.Response (get child :stdout)) :text)
+                                         (js-call (new globalThis.Response (get child :stderr)) :text))))))
+        (js-object :exitCode (aref parts 0) :stdout (aref parts 1) :stderr (aref parts 2)))))
+
+  (defasync totalTreeBytes (dirPath)
+    (let ((entries (await (readdir dirPath (js-object :withFileTypes t))))
+          (sum 0)
+          (idx 0))
+      (while (< idx (js-length entries))
+        (let* ((ent (aref entries idx))
+               (full (join dirPath (get ent :name))))
+          (cond
+            ((js-call ent :isDirectory)
+             (setq sum (+ sum (await (totalTreeBytes full)))))
+            ((js-call (get ent :name) :endsWith ".mjs")
+             (setq sum (+ sum (get (await (stat full)) :size))))))
+        (setq idx (1+ idx)))
+      sum))
+
+  (beforeAll (async ()
+    (setq workDir (await (mkdtemp (join (tmpdir) "eliscript-tree-shake-test-"))))
+    (setq compilerDir (resolve workDir "compiler"))
+    (let ((built (await (runCmd (js-array bootstrapPath)
+                          (js-object :env (copyHostRecord (get globalThis.process :env)
+                                            (js-object :ELISCRIPT_BOOTSTRAP_OUT_DIR compilerDir)))))))
+      (js-call (expect (get built :exitCode)) :toBe 0))
+    (setq compiler (await (funcall dynamicImport (str (get (pathToFileURL (resolve compilerDir "compiler.mjs")) :href) "?treeshake"))))) 30000)
+
+  (afterAll (async ()
+    (when workDir
+      (await (rm workDir (js-object :recursive t :force t))))))
+
+  (test "eliscript-build tree-shakes pure barrels and stdlib/core imports identically in Seed and Self-hosted"
+    (async ()
+      ;; 1. Local pure barrel graph pruning + runtime parity + --no-tree-shake CLI comparison
+      (let* ((projDir (resolve workDir "barrel-proj"))
+             (srcDir (resolve projDir "src"))
+             (usedFile (resolve srcDir "used.eli"))
+             (unusedSchema (resolve srcDir "unused-schema.eli"))
+             (unusedAsync (resolve srcDir "unused-async.eli"))
+             (barrelFile (resolve srcDir "barrel.eli"))
+             (entryFile (resolve srcDir "main.eli"))
+             (outShaken (resolve projDir "out-shaken"))
+             (outFull (resolve projDir "out-full"))
+             (seedShaken (resolve projDir "seed-shaken"))
+             (seedFull (resolve projDir "seed-full")))
+        (await (mkdir srcDir (js-object :recursive t)))
+        (await (writeFile usedFile "(module b.used (defun compute (x) (* x 3)) (export compute))\n" "utf8"))
+        (await (writeFile unusedSchema
+                 (str "(module b.unused.schema\n"
+                      "  (defun heavy-validator (x) (str \"schema:\" x \"-\" \"unused-payload-marker-001\"))\n"
+                      "  (export heavy-validator))\n")
+                 "utf8"))
+        (await (writeFile unusedAsync
+                 (str "(module b.unused.async\n"
+                      "  (defun heavy-channel (x) (str \"async:\" x \"-\" \"unused-payload-marker-002\"))\n"
+                      "  (export heavy-channel))\n")
+                 "utf8"))
+        (await (writeFile barrelFile
+                 (str "(module b.barrel\n"
+                      "  (import \"./used.eli\" compute)\n"
+                      "  (import \"./unused-schema.eli\" heavy-validator)\n"
+                      "  (import \"./unused-async.eli\" heavy-channel)\n"
+                      "  (export compute heavy-validator heavy-channel))\n")
+                 "utf8"))
+        (await (writeFile entryFile
+                 "(module b.main\n  (import \"./barrel.eli\" compute)\n  (print (compute 14))\n  (export compute))\n"
+                 "utf8"))
+
+        (let ((cliShaken (await (runCmd (js-array buildBin "--root" srcDir "--out-dir" outShaken entryFile)
+                                  (js-object :env (copyHostRecord (get globalThis.process :env)
+                                                    (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR compilerDir))))))
+              (cliFull (await (runCmd (js-array buildBin "--root" srcDir "--out-dir" outFull "--no-tree-shake" entryFile)
+                                (js-object :env (copyHostRecord (get globalThis.process :env)
+                                                  (js-object :ELISCRIPT_BOOTSTRAP_MODULE_DIR compilerDir)))))))
+          (js-call (expect (get cliShaken :exitCode)) :toBe 0)
+          (js-call (expect (get cliFull :exitCode)) :toBe 0))
+
+        (let ((shakenFiles (js-call (await (readdir outShaken)) :sort))
+              (fullFiles (js-call (await (readdir outFull)) :sort))
+              (shakenBarrel (await (readFile (resolve outShaken "barrel.mjs") "utf8")))
+              (fullBarrel (await (readFile (resolve outFull "barrel.mjs") "utf8"))))
+          (js-call (expect shakenFiles) :toEqual
+            (js-array "barrel.mjs" "barrel.mjs.map" "eliscript-project.json" "main.mjs" "main.mjs.map" "used.mjs" "used.mjs.map"))
+          (js-call (expect fullFiles) :toContain "unused-schema.mjs")
+          (js-call (expect fullFiles) :toContain "unused-async.mjs")
+          (js-call (expect shakenBarrel) :toContain "compute")
+          (js-call (get (expect shakenBarrel) :not) :toContain "unused-schema")
+          (js-call (get (expect shakenBarrel) :not) :toContain "unused-async")
+          (js-call (expect fullBarrel) :toContain "unused-schema")
+          (let ((shakenBytes (await (totalTreeBytes outShaken)))
+                (fullBytes (await (totalTreeBytes outFull))))
+            (js-call (expect shakenBytes) :toBeLessThan fullBytes))
+          (let ((runShaken (await (runCmd (js-array nodeBin (resolve outShaken "main.mjs")))))
+                (runFull (await (runCmd (js-array nodeBin (resolve outFull "main.mjs"))))))
+            (js-call (expect (get runShaken :exitCode)) :toBe 0)
+            (js-call (expect (js-call (get runShaken :stdout) :trim)) :toBe "42")
+            (js-call (expect (get runShaken :stdout)) :toBe (get runFull :stdout))))
+
+        ;; Emacs Seed eliscript-project-build parity (shaken vs eliscript-project-tree-shake nil)
+        (let* ((elisp "(progn
+  (require 'eliscript-project)
+  (let* ((entry (getenv \"ELISCRIPT_TS_ENTRY\"))
+         (src (getenv \"ELISCRIPT_TS_SRC\"))
+         (out-on (getenv \"ELISCRIPT_TS_OUT_ON\"))
+         (out-off (getenv \"ELISCRIPT_TS_OUT_OFF\")))
+    (eliscript-project-build entry out-on src)
+    (let ((eliscript-project-tree-shake nil))
+      (eliscript-project-build entry out-off src))
+    (princ \"ok\")))")
+               (seedRes (await (runCmd (js-array emacsBin "--batch" "-Q" "-L" (resolve root "compiler") "--eval" elisp)
+                                 (js-object :env (copyHostRecord (get globalThis.process :env)
+                                                   (js-object :LC_ALL "C" :LANG "C"
+                                                     :ELISCRIPT_TS_ENTRY entryFile
+                                                     :ELISCRIPT_TS_SRC srcDir
+                                                     :ELISCRIPT_TS_OUT_ON seedShaken
+                                                     :ELISCRIPT_TS_OUT_OFF seedFull)))))))
+          (js-call (expect (get seedRes :exitCode)) :toBe 0)
+          (js-call (expect (get seedRes :stdout)) :toBe "ok")
+          (js-call (expect (js-call (await (readdir seedShaken)) :sort)) :toEqual
+            (js-array "barrel.mjs" "barrel.mjs.map" "eliscript-project.json" "main.mjs" "main.mjs.map" "used.mjs" "used.mjs.map"))
+          (js-call (expect (js-call (await (readdir seedFull)) :sort)) :toContain "unused-schema.mjs"))
+
+      ;; 2. "eliscript/core" barrel import rewriting (eliscript/seq only vs unshaken eliscript/core)
+      (let* ((coreProj (resolve workDir "core-proj"))
+             (coreEntry (resolve coreProj "app.eli"))
+             (coreOutShaken (resolve coreProj "out-shaken"))
+             (coreOutFull (resolve coreProj "out-full")))
+        (await (mkdir coreProj (js-object :recursive t)))
+        (await (writeFile coreEntry
+                 "(module core.consumer\n  (import \"eliscript/core\" map filter)\n  (defun run (xs) (map (lambda (n) (* n 2)) (filter (lambda (n) (> n 0)) xs)))\n  (export run))\n"
+                 "utf8"))
+        (await (buildProject (js-object :entries (js-array coreEntry) :root coreProj :outDir coreOutShaken
+                               :moduleDirectory compilerDir :useCache false)))
+        (await (buildProject (js-object :entries (js-array coreEntry) :root coreProj :outDir coreOutFull
+                               :moduleDirectory compilerDir :useCache false :treeShake false)))
+        (let ((shakenJs (await (readFile (resolve coreOutShaken "app.mjs") "utf8")))
+              (fullJs (await (readFile (resolve coreOutFull "app.mjs") "utf8"))))
+          (js-call (expect shakenJs) :toContain "\"eliscript/seq\"")
+          (js-call (get (expect shakenJs) :not) :toContain "\"eliscript/core\"")
+          (js-call (get (expect shakenJs) :not) :toContain "pprint")
+          (js-call (get (expect shakenJs) :not) :toContain "schema")
+          (js-call (get (expect shakenJs) :not) :toContain "async")
+          (js-call (expect fullJs) :toContain "\"eliscript/core\"")))))
+)
+)

@@ -8,7 +8,7 @@
     "Usage: eliscript-eval [OPTIONS]\n\nOptions:\n  --repl            Run the persistent terminal REPL (default mode)\n  --stdio           Read and write one JSON record per line\n  --eval SOURCE     Evaluate one form\n  --file FILE       Load one complete Eliscript source file\n  --root DIRECTORY  Set the project root for REPL, --eval, or --file\n  --json            Print the one-shot result as JSON\n  --prompt          Always print the REPL banner and prompts\n  --no-prompt       Never print the REPL banner or prompts\n  --help            Show this help\n")
 
   (defconst replHelp
-    "Commands:\n  :help             Show this command summary\n  :load FILE        Load one complete source file\n  :reload           Reload the last successfully loaded file\n  :reset            Discard the current namespace\n  :quit             Close the session\n")
+    "Commands:\n  :help             Show this command summary\n  :load FILE        Load one complete source file\n  :reload           Reload the last successfully loaded file\n  :reset            Discard the current namespace\n  :doc SYMBOL       Print documentation for a symbol or module\n  :source SYMBOL    Print definition source for a symbol\n  :apropos QUERY    Search symbols and modules matching QUERY\n  :dir [MODULE]     List module exports or session bindings\n  :pst              Print restored stack trace of last exception\n  :quit             Close the session\n")
 
   (defconst replFilename "<repl>.eli")
 
@@ -282,6 +282,38 @@
              t)
            (put context :lastFile nil)
            false))
+        ((= name "doc")
+         (when (= argument "")
+           (throw (cliError ":doc requires SYMBOL")))
+         (js-call (get globalThis.process :stdout) :write
+           (str (js-call session :doc argument) "\n"))
+         false)
+        ((= name "source")
+         (when (= argument "")
+           (throw (cliError ":source requires SYMBOL")))
+         (js-call (get globalThis.process :stdout) :write
+           (str (js-call session :source argument) "\n"))
+         false)
+        ((= name "apropos")
+         (when (= argument "")
+           (throw (cliError ":apropos requires QUERY")))
+         (let ((matches (js-call session :apropos argument)))
+           (if (= (js-length matches) 0)
+             (js-call (get globalThis.process :stdout) :write "(no matches)\n")
+             (js-call (get globalThis.process :stdout) :write (str (js-call matches :join "\n") "\n"))))
+         false)
+        ((= name "dir")
+         (let ((entries (js-call session :dir (if (= argument "") nil argument))))
+           (if (= (js-length entries) 0)
+             (js-call (get globalThis.process :stdout) :write "(empty)\n")
+             (js-call (get globalThis.process :stdout) :write (str (js-call entries :join "\n") "\n"))))
+         false)
+        ((= name "pst")
+         (unless (= argument "")
+           (throw (cliError ":pst does not accept arguments")))
+         (js-call (get globalThis.process :stdout) :write
+           (str (js-call session :pst) "\n"))
+         false)
         ((= name "quit")
          (unless (= argument "")
            (throw (cliError ":quit does not accept arguments")))

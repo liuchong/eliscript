@@ -117,12 +117,18 @@
 (defvar eliscript-project-use-cache t
   "When non-nil, project builds may reuse verified manifest artifacts.")
 
+(defvar eliscript-project-tree-shake t
+  "When non-nil, prune unreferenced exports from pure barrel modules.")
+
 (defconst eliscript-project--macro-capabilities '("read-file")
   "Macro capabilities implemented by the project host.")
 
 (defconst eliscript-project--compiler-directory
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory whose compiler sources determine incremental cache validity.")
+
+(defvar eliscript-project--core-barrel-export-map 'uninitialized
+  "Cached export-name to relative specifier table for `stdlib/core.eli'.")
 
 (defun eliscript-project--elapsed-ms (started-at)
   "Return non-negative milliseconds elapsed since STARTED-AT."
@@ -1251,6 +1257,184 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
   "Compile the local Eliscript graph rooted at ENTRY into OUT-DIR."
   (eliscript-project--build-many (list entry) out-dir root))
 
+(defun eliscript-project--unwrap-statements (body)
+  "Flatten module wrappers in IR BODY."
+  (let (result)
+    (dolist (node body)
+      (if (eq (eliscript-ir-node-kind node) 'module-declaration)
+          (setq result
+                (nconc (nreverse (eliscript-project--unwrap-statements
+                                  (eliscript-ir-node-children node)))
+                       result))
+        (push node result)))
+    (nreverse result)))
+
+(defun eliscript-project--analyze-pure-barrel (program)
+  "Return hash table mapping exported symbol name to upstream specifier, or nil."
+  (let ((statements (eliscript-project--unwrap-statements
+                     (eliscript-ir-program-body program)))
+        (imported (make-hash-table :test #'eq))
+        (export-map (make-hash-table :test #'eq))
+        (valid t))
+    (dolist (node statements)
+      (when valid
+        (pcase (eliscript-ir-node-kind node)
+          ('import-declaration
+           (let ((specifier (eliscript-ir-node-value node))
+                 (children (eliscript-ir-node-children node)))
+             (if (null children)
+                 (setq valid nil)
+               (dolist (child children)
+                 (if (eq (eliscript-ir-node-kind child) 'import-named)
+                     (puthash (eliscript-ir-node-value child) specifier imported)
+                   (setq valid nil))))))
+          ('export-declaration
+           (dolist (child (eliscript-ir-node-children node))
+             (let ((name (eliscript-ir-node-value child)))
+               (if (and (eq (eliscript-ir-node-kind child) 'reference)
+                        (gethash name imported))
+                   (puthash name (gethash name imported) export-map)
+                 (setq valid nil)))))
+          (_ (setq valid nil)))))
+    (when (and valid (> (hash-table-count export-map) 0))
+      export-map)))
+
+(defun eliscript-project--prune-barrel-statements (body needed)
+  "Filter IR BODY statements so only exports in NEEDED hash table remain."
+  (let (out)
+    (dolist (node body)
+      (pcase (eliscript-ir-node-kind node)
+        ('module-declaration
+         (let ((copy (copy-eliscript-ir-node node)))
+           (setf (eliscript-ir-node-children copy)
+                 (eliscript-project--prune-barrel-statements
+                  (eliscript-ir-node-children node) needed))
+           (push copy out)))
+        ('import-declaration
+         (let ((kept (cl-remove-if-not
+                      (lambda (child)
+                        (and (eq (eliscript-ir-node-kind child) 'import-named)
+                             (gethash (eliscript-ir-node-value child) needed)))
+                      (eliscript-ir-node-children node))))
+           (when kept
+             (let ((copy (copy-eliscript-ir-node node)))
+               (setf (eliscript-ir-node-children copy) kept)
+               (push copy out)))))
+        ('export-declaration
+         (let ((kept (cl-remove-if-not
+                      (lambda (child)
+                        (and (eq (eliscript-ir-node-kind child) 'reference)
+                             (gethash (eliscript-ir-node-value child) needed)))
+                      (eliscript-ir-node-children node))))
+           (when kept
+             (let ((copy (copy-eliscript-ir-node node)))
+               (setf (eliscript-ir-node-children copy) kept)
+               (push copy out)))))
+        (_ (push node out))))
+    (nreverse out)))
+
+(defun eliscript-project--prune-barrel-program (program requested)
+  "Return pruned clone of pure-barrel PROGRAM keeping REQUESTED export symbols."
+  (let ((export-map (eliscript-project--analyze-pure-barrel program)))
+    (if (not export-map)
+        program
+      (let ((needed (make-hash-table :test #'eq)))
+        (dolist (name requested)
+          (when (gethash name export-map)
+            (puthash name t needed)))
+        (eliscript-ir-make-program
+         (eliscript-ir-program-filename program)
+         (eliscript-project--prune-barrel-statements
+          (eliscript-ir-program-body program) needed))))))
+
+(defun eliscript-project--rewrite-target-specifier (raw-specifier target-prefix)
+  "Rewrite relative barrel specifier RAW-SPECIFIER under TARGET-PREFIX."
+  (let ((spec raw-specifier))
+    (when (string-prefix-p "./" spec)
+      (setq spec (substring spec 2)))
+    (cond
+     ((string-suffix-p ".mjs" spec)
+      (setq spec (substring spec 0 -4)))
+     ((string-suffix-p ".eli" spec)
+      (setq spec (substring spec 0 -4))))
+    (concat target-prefix spec)))
+
+(defun eliscript-project--rewrite-barrel-statements
+    (body barrel-specifier export-map target-prefix)
+  "Rewrite BARREL-SPECIFIER named imports in BODY via EXPORT-MAP."
+  (let (out)
+    (dolist (node body)
+      (cond
+       ((eq (eliscript-ir-node-kind node) 'module-declaration)
+        (let ((copy (copy-eliscript-ir-node node)))
+          (setf (eliscript-ir-node-children copy)
+                (eliscript-project--rewrite-barrel-statements
+                 (eliscript-ir-node-children node)
+                 barrel-specifier export-map target-prefix))
+          (push copy out)))
+       ((and (eq (eliscript-ir-node-kind node) 'import-declaration)
+             (equal (eliscript-ir-node-value node) barrel-specifier))
+        (let ((children (eliscript-ir-node-children node)))
+          (if (not (and children
+                        (cl-every
+                         (lambda (child)
+                           (and (eq (eliscript-ir-node-kind child) 'import-named)
+                                (gethash (eliscript-ir-node-value child) export-map)))
+                         children)))
+              (push node out)
+            (let ((grouped (make-hash-table :test #'equal))
+                  targets)
+              (dolist (child children)
+                (let* ((upstream (gethash (eliscript-ir-node-value child) export-map))
+                       (target (eliscript-project--rewrite-target-specifier
+                                upstream target-prefix)))
+                  (unless (gethash target grouped)
+                    (push target targets))
+                  (puthash target (append (gethash target grouped) (list child)) grouped)))
+              (dolist (target (sort targets #'string-lessp))
+                (let ((copy (copy-eliscript-ir-node node)))
+                  (setf (eliscript-ir-node-value copy) target
+                        (eliscript-ir-node-children copy) (gethash target grouped))
+                  (push copy out)))))))
+       (t (push node out))))
+    (nreverse out)))
+
+(defun eliscript-project--core-barrel-map ()
+  "Load and cache `stdlib/core.eli' pure-barrel export routing table."
+  (when (eq eliscript-project--core-barrel-export-map 'uninitialized)
+    (let ((core-file (expand-file-name
+                      "../stdlib/core.eli"
+                      eliscript-project--compiler-directory)))
+      (setq eliscript-project--core-barrel-export-map
+            (when (file-regular-p core-file)
+              (ignore-errors
+                (eliscript-project--analyze-pure-barrel
+                 (eliscript-compile-ir-string
+                  (eliscript-project--read-source core-file)
+                  core-file)))))))
+  eliscript-project--core-barrel-export-map)
+
+(defun eliscript-project--merge-demand (requests source incoming)
+  "Merge INCOMING export demand (`all' or symbol list) for SOURCE into REQUESTS."
+  (let ((existing (gethash source requests 'absent)))
+    (cond
+     ((eq existing 'all) nil)
+     ((eq incoming 'all)
+      (puthash source 'all requests)
+      t)
+     ((eq existing 'absent)
+      (let ((table (make-hash-table :test #'eq)))
+        (dolist (n incoming) (puthash n t table))
+        (puthash source table requests)
+        t))
+     (t
+      (let (changed)
+        (dolist (n incoming)
+          (unless (gethash n existing)
+            (puthash n t existing)
+            (setq changed t)))
+        changed)))))
+
 (defun eliscript-project--build-many
     (entries out-dir &optional root macro-capabilities macro-file-dependencies)
   "Compile local Eliscript graphs rooted at ENTRIES into OUT-DIR.
@@ -1300,14 +1484,25 @@ unchanged."
            canonical-entries))
          (cache-started-at (float-time))
          (cache-lookup
-          (eliscript-project--read-cache
-           output-directory entry-outputs "standard" nil
-           compiler-digest))
+          (let ((eliscript-project-use-cache
+                 (and eliscript-project-use-cache eliscript-project-tree-shake)))
+            (eliscript-project--read-cache
+             output-directory entry-outputs "standard" nil
+             compiler-digest)))
          (cache-read-ms
           (eliscript-project--elapsed-ms cache-started-at))
          (cache (eliscript-project-cache-lookup-cache cache-lookup))
-         (states (make-hash-table :test #'equal))
-         pending-writes
+         (core-map (and eliscript-project-tree-shake
+                        (eliscript-project--core-barrel-map)))
+         (requests (make-hash-table :test #'equal))
+         (pending nil)
+         (compiled-raw (make-hash-table :test #'equal))
+         (force-compile (make-hash-table :test #'equal))
+         (decisions (make-hash-table :test #'equal))
+         (records-map (make-hash-table :test #'equal))
+         (write-map (make-hash-table :test #'equal))
+         (cached-modules (make-hash-table :test #'equal))
+         (iterations 0)
          modules)
     (unless (= (length canonical-entries)
                (length (delete-dups (copy-sequence canonical-entries))))
@@ -1322,84 +1517,169 @@ unchanged."
       (unless (file-directory-p resolved-out-dir)
         (eliscript-project--fail
          resolved-out-dir nil "output path is not a directory")))
-    (cl-labels
-        ((visit
-           (source)
-           (pcase (gethash source states)
-             ('done nil)
-             ('visiting nil)
-             (_
-              (puthash source 'visiting states)
-              (let* ((output-path
-                      (eliscript-project--source-output
-                       source root-path output-directory))
-                     (decision
-                     (eliscript-project--cache-decision
-                       source root-path output-directory cache nil
-                       macro-dependencies))
-                     (cached
-                      (eliscript-project-cache-decision-module decision)))
-		(if cached
-                    (progn
-                      (dolist (dependency
-                               (eliscript-project-module-dependencies cached))
-			(visit dependency))
-                      (push cached modules))
-                  (let* ((source-text
-                          (eliscript-project--read-source source))
-                         (program
-                          (eliscript-compile-ir-string
-                           source-text source macro-context))
-                         dependencies)
-                    (eliscript-ir-walk
-                     program
-                     (lambda (node)
-                       (when (eq (eliscript-ir-node-kind node)
-                                 'import-declaration)
-                         (let ((specifier (eliscript-ir-node-value node)))
-                           (cond
-                            ((eliscript-project--local-import-p specifier)
-                             (let* ((candidate
-                                     (expand-file-name
-                                      specifier
-                                      (file-name-directory source)))
-                                    (dependency
-                                     (eliscript-project--canonical-source
-                                      candidate root-path source
-                                      (eliscript-ir-node-span node)))
-                                    (dependency-output
-                                     (eliscript-project--source-output
-                                      dependency root-path output-directory)))
-                               (push dependency dependencies)
-                               (setf (eliscript-ir-node-value node)
-                                     (eliscript-project--relative-import
-                                      dependency-output output-path))))
-                            ((eliscript-project--source-file-p specifier)
-                             (eliscript-project--fail
-                              source (eliscript-ir-node-span node)
-                              "Eliscript source import must be relative: %s"
-                              specifier)))))))
-                    (setq dependencies
-                          (sort (delete-dups dependencies) #'string-lessp))
-                    (dolist (dependency dependencies)
-                      (visit dependency))
-                    (push
+    (dolist (entry canonical-entries)
+      (puthash entry 'all requests)
+      (cl-pushnew entry pending :test #'equal))
+    (while pending
+      (setq iterations (1+ iterations))
+      (when (> iterations 10000)
+        (eliscript-project--fail nil nil "project graph exceeded planning limit"))
+      (setq pending (sort pending #'string-lessp))
+      (let* ((source (pop pending))
+             (demand (gethash source requests 'all))
+             (output-path
+              (eliscript-project--source-output
+               source root-path output-directory))
+             (decision
+              (if (gethash source force-compile)
+                  nil
+                (or (gethash source decisions)
+                    (let ((d (eliscript-project--cache-decision
+                              source root-path output-directory cache nil
+                              macro-dependencies)))
+                      (puthash source d decisions)
+                      d))))
+             (cached
+              (and decision
+                   (eliscript-project-cache-decision-module decision))))
+        (if cached
+            (progn
+              (puthash source cached cached-modules)
+              (puthash source (eliscript-project-module-dependencies cached) records-map)
+              (dolist (dependency (eliscript-project-module-dependencies cached))
+                (when (and (eliscript-project--merge-demand requests dependency 'all)
+                           (not (gethash dependency records-map)))
+                  (cl-pushnew dependency pending :test #'equal))))
+          (let* ((raw-info
+                  (or (gethash source compiled-raw)
+                      (let* ((source-text (eliscript-project--read-source source))
+                             (parsed (eliscript-compile-ir-string
+                                      source-text source macro-context))
+                             (core-rewritten
+                              (if core-map
+                                  (eliscript-ir-make-program
+                                   (eliscript-ir-program-filename parsed)
+                                   (eliscript-project--rewrite-barrel-statements
+                                    (eliscript-ir-program-body parsed)
+                                    "eliscript/core" core-map "eliscript/"))
+                                parsed))
+                             (barrel-map
+                              (and eliscript-project-tree-shake
+                                   (eliscript-project--analyze-pure-barrel core-rewritten)))
+                             (info (list source-text core-rewritten barrel-map)))
+                        (puthash source info compiled-raw)
+                        info)))
+                 (source-text (nth 0 raw-info))
+                 (raw-program (nth 1 raw-info))
+                 (barrel-map (nth 2 raw-info))
+                 (effective-program
+                  (if (and eliscript-project-tree-shake
+                           barrel-map
+                           (not (eq demand 'all)))
+                      (let (req-names)
+                        (maphash (lambda (k _v) (push k req-names)) demand)
+                        (eliscript-project--prune-barrel-program raw-program req-names))
+                    (eliscript-ir-make-program
+                     (eliscript-ir-program-filename raw-program)
+                     (eliscript-project--rewrite-barrel-statements
+                      (eliscript-ir-program-body raw-program)
+                      "__unused__" (make-hash-table) ""))))
+                 dependencies
+                 imp-demands)
+            (remhash source cached-modules)
+            (eliscript-ir-walk
+             effective-program
+             (lambda (node)
+               (when (eq (eliscript-ir-node-kind node) 'import-declaration)
+                 (let ((specifier (eliscript-ir-node-value node)))
+                   (cond
+                    ((eliscript-project--local-import-p specifier)
+                     (let* ((candidate (expand-file-name
+                                        specifier (file-name-directory source)))
+                            (dependency
+                             (eliscript-project--canonical-source
+                              candidate root-path source
+                              (eliscript-ir-node-span node)))
+                            (dependency-output
+                             (eliscript-project--source-output
+                              dependency root-path output-directory))
+                            (children (eliscript-ir-node-children node))
+                            (child-demand
+                             (if (and children
+                                      (cl-every
+                                       (lambda (c)
+                                         (eq (eliscript-ir-node-kind c) 'import-named))
+                                       children))
+                                 (mapcar #'eliscript-ir-node-value children)
+                               'all)))
+                       (push dependency dependencies)
+                       (push (cons dependency child-demand) imp-demands)
+                       (setf (eliscript-ir-node-value node)
+                             (eliscript-project--relative-import
+                              dependency-output output-path))))
+                    ((eliscript-project--source-file-p specifier)
+                     (eliscript-project--fail
+                      source (eliscript-ir-node-span node)
+                      "Eliscript source import must be relative: %s"
+                      specifier)))))))
+            (setq dependencies (sort (delete-dups dependencies) #'string-lessp))
+            (puthash source dependencies records-map)
+            (puthash source
                      (list
-                      program source source-text output-path dependencies
+                      effective-program source source-text output-path dependencies
                       macro-dependencies nil
-                      (if cache
-                          (eliscript-project-cache-decision-reason decision)
-			(eliscript-project-cache-lookup-reason cache-lookup)))
-                     pending-writes)))
-		(puthash source 'done states))))))
-      (dolist (entry canonical-entries)
-        (visit entry)))
-    (let (sources)
-      (maphash (lambda (source _state) (push source sources)) states)
+                      (cond
+                       ((gethash source force-compile) "barrel-demand-changed")
+                       ((and cache decision) (eliscript-project-cache-decision-reason decision))
+                       (t (eliscript-project-cache-lookup-reason cache-lookup))))
+                     write-map)
+            (dolist (pair (nreverse imp-demands))
+              (let* ((dep (car pair))
+                     (cdem (cdr pair))
+                     (widened (eliscript-project--merge-demand requests dep cdem)))
+                (cond
+                 ((not (gethash dep records-map))
+                  (cl-pushnew dep pending :test #'equal))
+                 (widened
+                  (if (gethash dep cached-modules)
+                      (let* ((dtext (eliscript-project--read-source dep))
+                             (dparsed (eliscript-compile-ir-string
+                                       dtext dep macro-context))
+                             (drewritten
+                              (if core-map
+                                  (eliscript-ir-make-program
+                                   (eliscript-ir-program-filename dparsed)
+                                   (eliscript-project--rewrite-barrel-statements
+                                    (eliscript-ir-program-body dparsed)
+                                    "eliscript/core" core-map "eliscript/"))
+                                dparsed))
+                             (dbarrel
+                              (and eliscript-project-tree-shake
+                                   (eliscript-project--analyze-pure-barrel drewritten))))
+                        (when dbarrel
+                          (puthash dep (list dtext drewritten dbarrel) compiled-raw)
+                          (puthash dep t force-compile)
+                          (cl-pushnew dep pending :test #'equal)))
+                    (let ((draw (gethash dep compiled-raw)))
+                      (when (and draw (nth 2 draw))
+                        (cl-pushnew dep pending :test #'equal))))))))))))
+    (let ((reachable (make-hash-table :test #'equal))
+          (walk (copy-sequence canonical-entries))
+          sources)
+      (while walk
+        (let ((cur (pop walk)))
+          (unless (gethash cur reachable)
+            (puthash cur t reachable)
+            (dolist (d (gethash cur records-map))
+              (push d walk)))))
+      (maphash (lambda (s _v) (push s sources)) reachable)
       (eliscript-project--validate-output-isolation
-       sources macro-dependencies root-path output-directory))
-    (dolist (pending (nreverse pending-writes))
-      (push (apply #'eliscript-project--write-module pending) modules))
+       sources macro-dependencies root-path output-directory)
+      (dolist (source (sort sources #'string-lessp))
+        (let ((cached (gethash source cached-modules)))
+          (if cached
+              (push cached modules)
+            (push (apply #'eliscript-project--write-module (gethash source write-map)) modules)))))
     (setq modules
           (sort modules
                 (lambda (left right)

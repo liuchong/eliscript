@@ -71,7 +71,7 @@
                 <tr><td>evaluated keywords</td><td>interned immutable Keyword values</td></tr>
                 <tr><td>vector expressions &amp; <code>persistent-vector</code></td><td>32-way persistent immutable Vectors (plus mutable <code>'[]</code> in compat core)</td></tr>
                 <tr><td>list expressions &amp; <code>persistent-list</code></td><td>persistent linked Lists and Emacs cons cells</td></tr>
-                <tr><td>map and set literals &amp; <code>persistent-map</code> / <code>persistent-set</code></td><td>persistent HAMT Maps and Sets (plus AVL <code>persistent-sorted-map</code> / <code>persistent-sorted-set</code>)</td></tr>
+                <tr><td>Map and set literals &amp; <code>persistent-map</code> / <code>persistent-set</code></td><td>Compact <code>ArrayMap</code> (&le; 8 keys), HAMT Maps/Sets, first-class <code>MapEntry</code>, and AVL sorted collections</td></tr>
                 <tr><td><code>#queue [...]</code> / <code>persistent-queue</code></td><td>persistent FIFO Queue</td></tr>
                 <tr><td><code>cl-defstruct-persistent</code></td><td>immutable structural records with Schema validation &amp; JSON Schema round-trip</td></tr>
                 <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native JavaScript containers</td></tr>
@@ -172,8 +172,8 @@
               <thead><tr><th>Value</th><th>Implementation</th></tr></thead>
               <tbody>
                 <tr><td>List</td><td>Singly linked nodes with O(1) front operations and exact suffix sharing</td></tr>
-                <tr><td>Vector</td><td>32-way bit-partitioned trie with a tail and O(log32 n) indexed updates</td></tr>
-                <tr><td>Map / Set</td><td>HAMT with bitmap, dense array, collision nodes, and path copying</td></tr>
+                <tr><td>Vector</td><td>32-way bit-partitioned trie with tail, O(1) flattened <code>SubVector</code> slices, and O(log32 n) updates</td></tr>
+                <tr><td>Map / Set</td><td>Compact flat <code>PersistentArrayMap</code> (&le; 8 keys) auto-promoting to 32-way HAMT with first-class <code>MapEntry</code></td></tr>
                 <tr><td>Queue</td><td>Persistent front/rear Vectors with iterative million-value behavior</td></tr>
                 <tr><td>Sorted Map / Set</td><td>Structurally shared AVL trees with custom comparators and range queries</td></tr>
               </tbody>
@@ -183,12 +183,12 @@
           </section>
 
           <section id="sequences">
-            <h2>Portable sequences</h2>
-            <pre><code>(import "eliscript/runtime/core/sequence" map filter reduce range)
+            <h2>Portable sequences &amp; core barrel</h2>
+            <pre><code>(import "eliscript/core" map filter reduce range)
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
-            <p>The standard library is written in Eliscript and includes persistent hash and AVL-sorted collections, protocols, replayable and memoized lazy sequences, pull transduction, immutable tree rewriting and zipper editing, text, numeric, Result, JSON, state, and host-interop modules without adding application-framework dependencies.</p>
-            <p>The maintained <code>stdlib/seq.eli</code> and <code>runtime/core/sequence.eli</code> modules are authored in Eliscript. They accept persistent, native, and externally extended reducible values through collection protocols, return persistent Vectors, add <code>remove</code>, and combine O(1) / O(log32 n) indexed fast-paths for <code>first</code>, <code>last</code>, and <code>nth</code> with unboxed early termination for <code>find</code> and circular array ring buffers with transient Vector builders for <code>take-last</code> and <code>drop-last</code>.</p>
+            <p>The standard library is exposed both by domain (<code>stdlib/string.eli</code>, <code>regex</code>, <code>math</code>, <code>bit</code>, <code>state</code> with <code>volatile!</code>, <code>tap</code>, <code>diff</code>, <code>pprint</code>, <code>time</code>, <code>uuid</code>, <code>schema</code>, <code>async</code>, <code>test</code>, <code>devtools</code>) and through the single tree-shakeable <code>eliscript/core</code> barrel entry point, with zero-runtime subsets isolated in <code>stdlib/portable/</code>.</p>
+            <p>The maintained <code>stdlib/seq.eli</code> and <code>runtime/core/lazy-sequence.eli</code> pipelines realize sequences in bounded 32-element chunks (<code>IChunk</code> / <code>IChunkedSeq</code> / <code>ArrayChunk</code>), combine O(1) / O(log32 n) indexed fast-paths, and route eager builders through owner-isolated <code>TransientVector</code>, <code>TransientHashMap</code>, and <code>TransientSet</code> instances.</p>
           </section>
 
           <section id="text">

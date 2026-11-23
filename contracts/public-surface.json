@@ -505,6 +505,7 @@
         "--help",
         "--json",
         "--no-cache",
+        "--no-tree-shake",
         "--out-dir",
         "--portable",
         "--root",
@@ -520,9 +521,11 @@
         "--diagnostic-format",
         "--help",
         "--json",
+        "--lint",
         "--portable",
         "--root",
-        "--stdin-file"
+        "--stdin-file",
+        "--strict"
       ]
     },
     {
@@ -2266,7 +2269,7 @@
   "standardLibrary": [
     {
       "module": "async",
-      "spec": "0072",
+      "spec": "0189",
       "file": "stdlib/async.eli",
       "exports": [
         "AsyncChannel",
@@ -2327,7 +2330,7 @@
     },
     {
       "module": "bit",
-      "spec": "0052",
+      "spec": "0186",
       "file": "stdlib/bit.eli",
       "exports": [
         "bit-and-fn",
@@ -2432,7 +2435,7 @@
     },
     {
       "module": "core",
-      "spec": "0066",
+      "spec": "0182",
       "file": "stdlib/core.eli",
       "exports": [
         "IAssociative",
@@ -2953,7 +2956,7 @@
     },
     {
       "module": "devtools",
-      "spec": "0069",
+      "spec": "0189",
       "file": "stdlib/devtools.eli",
       "exports": [
         "devtools-formatter",
@@ -2968,7 +2971,7 @@
     },
     {
       "module": "diff",
-      "spec": "0066",
+      "spec": "0187",
       "file": "stdlib/diff.eli",
       "exports": [
         "diff"
@@ -3115,7 +3118,7 @@
     },
     {
       "module": "math",
-      "spec": "0052",
+      "spec": "0186",
       "file": "stdlib/math.eli",
       "exports": [
         "E",
@@ -3475,7 +3478,7 @@
     },
     {
       "module": "pprint",
-      "spec": "0069",
+      "spec": "0187",
       "file": "stdlib/pprint.eli",
       "exports": [
         "pp",
@@ -3566,7 +3569,7 @@
     },
     {
       "module": "schema",
-      "spec": "0066",
+      "spec": "0188",
       "file": "stdlib/schema.eli",
       "exports": [
         "INVALID",
@@ -3756,7 +3759,7 @@
     },
     {
       "module": "state",
-      "spec": "0072",
+      "spec": "0186",
       "file": "stdlib/state.eli",
       "exports": [
         "add-watch",
@@ -3787,7 +3790,7 @@
     },
     {
       "module": "string",
-      "spec": "0081",
+      "spec": "0186",
       "file": "stdlib/string.eli",
       "exports": [
         "blank?",
@@ -3823,7 +3826,7 @@
     },
     {
       "module": "tap",
-      "spec": "0072",
+      "spec": "0186",
       "file": "stdlib/tap.eli",
       "exports": [
         "add-tap",
@@ -3836,7 +3839,7 @@
     },
     {
       "module": "test",
-      "spec": "0066",
+      "spec": "0189",
       "file": "stdlib/test.eli",
       "exports": [
         "are",
@@ -3860,7 +3863,7 @@
     },
     {
       "module": "time",
-      "spec": "0069",
+      "spec": "0187",
       "file": "stdlib/time.eli",
       "exports": [
         "Duration",
@@ -3946,7 +3949,7 @@
     },
     {
       "module": "uuid",
-      "spec": "0069",
+      "spec": "0187",
       "file": "stdlib/uuid.eli",
       "exports": [
         "UUID",
@@ -4126,6 +4129,8 @@
       "eliscript-ir-program-to-forms",
       "eliscript-ir-property",
       "eliscript-ir-walk",
+      "eliscript-lint-module",
+      "eliscript-lint-string",
       "eliscript-lower-expression",
       "eliscript-lower-module",
       "eliscript-lower-top-level",
@@ -4137,6 +4142,7 @@
       "eliscript-mode-compile-buffer",
       "eliscript-mode-compile-file",
       "eliscript-mode-compile-project",
+      "eliscript-mode-eldoc-function",
       "eliscript-mode-eval-buffer",
       "eliscript-mode-eval-defun",
       "eliscript-mode-eval-last-form",
@@ -4146,6 +4152,8 @@
       "eliscript-mode-next-error",
       "eliscript-mode-previous-error",
       "eliscript-mode-project-root",
+      "eliscript-mode-run-test-at-point",
+      "eliscript-mode-run-tests",
       "eliscript-mode-show-repl",
       "eliscript-mode-stop-repl",
       "eliscript-mode-stop-watch",
@@ -4252,6 +4260,8 @@
       ],
       "internal": [
         "eliscript-analyzer--binding",
+        "eliscript-analyzer--lint-binding",
+        "eliscript-analyzer--lint-scope",
         "eliscript-analyzer--recur-target",
         "eliscript-analyzer--scope",
         "eliscript-expander--macro",

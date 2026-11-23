@@ -1117,6 +1117,700 @@ Return FORMS unchanged for the emitter."
     (eliscript-portable-validate-module forms filename)
     forms))
 
+(defconst eliscript-analyzer--lint-rule-codes
+  '("ELI-L0001" "ELI-L0002" "ELI-L0003" "ELI-L0004" "ELI-L0005"
+    "ELI-L0006" "ELI-L0007" "ELI-L0008" "ELI-L0009")
+  "Static lint rule codes emitted by Seed and self-hosted analyzers.")
+
+(defconst eliscript-analyzer--lint-transient-constructors
+  '(transient as-transient asTransient transient-vector transientVector
+    transient-map transientMap transient-set transientSet)
+  "Constructor names recognized by ELI-L0009.")
+
+(defconst eliscript-analyzer--lint-transient-updaters
+  '(conj! conjBang assoc! assocBang dissoc! dissocBang disj! disjBang)
+  "Mutator names preserving transient provenance for ELI-L0009.")
+
+(defconst eliscript-analyzer--lint-transient-finalizers
+  '(persistent! persistentBang)
+  "Finalizer names consuming transient values for ELI-L0009.")
+
+(cl-defstruct (eliscript-analyzer--lint-binding
+               (:constructor eliscript-analyzer--lint-binding-create))
+  name
+  kind
+  fn-depth
+  span
+  mutable
+  used
+  is-transient
+  transient-finalized
+  transient-escaped
+  transient-escape-span)
+
+(cl-defstruct (eliscript-analyzer--lint-scope
+               (:constructor eliscript-analyzer--lint-scope-create))
+  parent
+  fn-depth
+  bindings
+  order)
+
+(defun eliscript-analyzer--lint-ignored-name-p (name)
+  "Return non-nil when symbol NAME starts with an underscore."
+  (and (symbolp name)
+       (string-prefix-p "_" (symbol-name name))))
+
+(defun eliscript-analyzer--lint-rule-level (options code)
+  "Return effective severity level (`off', `warning', `error') for CODE."
+  (let* ((rules (cond
+                 ((hash-table-p options) (gethash "rules" options))
+                 ((and (listp options) (not (keywordp (car options))))
+                  (alist-get 'rules options))
+                 ((listp options) (plist-get options :rules))
+                 (t nil)))
+         (raw (cond
+               ((hash-table-p rules)
+                (or (gethash code rules)
+                    (gethash (intern code) rules)))
+               ((listp rules)
+                (or (alist-get code rules nil nil #'equal)
+                    (alist-get (intern code) rules)
+                    (plist-get rules (intern code))))
+               (t nil))))
+    (cond
+     ((or (equal raw "off") (eq raw 'off) (eq raw :off)) "off")
+     ((or (equal raw "error") (eq raw 'error) (eq raw :error)) "error")
+     (t "warning"))))
+
+(defun eliscript-analyzer--lint-emit (state code span format-string &rest args)
+  "Record lint diagnostic CODE at SPAN in STATE when enabled."
+  (let ((severity (eliscript-analyzer--lint-rule-level
+                   (plist-get state :options) code)))
+    (unless (equal severity "off")
+      (let* ((effective-span (or span (plist-get state :current-span)))
+             (file (or (plist-get state :filename)
+                       (and effective-span
+                            (eliscript-source-span-filename effective-span))
+                       "<input>"))
+             (diag (eliscript-diagnostic-create
+                    :code code
+                    :severity severity
+                    :phase "lint"
+                    :message (apply #'format format-string args)
+                    :file file
+                    :span effective-span)))
+        (push diag (plist-get state :diagnostics))))))
+
+(defun eliscript-analyzer--lint-make-scope (parent fn-depth)
+  "Create a lint lexical scope below PARENT at FN-DEPTH."
+  (eliscript-analyzer--lint-scope-create
+   :parent parent
+   :fn-depth fn-depth
+   :bindings (make-hash-table :test #'eq)
+   :order nil))
+
+(defun eliscript-analyzer--lint-lookup (scope name)
+  "Resolve NAME in lint SCOPE and its parents."
+  (let (binding)
+    (while (and scope (not binding))
+      (setq binding (gethash name (eliscript-analyzer--lint-scope-bindings scope))
+            scope (eliscript-analyzer--lint-scope-parent scope)))
+    binding))
+
+(defun eliscript-analyzer--lint-declare
+    (scope name-form kind fn-depth mutable state &optional check-shadow is-transient)
+  "Declare NAME-FORM in lint SCOPE and optionally check ELI-L0003."
+  (let* ((name (eliscript-form-value name-form))
+         (span (or (eliscript-form-span name-form)
+                   (plist-get state :current-span))))
+    (when (symbolp name)
+      (when (and check-shadow
+                 (not (eliscript-analyzer--lint-ignored-name-p name))
+                 (eliscript-analyzer--lint-scope-parent scope)
+                 (eliscript-analyzer--lint-lookup
+                  (eliscript-analyzer--lint-scope-parent scope) name))
+        (eliscript-analyzer--lint-emit
+         state "ELI-L0003" span
+         "binding shadows outer binding: %s" (symbol-name name)))
+      (let ((binding (eliscript-analyzer--lint-binding-create
+                      :name name
+                      :kind kind
+                      :fn-depth fn-depth
+                      :span span
+                      :mutable mutable
+                      :used nil
+                      :is-transient is-transient
+                      :transient-finalized nil
+                      :transient-escaped nil
+                      :transient-escape-span nil)))
+        (unless (gethash name (eliscript-analyzer--lint-scope-bindings scope))
+          (push binding (eliscript-analyzer--lint-scope-order scope)))
+        (puthash name binding (eliscript-analyzer--lint-scope-bindings scope))
+        binding))))
+
+(defun eliscript-analyzer--lint-finalize-scope (scope state)
+  "Emit ELI-L0001 and ELI-L0009 for unused/unfinalized bindings in SCOPE."
+  (dolist (binding (reverse (eliscript-analyzer--lint-scope-order scope)))
+    (let ((name (eliscript-analyzer--lint-binding-name binding))
+          (kind (eliscript-analyzer--lint-binding-kind binding)))
+      (when (and (memq kind '(local parameter loop catch))
+                 (not (eliscript-analyzer--lint-binding-used binding))
+                 (not (eliscript-analyzer--lint-ignored-name-p name)))
+        (eliscript-analyzer--lint-emit
+         state "ELI-L0001"
+         (eliscript-analyzer--lint-binding-span binding)
+         "unused local binding: %s" (symbol-name name)))
+      (when (and (eliscript-analyzer--lint-binding-is-transient binding)
+                 (or (eliscript-analyzer--lint-binding-transient-escaped binding)
+                     (not (eliscript-analyzer--lint-binding-transient-finalized binding))))
+        (eliscript-analyzer--lint-emit
+         state "ELI-L0009"
+         (or (eliscript-analyzer--lint-binding-transient-escape-span binding)
+             (eliscript-analyzer--lint-binding-span binding))
+         "transient binding escapes or is not finalized with persistent!: %s"
+         (symbol-name name))))))
+
+(defun eliscript-analyzer--lint-transient-init-p (form)
+  "Return non-nil when FORM is a transient constructor expression."
+  (let ((value (and form (eliscript-form-value form))))
+    (and (proper-list-p value)
+         value
+         (symbolp (eliscript-form-value (car value)))
+         (memq (eliscript-form-value (car value))
+               eliscript-analyzer--lint-transient-constructors))))
+
+(defun eliscript-analyzer--lint-mark-finalized-transient (arg scope state)
+  "Mark transient bindings finalized directly or through fluent updaters in ARG."
+  (when arg
+    (let ((value (eliscript-form-value arg)))
+      (cond
+       ((symbolp value)
+        (let ((binding (eliscript-analyzer--lint-lookup scope value)))
+          (when (and binding
+                     (eliscript-analyzer--lint-binding-is-transient binding)
+                     (= (eliscript-analyzer--lint-binding-fn-depth binding)
+                        (eliscript-analyzer--lint-scope-fn-depth scope)))
+            (setf (eliscript-analyzer--lint-binding-transient-finalized binding) t))))
+       ((proper-list-p value)
+        (let ((head (and value (eliscript-form-value (car value)))))
+          (when (and (symbolp head)
+                     (memq head eliscript-analyzer--lint-transient-updaters)
+                     (cdr value))
+            (eliscript-analyzer--lint-mark-finalized-transient
+             (cadr value) scope state))))))))
+
+(defun eliscript-analyzer--lint-constant-condition-p (form)
+  "Return non-nil when FORM is an always-constant conditional test."
+  (let ((value (eliscript-form-value form)))
+    (or (null value)
+        (eq value t)
+        (eq value 'false)
+        (eq value 'undefined)
+        (numberp value)
+        (stringp value)
+        (keywordp value)
+        (and (proper-list-p value)
+             value
+             (eq (eliscript-form-value (car value)) 'quote)))))
+
+(defun eliscript-analyzer--lint-useless-expr-p (form)
+  "Return non-nil when FORM has no side effects as a non-final sequence item."
+  (let ((value (eliscript-form-value form)))
+    (or (null value)
+        (eq value t)
+        (eq value 'false)
+        (eq value 'undefined)
+        (numberp value)
+        (stringp value)
+        (keywordp value)
+        (and (symbolp value)
+             (not (eliscript-analyzer--lint-ignored-name-p value)))
+        (and (proper-list-p value)
+             value
+             (eq (eliscript-form-value (car value)) 'quote)))))
+
+(defun eliscript-analyzer--lint-literal-key (form)
+  "Return canonical scalar key string for literal FORM, or nil if dynamic."
+  (let ((value (eliscript-form-value form)))
+    (cond
+     ((null value) "nil:nil")
+     ((eq value t) "bool:t")
+     ((eq value 'false) "bool:false")
+     ((eq value 'undefined) "undef:undefined")
+     ((keywordp value) (concat "kw:" (substring (symbol-name value) 1)))
+     ((stringp value) (concat "str:" value))
+     ((numberp value)
+      (concat "num:" (number-to-string (if (= value 0) 0 value))))
+     (t nil))))
+
+(defun eliscript-analyzer--lint-key-display (form)
+  "Return readable representation of scalar FORM for ELI-L0007 messages."
+  (let ((value (eliscript-form-value form)))
+    (cond
+     ((null value) "nil")
+     ((eq value t) "t")
+     ((eq value 'false) "false")
+     ((eq value 'undefined) "undefined")
+     ((keywordp value) (symbol-name value))
+     ((stringp value) (json-serialize value))
+     ((numberp value) (number-to-string value))
+     (t (format "%S" value)))))
+
+(defun eliscript-analyzer--lint-collect-arities (forms)
+  "Map top-level function names in FORMS to (MIN . MAX) arity bounds."
+  (let ((arities (make-hash-table :test #'eq)))
+    (dolist (form forms)
+      (let ((value (eliscript-form-value form)))
+        (when (and (proper-list-p value)
+                   (>= (length value) 3)
+                   (memq (eliscript-form-value (car value))
+                         '(defun defn defportable defasync)))
+          (let* ((name (eliscript-form-value (nth 1 value)))
+                 (params-form (nth 2 value))
+                 (parsed (ignore-errors
+                           (eliscript-parameters-parse
+                            params-form (lambda (&rest _) nil))))
+                 (min-arity 0)
+                 (max-arity 0)
+                 (variadic nil))
+            (when (and (symbolp name) parsed)
+              (dolist (param parsed)
+                (pcase (eliscript-parameter-kind param)
+                  ('required
+                   (setq min-arity (1+ min-arity)
+                         max-arity (1+ max-arity)))
+                  ('optional
+                   (setq max-arity (1+ max-arity)))
+                  ('rest
+                   (setq variadic t))))
+              (puthash name (cons min-arity (if variadic nil max-arity))
+                       arities))))))
+    arities))
+
+(defun eliscript-analyzer--lint-sequence (forms scope tail state)
+  "Lint statement sequence FORMS in SCOPE with TAIL status."
+  (let ((rest forms))
+    (while rest
+      (let ((item (car rest))
+            (is-last (null (cdr rest))))
+        (when (and (not is-last)
+                   (eliscript-analyzer--lint-useless-expr-p item))
+          (eliscript-analyzer--lint-emit
+           state "ELI-L0008"
+           (or (eliscript-form-span item) (plist-get state :current-span))
+           "useless literal expression in sequence"))
+        (eliscript-analyzer--lint-expression item scope (and tail is-last) state))
+      (setq rest (cdr rest)))))
+
+(defun eliscript-analyzer--lint-pattern-defaults (pattern scope state)
+  "Lint map binding default expressions in PATTERN using SCOPE."
+  (let ((defaults (ignore-errors
+                    (eliscript-binding-defaults
+                     pattern (lambda (&rest _) nil)))))
+    (dolist (default defaults)
+      (eliscript-analyzer--lint-expression default scope nil state))))
+
+(defun eliscript-analyzer--lint-declare-pattern
+    (scope pattern kind fn-depth mutable state &optional check-shadow is-transient)
+  "Declare all scalar bindings from PATTERN in lint SCOPE."
+  (let ((names (ignore-errors
+                 (eliscript-binding-names
+                  pattern (lambda (&rest _) nil))))
+        (single (symbolp (eliscript-form-value pattern))))
+    (dolist (name-form names)
+      (eliscript-analyzer--lint-declare
+       scope name-form kind fn-depth mutable state check-shadow
+       (and single is-transient)))))
+
+(defun eliscript-analyzer--lint-let (args scope sequential tail state)
+  "Lint let/let* expression ARGS in SCOPE."
+  (when args
+    (let* ((bindings (eliscript-form-value (car args)))
+           (body (cdr args))
+           (child (eliscript-analyzer--lint-make-scope
+                   scope (eliscript-analyzer--lint-scope-fn-depth scope))))
+      (when (proper-list-p bindings)
+        (if sequential
+            (dolist (binding bindings)
+              (let* ((val (eliscript-form-value binding))
+                     (pair (if (eliscript-binding-pattern-p binding)
+                               (list binding nil)
+                             (list (car val) (cadr val))))
+                     (pat (car pair))
+                     (init (cadr pair)))
+                (when init
+                  (eliscript-analyzer--lint-expression init child nil state))
+                (eliscript-analyzer--lint-pattern-defaults pat child state)
+                (eliscript-analyzer--lint-declare-pattern
+                 child pat 'local (eliscript-analyzer--lint-scope-fn-depth child)
+                 t state t (eliscript-analyzer--lint-transient-init-p init))))
+          (let ((pairs (mapcar (lambda (binding)
+                                 (let ((val (eliscript-form-value binding)))
+                                   (if (eliscript-binding-pattern-p binding)
+                                       (list binding nil)
+                                     (list (car val) (cadr val)))))
+                               bindings)))
+            (dolist (pair pairs)
+              (when (cadr pair)
+                (eliscript-analyzer--lint-expression (cadr pair) scope nil state))
+              (eliscript-analyzer--lint-pattern-defaults (car pair) scope state))
+            (dolist (pair pairs)
+              (eliscript-analyzer--lint-declare-pattern
+               child (car pair) 'local
+               (eliscript-analyzer--lint-scope-fn-depth child)
+               t state t
+               (eliscript-analyzer--lint-transient-init-p (cadr pair)))))))
+      (eliscript-analyzer--lint-sequence body child tail state)
+      (eliscript-analyzer--lint-finalize-scope child state))))
+
+(defun eliscript-analyzer--lint-loop (args scope tail state)
+  "Lint loop expression ARGS in SCOPE."
+  (when args
+    (let* ((bindings (eliscript-form-value (car args)))
+           (body (cdr args))
+           (child (eliscript-analyzer--lint-make-scope
+                   scope (eliscript-analyzer--lint-scope-fn-depth scope)))
+           pairs)
+      (when (proper-list-p bindings)
+        (dolist (binding bindings)
+          (let ((val (eliscript-form-value binding)))
+            (when (and (proper-list-p val) (= (length val) 2))
+              (push (list (car val) (cadr val)) pairs))))
+        (setq pairs (nreverse pairs))
+        (dolist (pair pairs)
+          (eliscript-analyzer--lint-expression (cadr pair) scope nil state)
+          (eliscript-analyzer--lint-pattern-defaults (car pair) scope state))
+        (dolist (pair pairs)
+          (eliscript-analyzer--lint-declare-pattern
+           child (car pair) 'loop
+           (eliscript-analyzer--lint-scope-fn-depth child)
+           t state t
+           (eliscript-analyzer--lint-transient-init-p (cadr pair)))))
+      (eliscript-analyzer--lint-sequence body child tail state)
+      (eliscript-analyzer--lint-finalize-scope child state))))
+
+(defun eliscript-analyzer--lint-function (parameters body scope asynchronous state)
+  "Lint function PARAMETERS and BODY inside SCOPE."
+  (let* ((parsed (ignore-errors
+                   (eliscript-parameters-parse
+                    parameters (lambda (&rest _) nil))))
+         (clean-body (if (and body
+                              (proper-list-p (eliscript-form-value (car body)))
+                              (eq (eliscript-form-value
+                                   (car (eliscript-form-value (car body))))
+                                  'memory-sig))
+                         (cdr body)
+                       body))
+         (child (eliscript-analyzer--lint-make-scope
+                 scope (1+ (eliscript-analyzer--lint-scope-fn-depth scope)))))
+    (ignore asynchronous)
+    (dolist (param parsed)
+      (eliscript-analyzer--lint-pattern-defaults
+       (eliscript-parameter-form param) scope state))
+    (dolist (param parsed)
+      (eliscript-analyzer--lint-declare-pattern
+       child (eliscript-parameter-form param) 'parameter
+       (eliscript-analyzer--lint-scope-fn-depth child) t state t nil))
+    (eliscript-analyzer--lint-sequence clean-body child t state)
+    (eliscript-analyzer--lint-finalize-scope child state)))
+
+(defun eliscript-analyzer--lint-assignment (form-span args scope state)
+  "Lint assignment ARGS at FORM-SPAN in SCOPE."
+  (let ((rest args))
+    (while rest
+      (let* ((target-form (pop rest))
+             (value-form (pop rest))
+             (target (eliscript-form-value target-form)))
+        (when value-form
+          (eliscript-analyzer--lint-expression value-form scope nil state))
+        (when (symbolp target)
+          (let ((binding (eliscript-analyzer--lint-lookup scope target)))
+            (when binding
+              (when (and (not (eliscript-analyzer--lint-ignored-name-p target))
+                         (or (eq (eliscript-analyzer--lint-binding-kind binding) 'parameter)
+                             (and (> (eliscript-analyzer--lint-binding-fn-depth binding) 0)
+                                  (< (eliscript-analyzer--lint-binding-fn-depth binding)
+                                     (eliscript-analyzer--lint-scope-fn-depth scope)))))
+                (eliscript-analyzer--lint-emit
+                 state "ELI-L0006" form-span
+                 "mutating parameter or captured binding with setq: %s"
+                 (symbol-name target)))
+              (when (and value-form
+                         (eliscript-analyzer--lint-transient-init-p value-form))
+                (setf (eliscript-analyzer--lint-binding-is-transient binding) t)))))))))
+
+(defun eliscript-analyzer--lint-call (form scope tail state)
+  "Lint call expression FORM in SCOPE with TAIL status."
+  (let* ((items (eliscript-form-value form))
+         (op-form (car items))
+         (op (eliscript-form-value op-form))
+         (args (cdr items))
+         (form-span (or (eliscript-form-span form)
+                        (plist-get state :current-span))))
+    (pcase op
+      ((or 'lambda 'fn 'async)
+       (when args
+         (eliscript-analyzer--lint-function
+          (car args) (cdr args) scope (eq op 'async) state)))
+      ('let (eliscript-analyzer--lint-let args scope nil tail state))
+      ('let* (eliscript-analyzer--lint-let args scope t tail state))
+      ('loop (eliscript-analyzer--lint-loop args scope tail state))
+      ((or 'setq 'set!)
+       (eliscript-analyzer--lint-assignment form-span args scope state))
+      ('if
+       (when (and args (eliscript-analyzer--lint-constant-condition-p (car args)))
+         (eliscript-analyzer--lint-emit
+          state "ELI-L0005" form-span "constant condition in if expression"))
+       (when args
+         (eliscript-analyzer--lint-expression (car args) scope nil state)
+         (dolist (branch (cdr args))
+           (eliscript-analyzer--lint-expression branch scope tail state))))
+      ((or 'when 'unless)
+       (when args
+         (eliscript-analyzer--lint-expression (car args) scope nil state)
+         (eliscript-analyzer--lint-sequence (cdr args) scope tail state)))
+      ((or 'progn 'do)
+       (if (null args)
+           (eliscript-analyzer--lint-emit
+            state "ELI-L0008" form-span "empty progn/do expression")
+         (eliscript-analyzer--lint-sequence args scope tail state)))
+      ((or 'and 'or)
+       (eliscript-analyzer--lint-sequence args scope tail state))
+      ('cond
+       (dolist (clause args)
+         (let ((cval (eliscript-form-value clause)))
+           (when (and (proper-list-p cval) cval)
+             (eliscript-analyzer--lint-expression (car cval) scope nil state)
+             (eliscript-analyzer--lint-sequence (cdr cval) scope tail state)))))
+      ('try
+       (dolist (arg args)
+         (let ((aop (eliscript-analyzer--clause-operator arg)))
+           (cond
+            ((eq aop 'catch)
+             (let* ((cval (eliscript-form-value arg))
+                    (pat (cadr cval))
+                    (child (eliscript-analyzer--lint-make-scope
+                            scope (eliscript-analyzer--lint-scope-fn-depth scope))))
+               (eliscript-analyzer--lint-pattern-defaults pat scope state)
+               (eliscript-analyzer--lint-declare-pattern
+                child pat 'catch (eliscript-analyzer--lint-scope-fn-depth child)
+                t state t nil)
+               (eliscript-analyzer--lint-sequence (cddr cval) child tail state)
+               (eliscript-analyzer--lint-finalize-scope child state)))
+            ((eq aop 'finally)
+             (eliscript-analyzer--lint-sequence
+              (cdr (eliscript-form-value arg)) scope nil state))
+            (t
+             (eliscript-analyzer--lint-expression arg scope tail state))))))
+      ('hash-map
+       (let ((seen (make-hash-table :test #'equal))
+             (rest args))
+         (while rest
+           (let ((k (pop rest))
+                 (v (pop rest)))
+             (when k
+               (let ((canon (eliscript-analyzer--lint-literal-key k)))
+                 (when canon
+                   (if (gethash canon seen)
+                       (eliscript-analyzer--lint-emit
+                        state "ELI-L0007"
+                        (or (eliscript-form-span k) form-span)
+                        "duplicate map literal key: %s"
+                        (eliscript-analyzer--lint-key-display k))
+                     (puthash canon t seen))))
+               (eliscript-analyzer--lint-expression k scope nil state))
+             (when v
+               (eliscript-analyzer--lint-expression v scope nil state))))))
+      ('hash-set
+       (let ((seen (make-hash-table :test #'equal)))
+         (dolist (elem args)
+           (let ((canon (eliscript-analyzer--lint-literal-key elem)))
+             (when canon
+               (if (gethash canon seen)
+                   (eliscript-analyzer--lint-emit
+                    state "ELI-L0007"
+                    (or (eliscript-form-span elem) form-span)
+                    "duplicate set literal element: %s"
+                    (eliscript-analyzer--lint-key-display elem))
+                 (puthash canon t seen))))
+           (eliscript-analyzer--lint-expression elem scope nil state))))
+      ('js-object
+       (let ((rest args))
+         (while rest
+           (let ((k (pop rest))
+                 (v (pop rest)))
+             (when k
+               (let ((kv (eliscript-form-value k)))
+                 (unless (or (keywordp kv) (stringp kv) (symbolp kv))
+                   (eliscript-analyzer--lint-expression k scope nil state))))
+             (when v
+               (eliscript-analyzer--lint-expression v scope nil state))))))
+      ((or 'get 'put 'js-call)
+       (when args
+         (eliscript-analyzer--lint-expression (car args) scope nil state)
+         (when (cadr args)
+           (let ((kv (eliscript-form-value (cadr args))))
+             (unless (or (keywordp kv) (stringp kv))
+               (eliscript-analyzer--lint-expression (cadr args) scope nil state))))
+         (dolist (extra (nthcdr 2 args))
+           (eliscript-analyzer--lint-expression extra scope nil state))))
+      ((or 'quote 'js*) nil)
+      (_
+       (let ((is-builtin (and (symbolp op)
+                              (memq op eliscript-analyzer--builtin-operators))))
+         (unless is-builtin
+           (eliscript-analyzer--lint-expression op-form scope nil state))
+         (when (and (symbolp op) (not is-builtin))
+           (let* ((binding (eliscript-analyzer--lint-lookup scope op))
+                  (sig (and binding
+                            (eq (eliscript-analyzer--lint-binding-kind binding) 'function)
+                            (= (eliscript-analyzer--lint-binding-fn-depth binding) 0)
+                            (gethash op (plist-get state :arities)))))
+             (when sig
+               (let ((min-a (car sig))
+                     (max-a (cdr sig))
+                     (argc (length args)))
+                 (when (or (< argc min-a) (and max-a (> argc max-a)))
+                   (eliscript-analyzer--lint-emit
+                    state "ELI-L0004" form-span
+                    "function %s expects %s arguments, got %d"
+                    (symbol-name op)
+                    (cond
+                     ((null max-a) (format "at least %d" min-a))
+                     ((= min-a max-a) (number-to-string min-a))
+                     (t (format "%d..%d" min-a max-a)))
+                    argc))))))
+         (when (and (symbolp op)
+                    (memq op eliscript-analyzer--lint-transient-finalizers)
+                    args)
+           (eliscript-analyzer--lint-mark-finalized-transient (car args) scope state))
+         (dolist (arg args)
+           (eliscript-analyzer--lint-expression arg scope nil state)))))))
+
+(defun eliscript-analyzer--lint-expression (form scope tail state)
+  "Lint expression FORM in SCOPE with TAIL status using STATE."
+  (when form
+    (let* ((prev-span (plist-get state :current-span))
+           (span (or (eliscript-form-span form) prev-span))
+           (value (eliscript-form-value form)))
+      (plist-put state :current-span span)
+      (cond
+       ((or (null value) (eq value t) (numberp value) (stringp value)
+            (keywordp value) (eq value 'false) (eq value 'undefined))
+        nil)
+       ((symbolp value)
+        (unless (eliscript-analyzer--qualified-symbol-p value)
+          (let ((binding (eliscript-analyzer--lint-lookup scope value)))
+            (when binding
+              (setf (eliscript-analyzer--lint-binding-used binding) t)
+              (when (eliscript-analyzer--lint-binding-is-transient binding)
+                (cond
+                 ((> (eliscript-analyzer--lint-scope-fn-depth scope)
+                     (eliscript-analyzer--lint-binding-fn-depth binding))
+                  (setf (eliscript-analyzer--lint-binding-transient-escaped binding) t)
+                  (unless (eliscript-analyzer--lint-binding-transient-escape-span binding)
+                    (setf (eliscript-analyzer--lint-binding-transient-escape-span binding) span)))
+                 (tail
+                  (setf (eliscript-analyzer--lint-binding-transient-escaped binding) t)
+                  (unless (eliscript-analyzer--lint-binding-transient-escape-span binding)
+                    (setf (eliscript-analyzer--lint-binding-transient-escape-span binding) span)))))))))
+       ((vectorp value)
+        (dolist (elem (append value nil))
+          (eliscript-analyzer--lint-expression elem scope nil state)))
+       ((consp value)
+        (when (proper-list-p value)
+          (eliscript-analyzer--lint-call form scope tail state))))
+      (plist-put state :current-span prev-span))))
+
+(defun eliscript-analyzer--lint-sort-key (diag)
+  "Return deterministic sort key for lint diagnostic DIAG."
+  (let ((span (eliscript-diagnostic-span diag)))
+    (list (if span (eliscript-source-span-start span) 0)
+          (eliscript-diagnostic-code diag)
+          (eliscript-diagnostic-message diag))))
+
+(defun eliscript-lint-module (forms &optional filename options)
+  "Run static lint rules ELI-L0001..ELI-L0009 on expanded FORMS.
+
+Return a deterministically sorted list of `eliscript-diagnostic' structs."
+  (let* ((flattened (eliscript-analyzer--flatten-modules forms))
+         (scope (eliscript-analyzer--lint-make-scope nil 0))
+         (arities (eliscript-analyzer--lint-collect-arities flattened))
+         (state (list :filename filename
+                      :options options
+                      :arities arities
+                      :current-span nil
+                      :diagnostics nil)))
+    (dolist (form flattened)
+      (let ((value (eliscript-form-value form)))
+        (when (consp value)
+          (pcase (eliscript-form-value (car value))
+            ((or 'import 'import-portable)
+             (dolist (name (eliscript-analyzer--import-bindings
+                            (cdr value)
+                            (eq (eliscript-form-value (car value))
+                                'import-portable)))
+               (eliscript-analyzer--lint-declare
+                scope name 'import 0 nil state)))
+            ('defvar
+             (eliscript-analyzer--lint-declare
+              scope (cadr value) 'variable 0 t state))
+            ('defconst
+             (eliscript-analyzer--lint-declare
+              scope (cadr value) 'constant 0 nil state))
+            ((or 'defun 'defn 'defportable 'defasync)
+             (eliscript-analyzer--lint-declare
+              scope (cadr value) 'function 0 nil state))))))
+    (dolist (form flattened)
+      (let* ((value (eliscript-form-value form))
+             (prev-span (plist-get state :current-span))
+             (form-span (or (eliscript-form-span form) prev-span)))
+        (plist-put state :current-span form-span)
+        (if (not (consp value))
+            (eliscript-analyzer--lint-expression form scope nil state)
+          (let ((op (eliscript-form-value (car value)))
+                (args (cdr value)))
+            (pcase op
+              ((or 'import 'import-portable) nil)
+              ((or 'defvar 'defconst)
+               (when (cadr args)
+                 (eliscript-analyzer--lint-expression (cadr args) scope nil state)))
+              ((or 'defun 'defn 'defportable 'defasync)
+               (when (>= (length args) 2)
+                 (eliscript-analyzer--lint-function
+                  (cadr args) (cddr args) scope (eq op 'defasync) state)))
+              ('export
+               (dolist (name args)
+                 (let ((sym (eliscript-form-value name)))
+                   (when (symbolp sym)
+                     (let ((binding (eliscript-analyzer--lint-lookup scope sym)))
+                       (when binding
+                         (setf (eliscript-analyzer--lint-binding-used binding) t)))))))
+              ('export-default
+               (when (car args)
+                 (eliscript-analyzer--lint-expression (car args) scope nil state)))
+              (_
+               (eliscript-analyzer--lint-expression form scope nil state)))))
+        (plist-put state :current-span prev-span)))
+    (dolist (binding (reverse (eliscript-analyzer--lint-scope-order scope)))
+      (when (eq (eliscript-analyzer--lint-binding-kind binding) 'import)
+        (let ((name (eliscript-analyzer--lint-binding-name binding)))
+          (when (and (not (eliscript-analyzer--lint-binding-used binding))
+                     (not (eliscript-analyzer--lint-ignored-name-p name)))
+            (eliscript-analyzer--lint-emit
+             state "ELI-L0002"
+             (eliscript-analyzer--lint-binding-span binding)
+             "unused import binding: %s" (symbol-name name))))))
+    (sort (nreverse (plist-get state :diagnostics))
+          (lambda (left right)
+            (let ((kl (eliscript-analyzer--lint-sort-key left))
+                  (kr (eliscript-analyzer--lint-sort-key right)))
+              (cond
+               ((/= (nth 0 kl) (nth 0 kr)) (< (nth 0 kl) (nth 0 kr)))
+               ((not (string= (nth 1 kl) (nth 1 kr)))
+                (string< (nth 1 kl) (nth 1 kr)))
+               (t (string< (nth 2 kl) (nth 2 kr)))))))))
+
 (provide 'eliscript-analyzer)
 
 ;;; eliscript-analyzer.el ends here

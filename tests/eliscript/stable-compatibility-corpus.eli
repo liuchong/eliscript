@@ -76,12 +76,12 @@
             (setq match (js-call pairs :exec bootstrap)))
           (js-call (expect (js-call mapped :has "tests/eliscript/stable-compatibility-corpus.eli")) :toBe t))
         (js-call (expect (await (checkStableCompatibilityCorpus (js-object :root root)))) :toEqual
-          (js-object :stableSpecifications 173 :stableFeatures 173
+          (js-object :stableSpecifications 182 :stableFeatures 182
             :provisionalFeatures 1 :excludedApplicationFeatures 2 :migrations 2
-            :fixtures (js-length (get value :fixtureFiles)) :evidenceLocators 682 :evidenceFiles 136
+            :fixtures (js-length (get value :fixtureFiles)) :evidenceLocators 705 :evidenceFiles 152
             :sourceFiles (get source-files :size) :readyForAc02 false
             :identity (js-call expect :stringMatching (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))))
-        (js-call (expect (get evidence-files :size)) :toBe 136))
+        (js-call (expect (get evidence-files :size)) :toBe 152))
       (let ((fixtures (get (await (contract)) :fixtureFiles)))
         (js-call (js-array "compiler-internal-order-oracle.el"
           "wasm-managed-catch-destructuring.eli" "wasm-managed-exceptions.eli"

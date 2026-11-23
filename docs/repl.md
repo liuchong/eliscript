@@ -42,3 +42,24 @@ If the JavaScript process exits, the Emacs integration starts a replacement and
 replays only acknowledged namespace operations. Unacknowledged work fails
 instead of being guessed or duplicated. Use the explicit stop command when a
 project session is no longer needed.
+
+
+## Introspection, Stack Traces, And Hot Reload
+
+Persistent evaluation sessions expose interactive inspection helpers as both
+evaluated forms and colon commands:
+
+- `:doc SYMBOL` / `(doc symbol)` inspects module summaries and signatures from
+  `api-index.json` alongside in-session docstrings.
+- `:source SYMBOL` / `(source symbol)` extracts the definition form from its
+  recorded `.eli` source file or session history.
+- `:apropos QUERY` / `(apropos query)` searches matching exported and
+  session-defined names.
+- `:dir MODULE` / `(dir module)` lists exported bindings for a loaded or
+  standard-library module.
+- `:pst` / `(pst)` replays the most recent evaluation error stack mapped through
+  Source Map v3 back to `.eli` file, line, and column coordinates.
+- `(load-file path)` incrementally reloads a module while `(defvar-once name init)`
+  preserves existing dynamic values across reloads until `:reset`.
+- `(tap> value)` broadcasts values to registered taps and live REPL tap
+  observers during evaluation.

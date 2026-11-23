@@ -17,9 +17,33 @@
                        (js-call (get globalThis.process :argv) :slice 2) (aref supplied 0)))
            (execution (await (execute arguments))))
       (if (get execution :help) (await (js-call ground :main arguments))
-        (js-call (get globalThis.process :stdout) :write
-          (str (if (get execution :jsonReport) (JSON/stringify (get (get execution :result) :report))
-            (str "Checked " (get (get (get (get execution :result) :report) :counts) :modules) " modules.")) "\n")))))
+        (let* ((result (get execution :result))
+               (report (get result :report))
+               (diagnostics (if (Array/isArray (get result :diagnostics))
+                              (get result :diagnostics)
+                              (js-array)))
+               (hasError (js-call diagnostics :some (lambda (d) (= (get d :severity) "error")))))
+          (when (or hasError (and (get execution :strict) (> (js-length diagnostics) 0)))
+            (put globalThis.process :exitCode 1))
+          (cond
+            ((get execution :jsonReport)
+             (js-call (get globalThis.process :stdout) :write (str (JSON/stringify report) "\n")))
+            ((and (get execution :lint) (= (get execution :diagnosticFormat) "json"))
+             (js-call (get globalThis.process :stdout) :write (str (JSON/stringify diagnostics) "\n")))
+            ((get execution :lint)
+             (let ((lines (js-array))
+                   (idx 0))
+               (while (< idx (js-length diagnostics))
+                 (let ((d (aref diagnostics idx)))
+                   (js-call lines :push
+                     (str (renderDiagnostic d) " [" (get d :severity) " " (get d :code) "]")))
+                 (setq idx (+ idx 1)))
+               (js-call lines :push
+                 (str "Checked " (get (get report :counts) :modules) " modules (" (js-length diagnostics) " lint diagnostics)."))
+               (js-call (get globalThis.process :stdout) :write (str (js-call lines :join "\n") "\n"))))
+            (t
+             (js-call (get globalThis.process :stdout) :write
+               (str "Checked " (get (get report :counts) :modules) " modules.\n"))))))))
   (let ((entry (aref (get globalThis.process :argv) 1)))
     (when (and (not (undefined? entry)) (= (resolve entry) (fileURLToPath (js* "import.meta.url"))))
       (let ((format (requestedDiagnosticFormat (js-call (get globalThis.process :argv) :slice 2))))

@@ -104,7 +104,7 @@ node --version</code></pre>
             <h2>Build a source graph</h2>
             <pre><code>bun run build:stdlib-cli
 bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
-            <p>The project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph, SHA-256 identities, and incremental cache metadata. Repeat builds reuse unchanged modules; pass <code>--no-cache</code> to force compilation.</p>
+            <p>The project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph, SHA-256 identities, and incremental cache metadata, while pure barrel imports such as <code>"eliscript/core"</code> undergo export-level tree-shaking unless <code>--no-tree-shake</code> is passed. Repeat builds reuse unchanged modules; pass <code>--no-cache</code> to force compilation.</p>
             <p>Tooling can request a report with stable cache and per-module decisions plus phase timings:</p>
             <pre><code>./bin/eliscript-build --json --root . --out-dir dist/project \
   examples/stdlib-cli/main.eli</code></pre>
@@ -133,14 +133,14 @@ console.log(module.double(21)); // 42</code></pre>
           <section id="persistent">
             <h2>Use persistent values &amp; Emacs-compatible extensions</h2>
             <pre><code>(module collections
-  (import "eliscript/runtime/core/collection" assoc get)
+  (import "eliscript/core" assoc get map filter)
 
   (defconst original {:name "Eliscript" :tags #{:lisp :esm}})
   (defconst updated (assoc original :status :stable))
 
   (print (get original :status :missing))
   (print (get updated :status)))</code></pre>
-            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols with reference-identity equality short-circuiting and compact O(1)-step Zipper navigation, while Transient builders provide an isolated construction path for batch updates.</p>
+            <p>Vector, Map (with compact <code>PersistentArrayMap</code> up to 8 keys and first-class <code>MapEntry</code>), Set, List, Queue, Record, and sorted collection values are immutable, while <code>stdlib/schema.eli</code>, <code>stdlib/async.eli</code>, <code>stdlib/diff.eli</code>, <code>stdlib/pprint.eli</code>, and <code>eliscript-test</code> ship out of the box.</p>
             <p>In GNU Emacs or JavaScript, load the unified Emacs runtime (<code>(require 'eliscript-runtime)</code> in Emacs or <code>import "eliscript/runtime/lisp"</code> in JS) to combine standard Emacs Lisp semantics with <code>defun-case</code>, <code>let-bind</code> / <code>defun-bind</code>, <code>cl-defstruct-persistent</code>, <code>defmodule</code>, <code>with-async-scope</code>, and lossless <code>js-false</code> / <code>js-null</code> / <code>js-undefined</code> sentinels.</p>
             <p><a class="button" href="language.html#collections">Inspect collection semantics</a></p>
           </section>
@@ -196,8 +196,9 @@ make verify-bootstrap</code></pre>
 
           <section id="test">
             <h2>Run the test suite</h2>
-            <pre><code>bun run test</code></pre>
-            <p>This runs the Emacs test suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
+            <pre><code>./bin/eliscript-test --root "$PWD"
+bun run test</code></pre>
+            <p><code>eliscript-test</code> runs declarative <code>deftest</code> suites with structural <code>diff</code> and <code>pprint</code> failure diagnostics, while <code>bun run test</code> runs the Emacs test suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
             <div class="callout callout-coral"><p>The portable standard library and protocol-driven persistent collection core run through the same Eliscript module pipeline. Application adapters are tested separately and contribute no core maturity credit.</p></div>
           </section>
         </article>
