@@ -1,0 +1,203 @@
+(module tests.collection-array-map.test
+  (import "bun:test" expect test)
+  (import "../runtime/core/array-map.mjs"
+    ARRAY_MAP_THRESHOLD
+    EMPTY_ARRAY_MAP
+    PersistentArrayMap
+    TransientArrayMap
+    arrayMapFromKeyValues
+    isPersistentArrayMap
+    persistentArrayMap
+    readArrayMapState)
+  (import "../runtime/core/collection.mjs" :as C)
+  (import "../runtime/core/collection.mjs"
+    assoc
+    conj
+    contains
+    count
+    dissoc
+    empty
+    reduce
+    reduceKV
+    seq)
+  (import "../runtime/core/map.mjs"
+    EMPTY_MAP
+    PersistentHashMap
+    isPersistentHashMap
+    persistentHashMap)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
+  (import "../runtime/core/transient.mjs" :as TR)
+  (import "../runtime/core/value.mjs" equalValues hashValue)
+  (import "../runtime/core/vector.mjs" persistentVector)
+  (import "../runtime/literals.mjs" :as Literal)
+  (import "../runtime/testing/map.mjs"
+    inspectPersistentMap
+    inspectTransientMap
+    persistentMapMetrics
+    resetPersistentMapMetrics
+    resetTransientMapMetrics
+    transientMapMetrics)
+
+  (defun has-key (map key)
+    (js-call map :has key))
+
+  (defun be (actual expected) (js-call (expect actual) :toBe expected))
+  (defun same (actual expected) (js-call (expect actual) :toEqual expected))
+  (defun raises (fn &optional msg)
+    (if (nullish? msg)
+        (js-call (expect fn) :toThrow)
+        (js-call (expect fn) :toThrow msg)))
+
+  (test "small maps up to 8 keys stay in PersistentArrayMap with zero HAMT node allocations" (lambda ()
+    (be ARRAY_MAP_THRESHOLD 8)
+    (be EMPTY_MAP EMPTY_ARRAY_MAP)
+    (be (isPersistentArrayMap EMPTY_MAP) t)
+    (be (isPersistentHashMap EMPTY_MAP) t)
+    (resetPersistentMapMetrics)
+    (let ((m EMPTY_MAP)
+          (i 0))
+      (while (< i 8)
+        (setq m (assoc m (str "k" i) (* i 10)))
+        (be (isPersistentArrayMap m) t)
+        (be (isPersistentHashMap m) t)
+        (be (count m) (1+ i))
+        (setq i (1+ i)))
+      (be (get (persistentMapMetrics) :nodeAllocations) 0)
+      (be (get (persistentMapMetrics) :entryAllocations) 0)
+      (be (get (inspectPersistentMap m) :representation) "array-map")
+      (be (get (inspectPersistentMap m) :nodeCount) 0)
+      (let ((lit (Literal/hashMap "a" 1 "b" 2 "c" 3 "d" 4 "e" 5 "f" 6 "g" 7 "h" 8)))
+        (be (isPersistentArrayMap lit) t)
+        (be (get (persistentMapMetrics) :nodeAllocations) 0)
+        (be (count lit) 8)
+        (be (C/get lit "e") 5)))))
+
+  (test "9th distinct key upgrades PersistentArrayMap seamlessly to HAMT with full parity" (lambda ()
+    (let* ((meta-tag (arrayMapFromKeyValues (js-array "tag" "array-promoted")))
+           (small (withMeta (arrayMapFromKeyValues (js-array "a" 1 "b" 2 "c" 3 "d" 4 "e" 5 "f" 6 "g" 7 "h" 8)) meta-tag)))
+      (be (isPersistentArrayMap small) t)
+      (be (meta small) meta-tag)
+      (let ((updated (assoc small "c" 33)))
+        (be (isPersistentArrayMap updated) t)
+        (be (count updated) 8)
+        (be (C/get updated "c") 33)
+        (be (C/get small "c") 3))
+      (resetPersistentMapMetrics)
+      (let ((promoted (assoc small "i" 9)))
+        (be (isPersistentArrayMap promoted) false)
+        (be (isPersistentHashMap promoted) t)
+        (be (count promoted) 9)
+        (be (meta promoted) meta-tag)
+        (be (C/get promoted "a") 1)
+        (be (C/get promoted "h") 8)
+        (be (C/get promoted "i") 9)
+        (be (get small :count) 8)
+        (be (has-key promoted "i") t)
+        (be (contains small "i") false))))
+    (let* ((from-array (arrayMapFromKeyValues (js-array "alpha" 1 "beta" 2)))
+           (from-hamt (persistentHashMap (js-array "beta" 2) (js-array "alpha" 1))))
+      (be (equalValues from-array from-hamt) t)
+      (be (hashValue from-array) (hashValue from-hamt))))
+
+  (test "PersistentArrayMap supports conj, dissoc, empty, seq, reduce, reduceKV and duplicate keys" (lambda ()
+    (let ((dedup (arrayMapFromKeyValues (js-array "x" 1 "y" 2 "x" 10 "z" 3))))
+      (be (isPersistentArrayMap dedup) t)
+      (be (count dedup) 3)
+      (be (C/get dedup "x") 10)
+      (be (get (readArrayMapState dedup) :count) 3))
+    (let* ((m (persistentArrayMap (js-array "p" 10) (js-array "q" 20)))
+           (s (seq m))
+           (total (C/reduce m (lambda (acc e) (+ acc (get e :val))) 0))
+           (kv-sum (C/reduceKV m (lambda (acc k v) (+ acc v (get k :length))) 0))
+           (emptied (dissoc (dissoc m "p") "q")))
+      (be (count s) 2)
+      (be total 30)
+      (be kv-sum 32)
+      (be emptied EMPTY_MAP)
+      (be (empty m) EMPTY_MAP)
+      (be (C/get (conj m (persistentVector "r" 30)) "r") 30)
+      (let* ((m9 (arrayMapFromKeyValues
+                   (js-array "k1" 1 "k2" 2 "k3" 3 "k4" 4 "k5" 5 "k6" 6 "k7" 7 "k8" 8 "k9" 9))))
+        (be (isPersistentArrayMap m9) false)
+        (be (isPersistentHashMap m9) t)
+        (be (count m9) 9)
+        (be (C/get m9 "k9") 9)))))
+
+  (test "TransientArrayMap edits in place up to 8 keys, promotes on 9th, and seals cleanly" (lambda ()
+    (resetPersistentMapMetrics)
+    (resetTransientMapMetrics)
+    (let ((tr-transient (get TR :transient))
+          (tr-assoc (get TR :assocBang))
+          (tr-dissoc (get TR :dissocBang))
+          (tr-conj (get TR :conjBang))
+          (tr-persistent (get TR :persistentBang)))
+      (let ((t8 (funcall tr-transient (arrayMapFromKeyValues (js-array "a" 1 "b" 2)))))
+        (be (= (js* "t8 instanceof TransientArrayMap") t) t)
+        (same (js-object :active (get (inspectTransientMap t8) :active)
+                         :count (get (inspectTransientMap t8) :count)
+                         :nodeCount (get (inspectTransientMap t8) :nodeCount))
+              (js-object :active t :count 2 :nodeCount 0))
+        (funcall tr-assoc t8 "c" 3 "d" 4 "a" 10)
+        (funcall tr-dissoc t8 "b")
+        (funcall tr-conj t8 (js-array "e" 5))
+        (be (get t8 :count) 4)
+        (be (js-call t8 :has "b") false)
+        (be (js-call t8 :get "a") 10)
+        (let ((p8 (funcall tr-persistent t8)))
+          (be (isPersistentArrayMap p8) t)
+          (be (count p8) 4)
+          (be (C/get p8 "e") 5)
+          (be (get (persistentMapMetrics) :nodeAllocations) 0)
+          (be (get (transientMapMetrics) :persistentCalls) 1))
+        (raises (lambda () (funcall tr-assoc t8 "z" 9)) "transient hash map is no longer editable"))
+      (resetTransientMapMetrics)
+      (let ((t9 (funcall tr-transient EMPTY_MAP))
+            (i 0))
+        (while (< i 8)
+          (funcall tr-assoc t9 (str "k" i) i)
+          (setq i (1+ i)))
+        (funcall tr-assoc t9 "k8" 8)
+        (be (get t9 :count) 9)
+        (let ((p9 (funcall tr-persistent t9)))
+          (be (isPersistentArrayMap p9) false)
+          (be (isPersistentHashMap p9) t)
+          (be (count p9) 9)
+          (be (C/get p9 "k8") 8)
+          (be (get (transientMapMetrics) :persistentCalls) 1))
+        (raises (lambda () (funcall tr-assoc t9 "extra" 1)) "transient hash map is no longer editable")))))
+
+  (test "Direct construction of PersistentArrayMap or TransientArrayMap is rejected" (lambda ()
+    (raises (lambda () (new PersistentArrayMap)) globalThis.TypeError)
+    (raises (lambda () (new TransientArrayMap)) globalThis.TypeError)))
+
+  (test "ArrayMap edge cases: NaN and -0/0 keys, -0 value preservation, duplicates across 8->9 promotion, dissoc to empty" (lambda ()
+    ;; NaN and -0/0 key identity matching HAMT + -0 value preserved when re-assoc with 0
+    (let* ((m (assoc (assoc EMPTY_MAP globalThis.NaN "nan-val") -0.0 "zero-val"))
+           (h (persistentHashMap (js-array globalThis.NaN "nan-val") (js-array -0.0 "zero-val"))))
+      (be (isPersistentArrayMap m) t)
+      (be (C/get m globalThis.NaN) "nan-val")
+      (be (C/get m 0) "zero-val")
+      (be (equalValues m h) t)
+      (be (hashValue m) (hashValue h))
+      (let* ((with-neg (assoc m "signed" -0.0))
+             (same-neg (assoc with-neg "signed" 0)))
+        (be same-neg with-neg)
+        (be (Object/is (C/get same-neg "signed") -0.0) t)))
+    ;; Duplicate keys at capacity 8 stay ArrayMap without promoting, then 9th distinct key promotes cleanly
+    (let* ((eight (arrayMapFromKeyValues
+                    (js-array "k0" 0 "k1" 1 "k2" 2 "k3" 3 "k4" 4 "k5" 5 "k6" 6 "k7" 7 "k3" 30)))
+           (nine (assoc eight "k8" 8))
+           (trimmed eight))
+      (be (isPersistentArrayMap eight) t)
+      (be (count eight) 8)
+      (be (C/get eight "k3") 30)
+      (be (isPersistentArrayMap nine) false)
+      (be (isPersistentHashMap nine) t)
+      (be (count nine) 9)
+      (let ((idx 0))
+        (while (< idx 8)
+          (setq trimmed (dissoc trimmed (str "k" idx))
+                idx (1+ idx))))
+      (be trimmed EMPTY_MAP)
+      (be (count trimmed) 0))))
+)

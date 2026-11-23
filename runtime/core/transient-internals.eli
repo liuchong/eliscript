@@ -2,11 +2,13 @@
   (import "./protocol.mjs" defineProtocol protocolMethod protocolSlot)
   (defconst I_EDITABLE (defineProtocol "IEditable" (js-array "transient")))
   (defconst I_TRANSIENT_COLLECTION (defineProtocol "ITransientCollection" (js-array "conj!" "assoc!" "dissoc!" "persistent!")))
+  (defconst I_TRANSIENT_SET (defineProtocol "ITransientSet" (js-array "disj!")))
   (defconst EDITABLE_TRANSIENT (protocolSlot I_EDITABLE "transient"))
   (defconst TRANSIENT_CONJ (protocolSlot I_TRANSIENT_COLLECTION "conj!"))
   (defconst TRANSIENT_ASSOC (protocolSlot I_TRANSIENT_COLLECTION "assoc!"))
   (defconst TRANSIENT_DISSOC (protocolSlot I_TRANSIENT_COLLECTION "dissoc!"))
   (defconst TRANSIENT_PERSISTENT (protocolSlot I_TRANSIENT_COLLECTION "persistent!"))
+  (defconst TRANSIENT_DISJ (protocolSlot I_TRANSIENT_SET "disj!"))
   ;; Private whole-source identity `into` hook registered by the vector module
   ;; at initialization. Keeping it in a module variable means no symbol is
   ;; installed on any public transient prototype and custom transient Proxies
@@ -21,7 +23,8 @@
   (defconst dispatchTransientAssoc (protocolMethod I_TRANSIENT_COLLECTION "assoc!"))
   (defconst dispatchTransientDissoc (protocolMethod I_TRANSIENT_COLLECTION "dissoc!"))
   (defconst dispatchTransientPersistent (protocolMethod I_TRANSIENT_COLLECTION "persistent!"))
-  (export I_EDITABLE I_TRANSIENT_COLLECTION EDITABLE_TRANSIENT TRANSIENT_CONJ TRANSIENT_ASSOC
-    TRANSIENT_DISSOC TRANSIENT_PERSISTENT registerTransientVectorConjArray
+  (defconst dispatchTransientDisj (protocolMethod I_TRANSIENT_SET "disj!"))
+  (export I_EDITABLE I_TRANSIENT_COLLECTION I_TRANSIENT_SET EDITABLE_TRANSIENT TRANSIENT_CONJ TRANSIENT_ASSOC
+    TRANSIENT_DISSOC TRANSIENT_PERSISTENT TRANSIENT_DISJ registerTransientVectorConjArray
     transientVectorConjArray dispatchEditableTransient dispatchTransientConj
-    dispatchTransientAssoc dispatchTransientDissoc dispatchTransientPersistent))
+    dispatchTransientAssoc dispatchTransientDissoc dispatchTransientPersistent dispatchTransientDisj))

@@ -33,8 +33,14 @@
   (cl-defstruct (eliscript-persistent-vector (:constructor eliscript-persistent-vector--create))
     items meta)
 
+  (cl-defstruct (eliscript-persistent-subvector (:constructor eliscript-persistent-subvector--create))
+    vector start end meta)
+
   (cl-defstruct (eliscript-persistent-map (:constructor eliscript-persistent-map--create))
     entries meta)
+
+  (cl-defstruct (eliscript-map-entry (:constructor eliscript-map-entry--create))
+    key val meta)
 
   (cl-defstruct (eliscript-persistent-set (:constructor eliscript-persistent-set--create))
     items meta)
@@ -57,7 +63,17 @@
 
 (defun persistent-vector-p (obj)
   "Return t if OBJ is a persistent-vector."
-  (and (eliscript-persistent-vector-p obj) t))
+  (and (or (eliscript-persistent-vector-p obj)
+           (eliscript-persistent-subvector-p obj))
+       t))
+
+(defun persistent-subvector-p (obj)
+  "Return non-nil if OBJ is a persistent subvector slice."
+  (and (eliscript-persistent-subvector-p obj) t))
+
+(defun map-entry-p (obj)
+  "Return non-nil if OBJ is a persistent map entry."
+  (and (eliscript-map-entry-p obj) t))
 
 (defun persistent-map-p (obj)
   "Return t if OBJ is a persistent-map."
@@ -84,6 +100,8 @@
     "Return t if OBJ is any Eliscript persistent collection or lazy sequence."
     (or (eliscript-persistent-list-p obj)
         (eliscript-persistent-vector-p obj)
+        (eliscript-persistent-subvector-p obj)
+        (eliscript-map-entry-p obj)
         (eliscript-persistent-map-p obj)
         (eliscript-persistent-set-p obj)
         (eliscript-persistent-queue-p obj)
@@ -98,6 +116,42 @@
 (defun persistent-vector (&rest items)
   "Construct an immutable persistent vector from ITEMS."
   (eliscript-persistent-vector--create :items (vconcat items) :meta nil))
+
+(defun map-entry (k v)
+  "Construct an immutable first-class map entry for K and V."
+  (eliscript-map-entry--create :key k :val v :meta nil))
+
+(defun key (entry)
+  "Return the key slot of map ENTRY."
+  (unless (eliscript-map-entry-p entry)
+    (error "Expected a map-entry, got %S" entry))
+  (eliscript-map-entry-key entry))
+
+(defun val (entry)
+  "Return the value slot of map ENTRY."
+  (unless (eliscript-map-entry-p entry)
+    (error "Expected a map-entry, got %S" entry))
+  (eliscript-map-entry-val entry))
+
+(defun subvec (vec start &optional end)
+  "Return an O(1) persistent subvector slice of VEC from START to END."
+  (unless (or (eliscript-persistent-vector-p vec)
+              (eliscript-persistent-subvector-p vec))
+    (error "subvec expects a persistent-vector, got %S" vec))
+  (let* ((total (value-count vec))
+         (limit (if (null end) total end)))
+    (unless (and (integerp start) (integerp limit)
+                 (<= 0 start) (<= start limit) (<= limit total))
+      (error "subvec range [%S, %S) is outside [0, %d]" start limit total))
+    (if (eliscript-persistent-subvector-p vec)
+        (let ((base (eliscript-persistent-subvector-start vec)))
+          (eliscript-persistent-subvector--create
+           :vector (eliscript-persistent-subvector-vector vec)
+           :start (+ base start)
+           :end (+ base limit)
+           :meta nil))
+      (eliscript-persistent-subvector--create
+       :vector vec :start start :end limit :meta nil))))
 
 (defun eliscript-data--assoc-alist (entries key val)
   "Return a new alist from ENTRIES with KEY mapped to VAL using `value-equal-p'."
@@ -298,6 +352,18 @@
     (eliscript-persistent-list-items coll))
    ((eliscript-persistent-vector-p coll)
     (append (eliscript-persistent-vector-items coll) nil))
+   ((eliscript-persistent-subvector-p coll)
+    (let ((items (eliscript-persistent-vector-items
+                  (eliscript-persistent-subvector-vector coll)))
+          (idx (eliscript-persistent-subvector-start coll))
+          (end (eliscript-persistent-subvector-end coll))
+          (acc nil))
+      (while (< idx end)
+        (push (aref items idx) acc)
+        (setq idx (1+ idx)))
+      (nreverse acc)))
+   ((eliscript-map-entry-p coll)
+    (list (eliscript-map-entry-key coll) (eliscript-map-entry-val coll)))
    ((eliscript-persistent-queue-p coll)
     (eliscript-persistent-queue-items coll))
    ((eliscript-persistent-set-p coll)
@@ -346,9 +412,13 @@
     (string-equal a b))
    ((and (or (eliscript-persistent-list-p a)
              (eliscript-persistent-vector-p a)
+             (eliscript-persistent-subvector-p a)
+             (eliscript-map-entry-p a)
              (eliscript-persistent-queue-p a))
          (or (eliscript-persistent-list-p b)
              (eliscript-persistent-vector-p b)
+             (eliscript-persistent-subvector-p b)
+             (eliscript-map-entry-p b)
              (eliscript-persistent-queue-p b)))
     (let ((la (eliscript-data--seq-elements a))
           (lb (eliscript-data--seq-elements b)))
@@ -432,6 +502,8 @@
   (cond
    ((eliscript-persistent-list-p obj) (eliscript-persistent-list-meta obj))
    ((eliscript-persistent-vector-p obj) (eliscript-persistent-vector-meta obj))
+   ((eliscript-persistent-subvector-p obj) (eliscript-persistent-subvector-meta obj))
+   ((eliscript-map-entry-p obj) (eliscript-map-entry-meta obj))
    ((eliscript-persistent-map-p obj) (eliscript-persistent-map-meta obj))
    ((eliscript-persistent-set-p obj) (eliscript-persistent-set-meta obj))
    ((eliscript-persistent-queue-p obj) (eliscript-persistent-queue-meta obj))
@@ -449,6 +521,17 @@
    ((eliscript-persistent-vector-p obj)
     (eliscript-persistent-vector--create
      :items (eliscript-persistent-vector-items obj) :meta meta-val))
+   ((eliscript-persistent-subvector-p obj)
+    (eliscript-persistent-subvector--create
+     :vector (eliscript-persistent-subvector-vector obj)
+     :start (eliscript-persistent-subvector-start obj)
+     :end (eliscript-persistent-subvector-end obj)
+     :meta meta-val))
+   ((eliscript-map-entry-p obj)
+    (eliscript-map-entry--create
+     :key (eliscript-map-entry-key obj)
+     :val (eliscript-map-entry-val obj)
+     :meta meta-val))
    ((eliscript-persistent-map-p obj)
     (eliscript-persistent-map--create
      :entries (eliscript-persistent-map-entries obj) :meta meta-val))
@@ -481,6 +564,10 @@
    ((null coll) 0)
    ((eliscript-persistent-list-p coll) (length (eliscript-persistent-list-items coll)))
    ((eliscript-persistent-vector-p coll) (length (eliscript-persistent-vector-items coll)))
+   ((eliscript-persistent-subvector-p coll)
+    (- (eliscript-persistent-subvector-end coll)
+       (eliscript-persistent-subvector-start coll)))
+   ((eliscript-map-entry-p coll) 2)
    ((eliscript-persistent-map-p coll) (length (eliscript-persistent-map-entries coll)))
    ((eliscript-persistent-set-p coll) (length (eliscript-persistent-set-items coll)))
    ((eliscript-persistent-queue-p coll) (length (eliscript-persistent-queue-items coll)))
@@ -503,6 +590,19 @@
                    (if (and (>= index 0) (< index (length v)))
                        (cons t (aref v index))
                      nil)))
+                ((eliscript-persistent-subvector-p coll)
+                 (let ((v (eliscript-persistent-vector-items
+                           (eliscript-persistent-subvector-vector coll)))
+                       (start (eliscript-persistent-subvector-start coll))
+                       (end (eliscript-persistent-subvector-end coll)))
+                   (if (and (integerp index) (>= index 0) (< (+ start index) end))
+                       (cons t (aref v (+ start index)))
+                     nil)))
+                ((eliscript-map-entry-p coll)
+                 (cond
+                  ((eq index 0) (cons t (eliscript-map-entry-key coll)))
+                  ((eq index 1) (cons t (eliscript-map-entry-val coll)))
+                  (t nil)))
                 ((vectorp coll)
                  (if (and (>= index 0) (< index (length coll)))
                      (cons t (aref coll index))
@@ -539,7 +639,9 @@
    ((hash-table-p coll)
     (let ((sentinel (make-symbol "missing")))
       (not (eq (gethash key coll sentinel) sentinel))))
-   ((eliscript-persistent-vector-p coll)
+   ((or (eliscript-persistent-vector-p coll)
+        (eliscript-persistent-subvector-p coll)
+        (eliscript-map-entry-p coll))
     (and (integerp key) (>= key 0) (< key (value-count coll))))
    ((vectorp coll)
     (and (integerp key) (>= key 0) (< key (length coll))))
@@ -561,7 +663,9 @@
     (let ((found (cl-find-if (lambda (it) (value-equal-p it key))
                              (eliscript-data--seq-elements coll))))
       (if found found not-found)))
-   ((eliscript-persistent-vector-p coll)
+   ((or (eliscript-persistent-vector-p coll)
+        (eliscript-persistent-subvector-p coll)
+        (eliscript-map-entry-p coll))
     (value-nth coll key not-found))
    ((hash-table-p coll)
     (gethash key coll not-found))
@@ -598,6 +702,24 @@
           (aset copy key val))
         (eliscript-persistent-vector--create
          :items copy :meta (eliscript-persistent-vector-meta coll)))))
+   ((eliscript-persistent-subvector-p coll)
+    (let* ((old (vconcat (eliscript-data--seq-elements coll)))
+           (len (length old)))
+      (when (or (< key 0) (> key len))
+        (error "value-put index %d out of bounds for subvector of length %d" key len))
+      (let ((copy (vconcat old (if (= key len) (vector val) []))))
+        (when (< key len)
+          (aset copy key val))
+        (eliscript-persistent-vector--create
+         :items copy :meta (eliscript-persistent-subvector-meta coll)))))
+   ((eliscript-map-entry-p coll)
+    (let ((k (eliscript-map-entry-key coll))
+          (v (eliscript-map-entry-val coll)))
+      (cond
+       ((= key 0) (persistent-vector val v))
+       ((= key 1) (persistent-vector k val))
+       ((= key 2) (persistent-vector k v val))
+       (t (error "value-put index %d out of bounds for map entry of length 2" key)))))
    (t (error "value-put unsupported on %S" coll))))
 
 (defalias 'value-assoc #'value-put)
@@ -643,6 +765,14 @@
               (eliscript-persistent-vector--create
                :items (vconcat (eliscript-persistent-vector-items cur) (vector item))
                :meta (eliscript-persistent-vector-meta cur)))
+             ((eliscript-persistent-subvector-p cur)
+              (eliscript-persistent-vector--create
+               :items (vconcat (eliscript-data--seq-elements cur) (vector item))
+               :meta (eliscript-persistent-subvector-meta cur)))
+             ((eliscript-map-entry-p cur)
+              (persistent-vector (eliscript-map-entry-key cur)
+                                 (eliscript-map-entry-val cur)
+                                 item))
              ((eliscript-persistent-queue-p cur)
               (eliscript-persistent-queue--create
                :items (append (eliscript-persistent-queue-items cur) (list item))
@@ -660,6 +790,8 @@
                      (append (eliscript-persistent-sorted-set-items cur) (list item))))
              ((or (eliscript-persistent-map-p cur) (eliscript-persistent-sorted-map-p cur))
               (cond
+               ((eliscript-map-entry-p item)
+                (value-put cur (eliscript-map-entry-key item) (eliscript-map-entry-val item)))
                ((and (vectorp item) (= (length item) 2))
                 (value-put cur (aref item 0) (aref item 1)))
                ((consp item)
@@ -1442,6 +1574,11 @@
      :kind 'vector :active t
      :data (append (eliscript-persistent-vector-items source) nil)
      :meta (eliscript-persistent-vector-meta source)))
+   ((eliscript-persistent-subvector-p source)
+    (eliscript-transient--create
+     :kind 'vector :active t
+     :data (eliscript-data--seq-elements source)
+     :meta (eliscript-persistent-subvector-meta source)))
    ((eliscript-persistent-list-p source)
     (eliscript-transient--create
      :kind 'list :active t
@@ -1500,11 +1637,18 @@
           (setf (eliscript-transient-data builder)
                 (append (eliscript-transient-data builder) (list it)))))
        ((eq kind 'map)
-        (if (consp it)
-            (setf (eliscript-transient-data builder)
-                  (eliscript-data--assoc-alist
-                   (eliscript-transient-data builder) (car it) (cdr it)))
-          (error "conj! on transient map expects pair, got %S" it)))))))
+        (cond
+         ((eliscript-map-entry-p it)
+          (setf (eliscript-transient-data builder)
+                (eliscript-data--assoc-alist
+                 (eliscript-transient-data builder)
+                 (eliscript-map-entry-key it)
+                 (eliscript-map-entry-val it))))
+         ((consp it)
+          (setf (eliscript-transient-data builder)
+                (eliscript-data--assoc-alist
+                 (eliscript-transient-data builder) (car it) (cdr it))))
+         (t (error "conj! on transient map expects pair, got %S" it))))))))
 
 (defun assoc! (builder key val)
   "Mutate active transient BUILDER by associating KEY with VAL."
@@ -1519,6 +1663,30 @@
   (setf (eliscript-transient-data builder)
         (eliscript-data--dissoc-alist (eliscript-transient-data builder) key))
   builder)
+
+(defun disj! (builder &rest items)
+  "Mutate active transient set BUILDER by removing ITEMS."
+  (eliscript-data--ensure-active-transient builder 'disj!)
+  (unless (eq (eliscript-transient-kind builder) 'set)
+    (error "disj! requires a transient set builder, got %S"
+           (eliscript-transient-kind builder)))
+  (dolist (it items builder)
+    (setf (eliscript-transient-data builder)
+          (cl-remove-if (lambda (x) (value-equal-p x it))
+                        (eliscript-transient-data builder)))))
+
+(defun mapv (fn coll)
+  "Eagerly map FN over COLL into a persistent vector via transients."
+  (with-transient (b (persistent-vector))
+    (dolist (item (eliscript-data--seq-elements coll))
+      (conj! b (funcall fn item)))))
+
+(defun filterv (pred coll)
+  "Eagerly filter COLL with PRED into a persistent vector via transients."
+  (with-transient (b (persistent-vector))
+    (dolist (item (eliscript-data--seq-elements coll))
+      (when (funcall pred item)
+        (conj! b item)))))
 
 (defmacro with-transient (binding &rest body)
   "Bind `(VAR SOURCE)' to a transient builder, run BODY, and seal result."

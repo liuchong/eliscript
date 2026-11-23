@@ -46,7 +46,7 @@
   (defun collect-buckets
     (key-function collection create-bucket update-bucket)
     (require-function key-function "data key function")
-    (let ((bucket-index EMPTY_MAP) (keys (js-array)) (buckets (js-array)))
+    (let ((bucket-index (transient EMPTY_MAP)) (keys (js-array)) (buckets (js-array)))
       (Collection/reduce
         collection
         (lambda
@@ -56,11 +56,8 @@
               (index (js-call bucket-index :get key missing-value)))
             (if (eq index missing-value)
               (progn
-                (setq
-                  index
-                  (js-length keys)
-                  bucket-index
-                  (js-call bucket-index :assoc key index))
+                (setq index (js-length keys))
+                (assocBang bucket-index key index)
                 (js-call keys :push key)
                 (js-call buckets :push (funcall create-bucket value)))
               (funcall update-bucket buckets index value))
@@ -252,24 +249,23 @@
   (defun merge-with
     (combine &rest collections)
     (require-function combine "mergeWith combine function")
-    (let ((result EMPTY_MAP) (index 0))
+    (let ((result (transient EMPTY_MAP)) (index 0))
       (while (< index (js-length collections))
-        (setq
-          result
-          (reduce-entries
-            (js-nth index collections)
-            (lambda
-              (current key value)
-              (Collection/assoc
-                current
+        (reduce-entries
+          (js-nth index collections)
+          (lambda
+            (builder key value)
+            (let ((existing (js-call builder :get key missing-value)))
+              (assocBang
+                builder
                 key
-                (if (Collection/contains current key)
-                  (funcall combine (Collection/get current key) value)
-                  value)))
-            result)
-          index
-          (1+ index)))
-      result))
+                (if (eq existing missing-value)
+                  value
+                  (funcall combine existing value))))
+            builder)
+          result)
+        (setq index (1+ index)))
+      (persistentBang result)))
   (defun zipmap
     (keys values)
     (let*

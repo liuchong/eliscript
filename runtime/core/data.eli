@@ -238,19 +238,20 @@
 
   (defun mergeWith (combine &rest collections)
     (require-function combine "mergeWith combine function")
-    (let ((result EMPTY_MAP)
+    (let ((result (transient EMPTY_MAP))
           (index 0))
       (while (< index (js-length collections))
-        (setq result
-          (reduce-entries (funcall get collections index)
-            (lambda (current key value)
-              (assoc current key
-                (if (contains current key)
-                    (funcall combine (funcall get current key) value)
-                    value)))
-            result))
+        (reduce-entries (funcall get collections index)
+          (lambda (builder key value)
+            (let ((existing (js-call builder :get key MISSING)))
+              (assocBang builder key
+                (if (eq existing MISSING)
+                    value
+                    (funcall combine existing value))))
+            builder)
+          result)
         (setq index (1+ index)))
-      result))
+      (persistentBang result)))
 
   (defun zipmap (keys-collection values-collection)
     (let* ((key-vector (path-vector keys-collection))

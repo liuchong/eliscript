@@ -14,6 +14,9 @@
   (defconst ISet Runtime/ISet)
   (defconst IStack Runtime/IStack)
   (defconst IReversible Runtime/IReversible)
+  (defconst IMapEntry Runtime/IMapEntry)
+  (defconst IChunk Runtime/IChunk)
+  (defconst IChunkedSeq Runtime/IChunkedSeq)
   (defconst ReductionView Runtime/ReductionView)
   (defconst SequenceView Runtime/SequenceView)
   (defun collection-count (collection) (Runtime/count collection))
@@ -64,6 +67,20 @@
   (defun peek (collection) (Runtime/peek collection))
   (defun pop (collection) (Runtime/pop collection))
   (defun rseq (collection) (Runtime/rseq collection))
+  (defun map-entry (key value) (Runtime/mapEntry key value))
+  (defun map-entry? (value) (Runtime/isMapEntry value))
+  (defun key (entry) (Runtime/entryKey entry))
+  (defun val (entry) (Runtime/entryVal entry))
+  (defun chunk? (value) (Runtime/isChunk value))
+  (defun chunked-seq? (value) (Runtime/isChunkedSeq value))
+  (defun chunk-count (chunk) (Runtime/chunkCount chunk))
+  (defun chunk-nth
+    (chunk index &rest not-found)
+    (apply Runtime/chunkNth (js-cons chunk (js-cons index not-found))))
+  (defun chunk-drop-first (chunk) (Runtime/chunkDropFirst chunk))
+  (defun chunked-first (sequence) (Runtime/chunkedFirst sequence))
+  (defun chunked-next (sequence) (Runtime/chunkedNext sequence))
+  (defun chunked-more (sequence) (Runtime/chunkedMore sequence))
   (defun collection-seq (collection) (Runtime/seq collection))
   (defun empty? (collection) (Runtime/isEmpty collection))
   (defun not-empty (collection) (Runtime/notEmpty collection))
@@ -78,14 +95,17 @@
   (defun reduction-view? (value) (Runtime/isReductionView value))
   (export
     IAssociative
+    IChunk
+    IChunkedSeq
     IConj
     ICounted
     IEmptyable
     IIndexed
     ILookup
+    IMap
+    IMapEntry
     IReduce
     IKVReduce
-    IMap
     ISet
     IStack
     IReversible
@@ -95,6 +115,14 @@
     assoc
     associative?
     bounded-count
+    chunk-count
+    chunk-drop-first
+    chunk-nth
+    chunk?
+    chunked-first
+    chunked-more
+    chunked-next
+    chunked-seq?
     collection-count
     collection-nth
     collection-seq
@@ -105,8 +133,11 @@
     empty
     empty?
     indexed?
+    key
     list?
     lookup
+    map-entry
+    map-entry?
     map?
     not-empty
     queue?
@@ -132,4 +163,5 @@
     sequence-view
     unbounded-sequence-view
     unreduced
+    val
     vector?))

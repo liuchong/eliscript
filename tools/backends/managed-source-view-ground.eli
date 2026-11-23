@@ -166,7 +166,11 @@
                       (t
                         (unless (eq (host-type readMetadata) "function") (throw (new globalThis.TypeError "literal host provider requires its actual metadata protocol reader")))
                         (let ((metadata (funcall readMetadata value))) (js-object :kind type :values
-                          (if (or (eq type "keyword") (eq type "symbol")) (js-array (get value :namespace) (get value :name)) (Array/from value)) :metadata metadata)))))))
+                          (cond
+                            ((or (eq type "keyword") (eq type "symbol")) (js-array (get value :namespace) (get value :name)))
+                            ((eq type "map") (Array/from value (lambda (entry) (js-array (aref entry 0) (aref entry 1)))))
+                            (t (Array/from value)))
+                          :metadata metadata)))))))
                 (setq create (lambda (type values &rest __host_optional_arguments_1)
     (let* ((metadata (aref __host_optional_arguments_1 0)) (view (aref __host_optional_arguments_1 1)))
                   (when (undefined? metadata) (setq metadata nil))

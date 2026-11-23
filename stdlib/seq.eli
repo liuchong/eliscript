@@ -16,6 +16,7 @@
     sliceSequenceView)
   (import "../runtime/core/protocol.mjs" implementsProtocolOperation)
   (import "../runtime/core/list.mjs" EMPTY_LIST isPersistentList)
+  (import "../runtime/core/lazy-sequence.mjs" chunkedRange chunkedRepeat)
   (import "../runtime/core/transducer.mjs"
     deduping
     distincting
@@ -46,8 +47,6 @@
   (defconst sequence-ring (lambda (limit) (new globalThis/Array limit)))
   (defconst sequence-array? (js* "Array.isArray"))
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
-  (defconst sequence-finite? (js* "Number.isFinite"))
-  (defconst sequence-ceil (js* "Math.ceil"))
   (defmacro seq-int>= (a b) `(funcall (js* "(a, b) => a >= b") ,a ,b))
   (defmacro seq-int> (a b) `(funcall (js* "(a, b) => a > b") ,a ,b))
   (defmacro seq-int- (a b) `(funcall (js* "(a, b) => a - b") ,a ,b))
@@ -118,86 +117,12 @@
       (funcall sequence-array? value)
       (isPersistentList value)
       (isPersistentVector value)))
-  (defun require-finite-number
-    (value label)
-    (if (funcall sequence-finite? value)
-      value
-      (throw (new globalThis/TypeError (str label " must be a finite number")))))
   (defun sequence-iterator-result (value done) (js-object :value value :done done))
   (defun sequence-iterator (next) (js-object :next next))
-  (defun sequence-range-count
-    (start end step)
-    (let ((distance (/ (- end start) step)))
-      (if (> distance 0)
-        (require-non-negative-safe-integer
-          (funcall sequence-ceil distance)
-          "range count")
-        0)))
-  (defun sequence-range-factory
-    (start step limit)
-    (lambda
-      ()
-      (let ((index 0))
-        (sequence-iterator
-          (lambda
-            ()
-            (if (and (not (nil? limit)) (>= index limit))
-              (sequence-iterator-result undefined t)
-              (let ((value (+ start (* index step))))
-                (setq index (1+ index))
-                (sequence-iterator-result value false))))))))
-  (defun range
-    (&rest bounds)
-    (let ((arity (js-length bounds)))
-      (if (= arity 0)
-        (unboundedSequenceView (sequence-range-factory 0 1 nil))
-        (progn
-          (when (> arity 3)
-            (throw (new globalThis/TypeError "range expects zero to three arguments")))
-          (let*
-            (
-              (start
-                (require-finite-number
-                  (if (= arity 1) 0 (js-nth 0 bounds))
-                  "range start"))
-              (end
-                (require-finite-number
-                  (if (= arity 1) (js-nth 0 bounds) (js-nth 1 bounds))
-                  "range end"))
-              (step
-                (require-finite-number
-                  (if (= arity 3) (js-nth 2 bounds) 1)
-                  "range step")))
-            (when (= step 0)
-              (throw (new globalThis/TypeError "range step must be non-zero")))
-            (let ((limit (sequence-range-count start end step)))
-              (sequenceView (sequence-range-factory start step limit) limit)))))))
-  (defun sequence-repeat-factory
-    (value limit)
-    (lambda
-      ()
-      (let ((index 0))
-        (sequence-iterator
-          (lambda
-            ()
-            (if (and (not (nil? limit)) (>= index limit))
-              (sequence-iterator-result undefined t)
-              (progn (setq index (1+ index)) (sequence-iterator-result value false))))))))
-  (defun repeat
-    (&rest arguments)
-    (let ((arity (js-length arguments)))
-      (cond
-        ((= arity 1)
-          (unboundedSequenceView (sequence-repeat-factory (js-nth 0 arguments) nil)))
-        ((= arity 2)
-          (let
-            (
-              (limit
-                (require-non-negative-safe-integer (js-nth 0 arguments) "repeat count")))
-            (sequenceView (sequence-repeat-factory (js-nth 1 arguments) limit) limit)))
-        (t
-          (throw
-            (new globalThis/TypeError "repeat expects a value or a count and value"))))))
+  (defun range (&rest bounds)
+    (apply chunkedRange bounds))
+  (defun repeat (&rest arguments)
+    (apply chunkedRepeat arguments))
   (defun sequence-repeatedly-factory
     (producer limit)
     (lambda
@@ -458,6 +383,24 @@
               (js-array))))
         (js-call values :reverse)
         (into EMPTY_VECTOR values))))
+  (defun mapv (transform collection)
+    (require-function transform "mapv transform")
+    (let ((builder (transient EMPTY_VECTOR)))
+      (reduce collection
+        (lambda (acc value)
+          (conjBang acc (funcall transform value)))
+        builder)
+      (persistentBang builder)))
+  (defun filterv (predicate collection)
+    (require-function predicate "filterv predicate")
+    (let ((builder (transient EMPTY_VECTOR)))
+      (reduce collection
+        (lambda (acc value)
+          (if (isTruthy (funcall predicate value))
+              (conjBang acc value)
+              acc))
+        builder)
+      (persistentBang builder)))
   (defun map (transform collection) (into EMPTY_VECTOR (mapping transform) collection))
   (defun map-indexed
     (transform collection)
@@ -692,6 +635,7 @@
     every?
     ffirst
     filter
+    filterv
     find
     flatten
     fnext
@@ -707,6 +651,7 @@
     map
     map-indexed
     mapcat
+    mapv
     next
     nfirst
     nnext

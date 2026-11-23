@@ -3,6 +3,7 @@
 
   (defconst IEditable Runtime/IEditable)
   (defconst ITransientCollection Runtime/ITransientCollection)
+  (defconst ITransientSet Runtime/ITransientSet)
 
   (defun transient (collection)
     (Runtime/transient collection))
@@ -17,8 +18,11 @@
   (defun dissoc! (collection &rest keys)
     (apply Runtime/dissocBang (js-cons collection keys)))
 
+  (defun disj! (collection &rest values)
+    (apply Runtime/disjBang (js-cons collection values)))
+
   (defun persistent! (collection)
     (Runtime/persistentBang collection))
 
-  (export IEditable ITransientCollection assoc! conj! dissoc! persistent!
+  (export IEditable ITransientCollection ITransientSet assoc! conj! disj! dissoc! persistent!
           transient))

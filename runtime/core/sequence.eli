@@ -14,6 +14,7 @@
   (import "./collection-internals.mjs"
     prependSequenceView
     sliceSequenceView)
+  (import "./lazy-sequence.mjs" chunkedRange chunkedRepeat)
   (import "./list.mjs" EMPTY_LIST PersistentList)
   (import "./protocol.mjs" implementsProtocolOperation)
   (import "./transducer.mjs"
@@ -107,31 +108,10 @@
           (lambda () (setq closed t))))))
 
   (defun range (&rest bounds)
-    (when (> (js-length bounds) 3)
-      (fail "range expects zero to three arguments"))
-    (if (= (js-length bounds) 0)
-        (unboundedSequenceView (indexed-factory (lambda (index) (+ 0 (* index 1))) nil))
-        (let* ((start (require-finite (if (= (js-length bounds) 1) 0 (get bounds 0)) "range start"))
-               (end (require-finite (if (= (js-length bounds) 1) (get bounds 0) (get bounds 1)) "range end"))
-               (step (require-finite (if (= (js-length bounds) 3) (get bounds 2) 1) "range step")))
-          (when (= step 0)
-            (fail "range step must be non-zero"))
-          (let* ((distance (/ (- end start) step))
-                 (length (if (> distance 0)
-                             (require-nonnegative (Math/ceil distance) "range count")
-                             0)))
-            (sequenceView (indexed-factory (lambda (index) (+ start (* index step))) length) length)))))
+    (apply chunkedRange bounds))
 
   (defun repeat (&rest arguments)
-    (cond
-      ((= (js-length arguments) 1)
-       (let ((value (get arguments 0)))
-         (unboundedSequenceView (indexed-factory (lambda (_index) value) nil))))
-      ((= (js-length arguments) 2)
-       (let ((length (require-nonnegative (get arguments 0) "repeat count"))
-             (value (get arguments 1)))
-         (sequenceView (indexed-factory (lambda (_index) value) length) length)))
-      (t (fail "repeat expects a value or a count and value"))))
+    (apply chunkedRepeat arguments))
 
   (defun repeatedly (&rest arguments)
     (cond

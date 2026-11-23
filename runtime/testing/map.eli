@@ -1,5 +1,9 @@
 (module eliscript.runtime.testing.map
   (import "../core/map-internals.mjs" :as map-internals)
+  (import "../core/array-map.mjs"
+    isPersistentArrayMap
+    readArrayMapState
+    readTransientArrayMapState)
   (import "../core/map-internals.mjs"
     MAP_STATE
     TRANSIENT_MAP_STATE
@@ -86,51 +90,76 @@
     (readTransientMapMetrics))
 
   (defun inspectTransientMap (map)
-    (let ((state (transient-state-of map))
-          (nodes (new globalThis/Set))
-          (owned-node-count 0))
-      (collect-nodes (get state :root) nodes)
-      (js-call nodes :forEach
-        (lambda (node)
-          (when (eq (get node :owner) (get state :owner))
-            (setq owned-node-count (+ owned-node-count 1)))))
-      (let* ((source (get state :source))
-             (source-state (if (nil? source) undefined (aref source MAP_STATE))))
-        (Object/freeze
-          (js-object
-            :active (get state :active)
-            :count (get state :count)
-            :nodeCount (get nodes :size)
-            :ownedNodeCount owned-node-count
-            :sharesSourceRoot (and (not (undefined? source-state))
-                                   (eq (get state :root) (get source-state :root))))))))
+    (let ((array-state (readTransientArrayMapState map)))
+      (if (not (undefined? array-state))
+          (if (not (nil? (get array-state :promoted)))
+              (inspectTransientMap (get array-state :promoted))
+              (Object/freeze
+                (js-object
+                  :active (get array-state :active)
+                  :count (/ (js-length (get array-state :items)) 2)
+                  :nodeCount 0
+                  :ownedNodeCount 0
+                  :sharesSourceRoot false)))
+          (let ((state (transient-state-of map))
+                (nodes (new globalThis/Set))
+                (owned-node-count 0))
+            (collect-nodes (get state :root) nodes)
+            (js-call nodes :forEach
+              (lambda (node)
+                (when (eq (get node :owner) (get state :owner))
+                  (setq owned-node-count (+ owned-node-count 1)))))
+            (let* ((source (get state :source))
+                   (source-state (if (nil? source) undefined (aref source MAP_STATE))))
+              (Object/freeze
+                (js-object
+                  :active (get state :active)
+                  :count (get state :count)
+                  :nodeCount (get nodes :size)
+                  :ownedNodeCount owned-node-count
+                  :sharesSourceRoot (and (not (undefined? source-state))
+                                         (eq (get state :root) (get source-state :root))))))))))
 
   (defun inspectPersistentMap (map)
-    (let* ((state (state-of map))
-           (result (js-object
-                     :count (get state :count)
-                     :bitmapNodes 0
-                     :arrayNodes 0
-                     :collisionNodes 0
-                     :entries 0
-                     :nodeCount 0
-                     :maxDepth 0))
-           (nodes (new globalThis/Set)))
-      (inspect-item (get state :root) 1 result nodes)
-      (put result "nodeCount" (get nodes :size))
-      (Object/freeze result)))
+    (if (isPersistentArrayMap map)
+        (let ((array-state (readArrayMapState map)))
+          (Object/freeze
+            (js-object
+              :representation "array-map"
+              :count (get array-state :count)
+              :bitmapNodes 0
+              :arrayNodes 0
+              :collisionNodes 0
+              :entries (get array-state :count)
+              :nodeCount 0
+              :maxDepth 0)))
+        (let* ((state (state-of map))
+               (result (js-object
+                         :count (get state :count)
+                         :bitmapNodes 0
+                         :arrayNodes 0
+                         :collisionNodes 0
+                         :entries 0
+                         :nodeCount 0
+                         :maxDepth 0))
+               (nodes (new globalThis/Set)))
+          (inspect-item (get state :root) 1 result nodes)
+          (put result "nodeCount" (get nodes :size))
+          (Object/freeze result))))
 
   (defun sharedPersistentMapNodes (left right)
-    (let ((left-nodes (new globalThis/Set))
-          (right-nodes (new globalThis/Set))
-          (shared 0))
-      (collect-nodes (get (state-of left) :root) left-nodes)
-      (collect-nodes (get (state-of right) :root) right-nodes)
-      (js-call left-nodes :forEach
-        (lambda (node)
-          (when (js-call right-nodes :has node)
-            (setq shared (+ shared 1)))))
-      shared))
+    (if (or (isPersistentArrayMap left) (isPersistentArrayMap right))
+        0
+        (let ((left-nodes (new globalThis/Set))
+              (right-nodes (new globalThis/Set))
+              (shared 0))
+          (collect-nodes (get (state-of left) :root) left-nodes)
+          (collect-nodes (get (state-of right) :root) right-nodes)
+          (js-call left-nodes :forEach
+            (lambda (node)
+              (when (js-call right-nodes :has node)
+                (setq shared (+ shared 1)))))
+          shared)))
 
   (export
     resetPersistentMapMetrics

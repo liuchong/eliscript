@@ -3,13 +3,16 @@
     EDITABLE_TRANSIENT
     I_EDITABLE
     I_TRANSIENT_COLLECTION
+    I_TRANSIENT_SET
     TRANSIENT_ASSOC
     TRANSIENT_CONJ
+    TRANSIENT_DISJ
     TRANSIENT_DISSOC
     TRANSIENT_PERSISTENT
     dispatchEditableTransient
     dispatchTransientAssoc
     dispatchTransientConj
+    dispatchTransientDisj
     dispatchTransientDissoc
     dispatchTransientPersistent)
 
@@ -20,6 +23,7 @@
   (defconst call-2 (js* "(fn, receiver, a, b) => fn.call(receiver, a, b)"))
   (defconst IEditable I_EDITABLE)
   (defconst ITransientCollection I_TRANSIENT_COLLECTION)
+  (defconst ITransientSet I_TRANSIENT_SET)
 
   (defun callable? (value)
     (= (funcall typeof-value value) "function"))
@@ -112,6 +116,31 @@
       dissoc-one
       dissoc-many))
 
+  (defun disj-one (collection value)
+    (if (not (nil? collection))
+        (let ((direct (aref collection TRANSIENT_DISJ)))
+          (if (callable? direct)
+              (if (eq (aref direct "call") native-call)
+                  (funcall call-1 direct collection value)
+                  (js-call direct :call collection value))
+              (dispatchTransientDisj collection value)))
+        (dispatchTransientDisj collection value)))
+
+  (defun disj-many (collection arguments)
+    (let ((result collection)
+          (index 1)
+          (limit (js-length arguments)))
+      (while (< index limit)
+        (setq result (disj-one result (aref arguments index))
+              index (+ index 1)))
+      result))
+
+  (defconst disjBang
+    (funcall
+      (js* "(disjOne, disjMany) => function disjBang(collection) { const n = arguments.length; if (n === 2) return disjOne(collection, arguments[1]); if (n <= 1) return collection; return disjMany(collection, arguments); }")
+      disj-one
+      disj-many))
+
   (defun persistentBang (collection)
     (if (not (nil? collection))
         (let ((direct (aref collection TRANSIENT_PERSISTENT)))
@@ -125,8 +154,10 @@
   (export
     IEditable
     ITransientCollection
+    ITransientSet
     transient
     conjBang
     assocBang
     dissocBang
+    disjBang
     persistentBang))

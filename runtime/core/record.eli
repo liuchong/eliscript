@@ -16,7 +16,7 @@
     sequenceView
     unreducedValue)
   (import "./identifier.mjs" identifierName identifierNamespace isKeyword keyword)
-  (import "./map.mjs" EMPTY_MAP PersistentHashMap)
+  (import "./map.mjs" EMPTY_MAP PersistentHashMap isPersistentHashMap)
   (import "./metadata-internals.mjs" METADATA_READ METADATA_WITH)
   (import "./value-internals.mjs" VALUE_EQUAL VALUE_HASH finishHash hashString mixHash)
 
@@ -176,7 +176,7 @@
           (js* "(initInstance) => class RecordValue { constructor(token, map, metadata = null) { initInstance(this, token, map, metadata); } }")
           (lambda (self token map metadata)
             (unless (and (eq token RECORD_CONSTRUCTOR_TOKEN)
-                         (funcall instance-of? map PersistentHashMap))
+                         (isPersistentHashMap map))
               (fail (str type-name " values must be created with its record constructors")))
             (put self RECORD_STATE (Object/freeze (js-object :map map :metadata metadata)))
             (Object/freeze self))))

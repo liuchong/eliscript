@@ -1,5 +1,21 @@
 (module eliscript.lazy-sequence
   (import "../runtime/core/lazy-sequence.mjs" :as Runtime)
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (defconst chunk-size Runtime/CHUNK_SIZE)
+  (defun chunk-buffer (&optional capacity)
+    (if (nullish? capacity) (Runtime/chunkBuffer) (Runtime/chunkBuffer capacity)))
+  (defun chunk-append (buffer value) (Runtime/chunkAppend buffer value))
+  (defun chunk-from-buffer (buffer) (Runtime/chunkFromBuffer buffer))
+  (defun array-chunk (values &optional offset end)
+    (cond
+      ((and (nullish? offset) (nullish? end)) (Runtime/arrayChunk values))
+      ((nullish? end) (Runtime/arrayChunk values offset))
+      (t (Runtime/arrayChunk values offset end))))
+  (defun chunk-cons (chunk more) (Runtime/chunkedCons chunk more))
+  (defun chunked-range (&rest bounds) (apply Runtime/chunkedRange bounds))
+  (defun chunked-repeat (&rest arguments) (apply Runtime/chunkedRepeat arguments))
+  (defun chunk? (value) (Collection/isChunk value))
+  (defun chunked-seq? (value) (Collection/isChunkedSeq value))
   (defun lazy-seq (thunk) (Runtime/lazySequence thunk))
   (defun lazy-cons (value tail-thunk) (Runtime/lazyCons value tail-thunk))
   (defun lazy-map (transform collection) (Runtime/lazyMap transform collection))
@@ -38,6 +54,16 @@
   (defun realized-count (value) (Runtime/realizedLazySequenceCount value))
   (defun realize (value) (Runtime/realizeLazySequence value))
   (export
+    array-chunk
+    chunk-append
+    chunk-buffer
+    chunk-cons
+    chunk-from-buffer
+    chunk-size
+    chunk?
+    chunked-range
+    chunked-repeat
+    chunked-seq?
     lazy-cons
     lazy-dedupe
     lazy-distinct

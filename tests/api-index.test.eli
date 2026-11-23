@@ -31,7 +31,7 @@
     (async ()
       (let ((index (await (buildApiIndex (js-object :root ROOT)))))
         (js-call (expect (get index :moduleCount)) :toBe 45)
-        (js-call (expect (get index :exportCount)) :toBe 601)
+        (js-call (expect (get index :exportCount)) :toBe 630)
         (js-call (expect (get (named-module index "protocol") :exports)) :toContain "read-external-protocol-method")
         (js-call (expect (named-module index "regex")) :toEqual
           (expected-module "regex" "stdlib/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"
@@ -60,7 +60,7 @@
         (js-call (expect (named-module index "lazy-sequence")) :toEqual
           (expected-module "lazy-sequence" "stdlib/lazy-sequence.eli" "0176" "specs/0176-memoized-lazy-sequences.md" "runtime-core"
             "Demand-driven memoized sequences, deferred recursive tails, direct lazy transformations, and realization inspection."
-            (js-array "lazy-cons" "lazy-dedupe" "lazy-distinct" "lazy-drop" "lazy-drop-while" "lazy-filter" "lazy-interpose"
+            (js-array "array-chunk" "chunk-append" "chunk-buffer" "chunk-cons" "chunk-from-buffer" "chunk-size" "chunk?" "chunked-range" "chunked-repeat" "chunked-seq?" "lazy-cons" "lazy-dedupe" "lazy-distinct" "lazy-drop" "lazy-drop-while" "lazy-filter" "lazy-interpose"
               "lazy-keep" "lazy-keep-indexed" "lazy-map" "lazy-map-indexed" "lazy-mapcat" "lazy-partition-all" "lazy-partition-by"
               "lazy-remove" "lazy-seq" "lazy-seq?" "lazy-take" "lazy-take-nth" "lazy-take-while" "realize" "realized-count" "realized?")))
         (js-call (expect (named-module index "persistent-vector")) :toEqual

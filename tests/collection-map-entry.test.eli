@@ -1,0 +1,143 @@
+(module tests.collection-map-entry.test
+  (import "bun:test" expect test)
+  (import "../runtime/core/array-map.mjs" arrayMapFromKeyValues)
+  (import "../runtime/core/collection.mjs"
+    :as C)
+  (import "../runtime/core/collection.mjs"
+    IMapEntry
+    assoc
+    conj
+    contains
+    count
+    empty
+    entryKey
+    entryVal
+    isAssociative
+    isCollection
+    isCounted
+    isIndexed
+    isMapEntry
+    isReducible
+    isReversible
+    isSeqable
+    isSequential
+    isVector
+    mapEntry
+    peek
+    pop
+    rseq
+    seq)
+  (import "../runtime/core/map.mjs" EMPTY_MAP persistentHashMap)
+  (import "../runtime/core/set.mjs" EMPTY_SET persistentHashSet)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
+  (import "../runtime/core/protocol.mjs" implementsProtocol)
+  (import "../runtime/core/value.mjs" equalValues hashValue)
+  (import "../runtime/core/vector.mjs" EMPTY_VECTOR persistentVector subvec)
+  (import "../runtime/core/data-text.mjs" printValue)
+
+  (defun be (actual expected) (js-call (expect actual) :toBe expected))
+  (defun same (actual expected) (js-call (expect actual) :toEqual expected))
+  (defun raises (fn &optional msg)
+    (if (nullish? msg)
+        (js-call (expect fn) :toThrow)
+        (js-call (expect fn) :toThrow msg)))
+
+  (test "PersistentMapEntry implements IMapEntry, tuple indexing, and collection protocols" (lambda ()
+    (let ((entry (mapEntry "alpha" 42)))
+      (be (isMapEntry entry) t)
+      (be (isVector entry) false)
+      (be (implementsProtocol IMapEntry entry) t)
+      (be (isCounted entry) t)
+      (be (isIndexed entry) t)
+      (be (isAssociative entry) t)
+      (be (isSeqable entry) t)
+      (be (isReducible entry) t)
+      (be (isReversible entry) t)
+      (be (isCollection entry) t)
+      (be (isSequential entry) t)
+      (be (Object/isFrozen entry) t)
+      (be (get entry :key) "alpha")
+      (be (get entry :val) 42)
+      (be (entryKey entry) "alpha")
+      (be (entryVal entry) 42)
+      (be (aref entry 0) "alpha")
+      (be (aref entry 1) 42)
+      (be (get entry :length) 2)
+      (be (count entry) 2)
+      (be (C/nth entry 0) "alpha")
+      (be (C/nth entry 1) 42)
+      (be (C/nth entry 5 "fallback") "fallback")
+      (raises (lambda () (C/nth entry 2)) globalThis.RangeError)
+      (be (C/get entry 0) "alpha")
+      (be (C/get entry 1) 42)
+      (be (C/get entry 2 :missing) :missing)
+      (be (contains entry 0) t)
+      (be (contains entry 1) t)
+      (be (contains entry 2) false)
+      (be (peek entry) 42)
+      (be (equalValues (pop entry) (persistentVector "alpha")) t)
+      (be (isVector (pop entry)) t)
+      (be (equalValues (assoc entry 0 "beta") (persistentVector "beta" 42)) t)
+      (be (equalValues (assoc entry 1 99) (persistentVector "alpha" 99)) t)
+      (be (equalValues (assoc entry 2 "extra") (persistentVector "alpha" 42 "extra")) t)
+      (be (equalValues (conj entry "extra") (persistentVector "alpha" 42 "extra")) t)
+      (be (empty entry) EMPTY_VECTOR)
+      (same (Array/from (seq entry)) (js-array "alpha" 42))
+      (same (Array/from (rseq entry)) (js-array 42 "alpha"))
+      (be (C/reduce entry (lambda (a b) (+ (get a :length) b))) 47)
+      (be (C/reduceKV entry (lambda (acc k v) (+ acc k ":" v "|")) "") "0:alpha|1:42|")
+      (same (JSON/parse (JSON/stringify entry)) (js-array "alpha" 42))
+      (be (printValue entry) "[\"alpha\" 42]"))))
+
+  (test "PersistentMapEntry equals and hashes identically to 2-element PersistentVector both ways" (lambda ()
+    (let* ((k (persistentVector "nested" 1))
+           (v (arrayMapFromKeyValues (js-array "x" 9)))
+           (entry (mapEntry k v))
+           (vec2 (persistentVector k v))
+           (sub2 (subvec (persistentVector "pad" k v "end") 1 3))
+           (vec3 (persistentVector k v "extra")))
+      (be (equalValues entry vec2) t)
+      (be (equalValues vec2 entry) t)
+      (be (equalValues entry sub2) t)
+      (be (equalValues sub2 entry) t)
+      (be (equalValues entry vec3) false)
+      (be (equalValues vec3 entry) false)
+      (be (hashValue entry) (hashValue vec2))
+      (be (hashValue entry) (hashValue sub2))
+      (let* ((tag (arrayMapFromKeyValues (js-array "source" "entry")))
+             (meta-entry (withMeta entry tag)))
+        (be (isMapEntry meta-entry) t)
+        (be (meta meta-entry) tag)
+        (be (meta entry) nil)
+        (be (equalValues meta-entry vec2) t)
+        (be (equalValues meta-entry EMPTY_MAP) false)))))
+
+  (test "ArrayMap and HashMap entries() and seq() yield first-class PersistentMapEntry values" (lambda ()
+    (let ((small (arrayMapFromKeyValues (js-array "a" 1 "b" 2)))
+          (large (persistentHashMap (js-array "a" 1) (js-array "b" 2))))
+      (js-call (js-array small large) :forEach
+        (lambda (m)
+          (let ((items (Array/from (js-call m :entries)))
+                (seq-items (Array/from (seq m))))
+            (be (js-length items) 2)
+            (be (isMapEntry (aref items 0)) t)
+            (be (isMapEntry (aref items 1)) t)
+            (be (isMapEntry (aref seq-items 0)) t)
+            (be (Object/isFrozen (aref items 0)) t)
+            (let (([k v] (aref items 0)))
+              (be (= (+ "" k ":" v) (str (entryKey (aref items 0)) ":" (entryVal (aref items 0)))) t))))))))
+
+  (test "MapEntry interops as map key and set member identically to 2-element PersistentVector with frozen bounds" (lambda ()
+    (let* ((e (mapEntry "k" 7))
+           (v (persistentVector "k" 7))
+           (m (assoc EMPTY_MAP e "found"))
+           (s (conj EMPTY_SET e)))
+      (be (Object/isFrozen e) t)
+      (be (C/get m v) "found")
+      (be (C/get m e) "found")
+      (be (contains s v) t)
+      (be (contains s e) t)
+      (raises (lambda () (C/nth e -1)) globalThis.RangeError)
+      (raises (lambda () (C/nth e 2)) globalThis.RangeError)
+      (be (C/get e -1 :oob) :oob))))
+)

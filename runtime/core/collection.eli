@@ -2,13 +2,24 @@
   (import "./protocol.mjs"
     extendProtocolCategory extendProtocolType implementsProtocol)
   (import "./collection-internals.mjs"
+    CHUNKED_FIRST
+    CHUNKED_MORE
+    CHUNKED_NEXT
+    CHUNK_COUNT
+    CHUNK_DROP_FIRST
+    CHUNK_NTH
     COLLECTION_ASSOC COLLECTION_CONJ COLLECTION_COUNT COLLECTION_EMPTY
+    COLLECTION_ENTRY_KEY COLLECTION_ENTRY_VAL
     COLLECTION_GET COLLECTION_NTH COLLECTION_PEEK COLLECTION_POP
     COLLECTION_REDUCE COLLECTION_REDUCE_KV
+    I_CHUNK I_CHUNKED_SEQ I_MAP_ENTRY
     I_COUNTED I_EMPTYABLE I_CONJ I_INDEXED I_LOOKUP I_ASSOCIATIVE
     I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE I_SEQABLE
     ReductionView MemoizedSequenceView SequenceView
+    dispatchChunkCount dispatchChunkDropFirst dispatchChunkNth
+    dispatchChunkedFirst dispatchChunkedMore dispatchChunkedNext
     dispatchCollectionCount dispatchCollectionEmpty dispatchCollectionConj
+    dispatchCollectionEntryKey dispatchCollectionEntryVal
     dispatchCollectionGet dispatchCollectionAssoc dispatchCollectionContains
     dispatchCollectionNth dispatchCollectionReduce dispatchCollectionReduceKV
     dispatchCollectionDissoc dispatchCollectionDisj dispatchCollectionPeek
@@ -17,6 +28,7 @@
     reductionView memoizedSequenceView sequenceView unboundedSequenceView
     unreducedValue validateCollectionCount)
   (import "./list.mjs" isPersistentList)
+  (import "./map-internals.mjs" isMapEntry mapEntry)
   (import "./queue.mjs" isPersistentQueue)
   (import "./record.mjs" isRecord)
   (import "./persistent-kind.mjs" isPersistentMapValue isPersistentSetValue)
@@ -451,6 +463,9 @@
   (defconst ISet I_SET)
   (defconst IStack I_STACK)
   (defconst IReversible I_REVERSIBLE)
+  (defconst IMapEntry I_MAP_ENTRY)
+  (defconst IChunk I_CHUNK)
+  (defconst IChunkedSeq I_CHUNKED_SEQ)
 
   (defun count (collection)
     (if (not (nullish? collection))
@@ -478,12 +493,20 @@
   (defun isAssociative (collection)
     (implementsProtocol IAssociative collection))
 
+  (defun isChunk (value)
+    (implementsProtocol IChunk value))
+
+  (defun isChunkedSeq (value)
+    (implementsProtocol IChunkedSeq value))
+
   (defun isCollection (value)
     (or (instance-of-p value SequenceView)
         (instance-of-p value MemoizedSequenceView)
+        (isChunkedSeq value)
         (isPersistentList value)
         (isPersistentQueue value)
         (isPersistentVector value)
+        (isMapEntry value)
         (isPersistentMapValue value)
         (isRecord value)
         (isPersistentSetValue value)))
@@ -506,13 +529,16 @@
   (defun isSequential (value)
     (or (instance-of-p value SequenceView)
         (instance-of-p value MemoizedSequenceView)
+        (isChunkedSeq value)
         (isPersistentList value)
         (isPersistentQueue value)
-        (isPersistentVector value)))
+        (isPersistentVector value)
+        (isMapEntry value)))
 
   (defun isSequence (value)
     (or (instance-of-p value SequenceView)
         (instance-of-p value MemoizedSequenceView)
+        (isChunkedSeq value)
         (isPersistentList value)))
 
   (defun seq (collection)
@@ -740,19 +766,95 @@
   (defun unreduced (value)
     (unreducedValue value))
 
+  (defun entryKey (entry)
+    (if (not (nullish? entry))
+        (let ((direct (aref entry COLLECTION_ENTRY_KEY)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call entry)
+            (dispatchCollectionEntryKey entry)))
+      (dispatchCollectionEntryKey entry)))
+
+  (defun entryVal (entry)
+    (if (not (nullish? entry))
+        (let ((direct (aref entry COLLECTION_ENTRY_VAL)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call entry)
+            (dispatchCollectionEntryVal entry)))
+      (dispatchCollectionEntryVal entry)))
+
+  (defun chunkCount (chunk)
+    (if (not (nullish? chunk))
+        (let ((direct (aref chunk CHUNK_COUNT)))
+          (if (eq (typeof-value direct) "function")
+              (validateCollectionCount (js-call direct :call chunk))
+            (validateCollectionCount (dispatchChunkCount chunk))))
+      (validateCollectionCount (dispatchChunkCount chunk))))
+
+  (defun chunkNth (chunk index &rest __opt)
+    (let ((notFound (aref __opt 0)))
+      (if (not (nullish? chunk))
+          (let ((direct (aref chunk CHUNK_NTH)))
+            (if (eq (typeof-value direct) "function")
+                (if (= (js-length __opt) 0)
+                    (js-call direct :call chunk index)
+                  (js-call direct :call chunk index notFound))
+              (if (= (js-length __opt) 0)
+                  (dispatchChunkNth chunk index)
+                (dispatchChunkNth chunk index notFound))))
+        (if (= (js-length __opt) 0)
+            (dispatchChunkNth chunk index)
+          (dispatchChunkNth chunk index notFound)))))
+  (Object/defineProperty chunkNth "length" (js-object :value 2 :configurable t))
+
+  (defun chunkDropFirst (chunk)
+    (if (not (nullish? chunk))
+        (let ((direct (aref chunk CHUNK_DROP_FIRST)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call chunk)
+            (dispatchChunkDropFirst chunk)))
+      (dispatchChunkDropFirst chunk)))
+
+  (defun chunkedFirst (sequence)
+    (if (not (nullish? sequence))
+        (let ((direct (aref sequence CHUNKED_FIRST)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call sequence)
+            (dispatchChunkedFirst sequence)))
+      (dispatchChunkedFirst sequence)))
+
+  (defun chunkedNext (sequence)
+    (if (not (nullish? sequence))
+        (let ((direct (aref sequence CHUNKED_NEXT)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call sequence)
+            (dispatchChunkedNext sequence)))
+      (dispatchChunkedNext sequence)))
+
+  (defun chunkedMore (sequence)
+    (if (not (nullish? sequence))
+        (let ((direct (aref sequence CHUNKED_MORE)))
+          (if (eq (typeof-value direct) "function")
+              (js-call direct :call sequence)
+            (dispatchChunkedMore sequence)))
+      (dispatchChunkedMore sequence)))
+
   (defun isSequenceView (value)
     (or (instance-of-p value SequenceView)
-        (instance-of-p value MemoizedSequenceView)))
+        (instance-of-p value MemoizedSequenceView)
+        (isChunkedSeq value)))
 
   (defun isReductionView (value)
     (instance-of-p value ReductionView))
 
   (export ICounted IEmptyable IConj ILookup IAssociative IIndexed ISeqable
-          IReduce IKVReduce IMap ISet IStack IReversible
+          IReduce IKVReduce IMap ISet IStack IReversible IMapEntry IChunk IChunkedSeq
           ReductionView MemoizedSequenceView SequenceView
           reductionView memoizedSequenceView sequenceView unboundedSequenceView
           count isCounted isIndexed isSeqable isReducible isReversible isAssociative
           isCollection isList isVector isQueue isMap isSet isSequential isSequence
+          isMapEntry mapEntry entryKey entryVal
+          isChunk isChunkedSeq chunkCount chunkNth chunkDropFirst
+          chunkedFirst chunkedNext chunkedMore
           boundedCount areDistinct empty conj get assoc contains nth seq isEmpty notEmpty
           reduce reduceKV dissoc disj peek pop rseq reduced isReduced unreduced
           isSequenceView isReductionView))

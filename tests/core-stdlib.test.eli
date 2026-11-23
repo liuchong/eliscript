@@ -394,7 +394,7 @@
       (js-call (expect (get (get usage :zipped_result) :count)) :toBe 2)
       (js-call (expect (js-call (get usage :zipped_result) :get "b")) :toBe 20)
       (js-call (expect (get usage :keyed_total)) :toBe 17)
-      (js-call (expect (arr (get usage :removed_map))) :toEqual (js-array (js-array "middle" 2)))
+      (js-call (expect (rows (get usage :removed_map))) :toEqual (js-array (js-array "middle" 2)))
       (js-call (expect (arr (get usage :removed_set))) :toEqual (js-array "middle"))
       (js-call (expect (get usage :vector_stack_top)) :toBe 3)
       (js-call (expect (arr (get usage :vector_stack_rest))) :toEqual (js-array 1 2))

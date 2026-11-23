@@ -53,6 +53,9 @@
   (import "./metadata-internals.mjs"
     METADATA_READ
     METADATA_WITH)
+  (import "./map-internals.mjs"
+    isMapEntry
+    registerMapEntryVectorFactory)
 
   (defun typeof-value (value) (js* "typeof value"))
   (defconst INITIAL_ARRAY (js* "Array"))
@@ -1021,6 +1024,9 @@
       (lambda (self other equal)
         (cond
           ((eq self other) t)
+          ((and (isMapEntry other) (= (get self :count) 2))
+           (and (funcall globalThis/Boolean (funcall equal (js-call self :nth 0) (get other :key)))
+                (funcall globalThis/Boolean (funcall equal (js-call self :nth 1) (get other :val)))))
           ((or (not (instance-of? other PersistentVector))
                (not (= (get other :count) (get self :count))))
            false)
@@ -1062,7 +1068,22 @@
 
   (defun subvector-source (vector) (get vector VECTOR_STATE))
   (defun initialize-subvector (self vector start end metadata)
-    (js-call SUBVECTOR_STATE :set self (Object/freeze (js-object :vector vector :start start :end end :metadata metadata))))
+    (if (js-call SUBVECTOR_STATE :has vector)
+        (let ((parent (js-call SUBVECTOR_STATE :get vector)))
+          (js-call SUBVECTOR_STATE :set self
+            (Object/freeze
+              (js-object
+                :vector (get parent :vector)
+                :start (+ (get parent :start) start)
+                :end (+ (get parent :start) end)
+                :metadata metadata))))
+        (js-call SUBVECTOR_STATE :set self
+          (Object/freeze
+            (js-object
+              :vector vector
+              :start start
+              :end end
+              :metadata metadata)))))
   (defconst PersistentSubVector
     (funcall
       (js* "(Base, token, sourceOf, initialize) => class PersistentSubVector extends Base { constructor(vector, start, end, metadata = null) { const source = sourceOf(vector); super(token, source.count, source.shift, source.root, source.tail, metadata); initialize(this, vector, start, end, metadata); } }")
@@ -1188,7 +1209,27 @@
               (get self :count)))))
     (define-unary-rest-method subproto COLLECTION_REDUCE "[eliscript.collection.reduce]"
       (lambda (self reducer initial)
-        (apply reduceIterable self reducer initial)))
+        (unless (callable? reducer)
+          (throw (new globalThis/TypeError "collection reducer must be a function")))
+        (let* ((state (js-call SUBVECTOR_STATE :get self))
+               (root (get state :vector))
+               (cursor (get state :start))
+               (limit (get state :end))
+               (result undefined)
+               (early false))
+          (if (> (js-length initial) 0)
+              (setq result (aref initial 0))
+              (if (>= cursor limit)
+                  (throw (new globalThis/TypeError "cannot reduce an empty collection without an initial value"))
+                  (setq result (js-call root :nth cursor)
+                        cursor (+ cursor 1))))
+          (while (and (< cursor limit) (not early))
+            (setq result (funcall reducer result (js-call root :nth cursor)))
+            (if (isReducedValue result)
+                (setq result (unreducedValue result)
+                      early t)
+                (setq cursor (+ cursor 1))))
+          result)))
     (define-binary-method subproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]"
       (lambda (self reducer initial)
         (let ((state (js-call SUBVECTOR_STATE :get self))
@@ -1229,6 +1270,9 @@
 
   (defun persistentVector (&rest values)
     (js-call PersistentVector :from values))
+
+  (registerMapEntryVectorFactory persistentVector
+    (lambda (value) (instance-of? value PersistentVector)))
 
   (defun subvec (vector start &rest __opt)
     (unless (instance-of? vector PersistentVector)

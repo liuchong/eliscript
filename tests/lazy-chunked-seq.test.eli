@@ -1,0 +1,187 @@
+(module tests.lazy-chunked-seq.test
+  (import "bun:test" expect test)
+  (import "../runtime/core/collection.mjs"
+    IChunk
+    IChunkedSeq
+    chunkCount
+    chunkDropFirst
+    chunkNth
+    chunkedFirst
+    chunkedMore
+    chunkedNext
+    count
+    isChunk
+    isChunkedSeq
+    isCollection
+    isSequence
+    isSequenceView
+    isSequential
+    seq)
+  (import "../runtime/core/collection.mjs" :as C)
+  (import "../runtime/core/lazy-sequence.mjs"
+    CHUNK_SIZE
+    ArrayChunk
+    ChunkBuffer
+    ChunkedCons
+    arrayChunk
+    chunkAppend
+    chunkBuffer
+    chunkFromBuffer
+    chunkedCons
+    chunkedRange
+    chunkedRepeat
+    isLazySequence
+    isLazySequenceRealized
+    lazyDrop
+    lazyFilter
+    lazyKeep
+    lazyMap
+    lazySequence
+    lazyTake
+    realizeLazySequence
+    realizedLazySequenceCount)
+  (import "../runtime/core/list.mjs" EMPTY_LIST)
+  (import "../runtime/core/sequence.mjs" first next nthNext nthRest prepend range repeat rest take)
+  (import "../runtime/core/collection-internals.mjs" unboundedSequenceView)
+
+  (defun be (actual expected) (js-call (expect actual) :toBe expected))
+  (defun same (actual expected) (js-call (expect actual) :toEqual expected))
+  (defun at-most (actual limit) (js-call (expect actual) :toBeLessThanOrEqual limit))
+  (defun raises (fn &optional msg)
+    (if (nullish? msg)
+        (js-call (expect fn) :toThrow)
+        (js-call (expect fn) :toThrow msg)))
+
+  (test "ArrayChunk, ChunkBuffer, and ChunkedCons implement IChunk and IChunkedSeq" (lambda ()
+    (be CHUNK_SIZE 32)
+    (let ((buf (chunkBuffer 4)))
+      (chunkAppend buf 10)
+      (chunkAppend buf 20)
+      (chunkAppend buf 30)
+      (be (get buf :count) 3)
+      (let ((c (chunkFromBuffer buf)))
+        (be (isChunk c) t)
+        (be (= (js* "c instanceof ArrayChunk") t) t)
+        (be (chunkCount c) 3)
+        (be (chunkNth c 0) 10)
+        (be (chunkNth c 2) 30)
+        (be (chunkNth c 9 :nf) :nf)
+        (raises (lambda () (chunkNth c 5)) globalThis.RangeError)
+        (let ((dropped (chunkDropFirst c)))
+          (be (chunkCount dropped) 2)
+          (be (chunkNth dropped 0) 20)
+          (be (chunkCount c) 3)
+          (let* ((more (arrayChunk (js-array 40 50)))
+                 (cs (chunkedCons c (chunkedCons more nil))))
+            (be (= (js* "cs instanceof ChunkedCons") t) t)
+            (be (isChunkedSeq cs) t)
+            (be (isSequence cs) t)
+            (be (isSequential cs) t)
+            (be (isCollection cs) t)
+            (be (count cs) 5)
+            (be (chunkNth (chunkedFirst cs) 0) 10)
+            (be (chunkCount (chunkedFirst (chunkedNext cs))) 2)
+            (be (chunkedNext (chunkedNext cs)) nil)
+            (be (chunkedMore (chunkedNext cs)) EMPTY_LIST)
+            (same (Array/from cs) (js-array 10 20 30 40 50))))
+        (raises (lambda () (chunkAppend buf 99)) "already been converted")))))
+
+  (test "range and repeat are chunked seqs enforcing bounded chunk evaluation <= 32" (lambda ()
+    (let ((r (range 1000))
+          (inf (range))
+          (rep (repeat 70 "z"))
+          (calls 0))
+      (be (isChunkedSeq r) t)
+      (be (isSequenceView r) t)
+      (be (isSequence r) t)
+      (be (count r) 1000)
+      (be (count rep) 70)
+      (be (isChunkedSeq inf) t)
+      (be (seq inf) inf)
+      (raises (lambda () (count inf)) "unbounded sequence does not have a finite count")
+      (let ((mapped (lazyMap (lambda (n) (setq calls (1+ calls)) (* n 10)) r)))
+        (be (isChunkedSeq mapped) t)
+        (be (isLazySequence mapped) t)
+        (be (isLazySequenceRealized mapped) false)
+        (be calls 0)
+        (be (first mapped) 0)
+        (at-most calls 32)
+        (be calls 32)
+        (be (isLazySequenceRealized mapped) t)
+        (be (realizedLazySequenceCount mapped) 32)
+        ;; Reading remaining items inside chunk 0 reuses memoized chunk with 0 extra calls
+        (same (Array/from (take 10 mapped)) (js-array 0 10 20 30 40 50 60 70 80 90))
+        (be calls 32)
+        ;; Crossing to item 32 triggers chunk 1 (calls -> 64)
+        (be (first (nthNext 32 mapped)) 320)
+        (be calls 64))
+      (let ((filter-calls 0))
+        (let ((filtered (lazyFilter (lambda (n) (setq filter-calls (1+ filter-calls)) (= (% n 5) 0)) r)))
+          (be (first filtered) 0)
+          (at-most filter-calls 32)
+          (be filter-calls 32)))
+      (let ((keep-calls 0))
+        (let ((kept (lazyKeep (lambda (n) (setq keep-calls (1+ keep-calls)) (when (= (% n 4) 0) (+ n 100))) (range 100))))
+          (be (first kept) 100)
+          (at-most keep-calls 32)
+          (same (Array/from (take 3 kept)) (js-array 100 104 108))))
+      ;; Combining lazyDrop before lazyMap skips chunk 0 of source without invoking f on 0..31
+      (let ((drop-map-calls 0))
+        (let ((skipped (lazyMap (lambda (n) (setq drop-map-calls (1+ drop-map-calls)) n)
+                                (lazyDrop 35 (range 1000)))))
+          (be (first skipped) 35)
+          (at-most drop-map-calls 29)))
+      ;; lazyTake limits realized elements before downstream map
+      (let ((take-calls 0))
+        (let ((taken (lazyMap (lambda (n) (setq take-calls (1+ take-calls)) (* n 2))
+                              (lazyTake 5 (range 1000)))))
+          (same (Array/from taken) (js-array 0 2 4 6 8))
+          (be take-calls 5)))
+      ;; Slice/rest/prepend preserve chunked behavior
+      (be (first (rest (range 50))) 1)
+      (be (isChunkedSeq (rest (range 50))) t)
+      (be (isChunkedSeq (prepend -1 (range 5))) t)
+      (same (Array/from (prepend -1 (range 3))) (js-array -1 0 1 2)))))
+
+  (test "non-chunked lazySequence preserves single-element pull granularity" (lambda ()
+    (let* ((pulls 0)
+           (source (lazySequence (lambda ()
+                     (let ((v 1))
+                       (unboundedSequenceView (lambda ()
+                         (js-object :next (lambda ()
+                           (setq pulls (1+ pulls))
+                           (let ((cur v)) (setq v (1+ v)) (js-object :value cur :done false))))))))))
+           (out (lazyTake 1 (lazyFilter (lambda (x) (= (% x 2) 0)) (lazyMap (lambda (x) (* x 3)) source)))))
+      (be (isChunkedSeq out) false)
+      (be pulls 0)
+      (same (Array/from out) (js-array 6))
+      (be pulls 2))))
+
+  (test "realizeLazySequence handles chunked streams completely" (lambda ()
+    (let ((seq-val (lazyMap (lambda (x) (+ x 1)) (chunkedRange 40))))
+      (realizeLazySequence seq-val)
+      (be (isLazySequenceRealized seq-val) t)
+      (be (C/reduce seq-val (lambda (a b) (+ a b)) 0) 820)
+      (be (count (chunkedRepeat 3 "x")) 3)
+      (be (chunkedRange 5 1) nil)
+      (be (chunkedRepeat 0 "x") nil))))
+
+  (test "chunkedRange and non-chunked lazyMap edge cases (negative/fractional step, empty, single pull)" (lambda ()
+    (same (Array/from (range 5 0 -2)) (js-array 5 3 1))
+    (be (range 1 5 -1) nil)
+    (be (range 5 1 1) nil)
+    (same (Array/from (range 0 1 0.5)) (js-array 0 0.5))
+    (be (repeat 0 "x") nil)
+    (let* ((pulls 0)
+           (single (lazySequence (lambda ()
+                     (let ((n 0))
+                       (unboundedSequenceView (lambda ()
+                         (js-object :next (lambda ()
+                           (setq pulls (1+ pulls) n (1+ n))
+                           (js-object :value n :done false)))))))))
+           (mapped (lazyMap (lambda (x) (* x 10)) single)))
+      (be (isChunkedSeq mapped) false)
+      (be pulls 0)
+      (be (first mapped) 10)
+      (be pulls 1))))
+)

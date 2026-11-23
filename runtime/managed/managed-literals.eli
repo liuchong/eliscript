@@ -28,7 +28,7 @@
     read-protocol-operations-owner read-protocol-method-owner protocol-method)
   (import "./managed-transient-state.eli"
     managed-transient-vector-new managed-transient-vector-conj managed-transient-vector-assoc managed-transient-vector-persistent
-    managed-transient-map-new managed-transient-map-assoc managed-transient-map-dissoc managed-transient-map-persistent
+    managed-transient-map-new managed-transient-map-get managed-transient-map-assoc managed-transient-map-dissoc managed-transient-map-persistent
     managed-transient-set-new managed-transient-set-conj managed-transient-set-disj managed-transient-set-persistent)
   (import-portable "./managed-vector-view-state.eli"
     managed-vector-view-state? managed-vector-view-state-make managed-vector-view-state-vector
@@ -1686,6 +1686,21 @@
             (put acc-desc :get undefined)
             (put acc-desc :set undefined))
           (literal-install-cached-getter prototype (get globalThis/Symbol :toStringTag) (ensure-shared-to-string-tag))
+          (when (= type 3)
+            (literal-install-receiver-method prototype "get" "get" 1
+              (lambda (receiver key &rest args)
+                (let ((record (literal-transient-record receiver)))
+                  (unless (= (aref record 0) 3)
+                    (literal-fail "incompatible transient collection receiver"))
+                  (let ((not-found (if (= (js-length args) 0) nil (aref args 0))))
+                    (managed-transient-map-get (aref record 1) key not-found)))))
+            (literal-install-receiver-method prototype "has" "has" 1
+              (lambda (receiver key)
+                (let ((record (literal-transient-record receiver)))
+                  (unless (= (aref record 0) 3)
+                    (literal-fail "incompatible transient collection receiver"))
+                  (let ((missing (js-object)))
+                    (not (eq (managed-transient-map-get (aref record 1) key missing) missing)))))))
           (managed-literal-bind-transient-type type constructor literal-protocol-dispatch)
           (setq literal-prototypes-ready-mask (bit-or literal-prototypes-ready-mask bit))
           ;; Installation for this type is complete; release the temporary

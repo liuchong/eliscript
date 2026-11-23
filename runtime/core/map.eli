@@ -11,10 +11,17 @@
     mapDissoc
     mapDissocTransient
     mapEntries
+    mapEntry
     mapFind
     mapHash
     recordInvalidTransientMapCall
     recordTransientMapPersistent)
+  (import "./array-map.mjs"
+    EMPTY_ARRAY_MAP
+    PersistentArrayMap
+    TransientArrayMap
+    isPersistentArrayMap
+    registerArrayMapPromoter)
   (import "./value-internals.mjs"
     VALUE_EQUAL
     VALUE_HASH
@@ -108,13 +115,15 @@
       root
       (if (undefined? metadata) nil metadata)))
 
-  (defconst EMPTY_MAP
+  (defconst EMPTY_MAP EMPTY_ARRAY_MAP)
+
+  (defconst EMPTY_HASH_MAP
     (make-map 0 EMPTY_BITMAP_NODE))
 
   (defun empty-map-with-metadata (metadata)
     (if (eq metadata nil)
         EMPTY_MAP
-        (make-map 0 EMPTY_BITMAP_NODE metadata)))
+        (js-call (aref EMPTY_MAP METADATA_WITH) :call EMPTY_MAP metadata)))
 
   (defun initialize-transient-map (self token map)
     (unless (and (eq token TRANSIENT_MAP_CONSTRUCTOR_TOKEN) (funcall instance-of? map PersistentHashMap))
@@ -148,6 +157,10 @@
       2))
 
   (let ((tproto (get TransientHashMap :prototype)))
+    (define-getter tproto "count" "count"
+      (lambda (self) (get (active-transient-map-state self) :count)))
+    (define-getter tproto "size" "size"
+      (lambda (self) (get (active-transient-map-state self) :count)))
     (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
       (lambda (self entry)
         (let ((pair (readCollectionEntry entry)))
@@ -157,6 +170,9 @@
         (let ((not-found (if (= (js-length args) 0) nil (get args 0)))
               (state (active-transient-map-state self)))
           (mapFind (get state :root) (mapHash key) key not-found))))
+    (define-method tproto "has" "has" 1
+      (lambda (self key)
+        (not (eq (js-call self :get key MAP_NOT_FOUND) MAP_NOT_FOUND))))
     (define-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]" 2
       (lambda (self key value)
         (let* ((state (active-transient-map-state self))
@@ -236,14 +252,17 @@
       (lambda (_self) EMPTY_MAP))
     (define-method PersistentHashMap "from" "from" 1
       (lambda (_self entries)
-        (if (funcall instance-of? entries PersistentHashMap)
+        (if (and (funcall instance-of? entries PersistentHashMap)
+                 (not (isPersistentArrayMap entries)))
             entries
-            (let ((result EMPTY_MAP))
+            (let ((result EMPTY_HASH_MAP))
               (for-each-iterable entries
                 (lambda (entry)
                   (let ((pair (readCollectionEntry entry)))
                     (setq result (js-call result :assoc (get pair 0) (get pair 1))))))
-              result))))
+              (if (= (get result :count) 0)
+                  EMPTY_MAP
+                  result)))))
     (define-getter proto "count" "count"
       (lambda (self) (get (aref self MAP_STATE) :count)))
     (define-getter proto "size" "size"
@@ -282,7 +301,7 @@
       (lambda (self)
         (mapped-entries-iterator
           (get (aref self MAP_STATE) :root)
-          (lambda (entry) (Object/freeze (js-array (get entry :key) (get entry :value)))))))
+          (lambda (entry) (mapEntry (get entry :key) (get entry :value))))))
     (define-generator-method proto "keys" "keys" 0
       (lambda (self)
         (mapped-entries-iterator
@@ -380,6 +399,53 @@
       (lambda (self) (js-call self :entries)))
     (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
       (lambda (_self) "EliscriptPersistentHashMap")))
+
+  (defun promote-array-map-to-hamt (items extra-key extra-value metadata)
+    (let ((root EMPTY_BITMAP_NODE)
+          (count 0)
+          (index 0)
+          (limit (js-length items)))
+      (while (< index limit)
+        (let* ((k (aref items index))
+               (v (aref items (+ index 1)))
+               (res (mapAssoc root (mapHash k) k v)))
+          (when (get res :changed)
+            (setq root (get res :item)
+                  count (+ count (if (get res :added) 1 0)))))
+        (setq index (+ index 2)))
+      (let ((res (mapAssoc root (mapHash extra-key) extra-key extra-value)))
+        (when (get res :changed)
+          (setq root (get res :item)
+                count (+ count (if (get res :added) 1 0)))))
+      (make-map count root metadata)))
+
+  (defun promote-transient-array-map-to-hamt (items extra-key extra-value metadata _source)
+    (let ((owner (Object/freeze (js-object)))
+          (root EMPTY_BITMAP_NODE)
+          (count 0)
+          (index 0)
+          (limit (js-length items)))
+      (while (< index limit)
+        (let* ((k (aref items index))
+               (v (aref items (+ index 1)))
+               (res (mapAssocTransient root owner (mapHash k) k v)))
+          (when (get res :changed)
+            (setq root (get res :item)
+                  count (+ count (if (get res :added) 1 0)))))
+        (setq index (+ index 2)))
+      (let ((res (mapAssocTransient root owner (mapHash extra-key) extra-key extra-value)))
+        (when (get res :changed)
+          (setq root (get res :item)
+                count (+ count (if (get res :added) 1 0)))))
+      (let ((tmap (make-transient-map (make-map count root metadata))))
+        (let ((state (aref tmap TRANSIENT_MAP_STATE)))
+          (put state "owner" owner)
+          (put state "changed" t))
+        tmap)))
+
+  (registerArrayMapPromoter promote-array-map-to-hamt promote-transient-array-map-to-hamt)
+  (Object/setPrototypeOf (get PersistentArrayMap :prototype) (get PersistentHashMap :prototype))
+  (Object/setPrototypeOf (get TransientArrayMap :prototype) (get TransientHashMap :prototype))
 
   (defun persistentHashMap (&rest entries)
     (js-call PersistentHashMap :from entries))

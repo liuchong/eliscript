@@ -8,6 +8,8 @@
     keyword
     qualifiedIdentifierName)
   (import "./map.mjs" EMPTY_MAP PersistentHashMap isPersistentHashMap)
+  (import "./array-map.mjs" PersistentArrayMap)
+  (import "./map-internals.mjs" PersistentMapEntry)
   (import "./list.mjs" PersistentList)
   (import "./metadata.mjs" meta withMeta)
   (import "./queue.mjs" PersistentQueue persistentQueue)
@@ -207,6 +209,8 @@
   (extendProtocolType IPrint EliscriptSymbol (js-object :print print-symbol))
   (extendProtocolType IPrint PersistentList (js-object :print print-list))
   (extendProtocolType IPrint PersistentVector (js-object :print print-vector))
+  (extendProtocolType IPrint PersistentMapEntry (js-object :print print-vector))
+  (extendProtocolType IPrint PersistentArrayMap (js-object :print print-map))
   (extendProtocolType IPrint PersistentHashMap (js-object :print print-map))
   (extendProtocolType IPrint PersistentHashSet (js-object :print print-set))
   (extendProtocolType IPrint PersistentSortedMap (js-object :print print-map))
@@ -363,7 +367,7 @@
 
   (defun reader-map (reader depth start)
     (reader-advance reader)
-    (let ((editable (transient EMPTY_MAP))
+    (let ((entries (js-array))
           (seen EMPTY_MAP)
           (done false))
       (while (not done)
@@ -384,8 +388,10 @@
                (when (js-call seen :has key)
                  (reader-fail reader "duplicate map key" position))
                (setq seen (js-call seen :assoc key t))
-               (assocBang editable key item))))))
-      (persistentBang editable)))
+               (js-call entries :push (js-array key item)))))))
+      (if (= (js-length entries) 0)
+          EMPTY_MAP
+          (js-call PersistentHashMap :from entries))))
 
   (defun reader-set (reader depth start)
     (reader-advance reader)

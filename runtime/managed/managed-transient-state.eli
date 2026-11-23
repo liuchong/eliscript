@@ -283,6 +283,38 @@
                   (js-call (get editable :entries) :splice index 1)
                   (managed-transient-map-removal editable t)))))))))
 
+  (defun managed-transient-map-find-item (node shift hash key equal-key not-found)
+    (cond
+      ((nullish? node) not-found)
+      ((= (get node :kind) "entry")
+        (if (managed-transient-map-same-entry node hash key equal-key)
+          (get node :value)
+          not-found))
+      ((= (get node :kind) "bitmap")
+        (let* ((bit (managed-transient-map-bit hash shift))
+               (bitmap (get node :bitmap)))
+          (if (= (bit-and bitmap bit) 0)
+            not-found
+            (managed-transient-map-find-item
+              (get (get node :items) (managed-transient-map-packed bitmap bit))
+              (+ shift 5) hash key equal-key not-found))))
+      ((= (get node :kind) "array")
+        (let ((child (get (get node :children) (managed-transient-map-index hash shift))))
+          (if (nullish? child)
+            not-found
+            (managed-transient-map-find-item child (+ shift 5) hash key equal-key not-found))))
+      (t
+        (if (/= (get node :hash) hash)
+          not-found
+          (let ((index (managed-transient-map-find-collision (get node :entries) key equal-key)))
+            (if (< index 0) not-found (get (get (get node :entries) index) :value)))))))
+
+  (defun managed-transient-map-get (state key not-found)
+    (managed-transient-active state "hash map")
+    (let* ((fns (get state :fns))
+           (hash (uint32 (funcall (get fns 0) key))))
+      (managed-transient-map-find-item (get state :root) 0 hash key (get fns 1) not-found)))
+
   (defun managed-transient-map-new (map)
     (unless (persistent-map? map)
       (throw (new globalThis/TypeError "transient hash maps must be created from a persistent hash map")))
@@ -348,6 +380,6 @@
       (put state :active false) result))
 
   (export managed-transient-vector-new managed-transient-vector-conj managed-transient-vector-assoc
-    managed-transient-vector-persistent managed-transient-map-new managed-transient-map-assoc
+    managed-transient-vector-persistent managed-transient-map-new managed-transient-map-get managed-transient-map-assoc
     managed-transient-map-dissoc managed-transient-map-persistent managed-transient-set-new
     managed-transient-set-conj managed-transient-set-disj managed-transient-set-persistent))

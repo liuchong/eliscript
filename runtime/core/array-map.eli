@@ -1,0 +1,538 @@
+(module eliscript.runtime.core.array-map
+  (import "./map-internals.mjs"
+    MAP_NOT_FOUND
+    mapEntry
+    recordInvalidTransientMapCall
+    recordTransientMapPersistent)
+  (import "./value.mjs" equalValues)
+  (import "./value-internals.mjs"
+    VALUE_EQUAL
+    VALUE_HASH
+    finishHash
+    mixHash
+    unorderedCollectionHash)
+  (import "./collection-internals.mjs"
+    COLLECTION_COUNT
+    COLLECTION_EMPTY
+    COLLECTION_CONJ
+    COLLECTION_GET
+    COLLECTION_ASSOC
+    COLLECTION_CONTAINS
+    COLLECTION_DISSOC
+    COLLECTION_SEQ
+    COLLECTION_REDUCE
+    COLLECTION_REDUCE_KV
+    isReducedValue
+    reduceIterable
+    readCollectionEntry
+    sequenceView
+    unreducedValue)
+  (import "./transient-internals.mjs"
+    EDITABLE_TRANSIENT
+    TRANSIENT_ASSOC
+    TRANSIENT_CONJ
+    TRANSIENT_DISSOC
+    TRANSIENT_PERSISTENT)
+  (import "./metadata-internals.mjs"
+    METADATA_READ
+    METADATA_WITH)
+  (import "./persistent-kind.mjs"
+    PERSISTENT_MAP_HAS_VALUE_KEY
+    PERSISTENT_MAP_KIND
+    persistentMapValueEqual)
+
+  (defun typeof-value (value) (js* "typeof value"))
+  (defun instance-of? (value Constructor) (js* "value instanceof Constructor"))
+  (defconst host-generator (js* "(create) => function* (...args) { yield* create(this, ...args); }"))
+
+  (defconst ARRAY_MAP_THRESHOLD 8)
+  (defconst ARRAY_MAP_MAX_SLOTS (* ARRAY_MAP_THRESHOLD 2))
+  (defconst MAP_HASH_TAG 1821285621)
+  (defconst MAP_ENTRY_HASH_TAG 982610667)
+
+  (defconst ARRAY_MAP_STATE (funcall globalThis/Symbol "eliscript.array-map.state"))
+  (defconst ARRAY_MAP_CONSTRUCTOR_TOKEN (funcall globalThis/Symbol "eliscript.array-map.constructor"))
+  (defconst TRANSIENT_ARRAY_MAP_STATE (funcall globalThis/Symbol "eliscript.array-map.transient-state"))
+  (defconst TRANSIENT_ARRAY_MAP_TOKEN (funcall globalThis/Symbol "eliscript.array-map.transient-constructor"))
+
+  (defvar promote-persistent-fn undefined)
+  (defvar promote-transient-fn undefined)
+
+  (defun registerArrayMapPromoter (persistent-promoter transient-promoter)
+    "Registers HAMT promotion callbacks supplied by the hash-map module."
+    (setq promote-persistent-fn persistent-promoter
+          promote-transient-fn transient-promoter)
+    undefined)
+
+  (defun callable? (value)
+    (= (funcall typeof-value value) "function"))
+
+  (defun method (implementation name arity)
+    (let ((function (funcall
+                      (js* "(fn, name) => ({ [name](...args) { return fn(this, ...args); } })[name]")
+                      implementation
+                      name)))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun define-method (target key name arity implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :value (method implementation name arity)
+        :writable t
+        :configurable t)))
+
+  (defun define-getter (target key name implementation)
+    (Object/defineProperty
+      target
+      key
+      (js-object
+        :get (method implementation (str "get " name) 0)
+        :configurable t)))
+
+  (defun define-generator-method (target key name arity implementation)
+    (let ((gen-fn (funcall host-generator implementation)))
+      (Object/defineProperty gen-fn "name" (js-object :value name :configurable t))
+      (Object/defineProperty gen-fn "length" (js-object :value arity :configurable t))
+      (Object/defineProperty target key
+        (js-object :value gen-fn :writable t :configurable t))))
+
+  (defun index-of-key (items length key)
+    (let ((index 0)
+          (found -1))
+      (while (and (< index length) (< found 0))
+        (when (equalValues (aref items index) key)
+          (setq found index))
+        (setq index (+ index 2)))
+      found))
+
+  (defun insert-or-update-pair (items key value)
+    (let* ((length (js-length items))
+           (idx (index-of-key items length key)))
+      (if (>= idx 0)
+          (put items (+ idx 1) value)
+          (progn
+            (js-call items :push key)
+            (js-call items :push value)))))
+
+  (defun initialize-array-map (self token items metadata)
+    (unless (eq token ARRAY_MAP_CONSTRUCTOR_TOKEN)
+      (throw (new globalThis.TypeError "PersistentArrayMap values must be created with persistentArrayMap or PersistentArrayMap.from")))
+    (Object/freeze items)
+    (put self ARRAY_MAP_STATE
+      (Object/freeze (js-object :count (/ (js-length items) 2) :items items :metadata metadata)))
+    (Object/freeze self))
+
+  (defconst PersistentArrayMap
+    (funcall
+      (js* "(initialize) => class PersistentArrayMap { constructor(token, items, metadata = null) { initialize(this, token, items, metadata); } }")
+      initialize-array-map))
+
+  (defun make-array-map (items &optional metadata)
+    (new PersistentArrayMap
+      ARRAY_MAP_CONSTRUCTOR_TOKEN
+      items
+      (if (undefined? metadata) nil metadata)))
+
+  (defconst EMPTY_ARRAY_MAP
+    (make-array-map (js-array)))
+
+  (defun empty-array-map-with-metadata (metadata)
+    (if (eq metadata nil)
+        EMPTY_ARRAY_MAP
+        (make-array-map (js-array) metadata)))
+
+  (defun promote-array-map (items extra-key extra-value metadata)
+    (unless (callable? promote-persistent-fn)
+      (throw (new globalThis/TypeError "hash map promoter must be registered before upgrading array maps")))
+    (funcall promote-persistent-fn items extra-key extra-value metadata))
+
+  (defun promote-transient-array-map (items extra-key extra-value metadata source)
+    (unless (callable? promote-transient-fn)
+      (throw (new globalThis/TypeError "transient hash map promoter must be registered before upgrading array maps")))
+    (funcall promote-transient-fn items extra-key extra-value metadata source))
+
+  (defun initialize-transient-array-map (self token map)
+    (unless (and (eq token TRANSIENT_ARRAY_MAP_TOKEN) (funcall instance-of? map PersistentArrayMap))
+      (throw (new globalThis/TypeError "transient array maps must be created from a persistent array map")))
+    (let ((source (aref map ARRAY_MAP_STATE)))
+      (put self TRANSIENT_ARRAY_MAP_STATE
+        (js-object
+          :active t
+          :changed false
+          :source map
+          :items (js-call (get source :items) :slice)
+          :metadata (get source :metadata)
+          :promoted nil)))
+    (Object/defineProperty self "__eliscript_transient__"
+      (js-object
+        :enumerable t
+        :get (funcall (js* "(reject) => ({ get() { return reject(); } }).get")
+               (lambda () (throw (new globalThis/TypeError "transient hash maps cannot be serialized"))))))
+    (Object/freeze self))
+
+  (defconst TransientArrayMap
+    (funcall
+      (js* "(initialize) => class TransientArrayMap { constructor(token, map) { initialize(this, token, map); } }")
+      initialize-transient-array-map))
+
+  (defun make-transient-array-map (map)
+    (new TransientArrayMap TRANSIENT_ARRAY_MAP_TOKEN map))
+
+  (defun active-transient-state (map)
+    (let ((state (aref map TRANSIENT_ARRAY_MAP_STATE)))
+      (unless (get state :active)
+        (recordInvalidTransientMapCall)
+        (throw (new globalThis/TypeError "transient hash map is no longer editable")))
+      state))
+
+  (defun pair-hash (key value hash)
+    (finishHash
+      (mixHash (mixHash MAP_ENTRY_HASH_TAG (funcall hash key))
+               (funcall hash value))
+      2))
+
+  (defun for-each-iterable (iterable callback)
+    (let ((iterator-method (if (nil? iterable)
+                               undefined
+                               (aref iterable (get globalThis/Symbol :iterator)))))
+      (unless (callable? iterator-method)
+        (throw (new globalThis/TypeError "value is not iterable")))
+      (let ((iterator (js-call iterator-method :call iterable))
+            (done false))
+        (try
+          (while (not done)
+            (let ((step (js-call iterator :next)))
+              (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (funcall callback (get step :value)))))
+          (finally
+            (when (and (not done) (callable? (get iterator :return)))
+              (js-call iterator :return)))))))
+
+  (defun array-items-iterator (items mode)
+    (let ((index 0)
+          (limit (js-length items)))
+      (let ((iterator
+              (js-object
+                :next (method
+                        (lambda (_self)
+                          (if (>= index limit)
+                              (js-object :value undefined :done t)
+                              (let* ((key (aref items index))
+                                     (val (aref items (+ index 1)))
+                                     (item (cond
+                                             ((= mode 1) key)
+                                             ((= mode 2) val)
+                                             (t (mapEntry key val)))))
+                                (setq index (+ index 2))
+                                (js-object :value item :done false))))
+                        "next"
+                        0))))
+        (put iterator (get globalThis/Symbol :iterator)
+              (method (lambda (self) self) "[Symbol.iterator]" 0))
+        iterator)))
+
+  (let ((tproto (get TransientArrayMap :prototype)))
+    (define-getter tproto "count" "count"
+      (lambda (self)
+        (let ((state (active-transient-state self)))
+          (if (not (nil? (get state :promoted)))
+              (get (get state :promoted) :count)
+              (/ (js-length (get state :items)) 2)))))
+    (define-getter tproto "size" "size"
+      (lambda (self) (get self :count)))
+    (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
+      (lambda (self entry)
+        (let ((pair (readCollectionEntry entry)))
+          (js-call (aref self TRANSIENT_ASSOC) :call self (aref pair 0) (aref pair 1)))))
+    (define-method tproto "get" "get" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (aref args 0)))
+              (state (active-transient-state self)))
+          (if (not (nil? (get state :promoted)))
+              (js-call (get state :promoted) :get key not-found)
+              (let* ((items (get state :items))
+                     (idx (index-of-key items (js-length items) key)))
+                (if (>= idx 0) (aref items (+ idx 1)) not-found))))))
+    (define-method tproto "has" "has" 1
+      (lambda (self key)
+        (not (eq (js-call self :get key MAP_NOT_FOUND) MAP_NOT_FOUND))))
+    (define-method tproto TRANSIENT_ASSOC "[eliscript.transient.assoc]" 2
+      (lambda (self key value)
+        (let ((state (active-transient-state self)))
+          (if (not (nil? (get state :promoted)))
+              (progn
+                (js-call (aref (get state :promoted) TRANSIENT_ASSOC) :call (get state :promoted) key value)
+                self)
+              (let* ((items (get state :items))
+                     (length (js-length items))
+                     (idx (index-of-key items length key)))
+                (cond
+                  ((>= idx 0)
+                   (unless (equalValues (aref items (+ idx 1)) value)
+                     (put items (+ idx 1) value)
+                     (put state "changed" t))
+                   self)
+                  ((< length ARRAY_MAP_MAX_SLOTS)
+                   (js-call items :push key)
+                   (js-call items :push value)
+                   (put state "changed" t)
+                   self)
+                  (t
+                   (put state "promoted"
+                        (promote-transient-array-map items key value (get state :metadata) (get state :source)))
+                   (put state "items" nil)
+                   (put state "changed" t)
+                   self)))))))
+    (define-method tproto TRANSIENT_DISSOC "[eliscript.transient.dissoc]" 1
+      (lambda (self key)
+        (let ((state (active-transient-state self)))
+          (if (not (nil? (get state :promoted)))
+              (progn
+                (js-call (aref (get state :promoted) TRANSIENT_DISSOC) :call (get state :promoted) key)
+                self)
+              (let* ((items (get state :items))
+                     (idx (index-of-key items (js-length items) key)))
+                (when (>= idx 0)
+                  (js-call items :splice idx 2)
+                  (put state "changed" t))
+                self)))))
+    (define-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]" 0
+      (lambda (self)
+        (let ((state (active-transient-state self)))
+          (if (not (nil? (get state :promoted)))
+              (let* ((promoted (get state :promoted))
+                     (result (js-call (aref promoted TRANSIENT_PERSISTENT) :call promoted)))
+                (put state "active" false)
+                result)
+              (let* ((items (get state :items))
+                     (result (cond
+                               ((not (get state :changed)) (get state :source))
+                               ((= (js-length items) 0) (empty-array-map-with-metadata (get state :metadata)))
+                               (t (make-array-map items (get state :metadata))))))
+                (put state "active" false)
+                (recordTransientMapPersistent)
+                result)))))
+    (define-method tproto "toJSON" "toJSON" 0
+      (lambda (_self)
+        (throw (new globalThis/TypeError "transient hash maps cannot be serialized"))))
+    (define-getter tproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptTransientArrayMap")))
+
+  (let ((proto (get PersistentArrayMap :prototype)))
+    (define-method PersistentArrayMap "empty" "empty" 0
+      (lambda (_self) EMPTY_ARRAY_MAP))
+    (define-method PersistentArrayMap "from" "from" 1
+      (lambda (_self entries)
+        (if (funcall instance-of? entries PersistentArrayMap)
+            entries
+            (let ((builder (make-transient-array-map EMPTY_ARRAY_MAP)))
+              (for-each-iterable entries
+                (lambda (entry)
+                  (let ((pair (readCollectionEntry entry)))
+                    (js-call (aref builder TRANSIENT_ASSOC) :call builder (aref pair 0) (aref pair 1)))))
+              (js-call (aref builder TRANSIENT_PERSISTENT) :call builder)))))
+    (define-getter proto "count" "count"
+      (lambda (self) (get (aref self ARRAY_MAP_STATE) :count)))
+    (define-getter proto "size" "size"
+      (lambda (self) (get (aref self ARRAY_MAP_STATE) :count)))
+    (define-method proto "get" "get" 1
+      (lambda (self key &rest args)
+        (let* ((not-found (if (= (js-length args) 0) nil (aref args 0)))
+               (items (get (aref self ARRAY_MAP_STATE) :items))
+               (idx (index-of-key items (js-length items) key)))
+          (if (>= idx 0) (aref items (+ idx 1)) not-found))))
+    (define-method proto "has" "has" 1
+      (lambda (self key)
+        (let ((items (get (aref self ARRAY_MAP_STATE) :items)))
+          (>= (index-of-key items (js-length items) key) 0))))
+    (define-method proto "assoc" "assoc" 2
+      (lambda (self key value)
+        (let* ((state (aref self ARRAY_MAP_STATE))
+               (items (get state :items))
+               (length (js-length items))
+               (metadata (get state :metadata))
+               (idx (index-of-key items length key)))
+          (cond
+            ((>= idx 0)
+             (if (equalValues (aref items (+ idx 1)) value)
+                 self
+                 (let ((copy (js-call items :slice)))
+                   (put copy (+ idx 1) value)
+                   (make-array-map copy metadata))))
+            ((< length ARRAY_MAP_MAX_SLOTS)
+             (let ((copy (js-call items :slice)))
+               (js-call copy :push key)
+               (js-call copy :push value)
+               (make-array-map copy metadata)))
+            (t (promote-array-map items key value metadata))))))
+    (define-method proto "dissoc" "dissoc" 1
+      (lambda (self key)
+        (let* ((state (aref self ARRAY_MAP_STATE))
+               (items (get state :items))
+               (length (js-length items))
+               (idx (index-of-key items length key)))
+          (cond
+            ((< idx 0) self)
+            ((= length 2) (empty-array-map-with-metadata (get state :metadata)))
+            (t
+             (let ((copy (js-call items :slice)))
+               (js-call copy :splice idx 2)
+               (make-array-map copy (get state :metadata))))))))
+    (define-generator-method proto "entries" "entries" 0
+      (lambda (self)
+        (array-items-iterator (get (aref self ARRAY_MAP_STATE) :items) 0)))
+    (define-generator-method proto "keys" "keys" 0
+      (lambda (self)
+        (array-items-iterator (get (aref self ARRAY_MAP_STATE) :items) 1)))
+    (define-generator-method proto "values" "values" 0
+      (lambda (self)
+        (array-items-iterator (get (aref self ARRAY_MAP_STATE) :items) 2)))
+    (define-method proto "reduce" "reduce" 2
+      (lambda (self &rest args)
+        (let ((reducer (aref args 0)))
+          (unless (callable? reducer)
+            (throw (new globalThis/TypeError "persistent hash map reducer must be a function")))
+          (when (< (js-length args) 2)
+            (throw (new globalThis/TypeError "persistent hash map reduce requires an initial value")))
+          (let* ((items (get (aref self ARRAY_MAP_STATE) :items))
+                 (length (js-length items))
+                 (result (aref args 1))
+                 (index 0))
+            (while (< index length)
+              (setq result (funcall reducer result (aref items (+ index 1)) (aref items index) self)
+                    index (+ index 2)))
+            result))))
+    (define-method proto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get self :count)))
+    (define-method proto COLLECTION_EMPTY "[eliscript.collection.empty]" 0
+      (lambda (self) (empty-array-map-with-metadata (get (aref self ARRAY_MAP_STATE) :metadata))))
+    (define-method proto COLLECTION_CONJ "[eliscript.collection.conj]" 1
+      (lambda (self entry)
+        (let ((pair (readCollectionEntry entry)))
+          (js-call self :assoc (aref pair 0) (aref pair 1)))))
+    (define-method proto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self key &rest args)
+        (let ((not-found (if (= (js-length args) 0) nil (aref args 0))))
+          (js-call self :get key not-found))))
+    (define-method proto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2
+      (lambda (self key value) (js-call self :assoc key value)))
+    (define-method proto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1
+      (lambda (self key) (js-call self :has key)))
+    (define-method proto COLLECTION_DISSOC "[eliscript.collection.dissoc]" 1
+      (lambda (self key) (js-call self :dissoc key)))
+    (define-method proto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (if (= (get self :count) 0)
+            nil
+            (sequenceView (lambda () (js-call self :entries)) (get self :count)))))
+    (define-method proto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial)
+        (apply reduceIterable self reducer initial)))
+    (define-method proto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (let* ((items (get (aref self ARRAY_MAP_STATE) :items))
+               (length (js-length items))
+               (result initial)
+               (index 0)
+               (early false))
+          (while (and (< index length) (not early))
+            (setq result (funcall reducer result (aref items index) (aref items (+ index 1))))
+            (if (isReducedValue result)
+                (setq result (unreducedValue result)
+                      early t)
+                (setq index (+ index 2))))
+          result)))
+    (define-method proto EDITABLE_TRANSIENT "[eliscript.transient.editable]" 0
+      (lambda (self) (make-transient-array-map self)))
+    (define-method proto "toMap" "toMap" 0
+      (lambda (self)
+        (let* ((items (get (aref self ARRAY_MAP_STATE) :items))
+               (length (js-length items))
+               (out (new globalThis/Map))
+               (index 0))
+          (while (< index length)
+            (js-call out :set (aref items index) (aref items (+ index 1)))
+            (setq index (+ index 2)))
+          out)))
+    (define-method proto PERSISTENT_MAP_HAS_VALUE_KEY "[eliscript.persistent-map.has-value-key]" 1
+      (lambda (self key) (js-call self :has key)))
+    (define-getter proto PERSISTENT_MAP_KIND "[eliscript.persistent-map.kind]"
+      (lambda (_self) t))
+    (define-method proto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (persistentMapValueEqual self other equal)))
+    (define-method proto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (unorderedCollectionHash
+          self
+          (lambda (entry) (pair-hash (get entry :key) (get entry :val) hash))
+          MAP_HASH_TAG)))
+    (define-method proto METADATA_READ "[eliscript.metadata.read]" 0
+      (lambda (self) (get (aref self ARRAY_MAP_STATE) :metadata)))
+    (define-method proto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (let ((state (aref self ARRAY_MAP_STATE)))
+          (if (eq metadata (get state :metadata))
+              self
+              (make-array-map (get state :items) metadata)))))
+    (define-method proto (get globalThis/Symbol :iterator) "[Symbol.iterator]" 0
+      (lambda (self) (js-call self :entries)))
+    (define-getter proto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentArrayMap")))
+
+  (defun persistentArrayMap (&rest entries)
+    (js-call PersistentArrayMap :from entries))
+
+  (defun arrayMapFromKeyValues (key-values)
+    (let ((arg-length (js-length key-values)))
+      (unless (= (mod arg-length 2) 0)
+        (throw (new globalThis/TypeError "hash-map expects complete key/value pairs")))
+      (if (= arg-length 0)
+          EMPTY_ARRAY_MAP
+          (let ((items (js-array))
+                (index 0)
+                (promoted nil))
+            (while (and (< index arg-length) (nil? promoted))
+              (let ((key (aref key-values index))
+                    (value (aref key-values (+ index 1))))
+                (if (< (js-length items) ARRAY_MAP_MAX_SLOTS)
+                    (insert-or-update-pair items key value)
+                    (let ((existing (index-of-key items (js-length items) key)))
+                      (if (>= existing 0)
+                          (put items (+ existing 1) value)
+                          (setq promoted (promote-array-map items key value nil))))))
+              (setq index (+ index 2)))
+            (if (not (nil? promoted))
+                (progn
+                  (while (< index arg-length)
+                    (setq promoted (js-call promoted :assoc
+                                     (aref key-values index)
+                                     (aref key-values (+ index 1)))
+                          index (+ index 2)))
+                  promoted)
+                (make-array-map items nil))))))
+
+  (defun isPersistentArrayMap (value)
+    (funcall instance-of? value PersistentArrayMap))
+
+  (defun readArrayMapState (value)
+    (if (nil? value) undefined (aref value ARRAY_MAP_STATE)))
+
+  (defun readTransientArrayMapState (value)
+    (if (nil? value) undefined (aref value TRANSIENT_ARRAY_MAP_STATE)))
+
+  (export
+    ARRAY_MAP_THRESHOLD
+    PersistentArrayMap
+    TransientArrayMap
+    EMPTY_ARRAY_MAP
+    persistentArrayMap
+    arrayMapFromKeyValues
+    isPersistentArrayMap
+    registerArrayMapPromoter
+    readArrayMapState
+    readTransientArrayMapState))

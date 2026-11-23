@@ -427,7 +427,7 @@ test-core: check-contracts
 		./tests/persistent-tree-walk.test.mjs \
 		./tests/persistent-zipper.test.mjs \
 		./tests/persistent-sorted.test.mjs \
-		./tests/lazy-sequence.test.mjs \
+		./tests/lazy-sequence.test.mjs ./tests/lazy-chunked-seq.test.mjs \
 		./tests/regex.test.mjs \
 		./tests/core-expression-forms.test.mjs \
 		./tests/interop-js.test.mjs \
@@ -447,6 +447,8 @@ test-core: check-contracts
 		./tests/core-stdlib.test.mjs \
 		./tests/persistent-list.test.mjs ./tests/persistent-queue.test.mjs ./tests/persistent-vector.test.mjs ./tests/value-semantics.test.mjs \
 		./tests/persistent-map.test.mjs ./tests/persistent-set.test.mjs \
+		./tests/collection-array-map.test.mjs ./tests/collection-map-entry.test.mjs \
+		./tests/collection-transient-subvec.test.mjs \
 		./tests/record.test.mjs ./tests/type.test.mjs \
 		./tests/core-syntax.test.mjs \
 		./tests/review-repairs.test.mjs

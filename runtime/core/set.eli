@@ -1,7 +1,8 @@
 (module eliscript.runtime.core.set
   (import "./map.mjs"
     EMPTY_MAP
-    PersistentHashMap)
+    isPersistentHashMap
+    persistentHashMap)
   (import "./set-internals.mjs"
     SET_CONSTRUCTOR_TOKEN
     SET_PRESENT
@@ -29,6 +30,7 @@
     EDITABLE_TRANSIENT
     TRANSIENT_ASSOC
     TRANSIENT_CONJ
+    TRANSIENT_DISJ
     TRANSIENT_DISSOC
     TRANSIENT_PERSISTENT)
   (import "./metadata-internals.mjs"
@@ -80,7 +82,7 @@
         (js-object :value gen-fn :writable t :configurable t))))
 
   (defun initialize-persistent-set (self token map metadata)
-    (unless (and (eq token SET_CONSTRUCTOR_TOKEN) (funcall instance-of? map PersistentHashMap))
+    (unless (and (eq token SET_CONSTRUCTOR_TOKEN) (isPersistentHashMap map))
       (throw (new globalThis.TypeError "PersistentHashSet values must be created with persistentHashSet or PersistentHashSet.from")))
     (put self SET_STATE (Object/freeze (js-object :map map :metadata metadata)))
     (Object/freeze self))
@@ -132,6 +134,15 @@
         (js-call PersistentHashSet :from values)))
 
   (let ((tproto (get TransientHashSet :prototype)))
+    (define-getter tproto "count" "count"
+      (lambda (self) (get (get (active-transient-set-state self) :map) :count)))
+    (define-getter tproto "size" "size"
+      (lambda (self) (get (get (active-transient-set-state self) :map) :count)))
+    (define-method tproto "has" "has" 1
+      (lambda (self value)
+        (js-call (get (active-transient-set-state self) :map) :has value)))
+    (define-method tproto "contains" "contains" 1
+      (lambda (self value) (js-call self :has value)))
     (define-method tproto TRANSIENT_CONJ "[eliscript.transient.conj]" 1
       (lambda (self value)
         (let* ((state (active-transient-set-state self))
@@ -139,6 +150,12 @@
           (js-call (aref map TRANSIENT_ASSOC) :call map value SET_PRESENT)
           self)))
     (define-method tproto TRANSIENT_DISSOC "[eliscript.transient.dissoc]" 1
+      (lambda (self value)
+        (let* ((state (active-transient-set-state self))
+               (map (get state :map)))
+          (js-call (aref map TRANSIENT_DISSOC) :call map value)
+          self)))
+    (define-method tproto TRANSIENT_DISJ "[eliscript.transient.disj]" 1
       (lambda (self value)
         (let* ((state (active-transient-set-state self))
                (map (get state :map)))
@@ -204,11 +221,15 @@
       (lambda (_self values)
         (if (funcall instance-of? values PersistentHashSet)
             values
-            (let ((result EMPTY_SET))
+            (let ((builder nil))
               (for-each-iterable values
                 (lambda (value)
-                  (setq result (js-call result :conj value))))
-              result))))
+                  (if (nil? builder)
+                      (setq builder (make-transient-set (make-set (persistentHashMap (js-array value SET_PRESENT)))))
+                      (js-call (aref builder TRANSIENT_CONJ) :call builder value))))
+              (if (nil? builder)
+                  EMPTY_SET
+                  (js-call (aref builder TRANSIENT_PERSISTENT) :call builder))))))
     (define-getter proto "count" "count"
       (lambda (self) (get (get (aref self SET_STATE) :map) :count)))
     (define-getter proto "size" "size"
@@ -233,14 +254,16 @@
             (t (make-set map (get state :metadata)))))))
     (define-method proto "union" "union" 0
       (lambda (self &rest collections)
-        (let ((result self)
-              (index 0)
-              (limit (js-length collections)))
-          (while (< index limit)
-            (for-each-iterable (get collections index)
-              (lambda (value) (setq result (js-call result :conj value))))
-            (setq index (+ index 1)))
-          result)))
+        (if (= (js-length collections) 0)
+            self
+            (let ((builder (make-transient-set self))
+                  (index 0)
+                  (limit (js-length collections)))
+              (while (< index limit)
+                (for-each-iterable (get collections index)
+                  (lambda (value) (js-call (aref builder TRANSIENT_CONJ) :call builder value)))
+                (setq index (+ index 1)))
+              (js-call (aref builder TRANSIENT_PERSISTENT) :call builder)))))
     (define-method proto "intersection" "intersection" 0
       (lambda (self &rest collections)
         (let ((result self)
@@ -253,27 +276,30 @@
                   (setq halted t)
                   (let* ((candidates (if (<= (get result :count) (get other :count)) result other))
                          (membership (if (eq candidates result) other result))
-                         (retained (empty-set-with-metadata (get (aref self SET_STATE) :metadata))))
+                         (builder (make-transient-set (empty-set-with-metadata (get (aref self SET_STATE) :metadata)))))
                     (for-each-iterable candidates
                       (lambda (value)
                         (when (js-call membership :has value)
-                          (setq retained (js-call retained :conj value)))))
-                    (setq result (if (= (get retained :count) (get result :count)) result retained)))))
+                          (js-call (aref builder TRANSIENT_CONJ) :call builder value))))
+                    (let ((retained (js-call (aref builder TRANSIENT_PERSISTENT) :call builder)))
+                      (setq result (if (= (get retained :count) (get result :count)) result retained))))))
             (setq index (+ index 1)))
           result)))
     (define-method proto "difference" "difference" 0
       (lambda (self &rest collections)
-        (let ((result self)
-              (index 0)
-              (limit (js-length collections))
-              (halted false))
-          (while (and (< index limit) (not halted))
-            (for-each-iterable (get collections index)
-              (lambda (value) (setq result (js-call result :disj value))))
-            (when (= (get result :count) 0)
-              (setq halted t))
-            (setq index (+ index 1)))
-          result)))
+        (if (= (js-length collections) 0)
+            self
+            (let ((builder (make-transient-set self))
+                  (index 0)
+                  (limit (js-length collections))
+                  (halted false))
+              (while (and (< index limit) (not halted))
+                (for-each-iterable (get collections index)
+                  (lambda (value) (js-call (aref builder TRANSIENT_DISJ) :call builder value)))
+                (when (= (get builder :count) 0)
+                  (setq halted t))
+                (setq index (+ index 1)))
+              (js-call (aref builder TRANSIENT_PERSISTENT) :call builder)))))
     (define-method proto "isSubsetOf" "isSubsetOf" 1
       (lambda (self collection)
         (let ((other (as-persistent-set collection)))

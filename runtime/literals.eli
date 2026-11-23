@@ -1,7 +1,8 @@
 (module eliscript.runtime.literals
   (import "./core/identifier.mjs" eliscriptSymbol keyword)
   (import "./core/list.mjs" persistentList)
-  (import "./core/map.mjs" persistentHashMap)
+  (import "./core/array-map.mjs" arrayMapFromKeyValues)
+  (import "./core/map.mjs" EMPTY_MAP)
   (import "./core/queue.mjs" persistentQueue)
   (import "./core/set.mjs" persistentHashSet)
   (import "./core/vector.mjs" persistentVector)
@@ -15,15 +16,9 @@
     (apply persistentVector values))
 
   (defun hashMap (&rest key-values)
-    (unless (= (mod (js-length key-values) 2) 0)
-      (throw (new globalThis/TypeError "hash-map expects complete key/value pairs")))
-    (let ((entries (js-array))
-          (index 0)
-          (limit (js-length key-values)))
-      (while (< index limit)
-        (js-call entries :push (js-array (get key-values index) (get key-values (+ index 1))))
-        (setq index (+ index 2)))
-      (apply persistentHashMap entries)))
+    (if (= (js-length key-values) 0)
+        EMPTY_MAP
+        (arrayMapFromKeyValues key-values)))
 
   (defun hashSet (&rest values)
     (apply persistentHashSet values))
