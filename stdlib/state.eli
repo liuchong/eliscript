@@ -15,6 +15,7 @@
                    persistent-vector-nth)
 
   (defconst atom-registry (js* "new WeakSet()"))
+  (defconst volatile-registry (js* "new WeakMap()"))
   (defconst deferred-kind "eliscript/delay")
   (defconst deferred-pending "pending")
   (defconst deferred-running "running")
@@ -237,7 +238,11 @@
       reference))
 
   (defun deref (reference)
-    (funcall (atom-method reference "read")))
+    (cond
+      ((atom? reference) (funcall (atom-method reference "read")))
+      ((volatile? reference) (vderef reference))
+      ((delay? reference) (force reference))
+      (t (atom-fail "ELI-ATOM-INVALID-REFERENCE" "operation requires an Atom"))))
 
   (defun reset! (reference candidate)
     (funcall (atom-method reference "reset") candidate))
@@ -330,6 +335,61 @@
               (setq cache (persistent-map-assoc cache key result))
               result))))))
 
-  (export add-watch atom atom? compare-and-set! delay delay? deref force
+  (defun volatile? (value)
+    (if (= (value-type value) "object")
+      (try (js-call volatile-registry :has value) (catch _error false))
+      false))
+
+  (defun volatile-cell (reference)
+    (let ((cell (when (= (value-type reference) "object")
+                  (try (js-call volatile-registry :get reference) (catch _error undefined)))))
+      (when (nullish? cell)
+        (atom-fail "ELI-VOLATILE-INVALID-REFERENCE" "operation requires a Volatile reference"))
+      cell))
+
+  (defun volatile! (initial)
+    (let ((box (js-object :toJSON (lambda ()
+                                    (atom-fail "ELI-VOLATILE-SERIALIZE" "Volatile reference cannot be serialized")))))
+      (js-call globalThis/Object :defineProperty box "__eliscript_volatile__"
+        (js-object :enumerable t
+                   :get (lambda ()
+                          (atom-fail "ELI-VOLATILE-SERIALIZE" "Volatile reference cannot be serialized"))))
+      (js-call globalThis/Object :freeze box)
+      (js-call volatile-registry :set box (js-object :value initial))
+      box))
+
+  (defun vderef (reference)
+    (get (volatile-cell reference) :value))
+
+  (defun vreset! (reference candidate)
+    (let ((cell (volatile-cell reference)))
+      (put cell :value candidate)
+      candidate))
+
+  (defun vswap! (reference transform &rest arguments)
+    (let ((cell (volatile-cell reference)))
+      (when (not (= (value-type transform) "function"))
+        (atom-fail "ELI-VOLATILE-INVALID-TRANSFORM" "Volatile swap transform must be a function"))
+      (let ((next (apply transform (js-cons (get cell :value) arguments))))
+        (put cell :value next)
+        next)))
+
+  (defun vswap-vals! (reference transform &rest arguments)
+    (let ((cell (volatile-cell reference)))
+      (when (not (= (value-type transform) "function"))
+        (atom-fail "ELI-VOLATILE-INVALID-TRANSFORM" "Volatile swap transform must be a function"))
+      (let* ((previous (get cell :value))
+             (next (apply transform (js-cons previous arguments))))
+        (put cell :value next)
+        (persistent-vector-from-array (js-array previous next)))))
+
+  (defun bound-fn (function)
+    (when (not (= (value-type function) "function"))
+      (atom-fail "ELI-STATE-INVALID-FUNCTION" "bound-fn requires a function"))
+    (lambda (&rest arguments)
+      (apply function arguments)))
+
+  (export add-watch atom atom? bound-fn compare-and-set! delay delay? deref force
           get-validator memoize realized? remove-watch reset! reset-vals!
-          set-validator! swap! swap-vals!))
+          set-validator! swap! swap-vals! vderef volatile! volatile? vreset!
+          vswap! vswap-vals!))

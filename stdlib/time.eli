@@ -1,0 +1,290 @@
+(module eliscript.time
+  (import "../runtime/core/data-text.mjs" IPrint)
+  (import "../runtime/core/order.mjs" IComparable)
+  (import "../runtime/core/protocol.mjs" extendProtocolType)
+  (import "../runtime/core/value.mjs" extendValueType)
+  (import "../runtime/core/value-internals.mjs" finishHash hashNumber mixHash)
+
+  (defconst INSTANT_TOKEN (Object/freeze (js-object)))
+  (defconst DURATION_TOKEN (Object/freeze (js-object)))
+  (defconst INSTANT_HASH_TAG 1639812457)
+  (defconst DURATION_HASH_TAG 1941273619)
+  (defconst MAX_INSTANT_MS 8640000000000000)
+
+  (defconst instant-state (new globalThis/WeakMap))
+  (defconst duration-state (new globalThis/WeakMap))
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun range-fail (message)
+    (throw (new globalThis/RangeError message)))
+
+  (defun normalize-zero (n)
+    (if (Object/is n -0.0) 0 n))
+
+  (defun parse-digits (text start count)
+    (if (> (+ start count) (js-length text))
+      -1
+      (let ((acc 0)
+            (idx 0)
+            (ok t))
+        (while (and ok (< idx count))
+          (let ((code (js-call text :charCodeAt (+ start idx))))
+            (if (and (>= code 48) (<= code 57))
+              (setq acc (+ (* acc 10) (- code 48))
+                    idx (1+ idx))
+              (setq ok false))))
+        (if ok acc -1))))
+
+  (defun parse-instant-ms (text)
+    (let ((len (js-length text)))
+      (if (< len 17)
+        nil
+        (let ((year (parse-digits text 0 4))
+              (dash1 (js-call text :charCodeAt 4))
+              (month (parse-digits text 5 2))
+              (dash2 (js-call text :charCodeAt 7))
+              (day (parse-digits text 8 2))
+              (sep (js-call text :charCodeAt 10))
+              (hour (parse-digits text 11 2))
+              (colon1 (js-call text :charCodeAt 13))
+              (minute (parse-digits text 14 2)))
+          (if (or (< year 0) (not (= dash1 45))
+                  (< month 1) (> month 12) (not (= dash2 45))
+                  (< day 1) (> day 31)
+                  (and (not (= sep 84)) (not (= sep 116)))
+                  (< hour 0) (> hour 23) (not (= colon1 58))
+                  (< minute 0) (> minute 59))
+            nil
+            (let ((pos 16)
+                  (second 0)
+                  (millis 0)
+                  (valid t))
+              (when (and (< pos len) (= (js-call text :charCodeAt pos) 58))
+                (setq second (parse-digits text (1+ pos) 2))
+                (if (or (< second 0) (> second 59))
+                  (setq valid false)
+                  (progn
+                    (setq pos (+ pos 3))
+                    (when (and (< pos len) (= (js-call text :charCodeAt pos) 46))
+                      (setq pos (1+ pos))
+                      (let ((fstart pos)
+                            (fdigits 0))
+                        (while (and (< pos len)
+                                    (let ((c (js-call text :charCodeAt pos)))
+                                      (and (>= c 48) (<= c 57))))
+                          (setq fdigits (1+ fdigits)
+                                pos (1+ pos)))
+                        (if (or (= fdigits 0) (> fdigits 9))
+                          (setq valid false)
+                          (let ((d0 (parse-digits text fstart 1))
+                                (d1 (if (>= fdigits 2) (parse-digits text (1+ fstart) 1) 0))
+                                (d2 (if (>= fdigits 3) (parse-digits text (+ fstart 2) 1) 0)))
+                            (setq millis (+ (* d0 100) (* d1 10) d2)))))))))
+              (if (not valid)
+                nil
+                (let ((tz-offset-ms nil))
+                  (when (< pos len)
+                    (let ((tzc (js-call text :charCodeAt pos)))
+                      (cond
+                        ((and (or (= tzc 90) (= tzc 122)) (= (1+ pos) len))
+                          (setq tz-offset-ms 0))
+                        ((and (or (= tzc 43) (= tzc 45)) (= (+ pos 6) len)
+                              (= (js-call text :charCodeAt (+ pos 3)) 58))
+                          (let ((tzh (parse-digits text (1+ pos) 2))
+                                (tzm (parse-digits text (+ pos 4) 2))
+                                (sign (if (= tzc 43) 1 -1)))
+                            (when (and (>= tzh 0) (<= tzh 23) (>= tzm 0) (<= tzm 59))
+                              (setq tz-offset-ms (* sign (+ (* tzh 60) tzm) 60000))))))))
+                  (if (nil? tz-offset-ms)
+                    nil
+                    (let ((utc-check (new globalThis/Date (Date/UTC year (1- month) day 0 0 0 0))))
+                      (if (or (not (= (js-call utc-check :getUTCFullYear) year))
+                              (not (= (1+ (js-call utc-check :getUTCMonth)) month))
+                              (not (= (js-call utc-check :getUTCDate) day)))
+                        nil
+                        (let ((epoch-ms (normalize-zero
+                                          (- (Date/UTC year (1- month) day hour minute second millis)
+                                             tz-offset-ms))))
+                          (if (and (Number/isSafeInteger epoch-ms)
+                                   (<= (Math/abs epoch-ms) MAX_INSTANT_MS))
+                            epoch-ms
+                            nil)))))))))))))
+
+  (defconst Instant
+    (funcall
+      (js* "(init, getIso) => class Instant { constructor(token, ms, iso) { init(this, token, ms, iso); } toString() { return getIso(this); } toJSON() { return getIso(this); } get [Symbol.toStringTag]() { return \"Instant\"; } }")
+      (lambda (self token ms iso)
+        (unless (eq token INSTANT_TOKEN)
+          (fail "Instant instances must be created via instant(), parse-instant(), or now()"))
+        (js-call instant-state :set self (Object/freeze (js-object :ms ms :iso iso)))
+        (Object/freeze self))
+      (lambda (self)
+        (get (js-call instant-state :get self) :iso))))
+
+  (defconst Duration
+    (funcall
+      (js* "(init, getMs) => class Duration { constructor(token, ms) { init(this, token, ms); } toString() { return getMs(this) + \"ms\"; } toJSON() { return getMs(this); } get [Symbol.toStringTag]() { return \"Duration\"; } }")
+      (lambda (self token ms)
+        (unless (eq token DURATION_TOKEN)
+          (fail "Duration instances must be created via duration() or instant-diff()"))
+        (js-call duration-state :set self (Object/freeze (js-object :ms ms)))
+        (Object/freeze self))
+      (lambda (self)
+        (get (js-call duration-state :get self) :ms))))
+
+  (defun instant? (value)
+    (funcall (js* "(value, Ctor) => value instanceof Ctor") value Instant))
+
+  (defun duration? (value)
+    (funcall (js* "(value, Ctor) => value instanceof Ctor") value Duration))
+
+  (defun require-instant (value label)
+    (unless (instant? value)
+      (fail (str label " must be an Instant")))
+    value)
+
+  (defun require-duration (value label)
+    (unless (duration? value)
+      (fail (str label " must be a Duration")))
+    value)
+
+  (defun make-instant-from-ms (ms)
+    (unless (Number/isSafeInteger ms)
+      (fail "instant epoch milliseconds must be a safe integer"))
+    (when (> (Math/abs ms) MAX_INSTANT_MS)
+      (range-fail (str "instant epoch milliseconds out of supported range: " ms)))
+    (let* ((clean-ms (normalize-zero ms))
+           (iso (js-call (new globalThis/Date clean-ms) :toISOString)))
+      (new Instant INSTANT_TOKEN clean-ms iso)))
+
+  (defun parse-instant (text)
+    (unless (= (value-type text) "string")
+      (fail "parse-instant expects a string"))
+    (let ((epoch-ms (parse-instant-ms text)))
+      (if (nil? epoch-ms)
+        nil
+        (make-instant-from-ms epoch-ms))))
+
+  (defun instant (input)
+    (cond
+      ((instant? input) input)
+      ((= (value-type input) "number")
+        (make-instant-from-ms input))
+      ((funcall (js* "(v) => v instanceof Date") input)
+        (let ((ms (js-call input :getTime)))
+          (when (Number/isNaN ms)
+            (fail "cannot construct Instant from invalid Date"))
+          (make-instant-from-ms ms)))
+      ((= (value-type input) "string")
+        (let ((parsed (parse-instant input)))
+          (when (nil? parsed)
+            (fail (str "invalid instant string: " input)))
+          parsed))
+      (t
+        (fail "instant expects an Instant, epoch ms integer, Date, or ISO-8601 string"))))
+
+  (defun now ()
+    (make-instant-from-ms (Date/now)))
+
+  (defun instant-ms (value)
+    (require-instant value "instant-ms")
+    (get (js-call instant-state :get value) :ms))
+
+  (defun instant-iso (value)
+    (require-instant value "instant-iso")
+    (get (js-call instant-state :get value) :iso))
+
+  (defun duration (ms-or-duration)
+    (cond
+      ((duration? ms-or-duration) ms-or-duration)
+      ((Number/isSafeInteger ms-or-duration)
+        (new Duration DURATION_TOKEN (normalize-zero ms-or-duration)))
+      (t
+        (fail "duration expects a Duration or safe integer milliseconds"))))
+
+  (defun duration-ms (value)
+    (require-duration value "duration-ms")
+    (get (js-call duration-state :get value) :ms))
+
+  (defun duration-seconds (value)
+    (/ (duration-ms value) 1000.0))
+
+  (defun instant-add (inst delta)
+    (let ((base (instant-ms inst))
+          (delta-ms (cond
+                      ((duration? delta) (duration-ms delta))
+                      ((Number/isSafeInteger delta) delta)
+                      (t (fail "instant-add delta must be a Duration or safe integer milliseconds")))))
+      (make-instant-from-ms (+ base delta-ms))))
+
+  (defun instant-diff (end-inst start-inst)
+    (let ((diff (- (instant-ms end-inst) (instant-ms start-inst))))
+      (duration diff)))
+
+  (defun instant-before? (left right)
+    (< (instant-ms left) (instant-ms right)))
+
+  (defun instant-after? (left right)
+    (> (instant-ms left) (instant-ms right)))
+
+  (extendValueType Instant
+    (js-object
+      :equal (lambda (left right _eq)
+               (and (instant? right) (= (instant-ms left) (instant-ms right))))
+      :hash (lambda (self _hash)
+              (finishHash (mixHash INSTANT_HASH_TAG (hashNumber (instant-ms self))) 1))))
+
+  (extendProtocolType IComparable Instant
+    (js-object
+      :compare (lambda (left right)
+                 (unless (instant? right)
+                   (fail "cannot compare Instant to non-Instant"))
+                 (let ((lm (instant-ms left))
+                       (rm (instant-ms right)))
+                   (if (< lm rm) -1 (if (> lm rm) 1 0))))))
+
+  (extendProtocolType IPrint Instant
+    (js-object
+      :print (lambda (self _ctx)
+               (str "#inst \"" (instant-iso self) "\""))))
+
+  (extendValueType Duration
+    (js-object
+      :equal (lambda (left right _eq)
+               (and (duration? right) (= (duration-ms left) (duration-ms right))))
+      :hash (lambda (self _hash)
+              (finishHash (mixHash DURATION_HASH_TAG (hashNumber (duration-ms self))) 1))))
+
+  (extendProtocolType IComparable Duration
+    (js-object
+      :compare (lambda (left right)
+                 (unless (duration? right)
+                   (fail "cannot compare Duration to non-Duration"))
+                 (let ((lm (duration-ms left))
+                       (rm (duration-ms right)))
+                   (if (< lm rm) -1 (if (> lm rm) 1 0))))))
+
+  (extendProtocolType IPrint Duration
+    (js-object
+      :print (lambda (self _ctx)
+               (str "#eliscript/duration " (duration-ms self)))))
+
+  (export
+    Duration
+    Instant
+    duration
+    duration-ms
+    duration-seconds
+    duration?
+    instant
+    instant-add
+    instant-after?
+    instant-before?
+    instant-diff
+    instant-iso
+    instant-ms
+    instant?
+    now
+    parse-instant))

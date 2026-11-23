@@ -381,6 +381,29 @@
             (lambda (result) (funcall downstream result)))))
       false))
 
+  (defun haltWhen (predicate &optional retf)
+    (require-function predicate "halt-when predicate")
+    (unless (nullish? retf)
+      (require-function retf "halt-when return function"))
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "halt-when reducing function"))
+              (halted false))
+          (completing
+            (lambda (result input)
+              (if (isTruthy (funcall predicate input))
+                  (progn
+                    (setq halted t)
+                    (reduced (if (nullish? retf)
+                                 input
+                                 (funcall retf (funcall downstream (unreduced result)) input))))
+                  (funcall downstream result input)))
+            (lambda (result)
+              (if halted
+                  result
+                  (funcall downstream result))))))
+      false))
+
   (defun composeTransducers (&rest transducers)
     (let ((index 0))
       (while (< index (js-length transducers))
@@ -572,6 +595,7 @@
     partitioningBy
     deduping
     distincting
+    haltWhen
     composeTransducers
     transduce
     eduction

@@ -1,0 +1,110 @@
+(module eliscript.tap
+  (import "../runtime/core/collection.mjs" conj count disj reduce)
+  (import "../runtime/core/set.mjs" EMPTY_SET)
+
+  (defconst MAX_TAP_QUEUE 1024)
+  (defconst microtask (if (= (value-type globalThis/queueMicrotask) "function")
+                        globalThis/queueMicrotask
+                        (lambda (fn) (js-call (globalThis.Promise/resolve) :then fn))))
+
+  (defvar tap-listeners EMPTY_SET)
+  (defvar tap-queue (js-array))
+  (defvar tap-scheduled false)
+  (defvar tap-draining false)
+  (defvar tap-dropped 0)
+  (defvar tap-delivered 0)
+  (defvar tap-errors 0)
+  (defvar tap-last-error nil)
+
+  (defun require-listener (listener)
+    (unless (= (value-type listener) "function")
+      (throw (new globalThis/TypeError "tap listener must be a function")))
+    listener)
+
+  (defun dispatch-item (value)
+    (let ((snapshot tap-listeners))
+      (reduce snapshot
+        (lambda (_acc listener)
+          (try
+            (funcall listener value)
+            (setq tap-delivered (1+ tap-delivered))
+            (catch error
+              (setq tap-errors (1+ tap-errors)
+                    tap-last-error error)))
+          nil)
+        nil)))
+
+  (defun drain-queue ()
+    (if tap-draining
+      0
+      (let ((processed 0))
+        (setq tap-draining t)
+        (try
+          (while (> (js-length tap-queue) 0)
+            (let ((batch tap-queue))
+              (setq tap-queue (js-array))
+              (let ((index 0))
+                (while (< index (js-length batch))
+                  (dispatch-item (aref batch index))
+                  (setq processed (1+ processed)
+                        index (1+ index))))))
+          (finally
+            (setq tap-draining false
+                  tap-scheduled false)
+            (when (> (js-length tap-queue) 0)
+              (schedule-drain))))
+        processed)))
+
+  (defun schedule-drain ()
+    (when (and (not tap-scheduled) (> (js-length tap-queue) 0))
+      (setq tap-scheduled t)
+      (funcall microtask
+        (lambda ()
+          (setq tap-scheduled false)
+          (drain-queue)))))
+
+  (defun add-tap (listener)
+    (require-listener listener)
+    (setq tap-listeners (conj tap-listeners listener))
+    nil)
+
+  (defun remove-tap (listener)
+    (setq tap-listeners (disj tap-listeners listener))
+    nil)
+
+  (defun tap> (value)
+    (if (nil? value)
+      false
+      (if (>= (js-length tap-queue) MAX_TAP_QUEUE)
+        (progn
+          (setq tap-dropped (1+ tap-dropped))
+          false)
+        (progn
+          (js-call tap-queue :push value)
+          (schedule-drain)
+          t))))
+
+  (defun flush-taps! ()
+    (drain-queue))
+
+  (defun clear-taps! ()
+    (setq tap-listeners EMPTY_SET
+          tap-queue (js-array)
+          tap-scheduled false
+          tap-dropped 0
+          tap-delivered 0
+          tap-errors 0
+          tap-last-error nil)
+    nil)
+
+  (defun tap-stats ()
+    (js-object
+      :listeners (count tap-listeners)
+      :queued (js-length tap-queue)
+      :capacity MAX_TAP_QUEUE
+      :delivered tap-delivered
+      :dropped tap-dropped
+      :errors tap-errors
+      :lastError tap-last-error))
+
+  (export add-tap clear-taps! flush-taps! remove-tap tap-stats tap>))

@@ -1,0 +1,204 @@
+(module eliscript.uuid
+  (import "../runtime/core/data-text.mjs" IPrint)
+  (import "../runtime/core/order.mjs" IComparable)
+  (import "../runtime/core/protocol.mjs" extendProtocolType)
+  (import "../runtime/core/value.mjs" extendValueType)
+  (import "../runtime/core/value-internals.mjs" hashString)
+
+  (defconst UUID_TOKEN (Object/freeze (js-object)))
+  (defconst UUID_HASH_TAG 1823491723)
+  (defconst uuid-state (new globalThis/WeakMap))
+  (defconst hex-digits "0123456789abcdef")
+
+  (defvar last-v7-ms -1)
+  (defvar last-v7-seq 0)
+
+  (defun fail (message)
+    (throw (new globalThis/TypeError message)))
+
+  (defun hex-nibble (code)
+    (cond
+      ((and (>= code 48) (<= code 57)) (- code 48))
+      ((and (>= code 97) (<= code 102)) (+ (- code 97) 10))
+      ((and (>= code 65) (<= code 70)) (+ (- code 65) 10))
+      (t -1)))
+
+  (defun bytes-to-canonical (bytes)
+    (let ((out "")
+          (idx 0))
+      (while (< idx 16)
+        (when (or (= idx 4) (= idx 6) (= idx 8) (= idx 10))
+          (setq out (str out "-")))
+        (let ((b (aref bytes idx)))
+          (setq out (str out
+                         (js-call hex-digits :charAt (unsigned-bit-shift-right b 4))
+                         (js-call hex-digits :charAt (bit-and b 15)))
+                idx (1+ idx))))
+      out))
+
+  (defun parse-canonical-parts (text)
+    (if (not (= (js-length text) 36))
+      nil
+      (if (or (not (= (js-call text :charCodeAt 8) 45))
+              (not (= (js-call text :charCodeAt 13) 45))
+              (not (= (js-call text :charCodeAt 18) 45))
+              (not (= (js-call text :charCodeAt 23) 45)))
+        nil
+        (let ((bytes (new globalThis/Uint8Array 16))
+              (byte-idx 0)
+              (char-idx 0)
+              (valid t))
+          (while (and valid (< byte-idx 16))
+            (when (or (= char-idx 8) (= char-idx 13) (= char-idx 18) (= char-idx 23))
+              (setq char-idx (1+ char-idx)))
+            (let ((hi (hex-nibble (js-call text :charCodeAt char-idx)))
+                  (lo (hex-nibble (js-call text :charCodeAt (1+ char-idx)))))
+              (if (or (< hi 0) (< lo 0))
+                (setq valid false)
+                (progn
+                  (put bytes byte-idx (bit-or (bit-shift-left hi 4) lo))
+                  (setq byte-idx (1+ byte-idx)
+                        char-idx (+ char-idx 2))))))
+          (if valid
+            (js-object :canonical (bytes-to-canonical bytes) :bytes bytes)
+            nil)))))
+
+  (defconst UUID
+    (funcall
+      (js* "(init, getCanon) => class UUID { constructor(token, canonical, bytes) { init(this, token, canonical, bytes); } get value() { return getCanon(this); } toString() { return getCanon(this); } toJSON() { return getCanon(this); } get [Symbol.toStringTag]() { return \"UUID\"; } }")
+      (lambda (self token canonical bytes)
+        (unless (eq token UUID_TOKEN)
+          (fail "UUID instances must be created via uuid(), parse-uuid(), uuid-v4(), or uuid-v7()"))
+        (js-call uuid-state :set self (Object/freeze (js-object :canonical canonical :bytes bytes)))
+        (Object/freeze self))
+      (lambda (self)
+        (get (js-call uuid-state :get self) :canonical))))
+
+  (defun uuid? (value)
+    (funcall (js* "(value, Ctor) => value instanceof Ctor") value UUID))
+
+  (defun require-uuid (value label)
+    (unless (uuid? value)
+      (fail (str label " must be a UUID")))
+    value)
+
+  (defun uuid-from-bytes-internal (bytes)
+    (let ((copy (new globalThis/Uint8Array bytes)))
+      (new UUID UUID_TOKEN (bytes-to-canonical copy) copy)))
+
+  (defun parse-uuid (text)
+    (unless (= (value-type text) "string")
+      (fail "parse-uuid expects a string"))
+    (let ((parts (parse-canonical-parts text)))
+      (if (nil? parts)
+        nil
+        (new UUID UUID_TOKEN (get parts :canonical) (get parts :bytes)))))
+
+  (defun uuid (input)
+    (cond
+      ((uuid? input) input)
+      ((= (value-type input) "string")
+        (let ((parsed (parse-uuid input)))
+          (when (nil? parsed)
+            (fail (str "invalid UUID string: " input)))
+          parsed))
+      ((funcall (js* "(v) => v instanceof Uint8Array") input)
+        (unless (= (get input :length) 16)
+          (fail "uuid byte array must contain exactly 16 bytes"))
+        (uuid-from-bytes-internal input))
+      (t
+        (fail "uuid expects a UUID, canonical string, or 16-byte Uint8Array"))))
+
+  (defun uuid-string (value)
+    (require-uuid value "uuid-string")
+    (get (js-call uuid-state :get value) :canonical))
+
+  (defun uuid-bytes (value)
+    (require-uuid value "uuid-bytes")
+    (new globalThis/Uint8Array (get (js-call uuid-state :get value) :bytes)))
+
+  (defun uuid-version (value)
+    (require-uuid value "uuid-version")
+    (let ((bytes (get (js-call uuid-state :get value) :bytes)))
+      (bit-and (unsigned-bit-shift-right (aref bytes 6) 4) 15)))
+
+  (defun random-bytes (bytes)
+    (js-call globalThis/crypto :getRandomValues bytes)
+    bytes)
+
+  (defun uuid-v4 ()
+    (let ((bytes (random-bytes (new globalThis/Uint8Array 16))))
+      (put bytes 6 (bit-or (bit-and (aref bytes 6) 15) 64))
+      (put bytes 8 (bit-or (bit-and (aref bytes 8) 63) 128))
+      (new UUID UUID_TOKEN (bytes-to-canonical bytes) bytes)))
+
+  (defun encode-v7-bytes (ts seq rand-seq-override bytes)
+    (let* ((hi16 (Math/floor (/ ts 4294967296)))
+           (lo32 (- ts (* hi16 4294967296))))
+      (put bytes 0 (bit-and (unsigned-bit-shift-right hi16 8) 255))
+      (put bytes 1 (bit-and hi16 255))
+      (put bytes 2 (bit-and (unsigned-bit-shift-right lo32 24) 255))
+      (put bytes 3 (bit-and (unsigned-bit-shift-right lo32 16) 255))
+      (put bytes 4 (bit-and (unsigned-bit-shift-right lo32 8) 255))
+      (put bytes 5 (bit-and lo32 255))
+      (let ((rand-a (if rand-seq-override
+                      (bit-or (bit-and (aref bytes 6) 15) 0)
+                      (bit-and (unsigned-bit-shift-right seq 8) 15))))
+        (put bytes 6 (bit-or 112 rand-a))
+        (unless rand-seq-override
+          (put bytes 7 (bit-and seq 255))))
+      (put bytes 8 (bit-or (bit-and (aref bytes 8) 63) 128))
+      (new UUID UUID_TOKEN (bytes-to-canonical bytes) bytes)))
+
+  (defun uuid-v7 (&optional timestamp-ms)
+    (let ((bytes (random-bytes (new globalThis/Uint8Array 16))))
+      (if (not (nullish? timestamp-ms))
+        (progn
+          (unless (and (Number/isSafeInteger timestamp-ms)
+                       (>= timestamp-ms 0)
+                       (<= timestamp-ms 281474976710655))
+            (fail "uuid-v7 timestamp-ms must be an integer between 0 and 281474976710655"))
+          (encode-v7-bytes timestamp-ms 0 t bytes))
+        (let ((now-ms (Date/now)))
+          (if (> now-ms last-v7-ms)
+            (setq last-v7-ms now-ms
+                  last-v7-seq (bit-or (bit-shift-left (bit-and (aref bytes 6) 3) 8)
+                                      (aref bytes 7)))
+            (progn
+              (setq last-v7-seq (1+ last-v7-seq))
+              (when (> last-v7-seq 4095)
+                (setq last-v7-ms (1+ last-v7-ms)
+                      last-v7-seq 0))))
+          (encode-v7-bytes last-v7-ms last-v7-seq false bytes)))))
+
+  (extendValueType UUID
+    (js-object
+      :equal (lambda (left right _eq)
+               (and (uuid? right) (= (uuid-string left) (uuid-string right))))
+      :hash (lambda (self _hash)
+              (hashString (uuid-string self) UUID_HASH_TAG))))
+
+  (extendProtocolType IComparable UUID
+    (js-object
+      :compare (lambda (left right)
+                 (unless (uuid? right)
+                   (fail "cannot compare UUID to non-UUID"))
+                 (let ((ls (uuid-string left))
+                       (rs (uuid-string right)))
+                   (if (< ls rs) -1 (if (> ls rs) 1 0))))))
+
+  (extendProtocolType IPrint UUID
+    (js-object
+      :print (lambda (self _ctx)
+               (str "#uuid \"" (uuid-string self) "\""))))
+
+  (export
+    UUID
+    parse-uuid
+    uuid
+    uuid-bytes
+    uuid-string
+    uuid-v4
+    uuid-v7
+    uuid-version
+    uuid?))

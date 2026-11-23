@@ -1,0 +1,267 @@
+(module eliscript.math
+  (import "./seq.mjs" random-sample shuffle)
+
+  (defconst PI Math/PI)
+  (defconst E Math/E)
+  (defconst TAU (* 2 Math/PI))
+
+  (defconst bit-buffer (new globalThis/ArrayBuffer 8))
+  (defconst bit-view (new globalThis/DataView bit-buffer))
+
+  (defun require-number (value label)
+    (unless (= (value-type value) "number")
+      (throw (new globalThis/TypeError (str label " must be a number"))))
+    value)
+
+  (defun sin (x) (Math/sin (require-number x "math/sin")))
+  (defun cos (x) (Math/cos (require-number x "math/cos")))
+  (defun tan (x) (Math/tan (require-number x "math/tan")))
+  (defun asin (x) (Math/asin (require-number x "math/asin")))
+  (defun acos (x) (Math/acos (require-number x "math/acos")))
+  (defun atan (x) (Math/atan (require-number x "math/atan")))
+  (defun atan2 (y x)
+    (Math/atan2 (require-number y "math/atan2 y") (require-number x "math/atan2 x")))
+  (defun sinh (x) (Math/sinh (require-number x "math/sinh")))
+  (defun cosh (x) (Math/cosh (require-number x "math/cosh")))
+  (defun tanh (x) (Math/tanh (require-number x "math/tanh")))
+  (defun asinh (x) (Math/asinh (require-number x "math/asinh")))
+  (defun acosh (x) (Math/acosh (require-number x "math/acosh")))
+  (defun atanh (x) (Math/atanh (require-number x "math/atanh")))
+  (defun to-radians (degrees) (* (require-number degrees "math/to-radians") (/ Math/PI 180)))
+  (defun to-degrees (radians) (* (require-number radians "math/to-degrees") (/ 180 Math/PI)))
+
+  (defun exp (x) (Math/exp (require-number x "math/exp")))
+  (defun expm1 (x) (Math/expm1 (require-number x "math/expm1")))
+  (defun log (x) (Math/log (require-number x "math/log")))
+  (defun log10 (x) (Math/log10 (require-number x "math/log10")))
+  (defun log2 (x) (Math/log2 (require-number x "math/log2")))
+  (defun log1p (x) (Math/log1p (require-number x "math/log1p")))
+  (defun pow (x y) (Math/pow (require-number x "math/pow x") (require-number y "math/pow y")))
+  (defun sqrt (x) (Math/sqrt (require-number x "math/sqrt")))
+  (defun cbrt (x) (Math/cbrt (require-number x "math/cbrt")))
+  (defun hypot (&rest values)
+    (let ((index 0))
+      (while (< index (js-length values))
+        (require-number (aref values index) "math/hypot argument")
+        (setq index (1+ index))))
+    (apply Math/hypot values))
+
+  (defun abs (x) (Math/abs (require-number x "math/abs")))
+  (defun ceil (x) (Math/ceil (require-number x "math/ceil")))
+  (defun floor (x) (Math/floor (require-number x "math/floor")))
+  (defun round (x) (Math/round (require-number x "math/round")))
+  (defun trunc (x) (Math/trunc (require-number x "math/trunc")))
+
+  (defun rint (x)
+    (require-number x "math/rint")
+    (if (or (not (Number/isFinite x)) (= x 0))
+      x
+      (let* ((lo (Math/floor x))
+             (frac (- x lo))
+             (rounded (cond
+                        ((< frac 0.5) lo)
+                        ((> frac 0.5) (+ lo 1))
+                        ((= (% lo 2) 0) lo)
+                        (t (+ lo 1)))))
+        (if (and (= rounded 0) (< x 0)) -0.0 rounded))))
+
+  (defun floor-div (x y)
+    (require-number x "math/floor-div x")
+    (require-number y "math/floor-div y")
+    (when (and (Number/isSafeInteger x) (= y 0))
+      (throw (new globalThis/RangeError "floor-div division by zero")))
+    (when (= y 0)
+      (throw (new globalThis/RangeError "floor-div division by zero")))
+    (let ((q (Math/floor (/ x y))))
+      (if (Object/is q -0.0) 0 q)))
+
+  (defun floor-mod (x y)
+    (require-number x "math/floor-mod x")
+    (require-number y "math/floor-mod y")
+    (when (= y 0)
+      (throw (new globalThis/RangeError "floor-mod division by zero")))
+    (let* ((q (floor-div x y))
+           (r (- x (* q y))))
+      (if (Object/is r -0.0)
+        (if (< y 0) -0.0 0)
+        r)))
+
+  (defun IEEE-remainder (x y)
+    (require-number x "math/IEEE-remainder x")
+    (require-number y "math/IEEE-remainder y")
+    (cond
+      ((or (not (Number/isFinite x)) (Number/isNaN y) (= y 0)) globalThis/NaN)
+      ((not (Number/isFinite y)) x)
+      (t
+        (let* ((n (rint (/ x y)))
+               (rem (- x (* y n))))
+          (if (= rem 0)
+            (if (< x 0) -0.0 0)
+            rem)))))
+
+  (defun copy-sign (magnitude sign)
+    (require-number magnitude "math/copy-sign magnitude")
+    (require-number sign "math/copy-sign sign")
+    (if (Number/isNaN magnitude)
+      globalThis/NaN
+      (let* ((mag (Math/abs magnitude))
+             (neg (or (Object/is sign -0.0)
+                      (< sign 0)
+                      (and (Number/isNaN sign)
+                           (progn
+                             (js-call bit-view :setFloat64 0 sign false)
+                             (/= (bit-and (js-call bit-view :getUint32 0 false) 2147483648) 0))))))
+        (if neg (- mag) mag))))
+
+  (defun signum (x)
+    (require-number x "math/signum")
+    (cond
+      ((or (Number/isNaN x) (= x 0)) x)
+      ((> x 0) 1)
+      (t -1)))
+
+  (defun ulp (x)
+    (require-number x "math/ulp")
+    (let ((mag (Math/abs x)))
+      (cond
+        ((Number/isNaN mag) globalThis/NaN)
+        ((not (Number/isFinite mag)) globalThis/Infinity)
+        ((= mag 0) globalThis/Number.MIN_VALUE)
+        ((= mag globalThis/Number.MAX_VALUE) (Math/pow 2 971))
+        (t
+          (js-call bit-view :setFloat64 0 mag false)
+          (let* ((hi (js-call bit-view :getUint32 0 false))
+                 (exp (- (bit-and (unsigned-bit-shift-right hi 20) 2047) 1023)))
+            (if (<= exp -1023)
+              globalThis/Number.MIN_VALUE
+              (Math/pow 2 (Math/max (- exp 52) -1074))))))))
+
+  (defun scalb (x scale-factor)
+    (require-number x "math/scalb x")
+    (require-number scale-factor "math/scalb scaleFactor")
+    (if (or (not (Number/isFinite x)) (= x 0) (not (Number/isSafeInteger scale-factor)))
+      (* x (Math/pow 2 scale-factor))
+      (let ((result x)
+            (remaining scale-factor))
+        (while (> remaining 512)
+          (setq result (* result (Math/pow 2 512))
+                remaining (- remaining 512)))
+        (while (< remaining -512)
+          (setq result (* result (Math/pow 2 -512))
+                remaining (+ remaining 512)))
+        (* result (Math/pow 2 remaining)))))
+
+  (defun clamp (value low high)
+    (require-number value "math/clamp value")
+    (require-number low "math/clamp low")
+    (require-number high "math/clamp high")
+    (when (> low high)
+      (throw (new globalThis/RangeError "math/clamp requires low <= high")))
+    (cond
+      ((Number/isNaN value) globalThis/NaN)
+      ((< value low) low)
+      ((> value high) high)
+      (t value)))
+
+  (defun min (&rest values)
+    (when (= (js-length values) 0)
+      (throw (new globalThis/TypeError "math/min expects at least one argument")))
+    (let ((index 0))
+      (while (< index (js-length values))
+        (require-number (aref values index) "math/min argument")
+        (setq index (1+ index))))
+    (apply Math/min values))
+
+  (defun max (&rest values)
+    (when (= (js-length values) 0)
+      (throw (new globalThis/TypeError "math/max expects at least one argument")))
+    (let ((index 0))
+      (while (< index (js-length values))
+        (require-number (aref values index) "math/max argument")
+        (setq index (1+ index))))
+    (apply Math/max values))
+
+  (defun random (&optional limit)
+    (if (nullish? limit)
+      (Math/random)
+      (progn
+        (require-number limit "math/random limit")
+        (* (Math/random) limit))))
+
+  (defun rand-int (limit)
+    (require-number limit "math/rand-int limit")
+    (unless (Number/isFinite limit)
+      (throw (new globalThis/RangeError "math/rand-int limit must be finite")))
+    (let ((hi (Math/trunc limit)))
+      (if (<= hi 0)
+        0
+        (Math/floor (* (Math/random) hi)))))
+
+  (defun rand-nth (collection)
+    (when (nullish? collection)
+      (throw (new globalThis/RangeError "math/rand-nth cannot select from nil")))
+    (let ((items (js-array)))
+      (let ((iter-fn (aref collection (get globalThis/Symbol :iterator))))
+        (if (= (value-type iter-fn) "function")
+          (let ((iter (js-call iter-fn :call collection))
+                (done false))
+            (while (not done)
+              (let ((step (js-call iter :next)))
+                (if (funcall globalThis/Boolean (get step :done))
+                  (setq done t)
+                  (js-call items :push (get step :value))))))
+          (throw (new globalThis/TypeError "math/rand-nth collection must be iterable"))))
+      (when (= (js-length items) 0)
+        (throw (new globalThis/RangeError "math/rand-nth collection is empty")))
+      (aref items (Math/floor (* (Math/random) (js-length items))))))
+
+  (export
+    E
+    IEEE-remainder
+    PI
+    TAU
+    abs
+    acos
+    acosh
+    asin
+    asinh
+    atan
+    atan2
+    atanh
+    cbrt
+    ceil
+    clamp
+    copy-sign
+    cos
+    cosh
+    exp
+    expm1
+    floor
+    floor-div
+    floor-mod
+    hypot
+    log
+    log10
+    log1p
+    log2
+    max
+    min
+    pow
+    rand-int
+    rand-nth
+    random
+    random-sample
+    rint
+    round
+    scalb
+    shuffle
+    signum
+    sin
+    sinh
+    sqrt
+    tan
+    tanh
+    to-degrees
+    to-radians
+    trunc
+    ulp))

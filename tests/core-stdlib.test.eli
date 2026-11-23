@@ -314,6 +314,8 @@
         (await (symlink (resolve ROOT "runtime") runtimeLink "dir"))
         (await (compile (resolve ROOT "stdlib/protocol.eli") protocolModule))
         (await (compile (resolve ROOT "stdlib/identifier.eli") identifierModule))
+        (await (compile (resolve ROOT "stdlib/uuid.eli") (resolve directory "stdlib/uuid.mjs")))
+        (await (compile (resolve ROOT "stdlib/time.eli") (resolve directory "stdlib/time.mjs")))
         (await (compile (resolve ROOT "stdlib/data-text.eli") dataTextModule))
         (await (compile (resolve ROOT "stdlib/meta.eli") metadataModule))
         (await (compile (resolve ROOT "stdlib/collection.eli") collectionModule))

@@ -1,5 +1,23 @@
 (module eliscript.data-text
   (import "../runtime/core/data-text.mjs" :as Runtime)
+  (import "./uuid.mjs" uuid)
+  (import "./time.mjs" duration instant)
+
+  (Runtime/registerDataReader "uuid"
+    (lambda (form)
+      (unless (= (value-type form) "string")
+        (throw (new globalThis/TypeError "#uuid tag requires a string literal")))
+      (uuid form)))
+
+  (Runtime/registerDataReader "inst"
+    (lambda (form)
+      (unless (= (value-type form) "string")
+        (throw (new globalThis/TypeError "#inst tag requires an ISO-8601 string literal")))
+      (instant form)))
+
+  (Runtime/registerDataReader "eliscript/duration"
+    (lambda (form)
+      (duration form)))
 
   (defconst DataTextError Runtime/DataTextError)
   (defconst IPrint Runtime/IPrint)
@@ -13,4 +31,33 @@
   (defun read-values (source &optional options)
     (Runtime/readValues source options))
 
-  (export DataTextError IPrint print-value read-value read-values))
+  (defun default-data-readers ()
+    (Runtime/defaultDataReaders))
+
+  (defun with-data-readers (readers thunk)
+    (Runtime/withDataReaders readers thunk))
+
+  (defun tagged-literal (tag form)
+    (Runtime/taggedLiteral tag form))
+
+  (defun tagged-literal? (value)
+    (Runtime/isTaggedLiteral value))
+
+  (defun tagged-literal-tag (value)
+    (Runtime/taggedLiteralTag value))
+
+  (defun tagged-literal-form (value)
+    (Runtime/taggedLiteralForm value))
+
+  (export
+    DataTextError
+    IPrint
+    default-data-readers
+    print-value
+    read-value
+    read-values
+    tagged-literal
+    tagged-literal-form
+    tagged-literal-tag
+    tagged-literal?
+    with-data-readers))

@@ -5,6 +5,7 @@
     eliscriptSymbol
     identifierName
     identifierNamespace
+    isEliscriptSymbol
     keyword
     qualifiedIdentifierName)
   (import "./map.mjs" EMPTY_MAP PersistentHashMap isPersistentHashMap)
@@ -17,6 +18,9 @@
   (import "./set.mjs" EMPTY_SET PersistentHashSet)
   (import "./sorted.mjs" PersistentSortedMap PersistentSortedSet)
   (import "./transient.mjs" assocBang conjBang persistentBang transient)
+  (import "./collection.mjs" :as Collection)
+  (import "./value-internals.mjs" finishHash hashString mixHash)
+  (import "./value.mjs" equalValues extendValueType hashValue)
   (import "./vector.mjs" EMPTY_VECTOR PersistentVector isPersistentVector)
 
   (defconst typeof-value (js* "(value) => typeof value"))
@@ -29,6 +33,11 @@
     (new globalThis/Set (js-array "nil" "true" "false" "undefined" "##NaN" "##Inf" "##-Inf")))
   (defconst IPrint (defineProtocol "IPrint" (js-array "print")))
   (defconst dispatch-print (protocolMethod IPrint "print"))
+  (defconst TAGGED_LITERAL_TOKEN (Object/freeze (js-object)))
+  (defconst TAGGED_LITERAL_HASH_TAG 1456893211)
+  (defconst tagged-literal-state (new globalThis/WeakMap))
+  (defvar default-readers-map EMPTY_MAP)
+  (defconst reader-scope-stack (js-array))
 
   (defun fail (message)
     (throw (new globalThis/TypeError message)))
@@ -39,8 +48,77 @@
   (defun truth (value)
     (funcall globalThis/Boolean value))
 
-  (defun positive-option (options name fallback)
-    (let* ((input (if (nullish? options) undefined (aref options name)))
+  (defun normalize-reader-tag-string (tag label)
+    (let ((sym (cond
+                 ((isEliscriptSymbol tag) tag)
+                 ((= (funcall typeof-value tag) "string") (eliscriptSymbol tag))
+                 (t (fail (str label " must be a string or symbol"))))))
+      (let ((ns (identifierNamespace sym))
+            (name (identifierName sym)))
+        (when (or (js-call unsafe-identifier :test name)
+                  (and (not (nil? ns)) (js-call unsafe-identifier :test ns))
+                  (js-call name :startsWith ":")
+                  (js-call name :startsWith "#"))
+          (fail (str label " contains invalid reader tag characters")))
+        (qualifiedIdentifierName sym))))
+
+  (defun normalize-readers-lookup (readers label)
+    (if (nullish? readers)
+      nil
+      (let ((lookup (new globalThis/Map)))
+        (cond
+          ((Collection/isMap readers)
+            (Collection/reduceKV
+              readers
+              (lambda (_acc key fn)
+                (unless (= (funcall typeof-value fn) "function")
+                  (fail (str label " reader handler must be a function")))
+                (js-call lookup :set (normalize-reader-tag-string key (str label " key")) fn)
+                nil)
+              nil))
+          ((and (= (funcall typeof-value readers) "object") (not (Array/isArray readers)))
+            (if (funcall (js* "(x) => x instanceof Map") readers)
+              (js-call readers :forEach
+                (lambda (fn key)
+                  (unless (= (funcall typeof-value fn) "function")
+                    (fail (str label " reader handler must be a function")))
+                  (js-call lookup :set (normalize-reader-tag-string key (str label " key")) fn)))
+              (let ((keys (Object/keys readers))
+                    (idx 0))
+                (while (< idx (js-length keys))
+                  (let* ((k (aref keys idx))
+                         (fn (aref readers k)))
+                    (unless (= (funcall typeof-value fn) "function")
+                      (fail (str label " reader handler must be a function")))
+                    (js-call lookup :set (normalize-reader-tag-string k (str label " key")) fn))
+                  (setq idx (1+ idx))))))
+          (t (fail (str label " must be a map or plain object"))))
+        lookup)))
+
+  (defun read-option (options is-map primary &optional secondary)
+    (if is-map
+      (let* ((missing (js-object))
+             (kw1 (keyword primary))
+             (v1 (Collection/get options kw1 missing)))
+        (if (not (eq v1 missing))
+          v1
+          (let ((s1 (Collection/get options primary missing)))
+            (if (not (eq s1 missing))
+              s1
+              (if (nullish? secondary)
+                undefined
+                (let ((v2 (Collection/get options (keyword secondary) missing)))
+                  (if (not (eq v2 missing))
+                    v2
+                    (Collection/get options secondary undefined))))))))
+      (if (Object/hasOwn options primary)
+        (aref options primary)
+        (if (and (not (nullish? secondary)) (Object/hasOwn options secondary))
+          (aref options secondary)
+          undefined))))
+
+  (defun positive-option (options is-map name secondary fallback)
+    (let* ((input (if (nullish? options) undefined (read-option options is-map name secondary)))
            (value (if (nullish? input) fallback input)))
       (unless (and (Number/isSafeInteger value) (> value 0))
         (fail (str name " must be a positive safe integer")))
@@ -48,15 +126,21 @@
 
   (defun normalize-options (options)
     (if (nullish? options)
-        (Object/freeze (js-object :maxDepth 256 :maxLength 16777216 :maxValues 1000000))
-        (progn
-          (when (or (not (= (funcall typeof-value options) "object")) (Array/isArray options))
+        (Object/freeze (js-object :maxDepth 256 :maxLength 16777216 :maxValues 1000000 :readers nil :defaultReader nil))
+        (let ((is-map (Collection/isMap options)))
+          (when (and (not is-map)
+                     (or (not (= (funcall typeof-value options) "object")) (Array/isArray options)))
             (fail "data text options must be an object"))
-          (Object/freeze
-            (js-object
-              :maxDepth (positive-option options "maxDepth" 256)
-              :maxLength (positive-option options "maxLength" 16777216)
-              :maxValues (positive-option options "maxValues" 1000000))))))
+          (let ((default-reader (read-option options is-map "defaultReader" "default-reader")))
+            (when (and (not (nullish? default-reader)) (not (= (funcall typeof-value default-reader) "function")))
+              (fail "defaultReader must be nil or a function"))
+            (Object/freeze
+              (js-object
+                :maxDepth (positive-option options is-map "maxDepth" "max-depth" 256)
+                :maxLength (positive-option options is-map "maxLength" "max-length" 16777216)
+                :maxValues (positive-option options is-map "maxValues" "max-values" 1000000)
+                :readers (normalize-readers-lookup (read-option options is-map "readers") "data text readers")
+                :defaultReader (if (nullish? default-reader) nil default-reader)))))))
 
   (defun compare-text (left right)
     (if (< left right) -1 (if (> left right) 1 0)))
@@ -199,6 +283,74 @@
          (js-call (js-call (iterable-array value) :map (lambda (item) (js-call context :print item))) :join " ")
          "]"))
 
+  (defconst TaggedLiteral
+    (funcall
+      (js* "(init, getTag, getForm, toStr) => class TaggedLiteral { constructor(token, tag, form) { init(this, token, tag, form); } get tag() { return getTag(this); } get form() { return getForm(this); } toString() { return toStr(this); } get [Symbol.toStringTag]() { return \"TaggedLiteral\"; } }")
+      (lambda (self token tag form)
+        (unless (eq token TAGGED_LITERAL_TOKEN)
+          (fail "TaggedLiteral values must be constructed with taggedLiteral()"))
+        (js-call tagged-literal-state :set self (Object/freeze (js-object :tag tag :form form)))
+        (Object/freeze self))
+      (lambda (self) (get (js-call tagged-literal-state :get self) :tag))
+      (lambda (self) (get (js-call tagged-literal-state :get self) :form))
+      (lambda (self)
+        (let ((st (js-call tagged-literal-state :get self)))
+          (str "#" (print-symbol (get st :tag)) " " (printValue (get st :form)))))))
+
+  (defun isTaggedLiteral (value)
+    (funcall (js* "(value, Ctor) => value instanceof Ctor") value TaggedLiteral))
+
+  (defun taggedLiteralTag (value)
+    (unless (isTaggedLiteral value)
+      (fail "expected a TaggedLiteral value"))
+    (get (js-call tagged-literal-state :get value) :tag))
+
+  (defun taggedLiteralForm (value)
+    (unless (isTaggedLiteral value)
+      (fail "expected a TaggedLiteral value"))
+    (get (js-call tagged-literal-state :get value) :form))
+
+  (defun taggedLiteral (tag form)
+    (let* ((normalized (normalize-reader-tag-string tag "taggedLiteral tag"))
+           (sym (eliscriptSymbol normalized)))
+      (new TaggedLiteral TAGGED_LITERAL_TOKEN sym form)))
+
+  (extendValueType TaggedLiteral
+    (js-object
+      :equal (lambda (left right eq-fn)
+               (and (isTaggedLiteral right)
+                    (funcall eq-fn (taggedLiteralTag left) (taggedLiteralTag right))
+                    (funcall eq-fn (taggedLiteralForm left) (taggedLiteralForm right))))
+      :hash (lambda (self hash-fn)
+              (finishHash
+                (mixHash
+                  (mixHash TAGGED_LITERAL_HASH_TAG (funcall hash-fn (taggedLiteralTag self)))
+                  (funcall hash-fn (taggedLiteralForm self)))
+                2))))
+
+  (defun print-tagged-literal (value context)
+    (str "#" (print-symbol (taggedLiteralTag value)) " " (js-call context :print (taggedLiteralForm value))))
+
+  (defun registerDataReader (tag fn)
+    (unless (= (funcall typeof-value fn) "function")
+      (fail "registerDataReader handler must be a function"))
+    (let ((normalized (normalize-reader-tag-string tag "registerDataReader tag")))
+      (setq default-readers-map (js-call default-readers-map :assoc normalized fn))
+      fn))
+
+  (defun defaultDataReaders ()
+    default-readers-map)
+
+  (defun withDataReaders (readers thunk)
+    (unless (= (funcall typeof-value thunk) "function")
+      (fail "withDataReaders thunk must be a function"))
+    (let ((lookup (or (normalize-readers-lookup readers "withDataReaders readers") (new globalThis/Map))))
+      (js-call reader-scope-stack :push lookup)
+      (try
+        (funcall thunk)
+        (finally
+          (js-call reader-scope-stack :pop)))))
+
   (extendProtocolCategory IPrint "null" (js-object :print (lambda () "nil")))
   (extendProtocolCategory IPrint "undefined" (js-object :print (lambda () "undefined")))
   (extendProtocolCategory IPrint "boolean" (js-object :print (lambda (value) (if (truth value) "true" "false"))))
@@ -216,6 +368,7 @@
   (extendProtocolType IPrint PersistentSortedMap (js-object :print print-map))
   (extendProtocolType IPrint PersistentSortedSet (js-object :print print-set))
   (extendProtocolType IPrint PersistentQueue (js-object :print print-queue))
+  (extendProtocolType IPrint TaggedLiteral (js-object :print print-tagged-literal))
 
   (defun make-print-context (options)
     (let ((values 0)
@@ -439,6 +592,24 @@
         (reader-fail reader "queue tag requires a vector" start))
       (apply persistentQueue (iterable-array payload))))
 
+  (defun resolve-tag-reader (options tag-name)
+    (let ((option-readers (get options :readers))
+          (found nil))
+      (when (not (nil? option-readers))
+        (setq found (js-call option-readers :get tag-name)))
+      (when (undefined? found) (setq found nil))
+      (let ((idx (1- (js-length reader-scope-stack))))
+        (while (and (nil? found) (>= idx 0))
+          (let ((candidate (js-call (aref reader-scope-stack idx) :get tag-name)))
+            (unless (undefined? candidate)
+              (setq found candidate)))
+          (setq idx (1- idx))))
+      (when (nil? found)
+        (let ((reg (js-call default-readers-map :get tag-name undefined)))
+          (unless (undefined? reg)
+            (setq found reg))))
+      found))
+
   (defun reader-dispatch (reader depth start)
     (if (= (reader-peek reader 1) "{")
         (progn
@@ -452,7 +623,30 @@
             ((= token "#eliscript/keyword") (reader-tagged-identifier reader "keyword" depth start))
             ((= token "#eliscript/symbol") (reader-tagged-identifier reader "symbol" depth start))
             ((= token "#queue") (reader-tagged-queue reader depth start))
-            (t (reader-fail reader (str "unknown dispatch " token) start))))))
+            (t
+              (let* ((options (get reader :options))
+                     (tag-name (if (> (js-length token) 1) (js-call token :slice 1) ""))
+                     (custom-reader (if (> (js-length tag-name) 0)
+                                      (resolve-tag-reader options tag-name)
+                                      nil))
+                     (default-reader (get options :defaultReader)))
+                (cond
+                  ((not (nil? custom-reader))
+                    (reader-skip reader)
+                    (let ((payload (reader-value reader (1+ depth))))
+                      (try
+                        (funcall custom-reader payload)
+                        (catch error
+                          (reader-fail reader (get error :message) start)))))
+                  ((and (> (js-length tag-name) 0) (not (nil? default-reader)))
+                    (reader-skip reader)
+                    (let ((payload (reader-value reader (1+ depth))))
+                      (try
+                        (funcall default-reader tag-name payload)
+                        (catch error
+                          (reader-fail reader (get error :message) start)))))
+                  (t
+                    (reader-fail reader (str "unknown dispatch " token) start)))))))))
 
   (defun reader-atom (reader start)
     (let ((token (reader-token reader start)))
@@ -534,8 +728,16 @@
       (Object/freeze values)))
 
   (export
-    IPrint
-    printValue
     DataTextError
+    IPrint
+    TaggedLiteral
+    defaultDataReaders
+    isTaggedLiteral
+    printValue
     readValue
-    readValues))
+    readValues
+    registerDataReader
+    taggedLiteral
+    taggedLiteralForm
+    taggedLiteralTag
+    withDataReaders))

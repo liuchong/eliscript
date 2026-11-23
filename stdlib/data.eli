@@ -1,7 +1,16 @@
 (module eliscript.data
   (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/identifier.mjs"
+    isEliscriptSymbol
+    isKeyword
+    keyword
+    qualifiedIdentifierName)
+  (import "../runtime/core/list.mjs" EMPTY_LIST persistentList)
   (import "../runtime/core/map.mjs" EMPTY_MAP)
+  (import "../runtime/core/metadata.mjs" meta withMeta)
   (import "../runtime/core/protocol.mjs" :as Protocol)
+  (import "../runtime/core/record.mjs" isRecord)
+  (import "../runtime/core/set.mjs" EMPTY_SET)
   (import "../runtime/core/transducer.mjs" into)
   (import "../runtime/core/transient.mjs"
     assocBang
@@ -10,6 +19,63 @@
     transient)
   (import "../runtime/core/vector.mjs" EMPTY_VECTOR)
   (defconst missing-value (js-object))
+  (defun ascii-digit? (code)
+    (and (>= code 48) (<= code 57)))
+  (defun valid-long-string? (text)
+    (let ((len (js-length text))
+          (idx 0))
+      (when (and (< idx len)
+                 (let ((ch (js-call text :charCodeAt idx)))
+                   (or (= ch 43) (= ch 45))))
+        (setq idx (1+ idx)))
+      (if (>= idx len)
+        false
+        (let ((ok t))
+          (while (and ok (< idx len))
+            (if (ascii-digit? (js-call text :charCodeAt idx))
+              (setq idx (1+ idx))
+              (setq ok false)))
+          ok))))
+  (defun valid-double-string? (text)
+    (let ((len (js-length text))
+          (idx 0)
+          (digits-before 0)
+          (digits-after 0)
+          (has-dot false))
+      (when (and (< idx len)
+                 (let ((ch (js-call text :charCodeAt idx)))
+                   (or (= ch 43) (= ch 45))))
+        (setq idx (1+ idx)))
+      (while (and (< idx len) (ascii-digit? (js-call text :charCodeAt idx)))
+        (setq digits-before (1+ digits-before)
+              idx (1+ idx)))
+      (when (and (< idx len) (= (js-call text :charCodeAt idx) 46))
+        (setq has-dot t
+              idx (1+ idx))
+        (while (and (< idx len) (ascii-digit? (js-call text :charCodeAt idx)))
+          (setq digits-after (1+ digits-after)
+                idx (1+ idx))))
+      (if (and (= digits-before 0) (or (not has-dot) (= digits-after 0)))
+        false
+        (if (= idx len)
+          t
+          (let ((exp-code (js-call text :charCodeAt idx)))
+            (if (or (= exp-code 101) (= exp-code 69))
+              (progn
+                (setq idx (1+ idx))
+                (when (and (< idx len)
+                           (let ((sc (js-call text :charCodeAt idx)))
+                             (or (= sc 43) (= sc 45))))
+                  (setq idx (1+ idx)))
+                (let ((exp-digits 0)
+                      (ok t))
+                  (while (and ok (< idx len))
+                    (if (ascii-digit? (js-call text :charCodeAt idx))
+                      (setq exp-digits (1+ exp-digits)
+                            idx (1+ idx))
+                      (setq ok false)))
+                  (and ok (> exp-digits 0))))
+              false))))))
   (defun require-function
     (value label)
     (if (= (value-type value) "function")
@@ -283,17 +349,154 @@
           (Collection/nth value-vector index))
         (setq index (1+ index)))
       (persistentBang result)))
+  (defun preserve-metadata (source target)
+    (let ((value-meta (meta source)))
+      (if (nil? value-meta) target (withMeta target value-meta))))
+  (defun editable-map? (value)
+    (and (Collection/isMap value) (not (isRecord value))))
+  (defun transform-map-keys (form key-transform)
+    (let ((map-entry-pred (get Collection :isMapEntry))
+          (map-entry-ctor (get Collection :mapEntry)))
+      (cond
+        ((and (= (value-type map-entry-pred) "function")
+              (= (value-type map-entry-ctor) "function")
+              (funcall map-entry-pred form))
+          (preserve-metadata form
+            (funcall map-entry-ctor
+              (transform-map-keys (Collection/nth form 0) key-transform)
+              (transform-map-keys (Collection/nth form 1) key-transform))))
+        ((editable-map? form)
+          (let ((result (transient EMPTY_MAP)))
+            (Collection/reduceKV
+              form
+              (lambda (builder key value)
+                (assocBang
+                  builder
+                  (funcall key-transform key)
+                  (transform-map-keys value key-transform))
+                builder)
+              result)
+            (preserve-metadata form (persistentBang result))))
+        ((Collection/isVector form)
+          (let ((result (transient EMPTY_VECTOR)))
+            (Collection/reduce
+              form
+              (lambda (builder value)
+                (conjBang builder (transform-map-keys value key-transform))
+                builder)
+              result)
+            (preserve-metadata form (persistentBang result))))
+        ((Collection/isSet form)
+          (let ((result (transient EMPTY_SET)))
+            (Collection/reduce
+              form
+              (lambda (builder value)
+                (conjBang builder (transform-map-keys value key-transform))
+                builder)
+              result)
+            (preserve-metadata form (persistentBang result))))
+        ((Collection/isList form)
+          (let ((items (js-array)))
+            (Collection/reduce
+              form
+              (lambda (_acc value)
+                (js-call items :push (transform-map-keys value key-transform))
+                nil)
+              nil)
+            (preserve-metadata form (if (= (js-length items) 0) EMPTY_LIST (apply persistentList items)))))
+        (t form))))
+  (defun keywordize-keys (form)
+    (transform-map-keys
+      form
+      (lambda (key)
+        (if (= (value-type key) "string") (keyword key) key))))
+  (defun stringify-keys (form)
+    (transform-map-keys
+      form
+      (lambda (key)
+        (if (or (isKeyword key) (isEliscriptSymbol key))
+          (qualifiedIdentifierName key)
+          key))))
+  (defun parse-long (text)
+    (unless (= (value-type text) "string")
+      (throw (new globalThis/TypeError "parse-long expects a string")))
+    (if (valid-long-string? text)
+      (let ((parsed (funcall globalThis/Number text)))
+        (if (Number/isSafeInteger parsed)
+          (if (Object/is parsed -0.0) 0 parsed)
+          nil))
+      nil))
+  (defun parse-double (text)
+    (unless (= (value-type text) "string")
+      (throw (new globalThis/TypeError "parse-double expects a string")))
+    (let ((trimmed (js-call text :trim)))
+      (cond
+        ((= trimmed "NaN") (get globalThis/Number :NaN))
+        ((or (= trimmed "Infinity") (= trimmed "+Infinity")) (get globalThis/Number :POSITIVE_INFINITY))
+        ((= trimmed "-Infinity") (get globalThis/Number :NEGATIVE_INFINITY))
+        ((valid-double-string? trimmed) (funcall globalThis/Number trimmed))
+        (t nil))))
+  (defun parse-boolean (text)
+    (unless (= (value-type text) "string")
+      (throw (new globalThis/TypeError "parse-boolean expects a string")))
+    (cond
+      ((= text "true") t)
+      ((= text "false") false)
+      (t nil)))
+  (defun deep-merge-value (combine existing incoming)
+    (if (and (editable-map? existing) (editable-map? incoming))
+      (let ((builder (transient existing)))
+        (Collection/reduceKV
+          incoming
+          (lambda (acc key value)
+            (let ((prev (js-call acc :get key missing-value)))
+              (assocBang acc key
+                (if (eq prev missing-value)
+                  value
+                  (deep-merge-value combine prev value))))
+            acc)
+          builder)
+        (persistentBang builder))
+      (funcall combine existing incoming)))
+  (defun deep-merge-with (combine &rest collections)
+    (require-function combine "deep-merge-with combine function")
+    (let ((result (transient EMPTY_MAP))
+          (index 0))
+      (while (< index (js-length collections))
+        (let ((coll (js-nth index collections)))
+          (unless (nullish? coll)
+            (reduce-entries
+              coll
+              (lambda (builder key value)
+                (let ((existing (js-call builder :get key missing-value)))
+                  (assocBang builder key
+                    (if (eq existing missing-value)
+                      value
+                      (deep-merge-value combine existing value))))
+                builder)
+              result)))
+        (setq index (1+ index)))
+      (persistentBang result)))
+  (defun deep-merge (&rest collections)
+    (apply deep-merge-with (js-cons (lambda (_old incoming) incoming) collections)))
   (export
     assoc-in
     count-by
+    deep-merge
+    deep-merge-with
     frequencies
     get-in
     group-by
     index-by
     keys
+    keywordize-keys
     merge
     merge-with
+    parse-boolean
+    parse-double
+    parse-long
     select-keys
+    stringify-keys
     update
     update-in
     update-keys

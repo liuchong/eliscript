@@ -1306,9 +1306,17 @@
       "namedExports": [
         "DataTextError",
         "IPrint",
+        "TaggedLiteral",
+        "defaultDataReaders",
+        "isTaggedLiteral",
         "printValue",
         "readValue",
-        "readValues"
+        "readValues",
+        "registerDataReader",
+        "taggedLiteral",
+        "taggedLiteralForm",
+        "taggedLiteralTag",
+        "withDataReaders"
       ],
       "defaultExport": false
     },
@@ -1409,6 +1417,7 @@
         "droppingWhile",
         "eduction",
         "filtering",
+        "haltWhen",
         "interposing",
         "into",
         "keeping",
@@ -2245,9 +2254,25 @@
       "spec": "0052",
       "file": "stdlib/bit.eli",
       "exports": [
+        "bit-and-fn",
+        "bit-and-not",
+        "bit-clear",
         "bit-count",
+        "bit-flip",
+        "bit-not-fn",
+        "bit-or-fn",
+        "bit-set",
+        "bit-shift-left-fn",
+        "bit-shift-right-fn",
+        "bit-test",
+        "bit-xor-fn",
+        "highest-one-bit",
+        "leading-zeros",
+        "lowest-one-bit",
         "rotate-left",
-        "rotate-right"
+        "rotate-right",
+        "trailing-zeros",
+        "unsigned-bit-shift-right-fn"
       ]
     },
     {
@@ -2273,6 +2298,7 @@
         "IStack",
         "ReductionView",
         "SequenceView",
+        "array-map?",
         "assoc",
         "associative?",
         "bounded-count",
@@ -2335,14 +2361,21 @@
       "exports": [
         "assoc-in",
         "count-by",
+        "deep-merge",
+        "deep-merge-with",
         "frequencies",
         "get-in",
         "group-by",
         "index-by",
         "keys",
+        "keywordize-keys",
         "merge",
         "merge-with",
+        "parse-boolean",
+        "parse-double",
+        "parse-long",
         "select-keys",
+        "stringify-keys",
         "update",
         "update-in",
         "update-keys",
@@ -2358,9 +2391,23 @@
       "exports": [
         "DataTextError",
         "IPrint",
+        "default-data-readers",
         "print-value",
         "read-value",
-        "read-values"
+        "read-values",
+        "tagged-literal",
+        "tagged-literal-form",
+        "tagged-literal-tag",
+        "tagged-literal?",
+        "with-data-readers"
+      ]
+    },
+    {
+      "module": "diff",
+      "spec": "0066",
+      "file": "stdlib/diff.eli",
+      "exports": [
+        "diff"
       ]
     },
     {
@@ -2500,6 +2547,62 @@
         "realize",
         "realized-count",
         "realized?"
+      ]
+    },
+    {
+      "module": "math",
+      "spec": "0052",
+      "file": "stdlib/math.eli",
+      "exports": [
+        "E",
+        "IEEE-remainder",
+        "PI",
+        "TAU",
+        "abs",
+        "acos",
+        "acosh",
+        "asin",
+        "asinh",
+        "atan",
+        "atan2",
+        "atanh",
+        "cbrt",
+        "ceil",
+        "clamp",
+        "copy-sign",
+        "cos",
+        "cosh",
+        "exp",
+        "expm1",
+        "floor",
+        "floor-div",
+        "floor-mod",
+        "hypot",
+        "log",
+        "log10",
+        "log1p",
+        "log2",
+        "max",
+        "min",
+        "pow",
+        "rand-int",
+        "rand-nth",
+        "random",
+        "random-sample",
+        "rint",
+        "round",
+        "scalb",
+        "shuffle",
+        "signum",
+        "sin",
+        "sinh",
+        "sqrt",
+        "tan",
+        "tanh",
+        "to-degrees",
+        "to-radians",
+        "trunc",
+        "ulp"
       ]
     },
     {
@@ -2807,6 +2910,18 @@
       ]
     },
     {
+      "module": "pprint",
+      "spec": "0069",
+      "file": "stdlib/pprint.eli",
+      "exports": [
+        "pp",
+        "pprint",
+        "pprint-str",
+        "print-table",
+        "table-str"
+      ]
+    },
+    {
       "module": "protocol",
       "spec": "0066",
       "file": "stdlib/protocol.eli",
@@ -2851,8 +2966,12 @@
       "exports": [
         "re-find",
         "re-matches",
+        "re-pattern?",
+        "re-quote",
+        "re-quote-replacement",
         "re-replace",
         "re-seq",
+        "re-split",
         "regex",
         "regex-flags",
         "regex-source",
@@ -2909,6 +3028,7 @@
         "iterate",
         "keep",
         "keep-indexed",
+        "keepv",
         "last",
         "map",
         "map-indexed",
@@ -2924,24 +3044,31 @@
         "partition",
         "partition-all",
         "partition-by",
+        "partitionv",
+        "partitionv-all",
         "prepend",
+        "random-sample",
         "range",
         "reductions",
         "remove",
+        "removev",
         "repeat",
         "repeatedly",
         "rest",
         "reverse",
         "second",
         "sequence-nth",
+        "shuffle",
         "some",
         "split-at",
         "split-with",
+        "splitv-at",
         "take",
         "take-last",
         "take-nth",
         "take-while",
-        "tree-seq"
+        "tree-seq",
+        "vec"
       ]
     },
     {
@@ -2996,6 +3123,7 @@
         "add-watch",
         "atom",
         "atom?",
+        "bound-fn",
         "compare-and-set!",
         "delay",
         "delay?",
@@ -3009,7 +3137,13 @@
         "reset-vals!",
         "set-validator!",
         "swap!",
-        "swap-vals!"
+        "swap-vals!",
+        "vderef",
+        "volatile!",
+        "volatile?",
+        "vreset!",
+        "vswap!",
+        "vswap-vals!"
       ]
     },
     {
@@ -3018,18 +3152,70 @@
       "file": "stdlib/string.eli",
       "exports": [
         "blank?",
+        "capitalize",
         "contains?",
         "empty?",
         "ends-with?",
+        "escape",
+        "includes?",
+        "index-of",
         "join",
+        "last-index-of",
+        "lower-case",
+        "re-quote-replacement",
         "repeat",
+        "replace",
+        "replace-first",
+        "reverse",
         "slice",
+        "split",
+        "split-lines",
         "starts-at?",
         "starts-with?",
         "strip-prefix",
         "strip-suffix",
         "trim",
+        "trim-newline",
+        "triml",
+        "trimr",
+        "upper-case",
         "whitespace?"
+      ]
+    },
+    {
+      "module": "tap",
+      "spec": "0072",
+      "file": "stdlib/tap.eli",
+      "exports": [
+        "add-tap",
+        "clear-taps!",
+        "flush-taps!",
+        "remove-tap",
+        "tap-stats",
+        "tap>"
+      ]
+    },
+    {
+      "module": "time",
+      "spec": "0069",
+      "file": "stdlib/time.eli",
+      "exports": [
+        "Duration",
+        "Instant",
+        "duration",
+        "duration-ms",
+        "duration-seconds",
+        "duration?",
+        "instant",
+        "instant-add",
+        "instant-after?",
+        "instant-before?",
+        "instant-diff",
+        "instant-iso",
+        "instant-ms",
+        "instant?",
+        "now",
+        "parse-instant"
       ]
     },
     {
@@ -3046,6 +3232,7 @@
         "dropping-while",
         "eduction",
         "filtering",
+        "halt-when",
         "interposing",
         "into",
         "keeping",
@@ -3092,6 +3279,22 @@
         "type-definition?",
         "type-of",
         "type-value?"
+      ]
+    },
+    {
+      "module": "uuid",
+      "spec": "0069",
+      "file": "stdlib/uuid.eli",
+      "exports": [
+        "UUID",
+        "parse-uuid",
+        "uuid",
+        "uuid-bytes",
+        "uuid-string",
+        "uuid-v4",
+        "uuid-v7",
+        "uuid-version",
+        "uuid?"
       ]
     },
     {

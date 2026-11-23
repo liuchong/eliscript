@@ -152,7 +152,7 @@
           (array (js-array "old")) (nativeMap (new globalThis.Map (js-array (js-array "old" 0)))) (nativeSet (new globalThis.Set (js-array "old"))))
       (same (Array/from (into vector (js-array 1 2 3))) (js-array 1 2 3)) (same (Array/from vector) (js-array "old"))
       (same (new globalThis.Map (js-call (into map (js-array (js-array "left" 1) (js-array "right" 2))) :entries)) (new globalThis.Map (js-array (js-array "left" 1) (js-array "right" 2))))
-      (same (Array/from map) (js-array (js-array "old" 0)))
+      (same (js-call (Array/from map) :map (lambda (entry) (Array/from entry))) (js-array (js-array "old" 0)))
       (same (js-call (into set (js-array 1 2 2)) :toSet) (new globalThis.Set (js-array 1 2))) (same (Array/from set) (js-array "old"))
       (same (into array (mapping (lambda (value) (* value 2))) (js-array 1 2 3)) (js-array 2 4 6)) (same array (js-array "old"))
       (same (into nativeMap (js-array (js-array "answer" 42))) (new globalThis.Map (js-array (js-array "answer" 42))))

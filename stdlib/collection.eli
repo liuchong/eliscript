@@ -1,4 +1,5 @@
 (module eliscript.collection
+  (import "../runtime/core/array-map.mjs" isPersistentArrayMap)
   (import "../runtime/core/collection.mjs" :as Runtime)
   (import "../runtime/core/vector.mjs" :as Vector)
   (defconst ICounted Runtime/ICounted)
@@ -30,6 +31,7 @@
   (defun list? (value) (Runtime/isList value))
   (defun vector? (value) (Runtime/isVector value))
   (defun map? (value) (Runtime/isMap value))
+  (defun array-map? (value) (isPersistentArrayMap value))
   (defun queue? (value) (Runtime/isQueue value))
   (defun set? (value) (Runtime/isSet value))
   (defun sequential? (value) (Runtime/isSequential value))
@@ -112,6 +114,7 @@
     ISeqable
     ReductionView
     SequenceView
+    array-map?
     assoc
     associative?
     bounded-count

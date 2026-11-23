@@ -40,6 +40,7 @@
   (import "../runtime/core/truth.mjs" isTruthy)
   (import "../runtime/core/vector.mjs"
     EMPTY_VECTOR
+    PersistentVector
     isPersistentVector
     persistentVector)
   (defconst not-found (js-object))
@@ -623,6 +624,59 @@
                 (setq index (1- index))))
             (conjBang result value))))
       (persistentBang result)))
+  (defun vec (collection)
+    (if (isPersistentVector collection)
+      collection
+      (into EMPTY_VECTOR collection)))
+  (defun removev (predicate collection)
+    (require-function predicate "removev predicate")
+    (into EMPTY_VECTOR (removing predicate) collection))
+  (defun keepv (transform collection)
+    (require-function transform "keepv transform")
+    (into EMPTY_VECTOR (keeping transform) collection))
+  (defun partitionv (size &rest arguments)
+    (apply partition (js-cons size arguments)))
+  (defun partitionv-all (size &rest arguments)
+    (apply partition-all (js-cons size arguments)))
+  (defun splitv-at (limit collection)
+    (require-non-negative-safe-integer limit "splitv-at limit")
+    (let ((head (transient EMPTY_VECTOR))
+          (tail (transient EMPTY_VECTOR))
+          (index 0))
+      (reduce collection
+        (lambda (_acc item)
+          (if (< index limit)
+            (conjBang head item)
+            (conjBang tail item))
+          (setq index (1+ index))
+          nil)
+        nil)
+      (persistentVector (persistentBang head) (persistentBang tail))))
+  (defun shuffle (collection)
+    (let ((values (js-array)))
+      (reduce collection
+        (lambda (_acc item)
+          (js-call values :push item)
+          nil)
+        nil)
+      (let ((index (1- (js-length values))))
+        (while (> index 0)
+          (let* ((swap-index (Math/floor (* (Math/random) (1+ index))))
+                 (temp (aref values index)))
+            (put values index (aref values swap-index))
+            (put values swap-index temp))
+          (setq index (1- index))))
+      (js-call PersistentVector :from values)))
+  (defun random-sample (probability &optional collection)
+    (unless (and (= (value-type probability) "number")
+                 (Number/isFinite probability)
+                 (>= probability 0)
+                 (<= probability 1))
+      (throw (new globalThis/TypeError "random-sample probability must be a number in [0, 1]")))
+    (let ((xf (filtering (lambda (_value) (< (Math/random) probability)))))
+      (if (nullish? collection)
+        xf
+        (into EMPTY_VECTOR xf collection))))
   (export
     butlast
     concat
@@ -646,6 +700,7 @@
     interleave-all
     keep
     keep-indexed
+    keepv
     last
     iterate
     map
@@ -660,23 +715,30 @@
     partition
     partition-all
     partition-by
+    partitionv
+    partitionv-all
     prepend
+    random-sample
     reductions
     remove
+    removev
     repeat
     repeatedly
     rest
     reverse
     range
     second
+    shuffle
     nth-next
     nth-rest
     sequence-nth
     some
     split-at
     split-with
+    splitv-at
     take
     take-last
     take-nth
     take-while
-    tree-seq))
+    tree-seq
+    vec))

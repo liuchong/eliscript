@@ -33,4 +33,92 @@
         (unsigned-bit-shift-right value amount)
         (bit-shift-left value (- 32 amount))))))
 
-  (export bit-count rotate-left rotate-right))
+  (defportable bit-and-not (left right)
+    (int32 (bit-and (int32 left) (bit-not (int32 right)))))
+
+  (defportable bit-test (value index)
+    (let ((mask (bit-shift-left 1 (bit-and (int32 index) 31))))
+      (/= (bit-and (uint32 value) (uint32 mask)) 0)))
+
+  (defportable bit-set (value index)
+    (int32 (bit-or (int32 value) (bit-shift-left 1 (bit-and (int32 index) 31)))))
+
+  (defportable bit-clear (value index)
+    (int32 (bit-and (int32 value) (bit-not (bit-shift-left 1 (bit-and (int32 index) 31))))))
+
+  (defportable bit-flip (value index)
+    (int32 (bit-xor (int32 value) (bit-shift-left 1 (bit-and (int32 index) 31)))))
+
+  (defportable leading-zeros (value)
+    (let ((bits (uint32 value)))
+      (if (= bits 0)
+        32
+        (let ((smeared bits))
+          (setq smeared (uint32 (bit-or smeared (unsigned-bit-shift-right smeared 1))))
+          (setq smeared (uint32 (bit-or smeared (unsigned-bit-shift-right smeared 2))))
+          (setq smeared (uint32 (bit-or smeared (unsigned-bit-shift-right smeared 4))))
+          (setq smeared (uint32 (bit-or smeared (unsigned-bit-shift-right smeared 8))))
+          (setq smeared (uint32 (bit-or smeared (unsigned-bit-shift-right smeared 16))))
+          (- 32 (bit-count smeared))))))
+
+  (defportable trailing-zeros (value)
+    (let ((bits (uint32 value)))
+      (if (= bits 0)
+        32
+        (let ((low (uint32 (bit-and bits (uint32 (1+ (bit-not bits)))))))
+          (bit-count (1- low))))))
+
+  (defportable lowest-one-bit (value)
+    (let ((signed (int32 value)))
+      (int32 (bit-and signed (int32 (1+ (bit-not signed)))))))
+
+  (defportable highest-one-bit (value)
+    (let ((bits (uint32 value)))
+      (setq bits (uint32 (bit-or bits (unsigned-bit-shift-right bits 1))))
+      (setq bits (uint32 (bit-or bits (unsigned-bit-shift-right bits 2))))
+      (setq bits (uint32 (bit-or bits (unsigned-bit-shift-right bits 4))))
+      (setq bits (uint32 (bit-or bits (unsigned-bit-shift-right bits 8))))
+      (setq bits (uint32 (bit-or bits (unsigned-bit-shift-right bits 16))))
+      (int32 (- bits (unsigned-bit-shift-right bits 1)))))
+
+  (defportable bit-and-fn (left right)
+    (int32 (bit-and (int32 left) (int32 right))))
+
+  (defportable bit-or-fn (left right)
+    (int32 (bit-or (int32 left) (int32 right))))
+
+  (defportable bit-xor-fn (left right)
+    (int32 (bit-xor (int32 left) (int32 right))))
+
+  (defportable bit-not-fn (value)
+    (int32 (bit-not (int32 value))))
+
+  (defportable bit-shift-left-fn (value distance)
+    (int32 (bit-shift-left (int32 value) (bit-and (int32 distance) 31))))
+
+  (defportable bit-shift-right-fn (value distance)
+    (int32 (bit-shift-right (int32 value) (bit-and (int32 distance) 31))))
+
+  (defportable unsigned-bit-shift-right-fn (value distance)
+    (uint32 (unsigned-bit-shift-right (uint32 value) (bit-and (int32 distance) 31))))
+
+  (export
+    bit-and-fn
+    bit-and-not
+    bit-clear
+    bit-count
+    bit-flip
+    bit-not-fn
+    bit-or-fn
+    bit-set
+    bit-shift-left-fn
+    bit-shift-right-fn
+    bit-test
+    bit-xor-fn
+    highest-one-bit
+    leading-zeros
+    lowest-one-bit
+    rotate-left
+    rotate-right
+    trailing-zeros
+    unsigned-bit-shift-right-fn))

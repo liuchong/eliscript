@@ -30,17 +30,17 @@
   (test "generated library API index matches every declared module and export"
     (async ()
       (let ((index (await (buildApiIndex (js-object :root ROOT)))))
-        (js-call (expect (get index :moduleCount)) :toBe 45)
-        (js-call (expect (get index :exportCount)) :toBe 630)
+        (js-call (expect (get index :moduleCount)) :toBe 51)
+        (js-call (expect (get index :exportCount)) :toBe 782)
         (js-call (expect (get (named-module index "protocol") :exports)) :toContain "read-external-protocol-method")
         (js-call (expect (named-module index "regex")) :toEqual
           (expected-module "regex" "stdlib/regex.eli" "0178" "specs/0178-immutable-regex-text-processing.md" "runtime-core"
             "Immutable regular-expression patterns, capture-aware matching, memoized lazy scanning, and literal or callback replacement."
-            (js-array "re-find" "re-matches" "re-replace" "re-seq" "regex" "regex-flags" "regex-source" "regex?")))
+            (js-array "re-find" "re-matches" "re-pattern?" "re-quote" "re-quote-replacement" "re-replace" "re-seq" "re-split" "regex" "regex-flags" "regex-source" "regex?")))
         (js-call (expect (named-module index "state")) :toEqual
           (expected-module "state" "stdlib/state.eli" "0072" "specs/0072-atomic-state-references.md" "state"
             "Synchronous atomic references with value-pair transitions, compare-and-set, validators, ordered watches, delayed computations, and memoization."
-            (js-array "add-watch" "atom" "atom?" "compare-and-set!" "delay" "delay?" "deref" "force" "get-validator" "memoize" "realized?" "remove-watch" "reset!" "reset-vals!" "set-validator!" "swap!" "swap-vals!")))
+            (js-array "add-watch" "atom" "atom?" "bound-fn" "compare-and-set!" "delay" "delay?" "deref" "force" "get-validator" "memoize" "realized?" "remove-watch" "reset!" "reset-vals!" "set-validator!" "swap!" "swap-vals!" "vderef" "volatile!" "volatile?" "vreset!" "vswap!" "vswap-vals!")))
         (js-call (expect (named-module index "walk")) :toEqual
           (expected-module "walk" "stdlib/walk.eli" "0173" "specs/0173-persistent-tree-walk.md" "runtime-core"
             "Stack-safe pre-order and post-order traversal and rewriting of nested persistent values."

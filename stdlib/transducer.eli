@@ -24,6 +24,7 @@
   (defun partitioning-by (classifier) (Runtime/partitioningBy classifier))
   (defun deduping () (Runtime/deduping))
   (defun distincting () (Runtime/distincting))
+  (defun halt-when (predicate &optional return-fn) (Runtime/haltWhen predicate return-fn))
   (defun transduce
     (transducer reducer initial collection)
     (Runtime/transduce transducer reducer initial collection))
@@ -41,6 +42,7 @@
     eduction
     dropping-while
     filtering
+    halt-when
     interposing
     into
     keeping

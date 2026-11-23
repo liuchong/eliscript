@@ -1,0 +1,588 @@
+(module eliscript.pprint
+  (import "../runtime/core/collection.mjs" :as Collection)
+  (import "../runtime/core/data-text.mjs" DataTextError IPrint isTaggedLiteral printValue taggedLiteralForm taggedLiteralTag)
+  (import "../runtime/core/identifier.mjs" isEliscriptSymbol isKeyword keyword qualifiedIdentifierName)
+  (import "../runtime/core/metadata.mjs" meta supportsMetadata)
+  (import "../runtime/core/protocol.mjs" implementsProtocolOperation)
+  (import "../runtime/core/record.mjs" isRecord recordTypeName)
+  (import "../runtime/core/regex.mjs" isRegexPattern regexFlags regexSource)
+  (import "../runtime/core/set.mjs" EMPTY_SET)
+  (import "../runtime/core/transient.mjs" conjBang persistentBang transient)
+
+  (defconst DEFAULT_WIDTH 72)
+  (defconst DEFAULT_MAX_DEPTH 64)
+
+  (defun empty-doc ()
+    (js-object :kind "empty"))
+
+  (defun text-doc (text)
+    (if (= (js-length text) 0)
+      (empty-doc)
+      (js-object :kind "text" :text text)))
+
+  (defun line-doc (alt)
+    (js-object :kind "line" :alt alt))
+
+  (defun cat-doc (parts)
+    (js-object :kind "cat" :parts parts))
+
+  (defun nest-doc (indent doc)
+    (js-object :kind "nest" :indent indent :doc doc))
+
+  (defun group-doc (doc)
+    (js-object :kind "group" :doc doc))
+
+  (defun join-docs (docs separator)
+    (let ((count (js-length docs)))
+      (cond
+        ((= count 0) (empty-doc))
+        ((= count 1) (aref docs 0))
+        (t
+          (let ((parts (js-array))
+                (idx 0))
+            (while (< idx count)
+              (when (> idx 0)
+                (js-call parts :push separator))
+              (js-call parts :push (aref docs idx))
+              (setq idx (1+ idx)))
+            (cat-doc parts))))))
+
+  (defconst option-missing (js-object))
+
+  (defun read-pprint-option (options is-map key1 &optional key2)
+    (if is-map
+      (let ((v1 (Collection/get options (keyword key1) option-missing)))
+        (if (not (eq v1 option-missing))
+          v1
+          (let ((s1 (Collection/get options key1 option-missing)))
+            (if (not (eq s1 option-missing))
+              s1
+              (if (nullish? key2)
+                nil
+                (let ((v2 (Collection/get options (keyword key2) option-missing)))
+                  (if (not (eq v2 option-missing))
+                    v2
+                    (Collection/get options key2 nil))))))))
+      (if (Object/hasOwn options key1)
+        (aref options key1)
+        (if (and (not (nullish? key2)) (Object/hasOwn options key2))
+          (aref options key2)
+          nil))))
+
+  (defun normalize-pprint-options (options)
+    (if (nullish? options)
+      (js-object
+        :width DEFAULT_WIDTH
+        :maxDepth DEFAULT_MAX_DEPTH
+        :maxLength nil
+        :printMeta false
+        :writer nil)
+      (let ((is-map (Collection/isMap options)))
+        (when (and (not is-map)
+                   (or (not (= (value-type options) "object")) (Array/isArray options)))
+          (throw (new globalThis/TypeError "pprint options must be a map or plain object")))
+        (let* ((w0 (read-pprint-option options is-map "width"))
+               (w1 (if (nullish? w0) (read-pprint-option options is-map "rightMargin" "right-margin") w0))
+               (raw-depth (read-pprint-option options is-map "maxDepth" "max-depth"))
+               (raw-length (read-pprint-option options is-map "maxLength" "max-length"))
+               (raw-meta (read-pprint-option options is-map "printMeta" "print-meta"))
+               (raw-writer (read-pprint-option options is-map "writer"))
+               (width (if (nullish? w1) DEFAULT_WIDTH w1))
+               (max-depth (if (nullish? raw-depth) DEFAULT_MAX_DEPTH raw-depth)))
+          (unless (and (Number/isSafeInteger width) (> width 0))
+            (throw (new globalThis/TypeError "pprint :width must be a positive safe integer")))
+          (unless (and (Number/isSafeInteger max-depth) (>= max-depth 0))
+            (throw (new globalThis/TypeError "pprint :maxDepth must be a non-negative safe integer")))
+          (when (and (not (nullish? raw-length))
+                     (not (and (Number/isSafeInteger raw-length) (>= raw-length 0))))
+            (throw (new globalThis/TypeError "pprint :maxLength must be nil or a non-negative safe integer")))
+          (when (and (not (nullish? raw-writer)) (not (= (value-type raw-writer) "function")))
+            (throw (new globalThis/TypeError "pprint :writer must be a function")))
+          (js-object
+            :width width
+            :maxDepth max-depth
+            :maxLength raw-length
+            :printMeta (not (or (nil? raw-meta) (undefined? raw-meta) (eq raw-meta false)))
+            :writer raw-writer)))))
+
+  (defun seq-like? (value)
+    (and (not (nullish? value))
+         (or (Collection/isList value)
+             (implementsProtocolOperation Collection/ISeqable "seq" value))))
+
+  (defun collect-seq-items (collection max-length)
+    (let ((items (js-array))
+          (truncated false))
+      (Collection/reduce
+        collection
+        (lambda (_acc item)
+          (if (and (not (nullish? max-length)) (>= (js-length items) max-length))
+            (progn
+              (setq truncated t)
+              (Collection/reduced nil))
+            (progn
+              (js-call items :push item)
+              nil)))
+        nil)
+      (js-object :items items :truncated truncated)))
+
+  (defun collect-map-entries (collection max-length)
+    (let ((entries (js-array))
+          (truncated false))
+      (Collection/reduceKV
+        collection
+        (lambda (_acc key val)
+          (if (and (not (nullish? max-length)) (>= (js-length entries) max-length))
+            (progn
+              (setq truncated t)
+              (Collection/reduced nil))
+            (progn
+              (js-call entries :push (js-object :key key :value val))
+              nil)))
+        nil)
+      (js-object :entries entries :truncated truncated)))
+
+  (defun delimited-sequence-doc (open close nest-indent items truncated depth options seen line-sep)
+    (let ((parts (js-array))
+          (idx 0))
+      (while (< idx (js-length items))
+        (js-call parts :push (value-to-doc (aref items idx) (1+ depth) options seen))
+        (setq idx (1+ idx)))
+      (when truncated
+        (js-call parts :push (text-doc "...")))
+      (if (= (js-length parts) 0)
+        (text-doc (str open close))
+        (group-doc
+          (cat-doc
+            (js-array
+              (text-doc open)
+              (nest-doc nest-indent (join-docs parts (if line-sep (cat-doc (js-array (text-doc line-sep) (line-doc " "))) (line-doc " "))))
+              (text-doc close)))))))
+
+  (defun map-entries-doc (prefix entries truncated depth options seen)
+    (let ((parts (js-array))
+          (idx 0))
+      (while (< idx (js-length entries))
+        (let* ((entry (aref entries idx))
+               (kdoc (value-to-doc (get entry :key) (1+ depth) options seen))
+               (vdoc (value-to-doc (get entry :value) (1+ depth) options seen)))
+          (js-call parts :push (group-doc (cat-doc (js-array kdoc (nest-doc 1 (cat-doc (js-array (line-doc " ") vdoc))))))))
+        (setq idx (1+ idx)))
+      (when truncated
+        (js-call parts :push (text-doc "...")))
+      (if (= (js-length parts) 0)
+        (text-doc (str prefix "{}"))
+        (let ((inner (join-docs parts (cat-doc (js-array (text-doc ",") (line-doc " "))))))
+          (group-doc
+            (cat-doc
+              (js-array
+                (text-doc (str prefix "{"))
+                (nest-doc (+ (js-length prefix) 1) inner)
+                (text-doc "}"))))))))
+
+  (defun js-object-entries (obj max-length)
+    (let ((keys (Object/keys obj))
+          (entries (js-array))
+          (truncated false)
+          (idx 0))
+      (while (< idx (js-length keys))
+        (if (and (not (nullish? max-length)) (>= (js-length entries) max-length))
+          (progn
+            (setq truncated t)
+            (setq idx (js-length keys)))
+          (let ((k (aref keys idx)))
+            (js-call entries :push (js-object :key k :value (aref obj k)))
+            (setq idx (1+ idx)))))
+      (js-object :entries entries :truncated truncated)))
+
+  (defun plain-value-doc (value options)
+    (let ((tname (value-type value)))
+      (cond
+        ((or (nil? value)
+             (= tname "boolean")
+             (= tname "number")
+             (= tname "string")
+             (isKeyword value)
+             (isEliscriptSymbol value))
+          (text-doc (printValue value)))
+        ((isRegexPattern value)
+          (let ((flags (regexFlags value)))
+            (text-doc (str "#\"" (js-call (regexSource value) :replaceAll "\"" "\\\"") "\"" (if (= (js-length flags) 0) "" (str " " flags))))))
+        ((= tname "function")
+          (let ((fname (get value :name)))
+            (text-doc (if (and (= (value-type fname) "string") (> (js-length fname) 0))
+                        (str "#<fn " fname ">")
+                        "#<fn>"))))
+        ((implementsProtocolOperation IPrint "print" value)
+          (text-doc (printValue value)))
+        (t
+          (text-doc (str "#<" (funcall globalThis/String value) ">"))))))
+
+  (defun raw-value-to-doc (value depth options seen)
+    (let ((tname (value-type value)))
+      (cond
+        ((or (nullish? value)
+             (= tname "boolean")
+             (= tname "number")
+             (= tname "string")
+             (= tname "function")
+             (isKeyword value)
+             (isEliscriptSymbol value)
+             (isRegexPattern value))
+          (plain-value-doc value options))
+        ((and (not (nil? (get options :maxDepth))) (>= depth (get options :maxDepth)))
+          (text-doc "#"))
+        ((js-call seen :has value)
+          (text-doc "#circular"))
+        (t
+          (js-call seen :add value)
+          (try
+            (let ((max-length (get options :maxLength)))
+              (cond
+                ((Collection/isMapEntry value)
+                  (delimited-sequence-doc "[" "]" 1
+                    (js-array (Collection/nth value 0) (Collection/nth value 1))
+                    false depth options seen nil))
+                ((Collection/isVector value)
+                  (let ((collected (collect-seq-items value max-length)))
+                    (delimited-sequence-doc "[" "]" 1
+                      (get collected :items) (get collected :truncated)
+                      depth options seen nil)))
+                ((Collection/isQueue value)
+                  (let ((collected (collect-seq-items value max-length)))
+                    (delimited-sequence-doc "#queue [" "]" 2
+                      (get collected :items) (get collected :truncated)
+                      depth options seen nil)))
+                ((Collection/isSet value)
+                  (let ((collected (collect-seq-items value max-length)))
+                    (delimited-sequence-doc "#{" "}" 2
+                      (get collected :items) (get collected :truncated)
+                      depth options seen nil)))
+                ((isRecord value)
+                  (let ((collected (collect-map-entries value max-length)))
+                    (map-entries-doc (str "#" (recordTypeName value) " ")
+                      (get collected :entries) (get collected :truncated)
+                      depth options seen)))
+                ((Collection/isMap value)
+                  (let ((collected (collect-map-entries value max-length)))
+                    (map-entries-doc ""
+                      (get collected :entries) (get collected :truncated)
+                      depth options seen)))
+                ((Collection/isList value)
+                  (let ((collected (collect-seq-items value max-length)))
+                    (delimited-sequence-doc "(" ")" 1
+                      (get collected :items) (get collected :truncated)
+                      depth options seen nil)))
+                ((isTaggedLiteral value)
+                  (let* ((tag-str (printValue (taggedLiteralTag value)))
+                         (form-doc (value-to-doc (taggedLiteralForm value) (1+ depth) options seen)))
+                    (group-doc
+                      (cat-doc
+                        (js-array
+                          (text-doc (str "#" tag-str))
+                          (nest-doc 2 (cat-doc (js-array (line-doc " ") form-doc))))))))
+                ((implementsProtocolOperation IPrint "print" value)
+                  (text-doc (printValue value)))
+                ((seq-like? value)
+                  (let ((collected (collect-seq-items value max-length)))
+                    (delimited-sequence-doc "(" ")" 1
+                      (get collected :items) (get collected :truncated)
+                      depth options seen nil)))
+                ((Array/isArray value)
+                  (let* ((len (js-length value))
+                         (limit (if (nullish? max-length) len (Math/min len max-length)))
+                         (truncated (and (not (nullish? max-length)) (> len max-length)))
+                         (items (js-array))
+                         (idx 0))
+                    (while (< idx limit)
+                      (js-call items :push (aref value idx))
+                      (setq idx (1+ idx)))
+                    (delimited-sequence-doc "[" "]" 1 items truncated depth options seen nil)))
+                ((= tname "object")
+                  (let ((collected (js-object-entries value max-length)))
+                    (map-entries-doc "" (get collected :entries) (get collected :truncated)
+                      depth options seen)))
+                (t
+                  (plain-value-doc value options))))
+            (finally
+              (js-call seen :delete value)))))))
+
+  (defun value-to-doc (value depth options seen)
+    (let ((inner (raw-value-to-doc value depth options seen)))
+      (if (and (get options :printMeta)
+               (supportsMetadata value)
+               (not (nil? (meta value)))
+               (< depth (get options :maxDepth)))
+        (let ((mdoc (raw-value-to-doc (meta value) depth options seen)))
+          (group-doc
+            (cat-doc
+              (js-array
+                (text-doc "^")
+                mdoc
+                (line-doc " ")
+                inner))))
+        inner)))
+
+  (defun make-frame (indent mode doc)
+    (js-object :indent indent :mode mode :doc doc))
+
+  (defun doc-fits? (remaining stack)
+    (let ((rem remaining)
+          (work (js-call stack :slice))
+          (ok t)
+          (decided false))
+      (while (and ok (not decided) (> (js-length work) 0))
+        (let* ((frame (js-call work :pop))
+               (indent (get frame :indent))
+               (mode (get frame :mode))
+               (doc (get frame :doc))
+               (kind (get doc :kind)))
+          (cond
+            ((= kind "empty") nil)
+            ((= kind "text")
+              (setq rem (- rem (js-length (get doc :text))))
+              (when (< rem 0)
+                (setq ok false)))
+            ((= kind "line")
+              (if (= mode "flat")
+                (progn
+                  (setq rem (- rem (js-length (get doc :alt))))
+                  (when (< rem 0)
+                    (setq ok false)))
+                (setq decided t)))
+            ((= kind "cat")
+              (let* ((parts (get doc :parts))
+                     (idx (1- (js-length parts))))
+                (while (>= idx 0)
+                  (js-call work :push (make-frame indent mode (aref parts idx)))
+                  (setq idx (1- idx)))))
+            ((= kind "nest")
+              (js-call work :push (make-frame (+ indent (get doc :indent)) mode (get doc :doc))))
+            ((= kind "group")
+              (js-call work :push (make-frame indent "flat" (get doc :doc)))))))
+      (and ok (>= rem 0))))
+
+  (defun spaces-cache (n)
+    (if (<= n 0) "" (js-call " " :repeat n)))
+
+  (defun layout-doc (width root)
+    (let ((chunks (js-array))
+          (stack (js-array (make-frame 0 "break" root)))
+          (col 0))
+      (while (> (js-length stack) 0)
+        (let* ((frame (js-call stack :pop))
+               (indent (get frame :indent))
+               (mode (get frame :mode))
+               (doc (get frame :doc))
+               (kind (get doc :kind)))
+          (cond
+            ((= kind "empty") nil)
+            ((= kind "text")
+              (let ((text (get doc :text)))
+                (js-call chunks :push text)
+                (setq col (+ col (js-length text)))))
+            ((= kind "line")
+              (if (= mode "flat")
+                (let ((alt (get doc :alt)))
+                  (js-call chunks :push alt)
+                  (setq col (+ col (js-length alt))))
+                (let ((pad (spaces-cache indent)))
+                  (js-call chunks :push "\n")
+                  (js-call chunks :push pad)
+                  (setq col indent))))
+            ((= kind "cat")
+              (let* ((parts (get doc :parts))
+                     (idx (1- (js-length parts))))
+                (while (>= idx 0)
+                  (js-call stack :push (make-frame indent mode (aref parts idx)))
+                  (setq idx (1- idx)))))
+            ((= kind "nest")
+              (js-call stack :push (make-frame (+ indent (get doc :indent)) mode (get doc :doc))))
+            ((= kind "group")
+              (let* ((inner (get doc :doc))
+                     (next-mode (if (= mode "flat")
+                                  "flat"
+                                  (progn
+                                    (js-call stack :push (make-frame indent "flat" inner))
+                                    (let ((fits (doc-fits? (- width col) stack)))
+                                      (js-call stack :pop)
+                                      (if fits "flat" "break"))))))
+                (js-call stack :push (make-frame indent next-mode inner)))))))
+      (js-call chunks :join "")))
+
+  (defun pprint-str (value &optional options)
+    (let ((opts (normalize-pprint-options options)))
+      (layout-doc (get opts :width)
+        (value-to-doc value 0 opts (new globalThis/Set)))))
+
+  (defun emit-printed (text options)
+    (let ((writer (if (nullish? options) nil (get options :writer))))
+      (if (nil? writer)
+        (js-call globalThis/console :log text)
+        (funcall writer text))))
+
+  (defun pprint (value &optional options)
+    (let ((opts (normalize-pprint-options options)))
+      (emit-printed (pprint-str value opts) opts)
+      nil))
+
+  (defun pp (value &optional options)
+    (pprint value options)
+    value)
+
+  (defun format-table-cell (cell)
+    (cond
+      ((nil? cell) "")
+      ((= (value-type cell) "string") cell)
+      ((isKeyword cell) (str ":" (qualifiedIdentifierName cell)))
+      ((isEliscriptSymbol cell) (qualifiedIdentifierName cell))
+      ((or (= (value-type cell) "number") (= (value-type cell) "boolean"))
+        (printValue cell))
+      (t
+        (pprint-str cell (js-object :width 1000)))))
+
+  (defun read-table-cell (row col)
+    (cond
+      ((nullish? row) nil)
+      ((or (Collection/isMap row) (isRecord row))
+        (Collection/get row col nil))
+      ((= (value-type row) "object")
+        (let ((k (if (isKeyword col) (qualifiedIdentifierName col) (funcall globalThis/String col))))
+          (if (Object/hasOwn row k) (aref row k) nil)))
+      (t nil)))
+
+  (defun infer-table-columns (row-items)
+    (let ((cols (js-array))
+          (seen EMPTY_SET)
+          (seen-plain (new globalThis/Set))
+          (idx 0))
+      (while (< idx (js-length row-items))
+        (let ((row (aref row-items idx)))
+          (cond
+            ((or (Collection/isMap row) (isRecord row))
+              (let ((rkeys (js-array)))
+                (Collection/reduceKV
+                  row
+                  (lambda (_acc key _val)
+                    (js-call rkeys :push key)
+                    nil)
+                  nil)
+                (let ((ki 0))
+                  (while (< ki (js-length rkeys))
+                    (let ((key (aref rkeys ki)))
+                      (unless (Collection/contains seen key)
+                        (setq seen (Collection/conj seen key))
+                        (js-call cols :push key)))
+                    (setq ki (1+ ki))))))
+            ((and (not (nullish? row)) (= (value-type row) "object"))
+              (let ((keys (Object/keys row))
+                    (kidx 0))
+                (while (< kidx (js-length keys))
+                  (let ((k (aref keys kidx)))
+                    (unless (js-call seen-plain :has k)
+                      (js-call seen-plain :add k)
+                      (js-call cols :push k)))
+                  (setq kidx (1+ kidx)))))))
+        (setq idx (1+ idx)))
+      cols))
+
+  (defun collect-seq-array (collection)
+    (if (Array/isArray collection)
+      collection
+      (let ((out (js-array)))
+        (Collection/reduce
+          collection
+          (lambda (_acc item) (js-call out :push item) nil)
+          nil)
+        out)))
+
+  (defun pad-right-align (text width)
+    (if (>= (js-length text) width)
+      text
+      (str (js-call " " :repeat (- width (js-length text))) text)))
+
+  (defun format-table-row (cells widths)
+    (let ((parts (js-array))
+          (idx 0))
+      (while (< idx (js-length widths))
+        (js-call parts :push (pad-right-align (aref cells idx) (aref widths idx)))
+        (setq idx (1+ idx)))
+      (str "| " (js-call parts :join " | ") " |")))
+
+  (defun format-table-divider (widths)
+    (let ((parts (js-array))
+          (idx 0))
+      (while (< idx (js-length widths))
+        (js-call parts :push (js-call "-" :repeat (+ (aref widths idx) 2)))
+        (setq idx (1+ idx)))
+      (str "|" (js-call parts :join "+") "|")))
+
+  (defun table-str (ks-or-rows &optional rows)
+    (let* ((has-rows (not (nullish? rows)))
+           (row-items (collect-seq-array (if has-rows rows ks-or-rows)))
+           (cols (if has-rows (collect-seq-array ks-or-rows) (infer-table-columns row-items))))
+      (if (or (= (js-length row-items) 0) (= (js-length cols) 0))
+        ""
+        (let* ((ncols (js-length cols))
+               (headers (js-array))
+               (widths (js-array))
+               (cidx 0))
+          (while (< cidx ncols)
+            (let ((h (format-table-cell (aref cols cidx))))
+              (js-call headers :push h)
+              (js-call widths :push (js-length h)))
+            (setq cidx (1+ cidx)))
+          (let ((formatted-rows (js-array))
+                (ridx 0))
+            (while (< ridx (js-length row-items))
+              (let ((row (aref row-items ridx))
+                    (rcells (js-array))
+                    (ci 0))
+                (while (< ci ncols)
+                  (let ((cell-str (format-table-cell (read-table-cell row (aref cols ci)))))
+                    (js-call rcells :push cell-str)
+                    (when (> (js-length cell-str) (aref widths ci))
+                      (put widths ci (js-length cell-str))))
+                  (setq ci (1+ ci)))
+                (js-call formatted-rows :push rcells))
+              (setq ridx (1+ ridx)))
+            (let ((lines (js-array
+                           (format-table-row headers widths)
+                           (format-table-divider widths)))
+                  (ri 0))
+              (while (< ri (js-length formatted-rows))
+                (js-call lines :push (format-table-row (aref formatted-rows ri) widths))
+                (setq ri (1+ ri)))
+              (js-call lines :join "\n")))))))
+
+  (defun sequential-collection? (value)
+    (and (not (nullish? value))
+         (or (Array/isArray value)
+             (Collection/isVector value)
+             (Collection/isList value)
+             (Collection/isSet value)
+             (Collection/isQueue value)
+             (implementsProtocolOperation Collection/ISeqable "seq" value))))
+
+  (defun print-table (ks-or-rows &optional rows-or-options options)
+    (let ((text "")
+          (opts nil))
+      (cond
+        ((nullish? rows-or-options)
+          (setq text (table-str ks-or-rows)))
+        ((sequential-collection? rows-or-options)
+          (setq text (table-str ks-or-rows rows-or-options))
+          (setq opts options))
+        (t
+          (setq text (table-str ks-or-rows))
+          (setq opts rows-or-options)))
+      (unless (= text "")
+        (emit-printed text (if (nullish? opts) nil (normalize-pprint-options opts))))
+      nil))
+
+  (export
+    pp
+    pprint
+    pprint-str
+    print-table
+    table-str))
