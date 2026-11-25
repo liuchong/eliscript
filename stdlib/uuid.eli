@@ -10,11 +10,58 @@
   (defconst uuid-state (new globalThis/WeakMap))
   (defconst hex-digits "0123456789abcdef")
 
+  (defconst make-named-class
+    (js* "(implementation, name) => { if (typeof name !== \"string\") throw new TypeError(\"class name must be a string\"); return ({ [name]: class { constructor(...args) { return implementation(this, ...args); } } })[name]; }"))
+  (defconst make-receiver-method
+    (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }"))
+
   (defvar last-v7-ms -1)
   (defvar last-v7-seq 0)
+  (defvar fallback-now-ms 1700000000000)
+  (defvar cached-host-now undefined)
+  (defvar cached-host-fill-random undefined)
+  (defvar cached-host-to-u8 undefined)
 
   (defun fail (message)
     (throw (new globalThis/TypeError message)))
+
+  (defun make-zero-bytes ()
+    (js-array 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0))
+
+  (defun get-host-now-fn ()
+    (when (undefined? cached-host-now)
+      (setq cached-host-now
+        (try
+          (let ((probe (new globalThis/Function "return typeof Date === 'function' && typeof Date.now === 'function' ? () => Date.now() : null;")))
+            (or (funcall probe) nil))
+          (catch _ignored nil))))
+    cached-host-now)
+
+  (defun current-epoch-ms ()
+    (let ((fn (get-host-now-fn)))
+      (if (not (nil? fn))
+        (funcall fn)
+        (progn
+          (setq fallback-now-ms (1+ fallback-now-ms))
+          fallback-now-ms))))
+
+  (defun get-host-fill-random-fn ()
+    (when (undefined? cached-host-fill-random)
+      (setq cached-host-fill-random
+        (try
+          (new globalThis/Function "bytes"
+            "if (typeof crypto === 'object' && crypto && typeof crypto.getRandomValues === 'function' && typeof Uint8Array === 'function') { const u = new Uint8Array(16); crypto.getRandomValues(u); for (let i = 0; i < 16; i++) bytes[i] = u[i]; return true; } return false;")
+          (catch _ignored nil))))
+    cached-host-fill-random)
+
+  (defun get-host-to-u8-fn ()
+    (when (undefined? cached-host-to-u8)
+      (setq cached-host-to-u8
+        (try
+          (let ((probe (new globalThis/Function "return typeof Uint8Array === 'function' ? (arr) => new Uint8Array(arr) : null;")))
+            (or (funcall probe) nil))
+          (catch _ignored nil))))
+    cached-host-to-u8)
 
   (defun hex-nibble (code)
     (cond
@@ -44,7 +91,7 @@
               (not (= (js-call text :charCodeAt 18) 45))
               (not (= (js-call text :charCodeAt 23) 45)))
         nil
-        (let ((bytes (new globalThis/Uint8Array 16))
+        (let ((bytes (make-zero-bytes))
               (byte-idx 0)
               (char-idx 0)
               (valid t))
@@ -64,18 +111,42 @@
             nil)))))
 
   (defconst UUID
-    (funcall
-      (js* "(init, getCanon) => class UUID { constructor(token, canonical, bytes) { init(this, token, canonical, bytes); } get value() { return getCanon(this); } toString() { return getCanon(this); } toJSON() { return getCanon(this); } get [Symbol.toStringTag]() { return \"UUID\"; } }")
-      (lambda (self token canonical bytes)
-        (unless (eq token UUID_TOKEN)
-          (fail "UUID instances must be created via uuid(), parse-uuid(), uuid-v4(), or uuid-v7()"))
-        (js-call uuid-state :set self (Object/freeze (js-object :canonical canonical :bytes bytes)))
-        (Object/freeze self))
-      (lambda (self)
-        (get (js-call uuid-state :get self) :canonical))))
+    (let ((ctor (funcall make-named-class
+                  (lambda (self token canonical bytes)
+                    (unless (eq token UUID_TOKEN)
+                      (fail "UUID instances must be created via uuid(), parse-uuid(), uuid-v4(), or uuid-v7()"))
+                    (js-call uuid-state :set self (Object/freeze (js-object :canonical canonical :bytes bytes)))
+                    (Object/freeze self))
+                  "UUID")))
+      (let ((proto (get ctor :prototype)))
+        (Object/defineProperty proto "value"
+          (js-object
+            :get (funcall make-receiver-method (lambda (self) (get (js-call uuid-state :get self) :canonical)) "get value")
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto "toString"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (get (js-call uuid-state :get self) :canonical)) "toString")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto "toJSON"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (get (js-call uuid-state :get self) :canonical)) "toJSON")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto (get globalThis/Symbol :toStringTag)
+          (js-object
+            :get (funcall make-receiver-method (lambda (_self) "UUID") "get [Symbol.toStringTag]")
+            :enumerable false
+            :configurable t)))
+      ctor))
 
   (defun uuid? (value)
-    (funcall (js* "(value, Ctor) => value instanceof Ctor") value UUID))
+    (and (not (nullish? value))
+         (or (= (value-type value) "object") (= (value-type value) "function"))
+         (js-call uuid-state :has value)))
 
   (defun require-uuid (value label)
     (unless (uuid? value)
@@ -83,7 +154,11 @@
     value)
 
   (defun uuid-from-bytes-internal (bytes)
-    (let ((copy (new globalThis/Uint8Array bytes)))
+    (let ((copy (make-zero-bytes))
+          (idx 0))
+      (while (< idx 16)
+        (put copy idx (bit-and (aref bytes idx) 255))
+        (setq idx (1+ idx)))
       (new UUID UUID_TOKEN (bytes-to-canonical copy) copy)))
 
   (defun parse-uuid (text)
@@ -102,7 +177,7 @@
           (when (nil? parsed)
             (fail (str "invalid UUID string: " input)))
           parsed))
-      ((funcall (js* "(v) => v instanceof Uint8Array") input)
+      ((= (js-call (get (get globalThis/Object :prototype) :toString) :call input) "[object Uint8Array]")
         (unless (= (get input :length) 16)
           (fail "uuid byte array must contain exactly 16 bytes"))
         (uuid-from-bytes-internal input))
@@ -115,7 +190,11 @@
 
   (defun uuid-bytes (value)
     (require-uuid value "uuid-bytes")
-    (new globalThis/Uint8Array (get (js-call uuid-state :get value) :bytes)))
+    (let ((bytes (get (js-call uuid-state :get value) :bytes))
+          (to-u8 (get-host-to-u8-fn)))
+      (if (not (nil? to-u8))
+        (funcall to-u8 bytes)
+        (js-call bytes :slice))))
 
   (defun uuid-version (value)
     (require-uuid value "uuid-version")
@@ -123,11 +202,16 @@
       (bit-and (unsigned-bit-shift-right (aref bytes 6) 4) 15)))
 
   (defun random-bytes (bytes)
-    (js-call globalThis/crypto :getRandomValues bytes)
+    (let ((fill-fn (get-host-fill-random-fn)))
+      (unless (and (not (nil? fill-fn)) (funcall fill-fn bytes))
+        (let ((idx 0))
+          (while (< idx 16)
+            (put bytes idx (Math/floor (* (Math/random) 256)))
+            (setq idx (1+ idx))))))
     bytes)
 
   (defun uuid-v4 ()
-    (let ((bytes (random-bytes (new globalThis/Uint8Array 16))))
+    (let ((bytes (random-bytes (make-zero-bytes))))
       (put bytes 6 (bit-or (bit-and (aref bytes 6) 15) 64))
       (put bytes 8 (bit-or (bit-and (aref bytes 8) 63) 128))
       (new UUID UUID_TOKEN (bytes-to-canonical bytes) bytes)))
@@ -151,7 +235,7 @@
       (new UUID UUID_TOKEN (bytes-to-canonical bytes) bytes)))
 
   (defun uuid-v7 (&optional timestamp-ms)
-    (let ((bytes (random-bytes (new globalThis/Uint8Array 16))))
+    (let ((bytes (random-bytes (make-zero-bytes))))
       (if (not (nullish? timestamp-ms))
         (progn
           (unless (and (Number/isSafeInteger timestamp-ms)
@@ -159,7 +243,7 @@
                        (<= timestamp-ms 281474976710655))
             (fail "uuid-v7 timestamp-ms must be an integer between 0 and 281474976710655"))
           (encode-v7-bytes timestamp-ms 0 t bytes))
-        (let ((now-ms (Date/now)))
+        (let ((now-ms (current-epoch-ms)))
           (if (> now-ms last-v7-ms)
             (setq last-v7-ms now-ms
                   last-v7-seq (bit-or (bit-shift-left (bit-and (aref bytes 6) 3) 8)

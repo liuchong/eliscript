@@ -37,7 +37,7 @@
   (defun transformOriginalPrimitiveRuntimeSuite (source relative)
     (let* ((primitive (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs"))
            (operand (= relative "tests/wasm-managed-operand-conversion.test.mjs"))
-           (expected (if primitive "c7d2dded926763c5fdc69257457849d47e7fcbb675d7b0881cbf8e6640c15a61" "3ad8ba6485f6d7b18de0eee6cdb7bfded1708eae7cad370f85747ba2db4c65de")))
+           (expected (if primitive "42482f3b725afe29092d27caeb9b10a5fc6c0f2e3b8f8fdbe30062c7ce55e777" "9e34b12c2e65f84c65d31a0b5ebd9e2ec30152447aa423a4d92582f112365a51")))
       (unless (and (or primitive operand) (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") expected))
         (throw (new globalThis.TypeError "complete original primitive runtime source identity changed")))
       (let* ((maintained (maintainedSuiteSource root relative source)) (seen (new globalThis.Set))

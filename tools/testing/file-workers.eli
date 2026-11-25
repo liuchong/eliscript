@@ -1,6 +1,7 @@
 (module tools.testing.file-workers
   (import "node:path" basename dirname resolve isAbsolute)
   (import "node:url" pathToFileURL)
+  (import "node:os" cpus totalmem)
   (import "node:fs" existsSync)
   (import "node:fs/promises" mkdir writeFile readFile rm stat)
   (import "node:crypto" createHash)
@@ -44,12 +45,194 @@
   (defconst prefix-pattern (new globalThis.RegExp "^(?:wasm|native|compiler|independent|bootstrap|seed|direct-wasm|managed-stdlib)-"))
   (defconst shard-pattern (new globalThis.RegExp "^[1-9][0-9]*$"))
   (defun worker-truth (value) (funcall globalThis.Boolean value))
-  (defun worker-optional (value key) (if (nullish? value) undefined (get value key)))
+  (defun worker-optional (value key) (if (nullish? value) undefined (aref value key)))
+
+  (defconst TEST_FILE_WEIGHTS_MS (new globalThis.Map (js-array
+    (js-array "wasm-managed-sequence-data.test.mjs" 260000)
+    (js-array "wasm-managed-wire-selfhosted.test.mjs" 212000)
+    (js-array "compiler-package-session.test.mjs" 170000)
+    (js-array "reader-program-fuzz-acceptance-selfhosted.test.mjs" 167000)
+    (js-array "compiler-seed-runtime-identity.test.mjs" 154000)
+    (js-array "direct-wasm-backend.test.mjs" 120000)
+    (js-array "compiler-response-events.test.mjs" 118000)
+    (js-array "record-grid-selfhosted.test.mjs" 106000)
+    (js-array "wasm-managed-exceptions-browser.test.mjs" 105000)
+    (js-array "native-managed-initializer-outlining.test.mjs" 105000)
+    (js-array "retained-performance-deferral.test.mjs" 90000)
+    (js-array "wasm-managed-sorted-core.test.mjs" 86000)
+    (js-array "wasm-managed-persistent-literals.test.mjs" 81000)
+    (js-array "persistent-semantics.test.mjs" 80000)
+    (js-array "native-managed-runtime.test.mjs" 68000)
+    (js-array "compiler-ir-session-ingress.test.mjs" 66000)
+    (js-array "wasm-managed-exceptions.test.mjs" 65500)
+    (js-array "final-acceptance-history-selfhosted.test.mjs" 60000)
+    (js-array "native-managed-behavior.test.mjs" 55000)
+    (js-array "final-acceptance.test.mjs" 50000)
+    (js-array "compiler-artifact-archive-selfhosted.test.mjs" 45000)
+    (js-array "compiler-corpus-exports-selfhosted.test.mjs" 45000)
+    (js-array "wasm-managed-str.test.mjs" 45000)
+    (js-array "compiler-seed-native-fresh.test.mjs" 45000)
+    (js-array "managed-project-zero-imports-selfhosted.test.mjs" 45000)
+    (js-array "wasm-managed-project-linking.test.mjs" 40000)
+    (js-array "compiler-corpus-original-regressions-selfhosted.test.mjs" 180000)
+    (js-array "compiler-corpus-implicit-resources-selfhosted.test.mjs" 90000)
+    (js-array "managed-host-selfhosted.test.mjs" 62000)
+    (js-array "compiler-build-selfhosted.test.mjs" 50000)
+    (js-array "compiler-session-protocol-selfhosted.test.mjs" 35000)
+    (js-array "stage3-targets-selfhosted.test.mjs" 45000)
+    (js-array "managed-protocol-dispatch-selfhosted.test.mjs" 35000)
+    (js-array "compiler-matrix-selfhosted.test.mjs" 30000)
+    (js-array "acceptance-generated-evidence-selfhosted.test.mjs" 35000)
+    (js-array "bootstrap-js-stages-selfhosted.test.mjs" 35000)
+    (js-array "compiler-corpus-managed-adapters-selfhosted.test.mjs" 30000)
+    (js-array "review-repairs.test.mjs" 35000)
+    (js-array "release-package-install-selfhosted.test.mjs" 35000)
+    (js-array "ci-contract.test.mjs" 35000)
+    (js-array "wasm-managed-behavior.test.mjs" 39200)
+    (js-array "wasm-managed-regexp.test.mjs" 38100)
+    (js-array "compiler-package-execution-selfhosted.test.mjs" 38000)
+    (js-array "retained-transient-refresh.test.mjs" 37000)
+    (js-array "retained-soak-refresh.test.mjs" 36500)
+    (js-array "compiler-browser-session.test.mjs" 36000)
+    (js-array "wasm-managed-callables.test.mjs" 35700)
+    (js-array "wasm-managed-objects.test.mjs" 35200)
+    (js-array "compiler-matrix-archive-debug-selfhosted.test.mjs" 35000)
+    (js-array "wasm-memory-static-data.test.mjs" 32600)
+    (js-array "persistent-map.test.mjs" 31800)
+    (js-array "literal-runtime.test.mjs" 30000)
+    (js-array "compiler-session-tools.test.mjs" 28000)
+    (js-array "native-memory-backend.test.mjs" 25000))))
+
+  (defconst heavy-parallel-files (new globalThis.Set (js-array
+    "compiler-package-session.test.mjs"
+    "direct-wasm-backend.test.mjs"
+    "native-memory-backend.test.mjs"
+    "retained-performance-deferral.test.mjs"
+    "compiler-corpus-original-regressions-selfhosted.test.mjs"
+    "compiler-corpus-implicit-resources-selfhosted.test.mjs"
+    "compiler-build-selfhosted.test.mjs"
+    "compiler-matrix-selfhosted.test.mjs"
+    "compiler-browser-session.test.mjs"
+    "wasm-managed-exceptions-browser.test.mjs"
+    "bootstrap-js-stages-selfhosted.test.mjs"
+    "stage3-targets-selfhosted.test.mjs"
+    "release-package-install-selfhosted.test.mjs"
+    "compiler-package-execution-selfhosted.test.mjs"
+    "compiler-matrix-archive-debug-selfhosted.test.mjs"
+    "reader-program-fuzz-acceptance-selfhosted.test.mjs")))
+
+  (defun isHeavyParallelTestFile (file)
+    (js-call heavy-parallel-files :has (basename file)))
 
   (defun isExclusiveTestFile (file)
     (let ((name (basename file)))
       (or (js-call exclusive-files :has name) (js-call exclusive-pattern :test name)
           (js-call prefix-pattern :test name))))
+
+  (defun test-file-weight (file)
+    (let* ((name (basename file))
+           (known (js-call TEST_FILE_WEIGHTS_MS :get name)))
+      (if (Number/isFinite known) known (if (isExclusiveTestFile file) 5000 500))))
+  (defun testFileWeight (file) (test-file-weight file))
+
+  (defun lptFileIndices (items &optional pick)
+    (let ((entries (js-array)) (index 0))
+      (while (< index (js-length items))
+        (let* ((item (aref items index))
+               (file (if pick (funcall pick item) item)))
+          (js-call entries :push (js-object :index index :weight (test-file-weight file))))
+        (setq index (1+ index)))
+      (js-call entries :sort (lambda (left right)
+        (let ((diff (- (get right :weight) (get left :weight))))
+          (if (/= diff 0) diff (- (get left :index) (get right :index))))))
+      (js-call entries :map (lambda (entry) (get entry :index)))))
+
+  (defun sortFilesByLpt (files)
+    (let ((order (lptFileIndices files)))
+      (js-call order :map (lambda (idx) (aref files idx)))))
+
+  (defun parse-positive-int (value)
+    (let ((num (if (or (= (value-type value) "number")
+                       (and (= (value-type value) "string") (js-call shard-pattern :test (js-call value :trim))))
+                 (funcall globalThis.Number value) nil)))
+      (if (and (not (nil? num)) (Number/isSafeInteger num) (>= num 1)) num nil)))
+
+  (defun resolveParallelConfig (environment &optional options)
+    (let* ((env (or environment (js-object)))
+           (opts (or options (js-object)))
+           (worker-override (or (parse-positive-int (worker-optional opts "parallelWorkers"))
+                                (parse-positive-int (worker-optional env "ELISCRIPT_TEST_WORKERS"))))
+           (heavy-override (or (parse-positive-int (worker-optional opts "heavyWorkers"))
+                               (parse-positive-int (worker-optional env "ELISCRIPT_HEAVY_WORKERS"))))
+           (node-override (or (parse-positive-int (worker-optional opts "nodeWorkers"))
+                              (parse-positive-int (worker-optional env "ELISCRIPT_NODE_WORKERS"))))
+           (parallel (or (= (worker-optional opts "parallel") t)
+                         (= (worker-optional env "ELISCRIPT_TEST_PARALLEL") "1")
+                         (and (not (nil? worker-override)) (> worker-override 1))))
+           (cpu-count (Math/max 1 (js-length (cpus))))
+           (mem-gib (Math/max 1 (Math/floor (/ (totalmem) 1073741824))))
+           (default-workers (Math/min 12 (Math/max 4 (Math/floor (* cpu-count 0.75)))))
+           (default-heavy (Math/min 6 (Math/max 2 (Math/floor (/ mem-gib 10)))))
+           (default-node (Math/min 10 (Math/max 3 (Math/floor (/ cpu-count 2)))))
+           (default-agg (Math/min 21474836480 (Math/max 8589934592 (Math/floor (* (totalmem) 0.65)))))
+           (max-workers (if parallel (or worker-override default-workers) FILE_WORKERS))
+           (heavy-workers (if parallel (Math/min max-workers (or heavy-override default-heavy)) 1))
+           (node-workers (or node-override (if (= (worker-optional env "ELISCRIPT_TEST_PARALLEL") "1") default-node 1))))
+      (js-object
+        :parallel parallel
+        :maxWorkers max-workers
+        :heavyWorkers heavy-workers
+        :nodeWorkers node-workers
+        :aggregateCeilingBytes (if parallel default-agg undefined))))
+
+  (defun raiseProcessMaxListeners (&optional target)
+    (let ((limit (or target 64)))
+      (when (and (= (value-type (get globalThis.process :getMaxListeners nil)) "function")
+                 (= (value-type (get globalThis.process :setMaxListeners nil)) "function")
+                 (< (js-call globalThis.process :getMaxListeners) limit))
+        (js-call globalThis.process :setMaxListeners limit))))
+
+  (defun runLptQueue (items max-workers heavy-workers should-stop run-item)
+    (raiseProcessMaxListeners 64)
+    (new globalThis.Promise (lambda (resolve-done reject-done)
+      (let ((queue (js-call items :slice))
+            (active-total 0)
+            (active-heavy 0)
+            (settled false))
+        (letfn ((pump ()
+          (unless settled
+            (let ((can-launch t))
+              (while (and can-launch
+                          (< active-total max-workers)
+                          (not (funcall should-stop))
+                          (> (js-length queue) 0))
+                (let ((pos -1) (k 0))
+                  (while (and (< pos 0) (< k (js-length queue)))
+                    (when (or (not (get (aref queue k) :heavy))
+                              (< active-heavy heavy-workers))
+                      (setq pos k))
+                    (setq k (1+ k)))
+                  (if (< pos 0)
+                    (setq can-launch false)
+                    (let ((entry (aref (js-call queue :splice pos 1) 0)))
+                      (setq active-total (1+ active-total))
+                      (when (get entry :heavy) (setq active-heavy (1+ active-heavy)))
+                      (js-call (funcall (async () (await (funcall run-item entry)))) :then
+                        (lambda ()
+                          (setq active-total (1- active-total))
+                          (when (get entry :heavy) (setq active-heavy (1- active-heavy)))
+                          (pump))
+                        (lambda (error)
+                          (setq active-total (1- active-total))
+                          (when (get entry :heavy) (setq active-heavy (1- active-heavy)))
+                          (unless settled (setq settled t) (funcall reject-done error)))))))))
+            (when (and (not settled)
+                       (= active-total 0)
+                       (or (= (js-length queue) 0) (funcall should-stop)))
+              (setq settled t)
+              (funcall resolve-done)))))
+          (pump))))))
+
   (defun workerTestArguments (file)
     ;; Bun treats bare names as discovery filters, including archived copies
     ;; below dist. Explicit paths select only the requested original file.
@@ -57,7 +240,7 @@
                         (js-call file :startsWith "../")) file (+ "./" file))))
       (if (js-call standard-bun-files :has (basename file)) (js-array "test" "--timeout" "300000" entry)
         (js-array "--smol" "test" "--timeout" "300000" entry))))
-  (defun node-test-plan (file source-root)
+  (defun nodeTestPlan (file source-root)
     (let ((actual (resolve source-root file)))
       (cond
         ((= actual (resolve source-root "tests/wasm-managed-number-text.test.mjs"))
@@ -67,6 +250,16 @@
         ((= actual (resolve source-root "tests/compiler-portable-guards.test.mjs"))
           (js-object :install "tests/helpers/portable-node-install.mjs" :entry file))
         (t nil))))
+  (defun workerRunRequest (file source-root environment id)
+    (let ((node-plan (nodeTestPlan file source-root)))
+      (js-object
+        :id id :file file
+        :command (if node-plan (get environment :NODE "node") (get globalThis.process :execPath))
+        :args (if node-plan
+                (js-array "--import" (resolve source-root "tools/testing/fixture-environment.mjs")
+                  "--import" (resolve source-root (get node-plan :install)) "--test" (get node-plan :entry))
+                (fixtureChildArguments (workerTestArguments file) environment))
+        :cwd source-root :env environment)))
   (defun validate-files (files)
     (unless (and (Array/isArray files) (> (js-length files) 0)
                  (not (js-call files :some (lambda (file)
@@ -113,6 +306,9 @@
     (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
            (environment (get options :environment (get globalThis.process :env)))
            (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (parallel-workers-opt (parse-positive-int (worker-optional options "parallelWorkers")))
+           (use-parallel (or (= (worker-optional options "parallel") t)
+                             (not (nil? parallel-workers-opt))))
            (results (js-array)) (cursor 0) (signal-code 0)
            (cancel (lambda (code)
              (setq signal-code code) (js-call supervisor :cancel (if (= code 130) "SIGINT" "SIGTERM"))))
@@ -122,17 +318,10 @@
       (js-call globalThis.process :on "SIGTERM" terminate)
       (try
         (let ((run-file (async (index)
-          (let* ((file (aref files index)) (node-plan (node-test-plan file source-root)))
+          (let ((file (aref files index)))
             (try
-              (let* ((result (await (js-call supervisor :run (js-object
-                        :id (funcall globalThis.String index) :file file
-                        :command (if node-plan
-                                   (get environment :NODE "node") (get globalThis.process :execPath))
-                        :args (if node-plan
-                                (js-array "--import" (resolve source-root "tools/testing/fixture-environment.mjs")
-                                  "--import" (resolve source-root (get node-plan :install)) "--test" (get node-plan :entry))
-                                (fixtureChildArguments (workerTestArguments file) environment)) :cwd source-root
-                        :env environment))))
+              (let* ((result (await (js-call supervisor :run
+                                (workerRunRequest file source-root environment (funcall globalThis.String index)))))
                      (row (js-object :file file :exitCode (get result :exitCode))))
                 (when (and (worker-truth (get result :failure)) (/= (get result :failure) "cancelled"))
                   (put row :failure (get result :failure)))
@@ -142,17 +331,28 @@
                 (put results index row))
               (catch error
                 (console/error error) (put results index (js-object :file file :exitCode 1))))))))
-          (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor (js-length files)))
-            (if (isExclusiveTestFile (aref files cursor))
-              (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index)))
-              (let ((end cursor))
-                (while (and (< end (js-length files)) (not (isExclusiveTestFile (aref files end))))
-                  (setq end (1+ end)))
-                (await (Promise/all (globalThis.Array.from
-                  (js-object :length (if (< (- end cursor) FILE_WORKERS) (- end cursor) FILE_WORKERS))
-                  (async ()
-                    (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor end))
-                      (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index))))))))))))
+          (if use-parallel
+            (let* ((config (resolveParallelConfig environment options))
+                   (max-workers (Math/max 1 (or parallel-workers-opt (get config :maxWorkers))))
+                   (heavy-workers (Math/max 1 (Math/min max-workers
+                     (or (parse-positive-int (worker-optional options "heavyWorkers")) (get config :heavyWorkers)))))
+                   (order (lptFileIndices files))
+                   (items (js-call order :map (lambda (index)
+                     (js-object :index index :heavy (isHeavyParallelTestFile (aref files index)))))))
+              (await (runLptQueue items max-workers heavy-workers
+                (lambda () (or (/= signal-code 0) (worker-truth (get supervisor :failure))))
+                (async (entry) (await (funcall run-file (get entry :index)))))))
+            (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor (js-length files)))
+              (if (isExclusiveTestFile (aref files cursor))
+                (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index)))
+                (let ((end cursor))
+                  (while (and (< end (js-length files)) (not (isExclusiveTestFile (aref files end))))
+                    (setq end (1+ end)))
+                  (await (Promise/all (globalThis.Array.from
+                    (js-object :length (if (< (- end cursor) FILE_WORKERS) (- end cursor) FILE_WORKERS))
+                    (async ()
+                      (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor end))
+                        (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index)))))))))))))
         (finally
           (js-call globalThis.process :off "SIGINT" interrupt)
           (js-call globalThis.process :off "SIGTERM" terminate)))
@@ -164,7 +364,9 @@
   (defconst MAX_EVIDENCE_FILE_BYTES 16777216)
   (defconst transient-env-keys (new globalThis.Set (js-array
     "ELISCRIPT_SUITE_RUN_ID" "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"
-    "ELISCRIPT_TEST_SUITE_LEDGER" "ELISCRIPT_DEFER_SUITE_FINALIZE")))
+    "ELISCRIPT_TEST_SUITE_LEDGER" "ELISCRIPT_DEFER_SUITE_FINALIZE"
+    "ELISCRIPT_TEST_PARALLEL" "ELISCRIPT_TEST_WORKERS"
+    "ELISCRIPT_HEAVY_WORKERS" "ELISCRIPT_NODE_WORKERS")))
   (defconst bound-env-keys (new globalThis.Set (js-array
     "NATIVE_TARGET" "STAGE3_FUNCTIONAL_RUNTIME_PROFILE" "NODE_OPTIONS"
     "BUN_TEST_RUNNER" "BUN_ARTIFACT_TEST_RUNNER" "EMACS" "BUN" "NODE")))
@@ -225,14 +427,29 @@
     (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
            (environment (get options :environment (get globalThis.process :env)))
            (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (explicit-parallel (or (= (worker-optional options "parallel") t)
+                                  (not (nil? (parse-positive-int (worker-optional options "parallelWorkers"))))))
+           (parallel-config (if explicit-parallel (resolveParallelConfig environment options) nil))
+           (use-aggregate (and explicit-parallel
+                               (get parallel-config :parallel)
+                               (nullish? (worker-optional environment "ELISCRIPT_TEST_TOTAL_RSS_BYTES"))
+                               (nullish? (get options :limits nil))
+                               (not (nullish? (get parallel-config :aggregateCeilingBytes)))))
+           (schedule-options (if (and explicit-parallel (get parallel-config :parallel))
+                               (Object/assign (js-object) options (js-object
+                                 :parallel t
+                                 :parallelWorkers (get parallel-config :maxWorkers)
+                                 :heavyWorkers (get parallel-config :heavyWorkers)))
+                               options))
            (archive (resolve ".eliscript-cache" "test-results"
                      (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
            (explicit-archive (worker-optional environment "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"))
            (supervisor undefined) (result undefined))
       (try
-        (setq supervisor (await (startResourceSupervisor)))
-        (setq result (await (Reflect/apply scheduleTestFiles undefined
-          (js-call (js-array files supervisor) :concat configuration))))
+        (setq supervisor (await (if use-aggregate
+                                  (startResourceSupervisor (js-object :aggregateCeilingBytes (get parallel-config :aggregateCeilingBytes)))
+                                  (startResourceSupervisor))))
+        (setq result (await (scheduleTestFiles files supervisor schedule-options)))
         (catch error (setq result (js-object :results (js-array) :exitCode 1
           :failure "resource-supervisor-unavailable" :message (get error :message))))
         (finally (when (worker-truth supervisor) (await (js-call supervisor :close)))))
@@ -564,21 +781,50 @@
                        (step-row nil))
                   (if is-multi-node-test
                     (let* ((node-flags (js-call rest-args :filter (lambda (a) (not (and (= (value-type a) "string") (js-call a :endsWith ".test.mjs"))))))
+                           (config (resolveParallelConfig environment options))
+                           (node-workers (Math/max 1 (get config :nodeWorkers)))
                            (file-results (js-array))
                            (signal-exit 0)
-                           (f-idx 0))
-                      (while (and (= signal-exit 0) (< f-idx (js-length test-mjs-args)))
-                        (let* ((file (aref test-mjs-args f-idx))
-                               (child-res (await (spawn-suite-child cmd (js-call node-flags :concat (js-array file)) source-root environment))))
-                          (when (or (= (get child-res :signal) "SIGINT") (= (get child-res :signal) "SIGTERM"))
-                            (setq signal-exit (if (= (get child-res :signal) "SIGINT") 130 143)))
-                          (js-call file-results :push (js-object
-                            :file file
-                            :started t
-                            :exitCode (get child-res :exitCode)
-                            :elapsedMs (get child-res :elapsedMs)
-                            :failure (get child-res :failure))))
-                        (setq f-idx (1+ f-idx)))
+                           (interrupt-suite (lambda () (when (= signal-exit 0) (setq signal-exit 130))))
+                           (terminate-suite (lambda () (when (= signal-exit 0) (setq signal-exit 143)))))
+                      (if (= node-workers 1)
+                        (let ((f-idx 0))
+                          (while (and (= signal-exit 0) (< f-idx (js-length test-mjs-args)))
+                            (let* ((file (aref test-mjs-args f-idx))
+                                   (child-res (await (spawn-suite-child cmd (js-call node-flags :concat (js-array file)) source-root environment))))
+                              (when (or (= (get child-res :signal) "SIGINT") (= (get child-res :signal) "SIGTERM"))
+                                (setq signal-exit (if (= (get child-res :signal) "SIGINT") 130 143)))
+                              (js-call file-results :push (js-object
+                                :file file
+                                :started t
+                                :exitCode (get child-res :exitCode)
+                                :elapsedMs (get child-res :elapsedMs)
+                                :failure (get child-res :failure))))
+                            (setq f-idx (1+ f-idx))))
+                        (let* ((order (lptFileIndices test-mjs-args))
+                               (items (js-call order :map (lambda (orig-idx)
+                                 (let ((file (aref test-mjs-args orig-idx)))
+                                   (js-object :index orig-idx :file file :heavy (isHeavyParallelTestFile file)))))))
+                          (js-call globalThis.process :on "SIGINT" interrupt-suite)
+                          (js-call globalThis.process :on "SIGTERM" terminate-suite)
+                          (try
+                            (await (runLptQueue items node-workers (Math/max 1 (Math/min node-workers (get config :heavyWorkers)))
+                              (lambda () (/= signal-exit 0))
+                              (async (entry)
+                                (let* ((file (get entry :file))
+                                       (child-res (await (spawn-suite-child cmd (js-call node-flags :concat (js-array file)) source-root environment))))
+                                  (when (or (= (get child-res :signal) "SIGINT") (= (get child-res :signal) "SIGTERM"))
+                                    (setq signal-exit (if (= (get child-res :signal) "SIGINT") 130 143)))
+                                  (put file-results (get entry :index) (js-object
+                                    :file file
+                                    :started t
+                                    :exitCode (get child-res :exitCode)
+                                    :elapsedMs (get child-res :elapsedMs)
+                                    :failure (get child-res :failure)))))))
+                            (finally
+                              (js-call globalThis.process :off "SIGINT" interrupt-suite)
+                              (js-call globalThis.process :off "SIGTERM" terminate-suite)))
+                          (setq file-results (js-call file-results :filter globalThis.Boolean))))
                       (let* ((completed-set (new globalThis.Set (js-call file-results :map (lambda (r) (get r :file)))))
                              (unstarted (js-call test-mjs-args :filter (lambda (f) (not (js-call completed-set :has f)))))
                              (failed-files (js-call (js-call file-results :filter (lambda (r) (/= (get r :exitCode) 0)))
@@ -687,4 +933,4 @@
   (when (and (> (js-length (get globalThis.process :argv)) 1)
              (= (basename (aref (get globalThis.process :argv) 1)) "file-workers.mjs"))
     (main))
-  (export FILE_WORKERS isExclusiveTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments collectPassedFileDigests computeCommandSignature parseSuiteArgs runSuiteCommand))
+  (export FILE_WORKERS isExclusiveTestFile isHeavyParallelTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments collectPassedFileDigests computeCommandSignature parseSuiteArgs runSuiteCommand sortFilesByLpt lptFileIndices resolveParallelConfig nodeTestPlan workerRunRequest runLptQueue raiseProcessMaxListeners testFileWeight))

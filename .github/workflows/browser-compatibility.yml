@@ -71,7 +71,7 @@ jobs:
             Darwin) node_platform=darwin ;;
             *) exit 1 ;;
           esac
-          node_version=24.20.0
+          node_version=24.22.3
           node_archive="node-v$node_version-$node_platform-${{ matrix.architecture }}.tar.gz"
           node_directory="$RUNNER_TEMP/eliscript-node"
           mkdir -p "$node_directory"
@@ -92,44 +92,41 @@ jobs:
           node --version
           test "$(bun -p 'process.arch')" = "${{ matrix.architecture }}"
           test "$(node -p 'process.arch')" = "${{ matrix.architecture }}"
-          test "$(node --version)" = "v24.20.0"
+          test "$(node --version)" = "v24.22.3"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Bootstrap maintained compiler and backend tools
         run: make bootstrap-backends
       - name: Install selected browsers
         run: bun node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
-      - name: Run complete backend differential suite (chromium) (performance reacceptance deferred)
+      - name: Run complete backend differential suite (chromium)
         id: chromium
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: chromium
           DEBUG: pw:browser
-          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
           ELISCRIPT_TEST_FIXTURE_PRELOAD: "1"
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci/chromium"
           bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/chromium/tests.log"
-      - name: Run complete backend differential suite (firefox) (performance reacceptance deferred)
+      - name: Run complete backend differential suite (firefox)
         if: "!cancelled() && steps.chromium.outcome != 'skipped'"
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: firefox
           DEBUG: pw:browser
-          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
           ELISCRIPT_TEST_FIXTURE_PRELOAD: "1"
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci/firefox"
           bun tools/testing/file-workers.mjs tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/firefox/tests.log"
-      - name: Run complete backend differential suite (webkit) (performance reacceptance deferred)
+      - name: Run complete backend differential suite (webkit)
         if: "!cancelled() && steps.chromium.outcome != 'skipped'"
         shell: bash
         env:
           ELISCRIPT_TEST_BROWSER: webkit
           DEBUG: pw:browser
-          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
           ELISCRIPT_TEST_FIXTURE_PRELOAD: "1"
         run: |
           set -o pipefail

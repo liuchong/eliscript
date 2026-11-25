@@ -16,11 +16,9 @@ jobs:
   test:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 240
+    timeout-minutes: 30
     env:
       BUN_TEST_RUNNER: tools/testing/file-workers.mjs
-      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
-      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: "small"
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +84,7 @@ jobs:
             Darwin) node_platform=darwin ;;
             *) exit 1 ;;
           esac
-          node_version=24.20.0
+          node_version=24.22.3
           node_archive="node-v$node_version-$node_platform-${{ matrix.architecture }}.tar.gz"
           node_directory="$RUNNER_TEMP/eliscript-node"
           mkdir -p "$node_directory"
@@ -107,7 +105,7 @@ jobs:
           node --version
           test "$(bun -p 'process.arch')" = "${{ matrix.architecture }}"
           test "$(node -p 'process.arch')" = "${{ matrix.architecture }}"
-          test "$(node --version)" = "v24.20.0"
+          test "$(node --version)" = "v24.22.3"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Install Chromium
@@ -116,7 +114,7 @@ jobs:
         run: make bootstrap-release
       - name: Prepare the release package
         run: make prepare-release-package
-      - name: Run test file shard 1/1 (performance reacceptance deferred)
+      - name: Run test file shard 1/1
         id: test-suite
         env:
           ELISCRIPT_PREPARED_STAGE3: "1"

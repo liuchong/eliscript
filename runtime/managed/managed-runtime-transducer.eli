@@ -293,6 +293,28 @@
     (when (aref st 5) (put st 3 nil) (put st 4 nil))
     (tx-close-input st)
     (js-object :value value :done t))
+  (defun haltWhen (predicate &optional retf)
+    (require-function predicate "halt-when predicate")
+    (unless (nullish? retf)
+      (require-function retf "halt-when return function"))
+    (make-transducer
+      (lambda (reducer)
+        (let ((downstream (as-reducer reducer "halt-when reducing function"))
+              (halted false))
+          (completing
+            (lambda (result input)
+              (if (isTruthy (funcall predicate input))
+                (progn
+                  (setq halted t)
+                  (reduced (if (nullish? retf)
+                             input
+                             (funcall retf (funcall downstream (unreduced result)) input))))
+                (funcall downstream result input)))
+            (lambda (result)
+              (if halted
+                result
+                (funcall downstream result))))))
+      false))
   (defun transformed-iterator (transducer collection)
     (let* ((state (js-array nil 0 nil nil nil false false transducer collection))
            (iterator (js-object
@@ -324,5 +346,5 @@
   (Object/defineProperty sequence "length" (js-object :value 2 :configurable t))
   (Object/defineProperty runBang "length" (js-object :value 2 :configurable t))
   (export completing mapping mappingIndexed keeping keepingIndexed catting mapcatting filtering removing taking dropping
-    takingWhile droppingWhile takingNth interposing partitioningAll partitioningBy deduping distincting composeTransducers
+    takingWhile droppingWhile takingNth interposing partitioningAll partitioningBy deduping distincting haltWhen composeTransducers
     transduce eduction sequence runBang into))

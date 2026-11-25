@@ -144,13 +144,30 @@
     (key-function collection)
     (require-function key-function "indexBy key function")
     (let ((result (transient EMPTY_MAP)))
-      (Collection/reduce
-        collection
-        (lambda
-          (builder value)
-          (assocBang builder (funcall key-function value) value)
-          builder)
-        result)
+      (if (and (Array/isArray collection)
+               (let ((iter-sym (get globalThis/Symbol :iterator))
+                     (reduce-slot (Protocol/protocolSlot Collection/IReduce "reduce"))
+                     (proto (Object/getPrototypeOf collection)))
+                 (and (not (Object/hasOwn collection iter-sym))
+                      (not (Object/hasOwn collection reduce-slot))
+                      (not (nil? proto))
+                      (or (eq proto (get globalThis/Array :prototype))
+                          (not (Object/hasOwn proto reduce-slot)))
+                      (let ((iter-fn (aref collection iter-sym)))
+                        (or (eq iter-fn (aref globalThis/Array.prototype iter-sym))
+                            (eq iter-fn (aref proto :values)))))))
+        (let ((index 0) (len (js-length collection)))
+          (while (< index len)
+            (let ((value (aref collection index)))
+              (setq result (assocBang result (funcall key-function value) value)
+                    index (1+ index)))))
+        (Collection/reduce
+          collection
+          (lambda
+            (builder value)
+            (assocBang builder (funcall key-function value) value)
+            builder)
+          result))
       (persistentBang result)))
   (defun group-by
     (key-function collection)

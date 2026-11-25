@@ -1,19 +1,20 @@
 (module eliscript.managed-runtime-collection
   (import "../../stdlib/protocol.eli"
-    extend-protocol-category extend-protocol-type implements-protocol? protocol-method protocol-slot
+    define-protocol extend-protocol-category extend-protocol-type implements-protocol? protocol-method protocol-slot
     register-protocol-extension-loader)
   (import "../managed/managed-literal-protocols.eli"
-    managed-literal-protocol managed-literal-protocol-role
+    managed-literal-protocol managed-literal-protocol-role managed-literal-slot
     managed-literal-is-reduced managed-literal-reduced managed-literal-unreduced
     managed-literal-reduce-iterable managed-literal-sequence-view managed-literal-unbounded-sequence-view
-    managed-literal-install-slot managed-literal-checked-count SequenceView
+    managed-literal-unbounded-sequence managed-literal-install-slot managed-literal-checked-count SequenceView
     MemoizedSequenceView memoizedSequenceView memoizedSequenceStatus
     managed-literal-read-sequence-state managed-literal-shift-sequence-count managed-literal-sequence-from-count
     managed-literal-self-iterable managed-literal-string-sequence managed-literal-object-sequence
     managed-literal-mapped-iterator managed-literal-map-sequence managed-literal-reduce
     PERSISTENT_MAP_KIND PERSISTENT_MAP_HAS_VALUE_KEY PERSISTENT_SET_KIND PERSISTENT_SET_HAS_VALUE)
   (import "../managed/managed-literals.eli"
-    PersistentList PersistentVector PersistentQueue literal-instance? literal-set)
+    PersistentList PersistentVector PersistentQueue literal-instance? literal-set literal-vector
+    literal-mix literal-finish literal-register-map-entry-adapter)
   (import "./record.mjs" isRecord)
 
   (defconst ICounted (managed-literal-protocol "collection.ICounted"))
@@ -29,6 +30,9 @@
   (defconst ISet (managed-literal-protocol "collection.ISet"))
   (defconst IStack (managed-literal-protocol "collection.IStack"))
   (defconst IReversible (managed-literal-protocol "collection.IReversible"))
+  (defconst IMapEntry (define-protocol "IMapEntry" (js-array "key" "val")))
+  (defconst IChunk (define-protocol "IChunk" (js-array "chunkCount" "chunkNth" "dropFirst")))
+  (defconst IChunkedSeq (define-protocol "IChunkedSeq" (js-array "chunkedFirst" "chunkedNext" "chunkedMore")))
   (defconst COLLECTION_COUNT (protocol-slot ICounted "count"))
   (defconst COLLECTION_EMPTY (protocol-slot IEmptyable "empty"))
   (defconst COLLECTION_CONJ (protocol-slot IConj "conj"))
@@ -44,6 +48,15 @@
   (defconst COLLECTION_PEEK (protocol-slot IStack "peek"))
   (defconst COLLECTION_POP (protocol-slot IStack "pop"))
   (defconst COLLECTION_RSEQ (protocol-slot IReversible "rseq"))
+  (defconst COLLECTION_ENTRY_KEY (protocol-slot IMapEntry "key"))
+  (defconst COLLECTION_ENTRY_VAL (protocol-slot IMapEntry "val"))
+  (defconst CHUNK_COUNT (protocol-slot IChunk "chunkCount"))
+  (defconst CHUNK_NTH (protocol-slot IChunk "chunkNth"))
+  (defconst CHUNK_DROP_FIRST (protocol-slot IChunk "dropFirst"))
+  (defconst CHUNKED_FIRST (protocol-slot IChunkedSeq "chunkedFirst"))
+  (defconst CHUNKED_NEXT (protocol-slot IChunkedSeq "chunkedNext"))
+  (defconst CHUNKED_MORE (protocol-slot IChunkedSeq "chunkedMore"))
+  (defconst UNBOUNDED_SEQUENCE (managed-literal-unbounded-sequence))
   (defvar MISSING nil)
   (defvar reduction-state nil)
   (defvar reduction-token nil)
@@ -105,21 +118,31 @@
   (defun unboundedSequenceView (factory) (managed-literal-unbounded-sequence-view factory))
   (defun sequenceState (sequence)
     (managed-literal-read-sequence-state sequence))
+  (defvar chunked-slice-handler nil)
+  (defvar chunked-prepend-handler nil)
+  (defun registerChunkedSliceHandler (handler)
+    (setq chunked-slice-handler handler)
+    undefined)
+  (defun registerChunkedPrependHandler (handler)
+    (setq chunked-prepend-handler handler)
+    undefined)
   (defun sliceSequenceView (sequence offset)
     (if (nil? sequence) nil
       (progn
         (unless (isSequenceView sequence) (fail "sequence slice expects a SequenceView or nil"))
         (managed-literal-checked-count offset)
         (if (= offset 0) sequence
-          (let* ((state (sequenceState sequence))
-                 (factory (lambda ()
-                   (let ((iterator (js-call (aref sequence (aref globalThis/Symbol "iterator")) :call sequence))
-                         (remaining offset) (done false))
-                     (while (and (> remaining 0) (not done))
-                       (if (truth (aref (js-call iterator :next) "done")) (setq done t)
-                         (setq remaining (1- remaining)))) iterator)))
-                 (count (managed-literal-shift-sequence-count state offset false)))
-            (managed-literal-sequence-from-count factory count))))))
+          (if (and (isChunkedSeq sequence) (callable? chunked-slice-handler))
+            (funcall chunked-slice-handler sequence offset)
+            (let* ((state (sequenceState sequence))
+                   (factory (lambda ()
+                     (let ((iterator (js-call (aref sequence (aref globalThis/Symbol "iterator")) :call sequence))
+                           (remaining offset) (done false))
+                       (while (and (> remaining 0) (not done))
+                         (if (truth (aref (js-call iterator :next) "done")) (setq done t)
+                           (setq remaining (1- remaining)))) iterator)))
+                   (count (managed-literal-shift-sequence-count state offset false)))
+              (managed-literal-sequence-from-count factory count)))))))
   (defun prependIterator (value sequence)
     (let ((stage 0) (running false) (delegate nil) (next nil) (iterator nil) (action nil))
       (setq action (lambda (operation sent)
@@ -167,9 +190,11 @@
       (selfIterable iterator false)))
   (defun prependSequenceView (value sequence)
     (unless (or (nil? sequence) (isSequenceView sequence)) (fail "sequence prepend expects a SequenceView or nil"))
-    (let ((factory (lambda () (prependIterator value sequence))))
-      (if (nil? sequence) (sequenceView factory 1)
-        (managed-literal-sequence-from-count factory (managed-literal-shift-sequence-count (sequenceState sequence) 0 t)))))
+    (if (and (not (nil? sequence)) (isChunkedSeq sequence) (callable? chunked-prepend-handler))
+      (funcall chunked-prepend-handler value sequence)
+      (let ((factory (lambda () (prependIterator value sequence))))
+        (if (nil? sequence) (sequenceView factory 1)
+          (managed-literal-sequence-from-count factory (managed-literal-shift-sequence-count (sequenceState sequence) 0 t))))))
   (defun reductionReduce (receiver reducer &rest initial)
     (let ((method (aref receiver (ensure-reduction-state))))
       (js-call method :apply receiver (js-cons reducer initial))))
@@ -411,6 +436,14 @@
   (defconst peek-method (protocol-method IStack "peek"))
   (defconst pop-method (protocol-method IStack "pop"))
   (defconst rseq-method (protocol-method IReversible "rseq"))
+  (defconst entry-key-method (protocol-method IMapEntry "key"))
+  (defconst entry-val-method (protocol-method IMapEntry "val"))
+  (defconst chunk-count-method (protocol-method IChunk "chunkCount"))
+  (defconst chunk-nth-method (protocol-method IChunk "chunkNth"))
+  (defconst chunk-drop-first-method (protocol-method IChunk "dropFirst"))
+  (defconst chunked-first-method (protocol-method IChunkedSeq "chunkedFirst"))
+  (defconst chunked-next-method (protocol-method IChunkedSeq "chunkedNext"))
+  (defconst chunked-more-method (protocol-method IChunkedSeq "chunkedMore"))
 
   (defun directSlot (value slot)
     (when (and (not (nullish? value))
@@ -426,7 +459,184 @@
   (defun isReducible (collection) (implements-protocol? IReduce collection))
   (defun isReversible (collection) (implements-protocol? IReversible collection))
   (defun isAssociative (collection) (implements-protocol? IAssociative collection))
-  (defun isSequenceView (value) (or (instance? value SequenceView) (instance? value MemoizedSequenceView)))
+  (defun isChunk (value) (implements-protocol? IChunk value))
+  (defun isChunkedSeq (value) (implements-protocol? IChunkedSeq value))
+  (defconst PERSISTENT_MAP_ENTRY_TOKEN (funcall globalThis/Symbol "eliscript.map-entry.constructor"))
+  (defconst PERSISTENT_MAP_ENTRY_MISSING (funcall globalThis/Symbol "eliscript.map-entry.missing"))
+  (defconst MAP_ENTRY_VECTOR_HASH_TAG 1327180861)
+  (defconst persistent-map-entry-states (new globalThis/WeakMap))
+  (defun persistent-entry-state (entry) (js-call persistent-map-entry-states :get entry))
+  (defconst host-entry-method
+    (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }"))
+  (defun entry-define-method (target key name arity implementation)
+    (let ((fn (funcall host-entry-method implementation name)))
+      (Object/defineProperty fn "length" (js-object :value arity :configurable t))
+      (Object/defineProperty target key (js-object :value fn :writable t :configurable t))))
+  (defun entry-define-getter (target key name implementation)
+    (Object/defineProperty target key
+      (js-object :get (funcall host-entry-method implementation (str "get " name)) :configurable t)))
+  (defconst PersistentMapEntry
+    (funcall
+      (js* "(implementation, name) => { if (typeof name !== \"string\") throw new TypeError(\"class name must be a string\"); return ({ [name]: class { constructor(...args) { return implementation(this, ...args); } } })[name]; }")
+      (lambda (self token key val metadata)
+        (unless (eq token PERSISTENT_MAP_ENTRY_TOKEN)
+          (fail "PersistentMapEntry values must be created with mapEntry"))
+        (when (undefined? metadata) (setq metadata nil))
+        (Object/defineProperty self "0" (js-object :value key :writable false :enumerable t :configurable false))
+        (Object/defineProperty self "1" (js-object :value val :writable false :enumerable t :configurable false))
+        (Object/defineProperty self "length" (js-object :value 2 :writable false :enumerable false :configurable false))
+        (js-call persistent-map-entry-states :set self
+          (Object/freeze (js-object :key key :val val :metadata metadata)))
+        (Object/freeze self))
+      "PersistentMapEntry"))
+  (defun isMapEntry (value) (instance? value PersistentMapEntry))
+  (defun make-persistent-map-entry (key val &optional metadata)
+    (new PersistentMapEntry PERSISTENT_MAP_ENTRY_TOKEN key val (if (undefined? metadata) nil metadata)))
+  (defun mapEntry (key val) (make-persistent-map-entry key val nil))
+  (defun make-vector-from-entry (&rest items)
+    (apply literal-vector items))
+  (let* ((eproto (get PersistentMapEntry :prototype))
+         (equiv-protocol (managed-literal-protocol "value.IEquiv"))
+         (hash-protocol (managed-literal-protocol "value.IHash"))
+         (meta-protocol (managed-literal-protocol "metadata.IMeta"))
+         (with-meta-protocol (managed-literal-protocol "metadata.IWithMeta"))
+         (VALUE_EQUAL (managed-literal-slot "value.IEquiv" "equal"))
+         (VALUE_HASH (managed-literal-slot "value.IHash" "hash"))
+         (METADATA_READ (managed-literal-slot "metadata.IMeta" "meta"))
+         (METADATA_WITH (managed-literal-slot "metadata.IWithMeta" "withMeta"))
+         (iterator-symbol (get globalThis/Symbol :iterator)))
+    (entry-define-getter eproto "key" "key" (lambda (self) (get (persistent-entry-state self) :key)))
+    (entry-define-getter eproto "val" "val" (lambda (self) (get (persistent-entry-state self) :val)))
+    (entry-define-getter eproto "count" "count" (lambda (_self) 2))
+    (entry-define-getter eproto "size" "size" (lambda (_self) 2))
+    (entry-define-method eproto "nth" "nth" 1
+      (lambda (self index &rest args)
+        (let ((state (persistent-entry-state self))
+              (not-found (if (= (js-length args) 0) PERSISTENT_MAP_ENTRY_MISSING (aref args 0))))
+          (cond
+            ((eq index 0) (get state :key))
+            ((eq index 1) (get state :val))
+            ((not (eq not-found PERSISTENT_MAP_ENTRY_MISSING)) not-found)
+            (t (throw (new globalThis/RangeError
+                        (str "map entry nth index " (funcall globalThis/String index) " is outside [0, 2)"))))))))
+    (entry-define-method eproto "get" "get" 1
+      (lambda (self key &rest args)
+        (let ((state (persistent-entry-state self))
+              (not-found (if (= (js-length args) 0) nil (aref args 0))))
+          (cond ((eq key 0) (get state :key)) ((eq key 1) (get state :val)) (t not-found)))))
+    (entry-define-method eproto "has" "has" 1 (lambda (_self key) (or (eq key 0) (eq key 1))))
+    (entry-define-method eproto "contains" "contains" 1 (lambda (_self key) (or (eq key 0) (eq key 1))))
+    (entry-define-method eproto "peek" "peek" 0 (lambda (self) (get (persistent-entry-state self) :val)))
+    (entry-define-method eproto "pop" "pop" 0 (lambda (self) (make-vector-from-entry (get (persistent-entry-state self) :key))))
+    (entry-define-method eproto "assoc" "assoc" 2
+      (lambda (self index value)
+        (let ((state (persistent-entry-state self)))
+          (cond
+            ((eq index 0) (make-vector-from-entry value (get state :val)))
+            ((eq index 1) (make-vector-from-entry (get state :key) value))
+            ((eq index 2) (make-vector-from-entry (get state :key) (get state :val) value))
+            (t (throw (new globalThis/RangeError
+                        (str "map entry assoc index " (funcall globalThis/String index) " is outside [0, 2]"))))))))
+    (entry-define-method eproto "conj" "conj" 1
+      (lambda (self value)
+        (let ((state (persistent-entry-state self)))
+          (make-vector-from-entry (get state :key) (get state :val) value))))
+    (entry-define-method eproto "empty" "empty" 0
+      (lambda (self)
+        (let ((empty (make-vector-from-entry))
+              (meta-value (get (persistent-entry-state self) :metadata)))
+          (if (nil? meta-value) empty
+            (js-call (aref empty METADATA_WITH) :call empty meta-value)))))
+    (entry-define-method eproto "seq" "seq" 0
+      (lambda (self) (sequenceView (lambda () (js-call (aref self iterator-symbol) :call self)) 2)))
+    (entry-define-method eproto "rseq" "rseq" 0
+      (lambda (self)
+        (sequenceView (lambda ()
+          (let* ((state (persistent-entry-state self))
+                 (items (js-array (get state :val) (get state :key))))
+            (js-call (aref items iterator-symbol) :call items))) 2)))
+    (entry-define-method eproto "reduce" "reduce" 1
+      (lambda (self reducer &rest args)
+        (unless (callable? reducer) (fail "collection reducer must be a function"))
+        (let* ((state (persistent-entry-state self))
+               (acc (if (= (js-length args) 0)
+                      (funcall reducer (get state :key) (get state :val))
+                      (let ((first-acc (funcall reducer (aref args 0) (get state :key))))
+                        (if (managed-literal-is-reduced first-acc) first-acc
+                          (funcall reducer first-acc (get state :val)))))))
+          (managed-literal-unreduced acc))))
+    (entry-define-method eproto "toJSON" "toJSON" 0
+      (lambda (self) (let ((state (persistent-entry-state self))) (js-array (get state :key) (get state :val)))))
+    (entry-define-method eproto COLLECTION_ENTRY_KEY "[eliscript.map-entry.key]" 0
+      (lambda (self) (get (persistent-entry-state self) :key)))
+    (entry-define-method eproto COLLECTION_ENTRY_VAL "[eliscript.map-entry.val]" 0
+      (lambda (self) (get (persistent-entry-state self) :val)))
+    (entry-define-method eproto COLLECTION_COUNT "[eliscript.collection.count]" 0 (lambda (_self) 2))
+    (entry-define-method eproto COLLECTION_EMPTY "[eliscript.collection.empty]" 0 (lambda (self) (js-call self :empty)))
+    (entry-define-method eproto COLLECTION_CONJ "[eliscript.collection.conj]" 1 (lambda (self value) (js-call self :conj value)))
+    (entry-define-method eproto COLLECTION_GET "[eliscript.collection.get]" 1
+      (lambda (self key &rest args) (js-call (get eproto :get) :apply self (js-call (js-array key) :concat args))))
+    (entry-define-method eproto COLLECTION_ASSOC "[eliscript.collection.assoc]" 2 (lambda (self key value) (js-call self :assoc key value)))
+    (entry-define-method eproto COLLECTION_CONTAINS "[eliscript.collection.contains]" 1 (lambda (self key) (js-call self :has key)))
+    (entry-define-method eproto COLLECTION_NTH "[eliscript.collection.nth]" 1
+      (lambda (self index &rest args) (js-call (get eproto :nth) :apply self (js-call (js-array index) :concat args))))
+    (entry-define-method eproto COLLECTION_SEQ "[eliscript.collection.seq]" 0 (lambda (self) (js-call self :seq)))
+    (entry-define-method eproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest args) (js-call (get eproto :reduce) :apply self (js-call (js-array reducer) :concat args))))
+    (entry-define-method eproto COLLECTION_REDUCE_KV "[eliscript.collection.reduceKv]" 2
+      (lambda (self reducer initial)
+        (unless (callable? reducer) (fail "key/value reducer must be a function"))
+        (let* ((state (persistent-entry-state self))
+               (acc (funcall reducer initial 0 (get state :key))))
+          (if (managed-literal-is-reduced acc)
+            (managed-literal-unreduced acc)
+            (managed-literal-unreduced (funcall reducer acc 1 (get state :val)))))))
+    (entry-define-method eproto COLLECTION_PEEK "[eliscript.collection.peek]" 0 (lambda (self) (js-call self :peek)))
+    (entry-define-method eproto COLLECTION_POP "[eliscript.collection.pop]" 0 (lambda (self) (js-call self :pop)))
+    (entry-define-method eproto COLLECTION_RSEQ "[eliscript.collection.rseq]" 0 (lambda (self) (js-call self :rseq)))
+    (entry-define-method eproto VALUE_EQUAL "[eliscript.value.equal]" 2
+      (lambda (self other equal)
+        (let ((state (persistent-entry-state self)))
+          (cond
+            ((eq self other) t)
+            ((isMapEntry other)
+             (let ((other-state (persistent-entry-state other)))
+               (and (truth (funcall equal (get state :key) (get other-state :key)))
+                    (truth (funcall equal (get state :val) (get other-state :val))))))
+            ((and (isVector other) (= (get other :count) 2))
+             (and (truth (funcall equal (get state :key) (js-call other :nth 0)))
+                  (truth (funcall equal (get state :val) (js-call other :nth 1)))))
+            (t false)))))
+    (entry-define-method eproto VALUE_HASH "[eliscript.value.hash]" 1
+      (lambda (self hash)
+        (let ((state (persistent-entry-state self)))
+          (literal-finish
+            (literal-mix
+              (literal-mix MAP_ENTRY_VECTOR_HASH_TAG (funcall hash (get state :key)))
+              (funcall hash (get state :val)))
+            2))))
+    (entry-define-method eproto METADATA_READ "[eliscript.metadata.read]" 0 (lambda (self) (get (persistent-entry-state self) :metadata)))
+    (entry-define-method eproto METADATA_WITH "[eliscript.metadata.with]" 1
+      (lambda (self metadata)
+        (unless (or (nil? metadata) (isPersistentMapValue metadata))
+          (fail "metadata must be null or a persistent hash map"))
+        (let ((state (persistent-entry-state self)))
+          (if (eq metadata (get state :metadata)) self
+            (make-persistent-map-entry (get state :key) (get state :val) metadata)))))
+    (entry-define-method eproto iterator-symbol "[Symbol.iterator]" 0
+      (lambda (self)
+        (let ((state (persistent-entry-state self)) (step 0) (iter nil))
+          (setq iter (js-object :next (lambda ()
+            (cond
+              ((= step 0) (setq step 1) (js-object :value (get state :key) :done false))
+              ((= step 1) (setq step 2) (js-object :value (get state :val) :done false))
+              (t (js-object :value undefined :done t))))))
+          (put iter iterator-symbol (lambda () iter))
+          iter)))
+    (entry-define-getter eproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptPersistentMapEntry")))
+  (literal-register-map-entry-adapter isMapEntry mapEntry)
+  (defun isSequenceView (value) (or (instance? value SequenceView) (instance? value MemoizedSequenceView) (isChunkedSeq value)))
   (defun isReductionView (value) (instance? value ReductionView))
   (defun isList (value) (literal-instance? value PersistentList))
   (defun isVector (value) (literal-instance? value PersistentVector))
@@ -434,8 +644,8 @@
   (defun isMap (value) (or (isPersistentMapValue value) (isRecord value)))
   (defun isSet (value) (isPersistentSetValue value))
   (defun isCollection (value) (or (isSequenceView value) (isList value) (isQueue value)
-    (isVector value) (isPersistentMapValue value) (isRecord value) (isPersistentSetValue value)))
-  (defun isSequential (value) (or (isSequenceView value) (isList value) (isQueue value) (isVector value)))
+    (isVector value) (isMapEntry value) (isPersistentMapValue value) (isRecord value) (isPersistentSetValue value)))
+  (defun isSequential (value) (or (isSequenceView value) (isList value) (isQueue value) (isVector value) (isMapEntry value)))
   (defun isSequence (value) (or (isSequenceView value) (isList value)))
   (defun boundedCount (limit collection)
     (unless (and (Number/isSafeInteger limit) (>= limit 0)) (fail "boundedCount limit must be a non-negative safe integer"))
@@ -539,6 +749,35 @@
   (defun reduced (value) (managed-literal-reduced value))
   (defun isReduced (value) (managed-literal-is-reduced value))
   (defun unreduced (value) (managed-literal-unreduced value))
+  (defun entryKey (entry)
+    (let ((slot (directSlot entry COLLECTION_ENTRY_KEY)))
+      (if (not (nullish? slot)) (js-call slot :call entry) (funcall entry-key-method entry))))
+  (defun entryVal (entry)
+    (let ((slot (directSlot entry COLLECTION_ENTRY_VAL)))
+      (if (not (nullish? slot)) (js-call slot :call entry) (funcall entry-val-method entry))))
+  (defun chunkCount (chunk)
+    (let ((slot (directSlot chunk CHUNK_COUNT)))
+      (managed-literal-checked-count
+        (if (not (nullish? slot)) (js-call slot :call chunk) (funcall chunk-count-method chunk)))))
+  (defun chunkNth (chunk index &rest __opt)
+    (let ((not-found (aref __opt 0))
+          (slot (directSlot chunk CHUNK_NTH)))
+      (if (not (nullish? slot))
+        (if (= (js-length __opt) 0) (js-call slot :call chunk index) (js-call slot :call chunk index not-found))
+        (if (= (js-length __opt) 0) (funcall chunk-nth-method chunk index) (funcall chunk-nth-method chunk index not-found)))))
+  (defun chunkDropFirst (chunk)
+    (let ((slot (directSlot chunk CHUNK_DROP_FIRST)))
+      (if (not (nullish? slot)) (js-call slot :call chunk) (funcall chunk-drop-first-method chunk))))
+  (defun chunkedFirst (sequence)
+    (let ((slot (directSlot sequence CHUNKED_FIRST)))
+      (if (not (nullish? slot)) (js-call slot :call sequence) (funcall chunked-first-method sequence))))
+  (defun chunkedNext (sequence)
+    (let ((slot (directSlot sequence CHUNKED_NEXT)))
+      (if (not (nullish? slot)) (js-call slot :call sequence) (funcall chunked-next-method sequence))))
+  (defun chunkedMore (sequence)
+    (let ((slot (directSlot sequence CHUNKED_MORE)))
+      (if (not (nullish? slot)) (js-call slot :call sequence) (funcall chunked-more-method sequence))))
+  (Object/defineProperty chunkNth "length" (js-object :value 2 :configurable t))
   (Object/defineProperty assoc "length" (js-object :value 3 :configurable t))
   (Object/defineProperty reduceKV "length" (js-object :value 3 :configurable t))
   (Object/defineProperty peek "length" (js-object :value 1 :configurable t))
@@ -547,8 +786,14 @@
   (Object/defineProperty sequenceView "length" (js-object :value 1 :configurable t))
   (Object/defineProperty get "length" (js-object :value 2 :configurable t))
   (export ICounted IEmptyable IConj ILookup IAssociative IIndexed ISeqable IReduce IKVReduce IMap ISet IStack IReversible
+    IMapEntry IChunk IChunkedSeq PersistentMapEntry
+    COLLECTION_ENTRY_KEY COLLECTION_ENTRY_VAL CHUNK_COUNT CHUNK_NTH CHUNK_DROP_FIRST CHUNKED_FIRST CHUNKED_NEXT CHUNKED_MORE
+    entry-key-method entry-val-method chunk-count-method chunk-nth-method chunk-drop-first-method chunked-first-method chunked-next-method chunked-more-method
+    registerChunkedSliceHandler registerChunkedPrependHandler UNBOUNDED_SEQUENCE
     ReductionView MemoizedSequenceView SequenceView reductionView memoizedSequenceView memoizedSequenceStatus sequenceView unboundedSequenceView
     sliceSequenceView prependSequenceView
     count isCounted isIndexed isSeqable isReducible isReversible isAssociative isCollection isList isVector isQueue isMap isSet
-    isSequential isSequence boundedCount areDistinct empty conj get assoc contains nth seq isEmpty notEmpty reduce reduceKV
+    isSequential isSequence isMapEntry mapEntry entryKey entryVal
+    isChunk isChunkedSeq chunkCount chunkNth chunkDropFirst chunkedFirst chunkedNext chunkedMore
+    boundedCount areDistinct empty conj get assoc contains nth seq isEmpty notEmpty reduce reduceKV
     dissoc disj peek pop rseq reduced isReduced unreduced isSequenceView isReductionView))

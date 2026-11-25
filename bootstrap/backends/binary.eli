@@ -86,8 +86,11 @@
         output)))
 
   (defun binary-append (output input)
-    (let ((i 0))
-      (while (< i (binary-length input)) (binary-byte output (binary-byte-at input i)) (setq i (1+ i))))
+    (if (and (Array/isArray output) (Array/isArray input))
+      (let ((i 0) (len (js-length input)))
+        (while (< i len) (js-call output :push (js-nth i input)) (setq i (1+ i))))
+      (let ((i 0) (len (binary-length input)))
+        (while (< i len) (binary-byte output (binary-byte-at input i)) (setq i (1+ i)))))
     output)
 
   (defun binary-append-owned-even (output input length)
@@ -126,32 +129,67 @@
       (when (= (% length 2) 1) (binary-byte output (binary-byte-at input (1- length)))))
     output)
 
+  (defun binary-unpack-into (input out pos)
+    (let* ((chunks (get input :chunks))
+           (pending (get input :pending))
+           (low (get input :low))
+           (ci 0) (nc (js-length chunks)))
+      (while (< ci nc)
+        (let* ((chunk (js-nth ci chunks)) (clen (js-length chunk)) (ui 0))
+          (while (< ui clen)
+            (let ((u (string-code-unit-at chunk ui)))
+              (put out pos (bit-and u 255))
+              (put out (1+ pos) (unsigned-bit-shift-right u 8)))
+            (setq pos (+ pos 2) ui (1+ ui))))
+        (setq ci (1+ ci)))
+      (let ((pi 0) (np (js-length pending)))
+        (while (< pi np)
+          (let ((u (js-nth pi pending)))
+            (put out pos (bit-and u 255))
+            (put out (1+ pos) (unsigned-bit-shift-right u 8)))
+          (setq pos (+ pos 2) pi (1+ pi))))
+      (when (>= low 0) (put out pos (bit-and low 255))))
+    out)
+
   ;; Internal transfer for the WASM emitter's freshly allocated packed body
   ;; writers only. Public append and finished envelopes remain repeatable and
   ;; non-consuming. No caller option can select this path for typed input.
   (defun binary-append-owned (output input)
     (when (Object/is output input) (backend-fail nil "cannot consume a binary writer into itself"))
-    (if (or (Array/isArray output) (Array/isArray input)
-            (= (get input :encoding nil) "u16le-chunks"))
-      (binary-append output input)
-      (progn
-        (unless (and (not (nil? output)) (not (nil? input))
-                     (Array/isArray (get output :chunks nil)) (Array/isArray (get output :pending nil))
-                     (Array/isArray (get input :chunks nil)) (Array/isArray (get input :pending nil))
-                     (not (Object/hasOwn output "encoding")) (not (Object/hasOwn input "encoding")))
-          (backend-fail nil "owned binary append requires fresh packed writers"))
-        (let ((length (get input :length)) (index 0))
-          (if (< (get output :low) 0) (binary-append-owned-even output input length)
-            ;; An odd destination needs cross-unit byte pairing. Preserve the
-            ;; original path, including the source's exact odd final byte.
-            (while (< index length)
-              (binary-byte output (binary-byte-at input index)) (setq index (1+ index)))))
-        ;; Replace storage, rather than clearing shared arrays in place: a
-        ;; previously finished snapshot may still own the old chunk list.
-        ;; Preserve emitter debug/span/scratch properties on both writers.
+    (if (and (Array/isArray output)
+             (not (Array/isArray input))
+             (not (nil? input))
+             (Array/isArray (get input :chunks nil))
+             (Array/isArray (get input :pending nil))
+             (not (Object/hasOwn input "encoding")))
+      (let ((add-len (get input :length)) (pos (js-length output)))
+        (when (> add-len 0)
+          (put output :length (+ pos add-len))
+          (binary-unpack-into input output pos))
         (put input :length 0) (put input :chunks (js-array))
         (put input :pending (js-array)) (put input :low -1)
-        output)))
+        output)
+      (if (or (Array/isArray output) (Array/isArray input)
+              (= (get input :encoding nil) "u16le-chunks"))
+        (binary-append output input)
+        (progn
+          (unless (and (not (nil? output)) (not (nil? input))
+                       (Array/isArray (get output :chunks nil)) (Array/isArray (get output :pending nil))
+                       (Array/isArray (get input :chunks nil)) (Array/isArray (get input :pending nil))
+                       (not (Object/hasOwn output "encoding")) (not (Object/hasOwn input "encoding")))
+            (backend-fail nil "owned binary append requires fresh packed writers"))
+          (let ((length (get input :length)) (index 0))
+            (if (< (get output :low) 0) (binary-append-owned-even output input length)
+              ;; An odd destination needs cross-unit byte pairing. Preserve the
+              ;; original path, including the source's exact odd final byte.
+              (while (< index length)
+                (binary-byte output (binary-byte-at input index)) (setq index (1+ index)))))
+          ;; Replace storage, rather than clearing shared arrays in place: a
+          ;; previously finished snapshot may still own the old chunk list.
+          ;; Preserve emitter debug/span/scratch properties on both writers.
+          (put input :length 0) (put input :chunks (js-array))
+          (put input :pending (js-array)) (put input :low -1)
+          output))))
 
   (defun binary-slice (output start end)
     (if (Array/isArray output) (js-call output :slice start end)
@@ -160,6 +198,35 @@
         (while (< start end)
           (js-call result :push (binary-byte-at output start))
           (setq start (1+ start))) result)))
+
+  (defun binary-to-u8 (input)
+    (if (Array/isArray input) (Uint8Array/from input)
+      (binary-unpack-into input (new globalThis.Uint8Array (get input :length)) 0)))
+
+  (defun binary-to-array (input)
+    (if (Array/isArray input) input
+      (let ((out (binary-unpack-into input (new globalThis.Array (get input :length)) 0)))
+        (put input :length 0) (put input :chunks (js-array))
+        (put input :pending (js-array)) (put input :low -1)
+        out)))
+
+  (defun binary-append-u8 (output bytes)
+    (let ((len (js-length bytes)) (i 0))
+      (if (Array/isArray output)
+        (while (< i len) (js-call output :push (bit-and (js-nth i bytes) 255)) (setq i (1+ i)))
+        (progn
+          (when (and (> len 0) (>= (get output :low) 0))
+            (binary-byte output (js-nth 0 bytes))
+            (setq i 1))
+          (let ((start-i i) (limit (1- len)))
+            (while (< i limit)
+              (binary-unit output (+ (js-nth i bytes) (* (js-nth (1+ i) bytes) 256)))
+              (setq i (+ i 2)))
+            (when (> i start-i)
+              (put output :length (+ (get output :length) (- i start-i)))))
+          (when (< i len)
+            (binary-byte output (js-nth i bytes))))))
+    output)
 
   (defun binary-finish (output)
     (if (Array/isArray output) output
@@ -170,4 +237,4 @@
         (js-object :encoding "u16le-chunks" :byteLength (get output :length) :chunks (get output :chunks)))))
 
   (export binary-output binary-byte binary-u32 binary-push binary-child binary-length binary-resume
-    binary-append binary-append-owned binary-slice binary-finish))
+    binary-append binary-append-owned binary-slice binary-to-u8 binary-to-array binary-append-u8 binary-finish))

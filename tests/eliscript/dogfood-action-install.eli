@@ -10,7 +10,7 @@
   (defconst original (Object/assign (js-object) framework))
   (js-call assert :strictEqual
     (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tests/dogfood-action-test-ground.mjs"))) :digest "hex")
-    "7cf369b1fdae6da5c15d09903fac0f8bf5559eb9564e62792decf95581c5c431")
+    "38762de0eca807f492a1a410d24453bf5b98421e0a01ff3b39cc2fc44afd61a2")
   (defconst registration (createDirectWasmRegistration original (js-object
     "the committed package reproduces from source" runSourcePackageCase
     "package reproduction verifies staged bytes and rejects unstaged, missing and untracked artifacts" runPackageNegatives)))

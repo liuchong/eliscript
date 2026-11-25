@@ -6,6 +6,7 @@
   ;; Limits remain per owned tree and per invocation, never across chats.
   (defconst TREE_RSS_LIMIT (* 8 1024 1024 1024))
   (defconst TOTAL_RSS_LIMIT TREE_RSS_LIMIT)
+  (defconst CONCURRENT_TOTAL_RSS_LIMIT (* 20 1024 1024 1024))
   (defconst SAMPLE_MS 75)
   (defconst GRACE_MS 150)
   (defconst PS_TIMEOUT_MS 3000)
@@ -206,7 +207,7 @@
         (send globalThis.process (js-object :type "launcher-ready" :pid (get globalThis.process :pid) :token token)))))
 
   (defasync supervisor-main ()
-    (let ((active (new globalThis.Map)) (limits nil) (stopped false) (stop-sampling (lambda () nil)) (heartbeat nil))
+    (let ((active (new globalThis.Map)) (limits nil) (aggregate-limits nil) (stopped false) (stop-sampling (lambda () nil)) (heartbeat nil))
       (letfn ((stop-all (outcome &rest arguments)
         (funcall (async ()
           (unless stopped
@@ -235,6 +236,10 @@
               (try
                 (progn
                   (setq limits (resourceLimits (get message :limits)))
+                  (setq aggregate-limits (if (undefined? (get message :aggregateCeilingBytes))
+                                           limits
+                                           (js-object :treeBytes (get limits :treeBytes)
+                                             :totalBytes (lower-limit (get message :aggregateCeilingBytes) CONCURRENT_TOTAL_RSS_LIMIT "aggregate RSS limit"))))
                   ;; IPC liveness is independent of successful memory samples.
                   ;; A failed bounded sample still calls stop-all immediately.
                   (setq heartbeat (funcall globalThis.setInterval (lambda ()
@@ -247,7 +252,7 @@
                         (let* ((rows (await (readProcessSnapshot)))
                                (roots (js-call (js-call (Array/from (js-call active :values)) :filter (lambda (entry) (get entry :running)))
                                         :map (lambda (entry) (get entry :root))))
-                               (usage (evaluateResourceUsage rows roots limits)))
+                               (usage (evaluateResourceUsage rows roots aggregate-limits)))
                           (when (get usage :violation)
                             (await (stop-all (js-object :failure "resource-limit" :exitCode 1 :resource (get usage :violation)))))))
                         (lambda (error) (stop-all (monitor-outcome error)))))
@@ -294,6 +299,7 @@
            (limits (resourceLimits (null-default (get options :limits) (js-object
              :treeBytes (get (get globalThis.process :env) :ELISCRIPT_TEST_TREE_RSS_BYTES)
              :totalBytes (get (get globalThis.process :env) :ELISCRIPT_TEST_TOTAL_RSS_BYTES)))))
+           (aggregate-ceiling (get options :aggregateCeilingBytes))
            (guard (fork SELF (js-array "--supervisor") (js-object :execPath (null-default (get options :node) "node")
              :execArgv GUARD_EXEC_ARGV :stdio (js-array "ignore" "inherit" "inherit" "ipc"))))
            (pending (new globalThis.Map)) (owned (new globalThis.Map))
@@ -337,7 +343,9 @@
           (when (> (- (Date/now) last-health) HEALTH_TIMEOUT_MS)
             (fail (js-object :failure "monitor-unavailable" :exitCode 1 :message "external resource guard stopped responding"))
             (js-call guard :kill "SIGKILL"))) SAMPLE_MS))
-        (send guard (js-object :type "init" :limits limits))
+        (send guard (if (nullish? aggregate-ceiling)
+                        (js-object :type "init" :limits limits)
+                      (js-object :type "init" :limits limits :aggregateCeilingBytes aggregate-ceiling)))
         (await ready)
         (let ((result (js-object
           :run (lambda (request)

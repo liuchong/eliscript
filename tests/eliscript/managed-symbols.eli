@@ -18,7 +18,7 @@
   (defvar directory undefined) (defvar b undefined) (defvar runtime undefined) (defvar family undefined)
   (defvar generationEvidence undefined)
   (defconst archive (readFileSync (resolve root "tests/wasm-managed-symbols-test-ground.mjs") "utf8"))
-  (defconst archive-sha "1d12c1de2ea62c6439d5c3957c4e246785f411c62a18b34f095274eb6fecf500")
+  (defconst archive-sha "8ada7608d42e17a0d4374b2595ace471efe4733f8b38e620335a18222359b91f")
   (defconst cases (Array/from (js-call archive :matchAll (new globalThis.RegExp "^test\\(\"((?:\\\\.|[^\"\\\\])*)\"" "gm"))))
   (defconst wellKnownSymbolNames (js-array "iterator" "toPrimitive" "match" "replace" "search" "split" "species" "isConcatSpreadable" "toStringTag" "hasInstance" "asyncIterator" "unscopables" "matchAll" "dispose" "asyncDispose"))
   (defun same (&rest arguments) (Reflect/apply (get assert :strictEqual) assert arguments))

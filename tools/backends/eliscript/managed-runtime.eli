@@ -391,8 +391,15 @@
             (unless (runtime-instance-p (get exports :memory) globalThis.WebAssembly.Memory)
               (throw (new globalThis.Error "managed runtime requires owned memory"))))
           (catch error (try (js-call bridge :close) (catch ignored nil)) (throw error)))
-        (let* ((memory (js-object
-                :view (lambda () (new globalThis.DataView (get (get exports :memory) :buffer)))
+        (let* ((cachedBuffer nil)
+               (cachedView nil)
+               (memory (js-object
+                :view (lambda ()
+                  (let ((buf (get (get exports :memory) :buffer)))
+                    (unless (eq buf cachedBuffer)
+                      (setq cachedBuffer buf
+                            cachedView (new globalThis.DataView buf)))
+                    cachedView))
                 :writeBytes (lambda (offset bytes)
                   (js-call (new globalThis.Uint8Array (get (get exports :memory) :buffer) offset (js-length bytes)) :set bytes))
                 :readBytes (lambda (offset length)

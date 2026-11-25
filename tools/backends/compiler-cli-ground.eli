@@ -567,10 +567,10 @@
                                           (if (and (= (value-type custom-cache-dir) "string") (> (js-length custom-cache-dir) 0))
                                             (resolve custom-cache-dir)
                                             (resolve (tmpdir) "eliscript-cli-request-cache"))))
-                            (max-entries-raw (funcall globalThis.Number (get env :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES "8")))
-                            (max-entries (if (and (Number/isSafeInteger max-entries-raw) (>= max-entries-raw 1) (<= max-entries-raw 1024)) max-entries-raw 8))
-                            (max-entry-bytes-raw (funcall globalThis.Number (get env :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES "268435456")))
-                            (max-entry-bytes (if (and (Number/isSafeInteger max-entry-bytes-raw) (>= max-entry-bytes-raw 1) (<= max-entry-bytes-raw 536870912)) max-entry-bytes-raw 268435456))
+                            (max-entries-raw (funcall globalThis.Number (get env :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRIES "16")))
+                            (max-entries (if (and (Number/isSafeInteger max-entries-raw) (>= max-entries-raw 1) (<= max-entries-raw 1024)) max-entries-raw 16))
+                            (max-entry-bytes-raw (funcall globalThis.Number (get env :ELISCRIPT_CLI_REQUEST_CACHE_MAX_ENTRY_BYTES "536870912")))
+                            (max-entry-bytes (if (and (Number/isSafeInteger max-entry-bytes-raw) (>= max-entry-bytes-raw 1) (<= max-entry-bytes-raw 536870912)) max-entry-bytes-raw 536870912))
                             (cache-dir (when cache-root
                                          (resolve cache-root
                                            (let ((hash (createHash "sha256")))

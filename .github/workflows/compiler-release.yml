@@ -38,8 +38,6 @@ jobs:
             emacsCommit: "fd7afced4036fc1a221567d70705d20a2bd64713"
             native_target: arm64-macos
     env:
-      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"
-      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: "small"
       NATIVE_TARGET: ${{ matrix.native_target }}
       BUN_TEST_RUNNER: tools/testing/final-functional-scope.mjs
     steps:
@@ -88,7 +86,7 @@ jobs:
             Darwin) node_platform=darwin ;;
             *) exit 1 ;;
           esac
-          node_version=24.20.0
+          node_version=24.22.3
           node_archive="node-v$node_version-$node_platform-${{ matrix.architecture }}.tar.gz"
           node_directory="$RUNNER_TEMP/eliscript-node"
           mkdir -p "$node_directory"
@@ -109,7 +107,7 @@ jobs:
           node --version
           test "$(bun -p 'process.arch')" = "${{ matrix.architecture }}"
           test "$(node -p 'process.arch')" = "${{ matrix.architecture }}"
-          test "$(node --version)" = "v24.20.0"
+          test "$(node --version)" = "v24.22.3"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
       - name: Install browser engines for final compiler validation

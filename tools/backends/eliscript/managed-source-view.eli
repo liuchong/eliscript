@@ -54,6 +54,23 @@
           (Object/freeze (Object/create (Object/getPrototypeOf provider) descriptors))))))
   (defconst source-boundaries (new globalThis.WeakMap))
   (defconst decode-realms (new globalThis.WeakMap))
+  (defconst weak-record-watermarks (new globalThis.WeakMap))
+
+  (defun push-weak-record (list ref)
+    (js-call list :push ref)
+    (let ((len (js-length list)))
+      (when (> len 65536)
+        (let ((prev (or (js-call weak-record-watermarks :get list) 0)))
+          (when (>= len (Math/max 65536 (* prev 2)))
+            (let ((read 0) (write 0))
+              (while (< read len)
+                (let ((entry (aref list read)))
+                  (when (not (undefined? (js-call entry :deref)))
+                    (put list write entry)
+                    (setq write (1+ write))))
+                (setq read (1+ read)))
+              (put list :length write)
+              (js-call weak-record-watermarks :set list write)))))))
   (defvar current-boundary undefined)
   (defvar current-binding-poll undefined)
   (defvar current-refresh undefined)
@@ -72,25 +89,36 @@
   ;; aliases enter this registry. No property on an input view is inspected.
   (defun registerManagedSourceDecodeRuntime (runtime owner &rest classifiers)
     (let ((realm (if (> (js-length classifiers) 0)
-                   (js-object :classify (aref classifiers 0) :records (js-array))
+                   (js-object :classify (aref classifiers 0) :closed false :closedInvoke closed-source-view-invoke :records nil)
                    (js-call decode-realms :get owner))))
       (unless (undefined? realm) (js-call decode-realms :set runtime realm))) runtime)
+
+  (defun getManagedSourceDecodeRealm (runtime)
+    (if (undefined? current-source-realm)
+      (when (not (undefined? runtime)) (js-call decode-realms :get runtime))
+      current-source-realm))
 
   (defun detachManagedDecodedSourceRecords (records &rest handlers)
     (let ((closed-invoke (if (and (> (js-length handlers) 0) (= (value-type (aref handlers 0)) "function"))
                            (aref handlers 0)
                            closed-source-view-invoke)))
-      (when (Array/isArray records)
-        (let ((index 0))
-          (while (< index (js-length records))
-            (let ((record (js-call (aref records index) :deref)))
-              (when record
-                (put record :invoke closed-invoke)
-                (put record :state undefined)
-                (put record :observer undefined)
-                (put record :realm undefined)))
-            (setq index (1+ index))))
-        (put records :length 0))
+      (if (Array/isArray records)
+        (progn
+          (let ((index 0))
+            (while (< index (js-length records))
+              (let ((record (js-call (aref records index) :deref)))
+                (when record
+                  (put record :invoke closed-invoke)
+                  (put record :fastGet undefined)
+                  (put record :fastApply undefined)
+                  (put record :state undefined)
+                  (put record :observer undefined)
+                  (put record :realm undefined)))
+              (setq index (1+ index))))
+          (put records :length 0))
+        (when (and (not (nullish? records)) (= (value-type records) "object"))
+          (put records :closed t)
+          (put records :closedInvoke closed-invoke)))
       undefined))
 
   (defun closeManagedSourceDecodeRuntime (runtime &rest handlers)
@@ -101,14 +129,17 @@
                            (aref handlers 0)
                            closed-source-view-invoke)))
       (when realm
-        (detachManagedDecodedSourceRecords (get realm :records) closed-invoke)
+        (put realm :closed t)
+        (put realm :closedInvoke closed-invoke)
+        (when (Array/isArray (get realm :records))
+          (detachManagedDecodedSourceRecords (get realm :records) closed-invoke))
         (put realm :classify closed-source-classify)
         (put realm :records undefined))
       undefined))
 
   (defun isManagedSourceViewForRuntime (value runtime)
     (let ((record (js-call source-boundaries :get value)) (realm (js-call decode-realms :get runtime)))
-      (and (not (undefined? record)) (not (undefined? realm)) (eq (get record :realm) realm))))
+      (and (not (undefined? record)) (not (undefined? realm)) (not (get realm :closed)) (eq (get record :realm) realm))))
 
   (defun snapshot-source-state (state)
     (let ((base (get state :base))) (if (undefined? base) state base)))
@@ -277,6 +308,65 @@
            (result (snapshot-source-intern state value)))
       (snapshot-source-drain state) result))
 
+  (defun plain-match-object-shape-p (value)
+    (and (not (nullish? value))
+         (= (host-typeof value) "object")
+         (not (Array/isArray value))
+         (let ((proto (Object/getPrototypeOf value)))
+           (or (eq proto nil) (eq proto globalThis.Object.prototype)))
+         (= (js-length (Object/getOwnPropertySymbols value)) 0)
+         (undefined? (get value :asymmetricMatch))))
+
+  (defun project-to-match-object-value (value expected seen)
+    (cond
+      ((or (nullish? value)
+           (and (/= (host-typeof value) "object") (/= (host-typeof value) "function")))
+       value)
+      ((and (Array/isArray expected) (Array/isArray value))
+       (if (js-call seen :has expected)
+         (projectManagedSourceViewForMatcher value)
+         (let ((len (js-length value))
+               (elen (js-length expected)))
+           (if (/= len elen)
+             (new globalThis.Array len)
+             (let ((out (new globalThis.Array elen)) (i 0))
+               (try
+                 (progn
+                   (js-call seen :add expected)
+                   (while (< i elen)
+                     (when (Reflect/has value i)
+                       (Object/defineProperty out i (js-object
+                         :value (project-to-match-object-value (get value i) (get expected i) seen)
+                         :enumerable t :writable t :configurable t)))
+                     (setq i (1+ i))))
+                 (finally (js-call seen :delete expected)))
+               out)))))
+      ((plain-match-object-shape-p expected)
+       (if (js-call seen :has expected)
+         (projectManagedSourceViewForMatcher value)
+         (let* ((keys (Object/keys expected))
+                (is-arr (Array/isArray value))
+                (len (if is-arr (js-length value) 0)))
+           (if (and is-arr (<= len 64))
+             (projectManagedSourceViewForMatcher value)
+             (let ((out (if is-arr (new globalThis.Array len) (js-object))) (i 0))
+               (try
+                 (progn
+                   (js-call seen :add expected)
+                   (while (< i (js-length keys))
+                     (let ((key (aref keys i)))
+                       (when (Reflect/has value key)
+                         (Object/defineProperty out key (js-object
+                           :value (project-to-match-object-value (get value key) (get expected key) seen)
+                           :enumerable t :writable t :configurable t))))
+                     (setq i (1+ i))))
+                 (finally (js-call seen :delete expected)))
+               out)))))
+      (t (projectManagedSourceViewForMatcher value))))
+
+  (defun projectManagedSourceViewForToMatchObject (value expected)
+    (project-to-match-object-value value expected (new globalThis.WeakSet)))
+
   ;; A private synchronous host-codec boundary. It does not escape through a
   ;; Promise, retain a managed value, or classify a source object as immutable.
   (defun source-decode-with-realm (operation realm)
@@ -289,6 +379,12 @@
   (defun withManagedSourceDecode (operation &rest runtimes)
     (source-decode-with-realm operation
       (if (> (js-length runtimes) 0) (js-call decode-realms :get (aref runtimes 0)) current-source-realm)))
+
+  (defun invokeWithManagedSourceDecode (realm fn a0 a1 a2 a3 hasExtra)
+    (let ((previous current-source-decode) (previous-realm current-source-realm))
+      (setq current-source-decode t current-source-realm realm)
+      (try (if hasExtra (funcall fn a0 a1 a2 a3) (funcall fn a0 a1 a2))
+        (finally (setq current-source-decode previous current-source-realm previous-realm)))))
 
   (defun drain-source-refresh (refresh value)
     ;; Decoder callbacks can discover another source view while mirroring a
@@ -380,34 +476,52 @@
 
   (defun noteManagedSourceIdentity (value raw realm)
     (when (and (host-object-key? value) (host-object-key? realm))
-      (let ((owners (js-call source-identity :get value)))
-        (when (undefined? owners)
-          (setq owners (new globalThis.WeakMap))
-          (js-call source-identity :set value owners))
-        (js-call owners :set realm raw)))
+      (let ((table (js-call source-identity :get realm)))
+        (when (undefined? table)
+          (setq table (new globalThis.WeakMap))
+          (js-call source-identity :set realm table))
+        (js-call table :set value raw)))
     value)
 
   (defun managedSourceIdentity (value &rest owners)
-    (let ((records (js-call source-identity :get value)))
-      (if (or (undefined? records) (= (js-length owners) 0) (not (host-object-key? (aref owners 0))))
-        undefined
-        (js-call records :get (aref owners 0)))))
+    (if (or (= (js-length owners) 0)
+            (not (host-object-key? (aref owners 0)))
+            (not (host-object-key? value)))
+      undefined
+      (let ((table (js-call source-identity :get (aref owners 0))))
+        (if (undefined? table) undefined (js-call table :get value)))))
+
+  (defun record-closed-invoke (record)
+    (if (not record)
+      nil
+      (let ((token (get record :closeToken)))
+        (if (and token (get token :closed))
+          (let ((fn (get token :closedInvoke)))
+            (if (= (value-type fn) "function") fn closed-source-view-invoke))
+          (let ((realm (get record :realm)))
+            (if (and realm (get realm :closed))
+              (let ((fn (get realm :closedInvoke)))
+                (if (= (value-type fn) "function") fn closed-source-view-invoke))
+              nil))))))
 
   (defun decoded-source-call (record name arguments)
     ;; These two callbacks exist only for the synchronous operation. No view
     ;; retains them, and polling/first-throw restoration remains per operation.
-    (let ((observer (get record :observer))
-          (realm (get record :realm)))
-      (if (or (not (= (value-type observer) "function")) (eq current-boundary observer))
-        (let ((previous current-source-decode) (previous-realm current-source-realm))
-          (setq current-source-decode t current-source-realm realm)
-          (try (funcall (get record :invoke) (get record :state) name arguments)
-            (finally (setq current-source-decode previous current-source-realm previous-realm))))
-        (withManagedSourceBoundary observer
-          (lambda ()
-            (source-decode-with-realm
-              (lambda () (funcall (get record :invoke) (get record :state) name arguments))
-              realm))))))
+    (let ((closed-invoke (record-closed-invoke record)))
+      (if closed-invoke
+        (funcall closed-invoke (get record :state) name arguments)
+        (let ((observer (get record :observer))
+              (realm (get record :realm)))
+          (if (or (not (= (value-type observer) "function")) (eq current-boundary observer))
+            (let ((previous current-source-decode) (previous-realm current-source-realm))
+              (setq current-source-decode t current-source-realm realm)
+              (try (funcall (get record :invoke) (get record :state) name arguments)
+                (finally (setq current-source-decode previous current-source-realm previous-realm))))
+            (withManagedSourceBoundary observer
+              (lambda ()
+                (source-decode-with-realm
+                  (lambda () (funcall (get record :invoke) (get record :state) name arguments))
+                  realm))))))))
 
   (defun decoded-source-mirror (target key entry)
     (let ((existing (Reflect/getOwnPropertyDescriptor target key)))
@@ -441,15 +555,25 @@
       keys))
 
   (defun decoded-source-get (target key receiver)
-    (let ((record (js-call decoded-source-records :get target)))
-      ;; A private runtime target need not publish an own descriptor merely to
-      ;; perform Get. Already published immutable properties stay exact through
-      ;; descriptor/define/integrity traps; writable properties impose no Get
-      ;; invariant. Keep the original callback order for all other factories.
-      (unless (get record :directGet)
-        (let ((entry (decoded-source-call record "descriptor" (js-array key))))
-          (when (and entry (not (get entry :configurable))) (decoded-source-mirror target key entry))))
-      (decoded-source-call record "get" (js-array key receiver))))
+    (let* ((record (js-call decoded-source-records :get target))
+           (closed-invoke (record-closed-invoke record)))
+      (if closed-invoke
+        (funcall closed-invoke (get record :state) "get" (js-array key receiver))
+        (let ((obs (if record (get record :observer) undefined)))
+          ;; A private runtime target need not publish an own descriptor merely to
+          ;; perform Get. Already published immutable properties stay exact through
+          ;; descriptor/define/integrity traps; writable properties impose no Get
+          ;; invariant. Keep the original callback order for all other factories.
+          (unless (get record :directGet)
+            (let ((entry (decoded-source-call record "descriptor" (js-array key))))
+              (when (and entry (not (get entry :configurable))) (decoded-source-mirror target key entry))))
+          (if (and (get record :directGet)
+                   (= (host-typeof key) "string")
+                   (get record :fastGet)
+                   (or (not (= (host-typeof obs) "function")) (eq current-boundary obs)))
+            (let ((hit (funcall (get record :fastGet) (get record :state) key receiver)))
+              (if hit (get hit :value) (decoded-source-call record "get" (js-array key receiver))))
+            (decoded-source-call record "get" (js-array key receiver)))))))
 
   (defun decoded-source-set (target key value receiver)
     (let* ((record (js-call decoded-source-records :get target))
@@ -500,7 +624,19 @@
       (progn (decoded-source-synchronize target t) (not (Reflect/isExtensible target)))))
 
   (defun decoded-source-apply (target receiver arguments)
-    (decoded-source-call (js-call decoded-source-records :get target) "apply" (js-array receiver arguments)))
+    (let* ((record (js-call decoded-source-records :get target))
+           (closed-invoke (record-closed-invoke record)))
+      (if closed-invoke
+        (funcall closed-invoke (get record :state) "apply" (js-array receiver arguments))
+        (let* ((fast-apply (if record (get record :fastApply) undefined))
+               (obs (if record (get record :observer) undefined)))
+          (if (and fast-apply
+                   (or (not (= (value-type obs) "function")) (eq current-boundary obs)))
+            (let ((previous current-source-decode) (previous-realm current-source-realm))
+              (setq current-source-decode t current-source-realm (get record :realm))
+              (try (funcall fast-apply (get record :state) receiver arguments)
+                (finally (setq current-source-decode previous current-source-realm previous-realm))))
+            (decoded-source-call record "apply" (js-array receiver arguments)))))))
 
   (defun decoded-source-construct (target arguments new-target)
     (decoded-source-call (js-call decoded-source-records :get target) "construct" (js-array arguments new-target)))
@@ -525,8 +661,9 @@
 
   (defun createManagedDecodedSourceView (configuration)
     (let ((target (get configuration :target)) (state (get configuration :state))
-          (invoke (get configuration :invoke)))
-      (if (not current-source-decode)
+          (invoke (get configuration :invoke))
+          (runtime (get configuration :runtime)))
+      (if (not (or current-source-decode (eq (get configuration :decoded) t)))
         ;; Existing direct factory callers still require public full refresh
         ;; and retry semantics. Only private decoder publication is optimized.
         (let ((operations (js-object)))
@@ -539,22 +676,42 @@
           (createManagedSourceView (js-object :target target :operations operations)))
         ;; Private targets can be arrays, boxed primitives or callables too.
         ;; Proxy validates the target without a language-level brand query.
-        (let* ((record (js-object :target target :state state :invoke invoke
-                         :observer current-boundary :realm current-source-realm
+        (let* ((realm (if (and (undefined? current-source-realm) (not (undefined? runtime)))
+                        (js-call decode-realms :get runtime)
+                        current-source-realm))
+               (explicit (get configuration :records))
+               (close-token (when (and (not (nullish? explicit)) (not (Array/isArray explicit)) (= (value-type explicit) "object")) explicit))
+               (record (js-object :target target :state state :invoke invoke
+                         :fastGet (get configuration :fastGet)
+                         :fastApply (get configuration :fastApply)
+                         :observer current-boundary :realm realm :closeToken close-token
                          :directGet (eq (get configuration :directGet) t)))
                (proxy (new globalThis.Proxy target decoded-source-handler)))
           (when (= (value-type globalThis.WeakRef) "function")
-            (let ((ref (new globalThis.WeakRef record))
-                  (explicit (get configuration :records))
-                  (realm-records (when current-source-realm (get current-source-realm :records))))
-              (when (Array/isArray explicit) (js-call explicit :push ref))
-              (when (and (Array/isArray realm-records) (not (eq realm-records explicit)))
-                (js-call realm-records :push ref))))
+            (let ((realm-records (when realm (get realm :records))))
+              (cond
+                ((Array/isArray explicit) (push-weak-record explicit (new globalThis.WeakRef record)))
+                ((Array/isArray realm-records) (push-weak-record realm-records (new globalThis.WeakRef record))))))
           (js-call decoded-source-records :set target record)
           (js-call source-boundaries :set proxy record)
           ;; Deferred refresh deliberately omits the redundant all:true walk.
           ;; Each live trap still mirrors exactly the original invariants.
-          (Object/freeze (js-object :value proxy :refresh (decoded-source-refresh proxy)))))))
+          (js-object :value proxy :refresh (if (eq (get configuration :skipRefresh) t) undefined (decoded-source-refresh proxy)))))))
+
+  (defun createManagedOrdinarySourceProxy (target state invoke fastGet realm records)
+    (let* ((close-token (when (and (not (nullish? records)) (not (Array/isArray records)) (= (value-type records) "object")) records))
+           (record (js-object :target target :state state :invoke invoke
+                     :fastGet fastGet :fastApply undefined
+                     :observer current-boundary :realm realm :closeToken close-token :directGet t))
+           (proxy (new globalThis.Proxy target decoded-source-handler)))
+      (when (= (value-type globalThis.WeakRef) "function")
+        (let ((realm-records (when realm (get realm :records))))
+          (cond
+            ((Array/isArray records) (push-weak-record records (new globalThis.WeakRef record)))
+            ((Array/isArray realm-records) (push-weak-record realm-records (new globalThis.WeakRef record))))))
+      (js-call decoded-source-records :set target record)
+      (js-call source-boundaries :set proxy record)
+      proxy))
 
   (defun createManagedSourceView (configuration)
     (let* ((target (get configuration :target)) (operations (get configuration :operations))
@@ -604,9 +761,9 @@
           :length (js-object :value (get (get view :refresh) :length))))
         (Object/freeze (js-object :value proxy :refresh refresh)))))
 
-  (export createManagedLiteralHostProvider createManagedSourceView createManagedDecodedSourceView
-    bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode
-    registerManagedSourceDecodeRuntime detachManagedDecodedSourceRecords closeManagedSourceDecodeRuntime isManagedSourceViewForRuntime
-    isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher
+  (export createManagedLiteralHostProvider createManagedSourceView createManagedDecodedSourceView createManagedOrdinarySourceProxy
+    bindManagedSourceBoundary withManagedSourceBoundary withManagedSourceBindingPoll withManagedSourceDecode invokeWithManagedSourceDecode
+    registerManagedSourceDecodeRuntime getManagedSourceDecodeRealm detachManagedDecodedSourceRecords closeManagedSourceDecodeRuntime isManagedSourceViewForRuntime
+    isManagedSourceView snapshotManagedSourceView projectManagedSourceViewForMatcher projectManagedSourceViewForToMatchObject
     noteManagedSourceIdentity managedSourceIdentity
     registerManagedSourceIdentityOwner managedSourceIdentityOwner))

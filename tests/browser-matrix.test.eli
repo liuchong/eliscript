@@ -51,7 +51,7 @@
   (test "the report binds the tree it describes" (async ()
     (be (get report :format) "dogfood-browser-matrix")
     (js-call (expect (get report :siteFingerprint)) :toMatch (new globalThis.RegExp "^[0-9a-f]{64}$" "u"))
-    (let* ((child (Bun/spawn (js-array "bun" "tools/browser/matrix.mjs" "--site" "examples/dogfood/_site" "--engines" "chromium" "--port" "8902" "--out" (join staging "report.json"))
+    (let* ((child (Bun/spawn (js-array "bun" "tools/browser/matrix.mjs" "--site" "examples/dogfood/_site" "--engines" "chromium" "--port" "8905" "--out" (join staging "report.json"))
              (js-object :cwd ROOT :stdout "pipe" :stderr "pipe")))
            (result (await (Promise/all (js-array (get child :exited) (js-call (new globalThis.Response (get child :stdout)) :text) (js-call (new globalThis.Response (get child :stderr)) :text))))))
       (be (aref result 0) 0) (be (aref result 2) "")

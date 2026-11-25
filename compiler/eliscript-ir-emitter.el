@@ -690,6 +690,9 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
                (eliscript-emitter--indent
                 (eliscript-ir-emitter--emit-statement-body (cdr nodes)))
                "\n}" (if returning "\nreturn null;" "")))
+      ((and (eq kind 'try-expression)
+            (not (eliscript-ir-emitter--contains-raw-javascript-p node)))
+       (eliscript-ir-emitter--emit-try-block node returning))
       ((and (eq kind 'lexical-bindings)
             (cl-every (lambda (binding)
                         (not (eliscript-ir-property binding :pattern)))
@@ -728,6 +731,11 @@ Independent sequential bindings share a scope; uncertain groups stay nested."
          ((consp item)
           (push (cdr item) pending) (push (car item) pending)))))
     found))
+
+(defun eliscript-ir-emitter--contains-raw-javascript-p (node)
+  "Return non-nil when NODE contains any raw JavaScript form."
+  (eliscript-ir-emitter--some-node
+   node (lambda (item) (eq (eliscript-ir-node-kind item) 'raw-javascript)) nil))
 
 (defun eliscript-ir-emitter--walk-program (program visitor)
   "Call VISITOR in the original IR preorder using explicit sibling frames."
@@ -1297,8 +1305,8 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
             (eliscript-ir-emitter-emit-expression
              (car (eliscript-ir-emitter--children node))))))
 
-(defun eliscript-ir-emitter--emit-catch (node)
-  "Emit catch clause NODE."
+(defun eliscript-ir-emitter--emit-catch-context (node returning)
+  "Emit catch clause NODE for RETURNING or statement context."
   (let* ((children (eliscript-ir-emitter--children node))
          (binding (car children))
          (body (cdr children)))
@@ -1315,9 +1323,15 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                (let ((setup
                       (eliscript-ir-emitter--emit-binding-setup binding)))
                  (and (not (string-empty-p setup)) setup))
-               (eliscript-ir-emitter--emit-returning-body body)))
+               (if returning
+                   (eliscript-ir-emitter--emit-returning-body body)
+                 (eliscript-ir-emitter--emit-statement-body body))))
         "\n"))
       "\n}"))))
+
+(defun eliscript-ir-emitter--emit-catch (node)
+  "Emit catch clause NODE."
+  (eliscript-ir-emitter--emit-catch-context node t))
 
 (defun eliscript-ir-emitter--emit-finally (node)
   "Emit finally clause NODE."
@@ -1330,8 +1344,8 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
       (eliscript-ir-emitter--children node)))
     "\n}")))
 
-(defun eliscript-ir-emitter--emit-try (node)
-  "Emit value-producing try expression NODE."
+(defun eliscript-ir-emitter--emit-try-block (node returning)
+  "Emit try block body for NODE in RETURNING or statement context."
   (pcase-let* ((`(,body ,clauses)
                 (eliscript-ir-emitter--split-counted-children
                  node :body-count))
@@ -1344,22 +1358,26 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                 (cl-find-if
                  (lambda (clause)
                    (eq (eliscript-ir-node-kind clause) 'finally-clause))
-                 clauses))
-               (try-block
-                (concat
-                 "try {\n"
-                 (eliscript-emitter--indent
-                  (eliscript-ir-emitter--emit-returning-body body))
-                 "\n}"
-                 (if catch-clause
-                     (eliscript-ir-emitter--emit-catch catch-clause)
-                   "")
-                 (if finally-clause
-                     (eliscript-ir-emitter--emit-finally finally-clause)
-                   ""))))
-    (eliscript-ir-emitter--emit-iife
-     "" (eliscript-emitter--indent try-block) ""
-     (eliscript-ir-emitter--contains-await-p node))))
+                 clauses)))
+    (concat
+     "try {\n"
+     (eliscript-emitter--indent
+      (if returning
+          (eliscript-ir-emitter--emit-returning-body body)
+        (eliscript-ir-emitter--emit-statement-body body)))
+     "\n}"
+     (if catch-clause
+         (eliscript-ir-emitter--emit-catch-context catch-clause returning)
+       "")
+     (if finally-clause
+         (eliscript-ir-emitter--emit-finally finally-clause)
+       ""))))
+
+(defun eliscript-ir-emitter--emit-try (node)
+  "Emit value-producing try expression NODE."
+  (eliscript-ir-emitter--emit-iife
+   "" (eliscript-emitter--indent (eliscript-ir-emitter--emit-try-block node t)) ""
+   (eliscript-ir-emitter--contains-await-p node)))
 
 (defun eliscript-ir-emitter--emit-let (node)
   "Emit lexical binding NODE."
@@ -1574,21 +1592,25 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
 (defun eliscript-ir-emitter--emit-distinct (name nodes)
   "Emit a one-evaluation pairwise distinct comparison for NAME and NODES."
   (eliscript-emitter--require-arity name nodes 2)
-  (let ((parameters
-         (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
-        comparisons)
-    (cl-loop for left-index from 0 below (length parameters)
-             do (cl-loop for right-index from (1+ left-index)
-                         below (length parameters)
-                         do (push
-                             (format "%s !== %s"
-                                     (nth left-index parameters)
-                                     (nth right-index parameters))
-                             comparisons)))
-    (format "((%s) => (%s))(%s)"
-            (string-join parameters ", ")
-            (string-join (nreverse comparisons) " && ")
-            (eliscript-ir-emitter--emit-arguments nodes))))
+  (if (= (length nodes) 2)
+      (format "(%s !== %s)"
+              (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+              (eliscript-ir-emitter-emit-expression (nth 1 nodes)))
+    (let ((parameters
+           (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
+          comparisons)
+      (cl-loop for left-index from 0 below (length parameters)
+               do (cl-loop for right-index from (1+ left-index)
+                           below (length parameters)
+                           do (push
+                               (format "%s !== %s"
+                                       (nth left-index parameters)
+                                       (nth right-index parameters))
+                               comparisons)))
+      (format "((%s) => (%s))(%s)"
+              (string-join parameters ", ")
+              (string-join (nreverse comparisons) " && ")
+              (eliscript-ir-emitter--emit-arguments nodes)))))
 
 (defun eliscript-ir-emitter--emit-intrinsic (node)
   "Emit intrinsic operation NODE."
@@ -1863,6 +1885,19 @@ Only IR nodes are cached; list tails remain ordinary sibling continuations."
                    (and (eq kind 'intrinsic)
                         (memq (eliscript-ir-node-value item) '(aref js-length))))
                (dolist (child (eliscript-ir-emitter--children item)) (push child pending)))
+              ((eq kind 'invoke)
+               (let* ((nodes (eliscript-ir-emitter--children item))
+                      (callee (car nodes))
+                      (children (and callee (eliscript-ir-emitter--children callee))))
+                 (if (and (= (length nodes) 3)
+                          (eq (eliscript-ir-node-kind callee) 'raw-javascript)
+                          (= (length children) 1)
+                          (eq (eliscript-ir-node-kind (car children)) 'literal)
+                          (eliscript-emitter--raw-binary-operator
+                           (eliscript-ir-node-value (car children))))
+                     (progn (push (nth 1 nodes) pending)
+                            (push (nth 2 nodes) pending))
+                   (setq safe nil))))
               (t (setq safe nil)))))
     safe))
 

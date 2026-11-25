@@ -1,40 +1,99 @@
 (module eliscript.managed-runtime-lazy-sequence
-  (import "./collection.mjs" MemoizedSequenceView memoizedSequenceView memoizedSequenceStatus seq)
+  (import "./collection.mjs" IChunk IChunkedSeq MemoizedSequenceView isChunkedSeq memoizedSequenceView memoizedSequenceStatus seq)
+  (import "./collection-internals.mjs"
+    CHUNKED_FIRST CHUNKED_MORE CHUNKED_NEXT CHUNK_COUNT CHUNK_DROP_FIRST CHUNK_NTH
+    COLLECTION_COUNT COLLECTION_NTH COLLECTION_REDUCE COLLECTION_SEQ UNBOUNDED_SEQUENCE
+    dispatchChunkCount dispatchChunkDropFirst dispatchChunkNth dispatchChunkedFirst dispatchChunkedNext
+    isReducedValue registerChunkedPrependHandler registerChunkedSliceHandler unreducedValue validateCollectionCount)
+  (import "./list.mjs" EMPTY_LIST)
+  (import "./protocol.mjs" implementsProtocol)
   (import "./transducer.mjs" deduping distincting dropping droppingWhile filtering interposing keeping keepingIndexed
     mapcatting mapping mappingIndexed partitioningAll partitioningBy removing sequence taking takingNth takingWhile)
-  (import "../managed/managed-literals.eli" literal-instance? literal-each
-    literal-private-symbol literal-private-weak-map)
+  (import "./truth.mjs" isTruthy)
+  (import "../managed/managed-literals.eli" literal-instance? literal-private-symbol literal-private-weak-map)
 
-  ;; The lazy-cons state map and the failure sentinel are created on first
-  ;; lazyCons call: importing the module without building a lazy cons keeps no
-  ;; resident WeakMap or symbol handle.
+  (defconst CHUNK_SIZE 32)
+  (defconst host-apply Reflect/apply)
+  (defconst no-arguments (Object/freeze (js-array)))
+  (defconst iterator-symbol (get globalThis/Symbol :iterator))
+
+  ;; WeakMaps and sentinel tokens are created lazily on first use so merely
+  ;; importing this module retains no extra resident handles.
   (defvar lazy-cons-states nil)
+  (defvar array-chunk-states nil)
+  (defvar chunk-buffer-states nil)
+  (defvar chunked-cons-states nil)
+  (defvar lazy-chunked-states nil)
   (defvar no-failure nil)
-  (defun ensure-lazy-cons-states ()
-    (or lazy-cons-states (setq lazy-cons-states (literal-private-weak-map))))
-  (defun ensure-no-failure ()
-    (or no-failure
-      (setq no-failure (literal-private-symbol "eliscript.lazy-cons.no-failure"))))
+  (defvar NO_INITIAL nil)
+  (defvar ARRAY_CHUNK_TOKEN nil)
+  (defvar ARRAY_CHUNK_MISSING nil)
+  (defvar CHUNK_BUFFER_TOKEN nil)
+  (defvar CHUNKED_CONS_TOKEN nil)
+  (defvar LAZY_CHUNKED_TOKEN nil)
+  (defvar UNKNOWN_COUNT nil)
+
+  (defun ensure-lazy-cons-states () (or lazy-cons-states (setq lazy-cons-states (literal-private-weak-map))))
+  (defun ensure-array-chunk-states () (or array-chunk-states (setq array-chunk-states (literal-private-weak-map))))
+  (defun ensure-chunk-buffer-states () (or chunk-buffer-states (setq chunk-buffer-states (literal-private-weak-map))))
+  (defun ensure-chunked-cons-states () (or chunked-cons-states (setq chunked-cons-states (literal-private-weak-map))))
+  (defun ensure-lazy-chunked-states () (or lazy-chunked-states (setq lazy-chunked-states (literal-private-weak-map))))
+  (defun ensure-no-failure () (or no-failure (setq no-failure (literal-private-symbol "eliscript.lazy-cons.no-failure"))))
+  (defun ensure-no-initial () (or NO_INITIAL (setq NO_INITIAL (literal-private-symbol "eliscript.lazy-chunk.no-initial"))))
+  (defun ensure-array-chunk-token () (or ARRAY_CHUNK_TOKEN (setq ARRAY_CHUNK_TOKEN (literal-private-symbol "eliscript.array-chunk.constructor"))))
+  (defun ensure-array-chunk-missing () (or ARRAY_CHUNK_MISSING (setq ARRAY_CHUNK_MISSING (literal-private-symbol "eliscript.array-chunk.missing"))))
+  (defun ensure-chunk-buffer-token () (or CHUNK_BUFFER_TOKEN (setq CHUNK_BUFFER_TOKEN (literal-private-symbol "eliscript.chunk-buffer.constructor"))))
+  (defun ensure-chunked-cons-token () (or CHUNKED_CONS_TOKEN (setq CHUNKED_CONS_TOKEN (literal-private-symbol "eliscript.chunked-cons.constructor"))))
+  (defun ensure-lazy-chunked-token () (or LAZY_CHUNKED_TOKEN (setq LAZY_CHUNKED_TOKEN (literal-private-symbol "eliscript.lazy-chunked.constructor"))))
+  (defun ensure-unknown-count () (or UNKNOWN_COUNT (setq UNKNOWN_COUNT (literal-private-symbol "eliscript.chunked.unknown-count"))))
+
   (defun fail (message) (throw (new globalThis/TypeError message)))
+  (defun range-fail (message) (throw (new globalThis/RangeError message)))
   (defun callable? (value) (= (js* "typeof value") "function"))
-  (defun truth (value) (js* "!!value"))
+  (defun truth (value) (funcall globalThis/Boolean value))
   (defun require-thunk (value label)
     (unless (callable? value) (fail (str label " must be a function"))) value)
   (defun require-arity (actual expected name)
     (unless (= actual expected)
       (fail (str name " requires exactly " expected (if (= expected 1) " argument" " arguments")))))
+  (defun require-nonnegative (value label)
+    (unless (and (Number/isSafeInteger value) (>= value 0))
+      (fail (str label " must be a non-negative safe integer"))) value)
+  (defun require-finite (value label)
+    (unless (Number/isFinite value)
+      (fail (str label " must be a finite number"))) value)
+
   (defun method (implementation name arity)
     (let ((function (funcall
       (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }")
       implementation name)))
-      (Object/defineProperty function "length" (js-object :value arity :configurable t)) function))
+      (Object/defineProperty function "length" (js-object :value arity :configurable t))
+      function))
+
+  (defun getter (implementation name)
+    (method implementation name 0))
+
+  (defun define-named-class (implementation name)
+    (funcall
+      (js* "(implementation, name) => { if (typeof name !== \"string\") throw new TypeError(\"class name must be a string\"); return ({ [name]: class { constructor(...args) { return implementation(this, ...args); } } })[name]; }")
+      implementation name))
+
+  (defun install-method (target key name arity implementation)
+    (Object/defineProperty target key
+      (js-object :value (method implementation name arity) :writable t :configurable t)))
+
+  (defun install-getter (target key name implementation)
+    (Object/defineProperty target key
+      (js-object :get (getter implementation (str "get " name)) :configurable t)))
+
   (defun sequence-iterator (value)
     (let ((source (seq value)))
       (if (nil? source)
-        (let ((empty (js-array))) (js-call (aref empty (get globalThis/Symbol :iterator)) :call empty))
-        (js-call (aref source (get globalThis/Symbol :iterator)) :call source))))
+        (js-call (aref (js-array) iterator-symbol) :call (js-array))
+        (js-call (aref source iterator-symbol) :call source))))
+
   (defun realize-tail (state)
-    (unless (eq (get state :failure) no-failure) (throw (get state :failure)))
+    (unless (eq (get state :failure) (ensure-no-failure)) (throw (get state :failure)))
     (unless (get state :started)
       (let ((thunk (get state :rest)))
         (put state :started t)
@@ -43,9 +102,9 @@
           (put state :rest (funcall thunk))
           (catch error (put state :failure error) (throw error)))))
     (get state :rest))
+
   (defun cons-iterator-next (it-state)
-    (let ((result undefined)
-          (returned false))
+    (let ((result undefined) (returned false))
       (while (and (not (aref it-state 3)) (not returned))
         (let ((state (aref it-state 0)))
           (if (and (not (nil? state)) (aref it-state 1))
@@ -55,7 +114,7 @@
             (progn
               (when (not (nil? state))
                 (let* ((tail (realize-tail state))
-                       (tail-state (js-call lazy-cons-states :get tail)))
+                       (tail-state (js-call (ensure-lazy-cons-states) :get tail)))
                   (if (not (undefined? tail-state))
                     (progn (put it-state 0 tail-state) (put it-state 1 t))
                     (progn (put it-state 0 nil) (put it-state 2 (sequence-iterator tail))))))
@@ -65,74 +124,770 @@
                     (setq result next returned t)
                     (put it-state 3 t))))))))
       (if returned result (js-object :value undefined :done t))))
+
   (defun cons-iterator-return (it-state value)
     (let ((tail-iterator (aref it-state 2)))
       (put it-state 3 t)
       (when (and (not (nil? tail-iterator)) (callable? (get tail-iterator :return)))
         (js-call tail-iterator :return))
       (js-object :value value :done t)))
+
   (defun cons-iterator (initial)
     (let* ((state (js-array initial t nil false))
            (iterator (js-object
              :next (method (lambda (_self) (cons-iterator-next state)) "next" 0)
              :return (method (lambda (_self value) (cons-iterator-return state value)) "return" 1))))
-      (put iterator (get globalThis/Symbol :iterator)
-        (method (lambda (self) self) "[Symbol.iterator]" 0))
+      (put iterator iterator-symbol (method (lambda (self) self) "[Symbol.iterator]" 0))
       iterator))
+
+  ;; 32-element chunked sequence infrastructure
+  (defconst ArrayChunk
+    (define-named-class
+      (lambda (self token array off end)
+        (unless (eq token (ensure-array-chunk-token))
+          (fail "ArrayChunk values must be created with arrayChunk"))
+        (js-call (ensure-array-chunk-states) :set self
+          (Object/freeze (js-object :array array :off off :end end :count (- end off))))
+        (Object/freeze self))
+      "ArrayChunk"))
+
+  (defun chunk-state (chunk)
+    (if (nil? array-chunk-states) undefined (js-call array-chunk-states :get chunk)))
+
+  (defun arrayChunk (array &optional off end)
+    (unless (Array/isArray array)
+      (fail "arrayChunk expects a JavaScript Array"))
+    (let* ((total (js-length array))
+           (start (if (nullish? off) 0 (validateCollectionCount off)))
+           (finish (if (nullish? end) total (validateCollectionCount end))))
+      (when (or (> start finish) (> finish total))
+        (range-fail "arrayChunk bounds are outside array length"))
+      (let ((frozen-items (Object/freeze (js-call array :slice))))
+        (new ArrayChunk (ensure-array-chunk-token) frozen-items start finish))))
+
+  (defun array-chunk-owned (frozen-array off end)
+    (new ArrayChunk (ensure-array-chunk-token) frozen-array off end))
+
+  (let ((cproto (get ArrayChunk :prototype)))
+    (install-getter cproto "count" "count"
+      (lambda (self) (get (chunk-state self) :count)))
+    (install-getter cproto "size" "size"
+      (lambda (self) (get (chunk-state self) :count)))
+    (install-method cproto "chunkCount" "chunkCount" 0
+      (lambda (self) (get (chunk-state self) :count)))
+    (install-method cproto "chunkNth" "chunkNth" 1
+      (lambda (self index &rest args)
+        (let* ((state (chunk-state self))
+               (count (get state :count))
+               (missing (ensure-array-chunk-missing))
+               (not-found (if (= (js-length args) 0) missing (aref args 0))))
+          (if (and (Number/isInteger index) (>= index 0) (< index count))
+            (aref (get state :array) (+ (get state :off) index))
+            (if (not (eq not-found missing))
+              not-found
+              (range-fail (str "chunk index " (funcall globalThis/String index) " is outside [0, " count ")")))))))
+    (install-method cproto "dropFirst" "dropFirst" 0
+      (lambda (self)
+        (let ((state (chunk-state self)))
+          (when (= (get state :count) 0)
+            (range-fail "cannot dropFirst on empty chunk"))
+          (array-chunk-owned (get state :array) (+ (get state :off) 1) (get state :end)))))
+    (install-method cproto CHUNK_COUNT "[eliscript.chunk.count]" 0
+      (lambda (self) (get (chunk-state self) :count)))
+    (install-method cproto CHUNK_NTH "[eliscript.chunk.nth]" 1
+      (lambda (self index &rest args)
+        (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
+    (install-method cproto CHUNK_DROP_FIRST "[eliscript.chunk.dropFirst]" 0
+      (lambda (self) (js-call self :dropFirst)))
+    (install-method cproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self) (get (chunk-state self) :count)))
+    (install-method cproto COLLECTION_NTH "[eliscript.collection.nth]" 1
+      (lambda (self index &rest args)
+        (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
+    (install-method cproto iterator-symbol "[Symbol.iterator]" 0
+      (lambda (self)
+        (let* ((state (chunk-state self))
+               (array (get state :array))
+               (end (get state :end))
+               (cursor (get state :off)))
+          (let ((iter (js-object :next (method
+                        (lambda (_self)
+                          (if (< cursor end)
+                            (let ((value (aref array cursor)))
+                              (setq cursor (1+ cursor))
+                              (js-object :value value :done false))
+                            (js-object :value undefined :done t)))
+                        "next" 0))))
+            (put iter iterator-symbol (method (lambda (s) s) "[Symbol.iterator]" 0))
+            iter))))
+    (install-getter cproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptArrayChunk")))
+
+  (defconst ChunkBuffer
+    (define-named-class
+      (lambda (self token capacity)
+        (unless (eq token (ensure-chunk-buffer-token))
+          (fail "ChunkBuffer values must be created with chunkBuffer"))
+        (js-call (ensure-chunk-buffer-states) :set self
+          (js-object :items (js-array) :capacity capacity :consumed false))
+        (Object/freeze self))
+      "ChunkBuffer"))
+
+  (defun chunk-buffer-state (buffer)
+    (let ((state (if (nil? chunk-buffer-states) undefined (js-call chunk-buffer-states :get buffer))))
+      (when (undefined? state)
+        (fail "expected an Eliscript ChunkBuffer"))
+      state))
+
+  (defun active-buffer-state (buffer)
+    (let ((state (chunk-buffer-state buffer)))
+      (when (get state :consumed)
+        (fail "ChunkBuffer has already been converted to an immutable chunk"))
+      state))
+
+  (defun chunkBuffer (&optional capacity)
+    (let ((limit (if (nullish? capacity) CHUNK_SIZE (require-nonnegative capacity "chunkBuffer capacity"))))
+      (new ChunkBuffer (ensure-chunk-buffer-token) limit)))
+
+  (defun chunkAppend (buffer value)
+    (let ((state (active-buffer-state buffer)))
+      (when (>= (js-length (get state :items)) (get state :capacity))
+        (range-fail "ChunkBuffer capacity exceeded"))
+      (js-call (get state :items) :push value)
+      buffer))
+
+  (defun chunkFromBuffer (buffer)
+    (let* ((state (active-buffer-state buffer))
+           (items (get state :items))
+           (len (js-length items)))
+      (put state "consumed" t)
+      (put state "items" nil)
+      (Object/freeze items)
+      (array-chunk-owned items 0 len)))
+
+  (let ((bproto (get ChunkBuffer :prototype)))
+    (install-getter bproto "count" "count"
+      (lambda (self)
+        (let ((state (chunk-buffer-state self)))
+          (if (get state :consumed) 0 (js-length (get state :items))))))
+    (install-getter bproto "size" "size"
+      (lambda (self) (get self :count)))
+    (install-method bproto "add" "add" 1
+      (lambda (self value) (chunkAppend self value)))
+    (install-method bproto "chunk" "chunk" 0
+      (lambda (self) (chunkFromBuffer self)))
+    (install-getter bproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptChunkBuffer")))
+
+  (defun chunk-count-of (chunk)
+    (let ((direct (aref chunk CHUNK_COUNT)))
+      (if (callable? direct) (funcall host-apply direct chunk no-arguments) (dispatchChunkCount chunk))))
+
+  (defun chunk-nth-of (chunk index)
+    (let ((direct (aref chunk CHUNK_NTH)))
+      (if (callable? direct) (funcall host-apply direct chunk (js-array index)) (dispatchChunkNth chunk index))))
+
+  (defun chunk-drop-first-of (chunk)
+    (let ((direct (aref chunk CHUNK_DROP_FIRST)))
+      (if (callable? direct) (funcall host-apply direct chunk no-arguments) (dispatchChunkDropFirst chunk))))
+
+  (defun resolve-lazy-chunk (lazy-seq)
+    (let ((state (js-call (ensure-lazy-chunked-states) :get lazy-seq)))
+      (unless (eq (get state :failure) (ensure-no-failure))
+        (throw (get state :failure)))
+      (unless (get state :started)
+        (put state "started" t)
+        (try
+          (let ((resolved (funcall (get state :thunk))))
+            (put state "thunk" nil)
+            (while (literal-instance? resolved LazyChunkedSeq)
+              (setq resolved (resolve-lazy-chunk resolved)))
+            (put state "value" resolved))
+          (catch error
+            (put state "thunk" nil)
+            (put state "failure" error)
+            (throw error))))
+      (get state :value)))
+
+  (defun resolve-more-seq (state)
+    (unless (eq (get state :failure) (ensure-no-failure))
+      (throw (get state :failure)))
+    (unless (get state :moreRealized)
+      (put state "moreRealized" t)
+      (try
+        (let ((raw (get state :more)))
+          (put state "more" nil)
+          (let ((next-val (if (callable? raw) (funcall raw) raw)))
+            (while (literal-instance? next-val LazyChunkedSeq)
+              (setq next-val (resolve-lazy-chunk next-val)))
+            (put state "cachedMore" (if (nil? next-val) nil next-val))))
+        (catch error
+          (put state "more" nil)
+          (put state "failure" error)
+          (throw error))))
+    (get state :cachedMore))
+
+  (defun normalize-chunk-head (chunked-seq)
+    (if (literal-instance? chunked-seq LazyChunkedSeq)
+      (resolve-lazy-chunk chunked-seq)
+      chunked-seq))
+
+  (defun chunked-first-of (chunked-seq)
+    (let ((curr (normalize-chunk-head chunked-seq)))
+      (if (nil? curr) nil
+        (let ((direct (aref curr CHUNKED_FIRST)))
+          (if (callable? direct) (funcall host-apply direct curr no-arguments) (dispatchChunkedFirst curr))))))
+
+  (defun chunked-next-of (chunked-seq)
+    (let ((curr (normalize-chunk-head chunked-seq)))
+      (if (nil? curr) nil
+        (let ((direct (aref curr CHUNKED_NEXT)))
+          (if (callable? direct) (funcall host-apply direct curr no-arguments) (dispatchChunkedNext curr))))))
+
+  (defun chunked-seq-iterator (initial-seq)
+    (let* ((current initial-seq)
+           (current-array nil)
+           (cursor 0)
+           (limit 0)
+           (current-chunk nil)
+           (tail-iterator nil)
+           (closed false)
+           (close-fn (lambda ()
+                       (setq closed t current nil current-array nil current-chunk nil)
+                       (when (and (not (nil? tail-iterator)) (callable? (get tail-iterator :return)))
+                         (js-call tail-iterator :return))
+                       (setq tail-iterator nil)))
+           (iter (js-object
+                   :next (lambda ()
+                           (if closed
+                             (js-object :value undefined :done t)
+                             (progn
+                               (while (and (>= cursor limit) (nil? tail-iterator) (not (nil? current)))
+                                 (let ((resolved (normalize-chunk-head current)))
+                                   (if (nil? resolved)
+                                     (setq current nil)
+                                     (if (isChunkedSeq resolved)
+                                       (let ((chunk (chunked-first-of resolved)))
+                                         (if (or (nil? chunk) (= (chunk-count-of chunk) 0))
+                                           (setq current (chunked-next-of resolved))
+                                           (let ((cstate (chunk-state chunk)))
+                                             (if (not (undefined? cstate))
+                                               (setq current-array (get cstate :array)
+                                                     cursor (get cstate :off)
+                                                     limit (get cstate :end)
+                                                     current-chunk nil
+                                                     current (chunked-next-of resolved))
+                                               (setq current-array nil
+                                                     cursor 0
+                                                     limit (chunk-count-of chunk)
+                                                     current-chunk chunk
+                                                     current (chunked-next-of resolved))))))
+                                       (setq tail-iterator (sequence-iterator resolved) current nil)))))
+                               (cond
+                                 ((< cursor limit)
+                                  (let ((val (if (not (nil? current-array))
+                                               (aref current-array cursor)
+                                               (chunk-nth-of current-chunk cursor))))
+                                    (setq cursor (1+ cursor))
+                                    (js-object :value val :done false)))
+                                 ((not (nil? tail-iterator))
+                                  (let ((step (js-call tail-iterator :next)))
+                                    (when (truth (get step :done))
+                                      (setq closed t tail-iterator nil))
+                                    step))
+                                 (t (setq closed t) (js-object :value undefined :done t))))))
+                   :return (lambda (&rest optional)
+                             (let ((value (if (= (js-length optional) 0) undefined (get optional 0))))
+                               (funcall close-fn)
+                               (js-object :value value :done t)))
+                   :throw (lambda (&rest optional)
+                            (let ((error (if (= (js-length optional) 0) undefined (get optional 0))))
+                              (funcall close-fn)
+                              (throw error))))))
+      (Object/defineProperty iter iterator-symbol
+        (js-object :value (lambda () iter) :writable t :configurable t))
+      iter))
+
+  (defun chunked-seq-count (start-seq)
+    (let ((total 0) (curr (normalize-chunk-head start-seq)))
+      (while (not (nil? curr))
+        (if (isChunkedSeq curr)
+          (let ((chunk (chunked-first-of curr)))
+            (when (not (nil? chunk)) (setq total (+ total (chunk-count-of chunk))))
+            (setq curr (chunked-next-of curr)))
+          (let ((iter (sequence-iterator curr)) (done false))
+            (while (not done)
+              (let ((step (js-call iter :next)))
+                (if (truth (get step :done)) (setq done t) (setq total (1+ total)))))
+            (setq curr nil))))
+      total))
+
+  (defun reduce-chunked-seq (start-seq reducer initial-args)
+    (unless (callable? reducer) (fail "collection reducer must be a function"))
+    (let* ((no-init (ensure-no-initial))
+           (acc (if (= (js-length initial-args) 0) no-init (aref initial-args 0)))
+           (curr (normalize-chunk-head start-seq))
+           (early false))
+      (while (and (not (nil? curr)) (not early))
+        (if (isChunkedSeq curr)
+          (let ((chunk (chunked-first-of curr)))
+            (when (not (nil? chunk))
+              (let ((cstate (chunk-state chunk)))
+                (if (not (undefined? cstate))
+                  (let* ((arr (get cstate :array)) (idx (get cstate :off)) (end (get cstate :end)))
+                    (when (and (< idx end) (eq acc no-init)) (setq acc (aref arr idx) idx (1+ idx)))
+                    (while (and (< idx end) (not early))
+                      (setq acc (funcall reducer acc (aref arr idx)))
+                      (if (isReducedValue acc) (setq acc (unreducedValue acc) early t) (setq idx (1+ idx)))))
+                  (let ((cnt (chunk-count-of chunk)) (idx 0))
+                    (when (and (< idx cnt) (eq acc no-init)) (setq acc (chunk-nth-of chunk 0) idx 1))
+                    (while (and (< idx cnt) (not early))
+                      (setq acc (funcall reducer acc (chunk-nth-of chunk idx)))
+                      (if (isReducedValue acc) (setq acc (unreducedValue acc) early t) (setq idx (1+ idx))))))))
+            (unless early (setq curr (chunked-next-of curr))))
+          (let ((iter (sequence-iterator curr)) (done false))
+            (while (and (not done) (not early))
+              (let ((step (js-call iter :next)))
+                (if (truth (get step :done)) (setq done t)
+                  (if (eq acc no-init) (setq acc (get step :value))
+                    (progn
+                      (setq acc (funcall reducer acc (get step :value)))
+                      (when (isReducedValue acc) (setq acc (unreducedValue acc) early t)))))))
+            (setq curr nil))))
+      (when (eq acc no-init) (fail "cannot reduce an empty collection without an initial value"))
+      acc))
+
+  (defconst ChunkedCons
+    (define-named-class
+      (lambda (self token chunk more count-hint)
+        (unless (eq token (ensure-chunked-cons-token))
+          (fail "ChunkedCons values must be created with chunkedCons"))
+        (js-call (ensure-chunked-cons-states) :set self
+          (js-object :chunk chunk :more more :countHint count-hint
+            :moreRealized false :cachedMore nil :failure (ensure-no-failure)))
+        (Object/freeze self))
+      "ChunkedCons"))
+
+  (defun make-chunked-cons (chunk more &optional count-hint)
+    (let ((resolved-hint (if (nullish? count-hint) (ensure-unknown-count) count-hint)))
+      (new ChunkedCons (ensure-chunked-cons-token) chunk more resolved-hint)))
+
+  (defun chunkedCons (chunk more)
+    (unless (or (literal-instance? chunk ArrayChunk) (implementsProtocol IChunk chunk))
+      (fail "chunkedCons expects an IChunk as its first argument"))
+    (if (= (chunk-count-of chunk) 0)
+      (if (callable? more) (funcall more) (if (nil? more) nil (seq more)))
+      (make-chunked-cons chunk more (ensure-unknown-count))))
+
+  (let ((ccproto (get ChunkedCons :prototype)))
+    (install-method ccproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
+      (lambda (self) (get (js-call (ensure-chunked-cons-states) :get self) :chunk)))
+    (install-method ccproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
+      (lambda (self)
+        (let ((next-val (resolve-more-seq (js-call (ensure-chunked-cons-states) :get self))))
+          (if (nil? next-val) nil
+            (if (or (literal-instance? next-val ChunkedCons) (literal-instance? next-val LazyChunkedSeq))
+              next-val (seq next-val))))))
+    (install-method ccproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
+      (lambda (self)
+        (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
+          (if (nil? next-val) EMPTY_LIST next-val))))
+    (install-method ccproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self) self))
+    (install-method ccproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self)
+        (let* ((state (js-call (ensure-chunked-cons-states) :get self))
+               (hint (get state :countHint)))
+          (cond
+            ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
+            ((not (eq hint (ensure-unknown-count))) hint)
+            (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
+    (install-method ccproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
+    (install-method ccproto iterator-symbol "[Symbol.iterator]" 0
+      (lambda (self) (chunked-seq-iterator self)))
+    (install-getter ccproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptChunkedCons")))
+
+  (defconst LazyChunkedSeq
+    (define-named-class
+      (lambda (self token thunk count-hint)
+        (unless (eq token (ensure-lazy-chunked-token))
+          (fail "LazyChunkedSeq values must be created with lazyChunkedSeq"))
+        (js-call (ensure-lazy-chunked-states) :set self
+          (js-object :thunk thunk :countHint count-hint :started false :value nil :failure (ensure-no-failure)))
+        (Object/freeze self))
+      "LazyChunkedSeq"))
+
+  (defun make-lazy-chunked (thunk &optional count-hint)
+    (new LazyChunkedSeq (ensure-lazy-chunked-token) thunk
+      (if (nullish? count-hint) (ensure-unknown-count) count-hint)))
+
+  (let ((lcproto (get LazyChunkedSeq :prototype)))
+    (install-method lcproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
+      (lambda (self)
+        (let ((resolved (resolve-lazy-chunk self)))
+          (if (nil? resolved) nil (chunked-first-of resolved)))))
+    (install-method lcproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
+      (lambda (self)
+        (let ((resolved (resolve-lazy-chunk self)))
+          (if (nil? resolved) nil (chunked-next-of resolved)))))
+    (install-method lcproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
+      (lambda (self)
+        (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
+          (if (nil? next-val) EMPTY_LIST next-val))))
+    (install-method lcproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+      (lambda (self)
+        (let ((state (js-call (ensure-lazy-chunked-states) :get self)))
+          (if (eq (get state :countHint) UNBOUNDED_SEQUENCE) self
+            (let ((resolved (resolve-lazy-chunk self))) (if (nil? resolved) nil self))))))
+    (install-method lcproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+      (lambda (self)
+        (let* ((state (js-call (ensure-lazy-chunked-states) :get self))
+               (hint (get state :countHint)))
+          (cond
+            ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
+            ((not (eq hint (ensure-unknown-count))) hint)
+            (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
+    (install-method lcproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+      (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
+    (install-method lcproto iterator-symbol "[Symbol.iterator]" 0
+      (lambda (self) (chunked-seq-iterator self)))
+    (install-getter lcproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+      (lambda (_self) "EliscriptLazyChunkedSeq")))
+
+  (defun build-range-cons (start step total offset)
+    (if (and (not (eq total UNBOUNDED_SEQUENCE)) (>= offset total))
+      nil
+      (let* ((remaining (if (eq total UNBOUNDED_SEQUENCE) CHUNK_SIZE (Math/min CHUNK_SIZE (- total offset))))
+             (items (new globalThis/Array remaining))
+             (i 0))
+        (while (< i remaining)
+          (put items i (+ start (* (+ offset i) step)))
+          (setq i (1+ i)))
+        (Object/freeze items)
+        (let ((next-offset (+ offset remaining))
+              (hint (if (eq total UNBOUNDED_SEQUENCE) UNBOUNDED_SEQUENCE (- total offset))))
+          (make-chunked-cons (array-chunk-owned items 0 remaining)
+            (if (or (eq total UNBOUNDED_SEQUENCE) (< next-offset total))
+              (lambda () (build-range-cons start step total next-offset))
+              nil)
+            hint)))))
+
+  (defun chunkedRange (&rest bounds)
+    (when (> (js-length bounds) 3) (fail "range expects zero to three arguments"))
+    (if (= (js-length bounds) 0)
+      (make-lazy-chunked (lambda () (build-range-cons 0 1 UNBOUNDED_SEQUENCE 0)) UNBOUNDED_SEQUENCE)
+      (let* ((start (require-finite (if (= (js-length bounds) 1) 0 (aref bounds 0)) "range start"))
+             (end (require-finite (if (= (js-length bounds) 1) (aref bounds 0) (aref bounds 1)) "range end"))
+             (step (require-finite (if (= (js-length bounds) 3) (aref bounds 2) 1) "range step")))
+        (when (= step 0) (fail "range step must be non-zero"))
+        (let* ((distance (/ (- end start) step))
+               (length (if (> distance 0) (require-nonnegative (Math/ceil distance) "range count") 0)))
+          (if (= length 0) nil
+            (make-lazy-chunked (lambda () (build-range-cons start step length 0)) length))))))
+
+  (defun build-repeat-cons (value remaining)
+    (if (and (not (eq remaining UNBOUNDED_SEQUENCE)) (<= remaining 0))
+      nil
+      (let* ((batch (if (eq remaining UNBOUNDED_SEQUENCE) CHUNK_SIZE (Math/min CHUNK_SIZE remaining)))
+             (items (new globalThis/Array batch))
+             (i 0))
+        (while (< i batch) (put items i value) (setq i (1+ i)))
+        (Object/freeze items)
+        (let ((next-rem (if (eq remaining UNBOUNDED_SEQUENCE) UNBOUNDED_SEQUENCE (- remaining batch))))
+          (make-chunked-cons (array-chunk-owned items 0 batch)
+            (if (or (eq next-rem UNBOUNDED_SEQUENCE) (> next-rem 0))
+              (lambda () (build-repeat-cons value next-rem))
+              nil)
+            remaining)))))
+
+  (defun chunkedRepeat (&rest arguments)
+    (cond
+      ((= (js-length arguments) 1)
+       (let ((value (aref arguments 0)))
+         (make-lazy-chunked (lambda () (build-repeat-cons value UNBOUNDED_SEQUENCE)) UNBOUNDED_SEQUENCE)))
+      ((= (js-length arguments) 2)
+       (let ((length (require-nonnegative (aref arguments 0) "repeat count"))
+             (value (aref arguments 1)))
+         (if (= length 0) nil (make-lazy-chunked (lambda () (build-repeat-cons value length)) length))))
+      (t (fail "repeat expects a value or a count and value"))))
+
+  (defun chunked-map-seq (transform source)
+    (let ((unbounded (and (literal-instance? source LazyChunkedSeq)
+                          (eq (get (js-call (ensure-lazy-chunked-states) :get source) :countHint) UNBOUNDED_SEQUENCE))))
+      (make-lazy-chunked
+        (lambda ()
+          (let ((resolved (normalize-chunk-head source)))
+            (if (nil? resolved) nil
+              (if (isChunkedSeq resolved)
+                (let* ((chunk (chunked-first-of resolved))
+                       (cnt (chunk-count-of chunk))
+                       (buf (chunkBuffer cnt))
+                       (cstate (chunk-state chunk)))
+                  (if (not (undefined? cstate))
+                    (let ((arr (get cstate :array)) (i (get cstate :off)) (end (get cstate :end)))
+                      (while (< i end) (chunkAppend buf (funcall transform (aref arr i))) (setq i (1+ i))))
+                    (let ((i 0))
+                      (while (< i cnt) (chunkAppend buf (funcall transform (chunk-nth-of chunk i))) (setq i (1+ i)))))
+                  (let ((rest-seq (chunked-next-of resolved)))
+                    (make-chunked-cons (chunkFromBuffer buf)
+                      (if (nil? rest-seq) nil (lambda () (chunked-map-seq transform rest-seq)))
+                      (if unbounded UNBOUNDED_SEQUENCE (ensure-unknown-count)))))
+                (sequence (mapping transform) resolved)))))
+        (if unbounded UNBOUNDED_SEQUENCE (ensure-unknown-count)))))
+
+  (defun chunked-filter-seq (predicate source)
+    (make-lazy-chunked
+      (lambda ()
+        (let ((curr (normalize-chunk-head source)) (result nil) (done false))
+          (while (and (not (nil? curr)) (not done))
+            (if (isChunkedSeq curr)
+              (let* ((chunk (chunked-first-of curr))
+                     (cnt (chunk-count-of chunk))
+                     (buf (chunkBuffer cnt))
+                     (cstate (chunk-state chunk)))
+                (if (not (undefined? cstate))
+                  (let ((arr (get cstate :array)) (i (get cstate :off)) (end (get cstate :end)))
+                    (while (< i end)
+                      (let ((item (aref arr i)))
+                        (when (truth (isTruthy (funcall predicate item))) (chunkAppend buf item)))
+                      (setq i (1+ i))))
+                  (let ((i 0))
+                    (while (< i cnt)
+                      (let ((item (chunk-nth-of chunk i)))
+                        (when (truth (isTruthy (funcall predicate item))) (chunkAppend buf item)))
+                      (setq i (1+ i)))))
+                (let ((next-curr (chunked-next-of curr)))
+                  (if (> (get buf :count) 0)
+                    (setq result (make-chunked-cons (chunkFromBuffer buf)
+                                   (if (nil? next-curr) nil (lambda () (chunked-filter-seq predicate next-curr))))
+                          done t)
+                    (setq curr next-curr))))
+              (setq result (sequence (filtering predicate) curr) done t)))
+          result))))
+
+  (defun chunked-keep-seq (transform source)
+    (make-lazy-chunked
+      (lambda ()
+        (let ((curr (normalize-chunk-head source)) (result nil) (done false))
+          (while (and (not (nil? curr)) (not done))
+            (if (isChunkedSeq curr)
+              (let* ((chunk (chunked-first-of curr))
+                     (cnt (chunk-count-of chunk))
+                     (buf (chunkBuffer cnt))
+                     (cstate (chunk-state chunk)))
+                (if (not (undefined? cstate))
+                  (let ((arr (get cstate :array)) (i (get cstate :off)) (end (get cstate :end)))
+                    (while (< i end)
+                      (let ((kept (funcall transform (aref arr i))))
+                        (unless (nil? kept) (chunkAppend buf kept)))
+                      (setq i (1+ i))))
+                  (let ((i 0))
+                    (while (< i cnt)
+                      (let ((kept (funcall transform (chunk-nth-of chunk i))))
+                        (unless (nil? kept) (chunkAppend buf kept)))
+                      (setq i (1+ i)))))
+                (let ((next-curr (chunked-next-of curr)))
+                  (if (> (get buf :count) 0)
+                    (setq result (make-chunked-cons (chunkFromBuffer buf)
+                                   (if (nil? next-curr) nil (lambda () (chunked-keep-seq transform next-curr))))
+                          done t)
+                    (setq curr next-curr))))
+              (setq result (sequence (keeping transform) curr) done t)))
+          result))))
+
+  (defun chunked-take-seq (limit source)
+    (if (= limit 0)
+      (make-lazy-chunked (lambda () nil) 0)
+      (make-lazy-chunked
+        (lambda ()
+          (let ((resolved (normalize-chunk-head source)))
+            (if (nil? resolved) nil
+              (if (isChunkedSeq resolved)
+                (let* ((chunk (chunked-first-of resolved))
+                       (cnt (chunk-count-of chunk))
+                       (take-cnt (Math/min limit cnt))
+                       (buf (chunkBuffer take-cnt))
+                       (cstate (chunk-state chunk)))
+                  (if (not (undefined? cstate))
+                    (let ((arr (get cstate :array)) (off (get cstate :off)) (i 0))
+                      (while (< i take-cnt) (chunkAppend buf (aref arr (+ off i))) (setq i (1+ i))))
+                    (let ((i 0))
+                      (while (< i take-cnt) (chunkAppend buf (chunk-nth-of chunk i)) (setq i (1+ i)))))
+                  (let ((rem (- limit take-cnt)) (next-src (chunked-next-of resolved)))
+                    (make-chunked-cons (chunkFromBuffer buf)
+                      (if (or (= rem 0) (nil? next-src)) nil (lambda () (chunked-take-seq rem next-src))))))
+                (sequence (taking limit) resolved))))))))
+
+  (defun chunked-drop-seq (limit source)
+    (if (= limit 0) source
+      (let ((unbounded (and (literal-instance? source LazyChunkedSeq)
+                            (eq (get (js-call (ensure-lazy-chunked-states) :get source) :countHint) UNBOUNDED_SEQUENCE))))
+        (make-lazy-chunked
+          (lambda ()
+            (let ((rem limit) (curr (normalize-chunk-head source)) (result nil) (done false))
+              (while (and (> rem 0) (not (nil? curr)) (not done))
+                (if (isChunkedSeq curr)
+                  (let* ((chunk (chunked-first-of curr)) (cnt (chunk-count-of chunk)))
+                    (if (<= cnt rem)
+                      (setq rem (- rem cnt) curr (chunked-next-of curr))
+                      (let ((trimmed chunk))
+                        (while (> rem 0) (setq trimmed (chunk-drop-first-of trimmed) rem (1- rem)))
+                        (setq result (make-chunked-cons trimmed (chunked-next-of curr)
+                                       (if unbounded UNBOUNDED_SEQUENCE (ensure-unknown-count)))
+                              done t))))
+                  (setq result (sequence (dropping rem) curr) done t)))
+              (if done result curr)))
+          (if unbounded UNBOUNDED_SEQUENCE (ensure-unknown-count))))))
+
+  (registerChunkedSliceHandler (lambda (source offset) (chunked-drop-seq offset source)))
+  (registerChunkedPrependHandler
+    (lambda (value source)
+      (let* ((items (Object/freeze (js-array value)))
+             (single (array-chunk-owned items 0 1))
+             (unbounded (and (literal-instance? source LazyChunkedSeq)
+                             (eq (get (js-call (ensure-lazy-chunked-states) :get source) :countHint) UNBOUNDED_SEQUENCE))))
+        (make-chunked-cons single source (if unbounded UNBOUNDED_SEQUENCE (ensure-unknown-count))))))
+
+  ;; Existing non-chunked lazy sequence & lazyCons path
   (defun lazySequence (&rest arguments)
     (unless (= (js-length arguments) 1) (fail "lazySequence requires exactly one thunk"))
     (let ((thunk (get arguments 0)))
       (require-thunk thunk "lazySequence thunk")
       (memoizedSequenceView (lambda () (sequence-iterator (funcall thunk))))))
+
   (defun lazyCons (&rest arguments)
     (unless (= (js-length arguments) 2) (fail "lazyCons requires a value and tail thunk"))
     (let ((value (get arguments 0)) (tail-thunk (get arguments 1)))
       (require-thunk tail-thunk "lazyCons tail thunk")
-      (ensure-lazy-cons-states) (ensure-no-failure)
+      (ensure-lazy-cons-states)
+      (ensure-no-failure)
       (let* ((state (js-object :value value :rest tail-thunk :started false :failure no-failure))
              (result (memoizedSequenceView (lambda () (cons-iterator state)))))
-        (js-call lazy-cons-states :set result state) result)))
+        (js-call lazy-cons-states :set result state)
+        result)))
+
   (defun lazyMap (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyMap") (sequence (mapping (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyMap")
+    (let ((transform (get arguments 0)) (collection (get arguments 1)))
+      (if (isChunkedSeq collection)
+        (progn (unless (callable? transform) (mapping transform)) (chunked-map-seq transform collection))
+        (sequence (mapping transform) collection))))
+
   (defun lazyMapIndexed (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyMapIndexed") (sequence (mappingIndexed (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyMapIndexed")
+    (sequence (mappingIndexed (get arguments 0)) (get arguments 1)))
+
   (defun lazyKeep (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyKeep") (sequence (keeping (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyKeep")
+    (let ((transform (get arguments 0)) (collection (get arguments 1)))
+      (if (isChunkedSeq collection)
+        (progn (unless (callable? transform) (keeping transform)) (chunked-keep-seq transform collection))
+        (sequence (keeping transform) collection))))
+
   (defun lazyKeepIndexed (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyKeepIndexed") (sequence (keepingIndexed (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyKeepIndexed")
+    (sequence (keepingIndexed (get arguments 0)) (get arguments 1)))
+
   (defun lazyFilter (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyFilter") (sequence (filtering (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyFilter")
+    (let ((predicate (get arguments 0)) (collection (get arguments 1)))
+      (if (isChunkedSeq collection)
+        (progn (unless (callable? predicate) (filtering predicate)) (chunked-filter-seq predicate collection))
+        (sequence (filtering predicate) collection))))
+
   (defun lazyRemove (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyRemove") (sequence (removing (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyRemove")
+    (sequence (removing (get arguments 0)) (get arguments 1)))
+
   (defun lazyTake (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyTake") (sequence (taking (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyTake")
+    (let ((limit (get arguments 0)) (collection (get arguments 1)))
+      (if (isChunkedSeq collection)
+        (progn (unless (and (Number/isSafeInteger limit) (>= limit 0)) (taking limit)) (chunked-take-seq limit collection))
+        (sequence (taking limit) collection))))
+
   (defun lazyDrop (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyDrop") (sequence (dropping (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyDrop")
+    (let ((limit (get arguments 0)) (collection (get arguments 1)))
+      (if (isChunkedSeq collection)
+        (progn (unless (and (Number/isSafeInteger limit) (>= limit 0)) (dropping limit)) (chunked-drop-seq limit collection))
+        (sequence (dropping limit) collection))))
+
   (defun lazyTakeWhile (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyTakeWhile") (sequence (takingWhile (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyTakeWhile")
+    (sequence (takingWhile (get arguments 0)) (get arguments 1)))
+
   (defun lazyDropWhile (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyDropWhile") (sequence (droppingWhile (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyDropWhile")
+    (sequence (droppingWhile (get arguments 0)) (get arguments 1)))
+
   (defun lazyTakeNth (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyTakeNth") (sequence (takingNth (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyTakeNth")
+    (sequence (takingNth (get arguments 0)) (get arguments 1)))
+
   (defun lazyInterpose (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyInterpose") (sequence (interposing (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyInterpose")
+    (sequence (interposing (get arguments 0)) (get arguments 1)))
+
   (defun lazyDedupe (&rest arguments)
-    (require-arity (js-length arguments) 1 "lazyDedupe") (sequence (deduping) (get arguments 0)))
+    (require-arity (js-length arguments) 1 "lazyDedupe")
+    (sequence (deduping) (get arguments 0)))
+
   (defun lazyDistinct (&rest arguments)
-    (require-arity (js-length arguments) 1 "lazyDistinct") (sequence (distincting) (get arguments 0)))
+    (require-arity (js-length arguments) 1 "lazyDistinct")
+    (sequence (distincting) (get arguments 0)))
+
   (defun lazyMapcat (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyMapcat") (sequence (mapcatting (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyMapcat")
+    (sequence (mapcatting (get arguments 0)) (get arguments 1)))
+
   (defun lazyPartitionAll (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyPartitionAll") (sequence (partitioningAll (get arguments 0)) (get arguments 1)))
+    (require-arity (js-length arguments) 2 "lazyPartitionAll")
+    (sequence (partitioningAll (get arguments 0)) (get arguments 1)))
+
   (defun lazyPartitionBy (&rest arguments)
-    (require-arity (js-length arguments) 2 "lazyPartitionBy") (sequence (partitioningBy (get arguments 0)) (get arguments 1)))
-  (defun isLazySequence (value) (literal-instance? value MemoizedSequenceView))
+    (require-arity (js-length arguments) 2 "lazyPartitionBy")
+    (sequence (partitioningBy (get arguments 0)) (get arguments 1)))
+
+  (defun isLazySequence (value)
+    (or (literal-instance? value MemoizedSequenceView)
+        (literal-instance? value LazyChunkedSeq)
+        (literal-instance? value ChunkedCons)))
+
   (defun status (value)
-    (unless (isLazySequence value) (fail "operation requires a lazy sequence")) (memoizedSequenceStatus value))
+    (cond
+      ((literal-instance? value MemoizedSequenceView) (memoizedSequenceStatus value))
+      ((literal-instance? value LazyChunkedSeq)
+       (let ((state (js-call (ensure-lazy-chunked-states) :get value)))
+         (Object/freeze (js-object
+           :started (get state :started)
+           :complete (and (get state :started) (nil? (get state :value)))
+           :failed (not (eq (get state :failure) (ensure-no-failure)))
+           :realizedCount (if (and (get state :started) (not (nil? (get state :value))))
+                            (let ((chunk (chunked-first-of (get state :value))))
+                              (if (nil? chunk) 0 (chunk-count-of chunk)))
+                            0)))))
+      ((literal-instance? value ChunkedCons)
+       (let ((state (js-call (ensure-chunked-cons-states) :get value)))
+         (Object/freeze (js-object
+           :started t
+           :complete (and (get state :moreRealized) (nil? (get state :cachedMore)))
+           :failed (not (eq (get state :failure) (ensure-no-failure)))
+           :realizedCount (chunk-count-of (get state :chunk))))))
+      (t (fail "operation requires a lazy sequence"))))
+
   (defun isLazySequenceRealized (value) (get (status value) :started))
   (defun realizedLazySequenceCount (value) (get (status value) :realizedCount))
   (defun realizeLazySequence (value)
-    (status value) (literal-each value (lambda (element) undefined)) value)
+    (status value)
+    (let ((iterator (js-call (aref value iterator-symbol) :call value)) (done false))
+      (while (not done)
+        (let ((step (js-call iterator :next)))
+          (when (truth (get step :done)) (setq done t)))))
+    value)
+
   (Object/defineProperty lazySequence "length" (js-object :value 1 :configurable t))
   (Object/defineProperty lazyCons "length" (js-object :value 2 :configurable t))
   (Object/defineProperty lazyMap "length" (js-object :value 2 :configurable t))
@@ -152,6 +907,9 @@
   (Object/defineProperty lazyMapcat "length" (js-object :value 2 :configurable t))
   (Object/defineProperty lazyPartitionAll "length" (js-object :value 2 :configurable t))
   (Object/defineProperty lazyPartitionBy "length" (js-object :value 2 :configurable t))
-  (export lazySequence lazyCons lazyMap lazyMapIndexed lazyKeep lazyKeepIndexed lazyFilter lazyRemove lazyTake lazyDrop
+
+  (export CHUNK_SIZE ArrayChunk ChunkBuffer ChunkedCons LazyChunkedSeq
+    arrayChunk chunkBuffer chunkAppend chunkFromBuffer chunkedCons chunkedRange chunkedRepeat
+    lazySequence lazyCons lazyMap lazyMapIndexed lazyKeep lazyKeepIndexed lazyFilter lazyRemove lazyTake lazyDrop
     lazyTakeWhile lazyDropWhile lazyTakeNth lazyInterpose lazyDedupe lazyDistinct lazyMapcat lazyPartitionAll lazyPartitionBy
     isLazySequence isLazySequenceRealized realizedLazySequenceCount realizeLazySequence))

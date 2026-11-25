@@ -1,7 +1,7 @@
 (module tools.acceptance.retained-performance-snapshot
   (import "node:crypto" createHash)
   (import "node:child_process" spawnSync)
-  (import "node:fs" readFileSync writeFileSync mkdirSync mkdtempSync rmSync)
+  (import "node:fs" existsSync mkdirSync mkdtempSync readFileSync readdirSync renameSync rmSync statSync writeFileSync)
   (import "node:path" resolve dirname)
   (import "../backends/build.mjs" :as backend-build)
   (defconst reports (new globalThis.Set (js-array
@@ -47,148 +47,238 @@
            (match (js-call (new globalThis.RegExp
              "^\\(module [a-zA-Z0-9_.-]+\\s+\\(js\\* (\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")\\)\\s*\\)\\s*$") :exec text)))
       (when match (globalThis.Buffer.from (JSON/parse (aref match 1)) "utf8"))))
+
+  (defconst immutableRuntimeModules (new globalThis.Map))
+  (defconst historicalLockSleepState (new globalThis.Int32Array (new globalThis.SharedArrayBuffer 4)))
+  (defvar historicalScriptDigestCache undefined)
+
+  (defun historical-script-digest (project-root)
+    (when (undefined? historicalScriptDigestCache)
+      (setq historicalScriptDigestCache
+        (js-call (digest (readFileSync (resolve project-root "tools/acceptance/compile-historical-runtime.el"))) :slice 0 16)))
+    historicalScriptDigestCache)
+
+  (defun acquire-historical-cache-lock (cache-dir)
+    (let ((lock-dir (str cache-dir ".lock"))
+          (ready-file (resolve cache-dir "READY"))
+          (deadline (+ (Date/now) 240000))
+          (acquired false))
+      (mkdirSync (resolve cache-dir "..") (js-object :recursive t))
+      (while (and (not acquired) (not (existsSync ready-file)))
+        (try
+          (mkdirSync lock-dir)
+          (setq acquired t)
+          (catch error
+            (if (= (get error :code) "EEXIST")
+              (progn
+                (try
+                  (let ((info (statSync lock-dir)))
+                    (when (> (- (Date/now) (get info :mtimeMs)) 240000)
+                      (rmSync lock-dir (js-object :recursive t :force t))))
+                  (catch _ nil))
+                (unless (existsSync ready-file)
+                  (when (>= (Date/now) deadline)
+                    (throw error))
+                  (js-call globalThis.Atomics :wait historicalLockSleepState 0 0 100)))
+              (throw error)))))
+      acquired))
+
+  (defun read-historical-cache-map (cache-dir)
+    (try
+      (let* ((manifest (JSON/parse (readFileSync (resolve cache-dir "manifest.json") "utf8")))
+             (table (new globalThis.Map))
+             (i 0))
+        (while (< i (js-length manifest))
+          (let* ((entry (aref manifest i))
+                 (key (aref entry 0))
+                 (rel (aref entry 1)))
+            (js-call table :set key
+              (globalThis.Uint8Array.from (readFileSync (resolve cache-dir "files" rel)))))
+          (setq i (1+ i)))
+        table)
+      (catch _ undefined)))
+
+  (defun write-historical-cache-map (cache-dir table)
+    (unless (existsSync (resolve cache-dir "READY"))
+      (let ((tmp-dir (str cache-dir ".tmp." (get globalThis.process :pid) "." (Math/floor (* (Math/random) 1000000000)))))
+        (try
+          (let ((files-dir (resolve tmp-dir "files"))
+                (manifest (js-array))
+                (entries (js-call globalThis.Array :from (js-call table :entries)))
+                (i 0))
+            (mkdirSync files-dir (js-object :recursive t))
+            (while (< i (js-length entries))
+              (let* ((pair (aref entries i))
+                     (key (aref pair 0))
+                     (bytes (aref pair 1))
+                     (rel (str i ".bin")))
+                (writeFileSync (resolve files-dir rel) bytes)
+                (js-call manifest :push (js-array key rel)))
+              (setq i (1+ i)))
+            (writeFileSync (resolve tmp-dir "manifest.json") (JSON/stringify manifest))
+            (writeFileSync (resolve tmp-dir "READY") "ok\n")
+            (mkdirSync (resolve cache-dir "..") (js-object :recursive t))
+            (renameSync tmp-dir cache-dir))
+          (catch _
+            (try (rmSync tmp-dir (js-object :recursive t :force t)) (catch _ nil)))))))
+
+  (defun load-or-build-historical-table (project-root memory-cache memory-key disk-cache-name scratch-prefix build-fn)
+    (unless (js-call memory-cache :has memory-key)
+      (let* ((base (resolve project-root ".eliscript-cache/historical-source"))
+             (cache-dir (resolve base (str disk-cache-name "-" (historical-script-digest project-root))))
+             (loaded (when (existsSync (resolve cache-dir "READY")) (read-historical-cache-map cache-dir))))
+        (if loaded
+          (js-call memory-cache :set memory-key loaded)
+          (let ((lock-held (acquire-historical-cache-lock cache-dir)))
+            (try
+              (progn
+                (when (existsSync (resolve cache-dir "READY"))
+                  (setq loaded (read-historical-cache-map cache-dir)))
+                (if loaded
+                  (js-call memory-cache :set memory-key loaded)
+                  (let* ((_ (mkdirSync base (js-object :recursive t)))
+                         (scratch (mkdtempSync (resolve base scratch-prefix)))
+                         (compiled (new globalThis.Map)))
+                    (try
+                      (progn
+                        (funcall build-fn scratch compiled)
+                        (write-historical-cache-map cache-dir compiled)
+                        (js-call memory-cache :set memory-key compiled))
+                      (finally (rmSync scratch (js-object :recursive t :force t)))))))
+              (finally
+                (when lock-held
+                  (try (rmSync (str cache-dir ".lock") (js-object :recursive t :force t)) (catch _ nil)))))))))
+    (js-call memory-cache :get memory-key))
+
   (defun compile-historical-runtime (root revision filename)
-    (let* ((project-root (get backend-build :root))
-           (base (resolve project-root ".eliscript-cache/historical-source"))
-           (_ (mkdirSync base (js-object :recursive t)))
-           (scratch (mkdtempSync (resolve base "build-")))
-           (archive (resolve scratch "source.tar"))
-           (output (resolve scratch filename)))
-      (try
-        (progn
-          (writeFileSync archive (checked-output (git-read root
-            (js-array "archive" "--format=tar" revision "compiler" "stdlib/core"))))
-          (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
-            (js-object :encoding nil :timeout 30000)))
-          (mkdirSync (dirname output) (js-object :recursive t))
-          (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
-            (js-array "--batch" "-Q" "--script"
-              (resolve project-root "tools/acceptance/compile-historical-runtime.el")
-              scratch (get generated-runtime filename) output)
-            (js-object :cwd scratch :encoding nil :timeout 60000 :maxBuffer 1048576)))
-          (readFileSync output))
-        (finally (rmSync scratch (js-object :recursive t :force t))))))
+    (let* ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
+                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim))
+           (memory-key (str tree ":" filename))
+           (project-root (get backend-build :root))
+           (table (load-or-build-historical-table project-root immutableRuntimeModules memory-key
+                    (str "runtime-" tree "-" (js-call (digest filename) :slice 0 12))
+                    "build-"
+                    (lambda (scratch compiled)
+                      (let ((archive (resolve scratch "source.tar"))
+                            (output (resolve scratch filename)))
+                        (writeFileSync archive (checked-output (git-read root
+                          (js-array "archive" "--format=tar" revision "compiler" "stdlib/core"))))
+                        (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
+                          (js-object :encoding nil :timeout 30000)))
+                        (mkdirSync (dirname output) (js-object :recursive t))
+                        (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+                          (js-array "--batch" "-Q" "--script"
+                            (resolve project-root "tools/acceptance/compile-historical-runtime.el")
+                            scratch (get generated-runtime filename) output)
+                          (js-object :cwd scratch :encoding nil :timeout 60000 :maxBuffer 1048576)))
+                        (js-call compiled :set filename (globalThis.Uint8Array.from (readFileSync output))))))))
+      (js-call (js-call table :get filename) :slice)))
+
   (defun compile-historical-stage-capsules (root revision filename)
-    (let ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
-                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim)))
-      (unless (js-call immutableStageCapsules :has tree)
-        (let* ((project-root (get backend-build :root))
-               (base (resolve project-root ".eliscript-cache/historical-source"))
-               (_ (mkdirSync base (js-object :recursive t)))
-               (scratch (mkdtempSync (resolve base "stage-")))
-               (archive (resolve scratch "source.tar"))
-               (compiled (new globalThis.Map)))
-          (try
-            (progn
-              (writeFileSync archive (checked-output (git-read root
-                (js-array "archive" "--format=tar" revision
-                  "package.json" "compiler" "bootstrap/compiler"
-                  "bootstrap/runtime/memory.eli" "runtime" "tools/runtime/unicode-case-runtime.el"))))
-              (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
-                (js-object :encoding nil :timeout 30000)))
-              (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
-                (js-array "--batch" "-Q" "--script"
-                  (resolve project-root "tools/acceptance/compile-historical-runtime.el")
-                  scratch "--stage-runtime-capsules")
-                (js-object :cwd scratch :encoding nil :timeout 120000 :maxBuffer 4194304)))
-              (checked-output (spawnSync (get globalThis.process :execPath)
-                (js-array (resolve scratch "emit-stage-capsules.mjs"))
-                (js-object :cwd scratch :encoding nil :timeout 60000 :maxBuffer 4194304)))
-              (js-call stage-runtime-capsules :forEach (lambda (item)
-                (if (= item "runtime/unicode-case-data.eli")
-                  (js-call compiled :set item
-                    (globalThis.Uint8Array.from (readFileSync (resolve scratch item))))
-                  (let ((name (js-call item :slice (js-length "runtime/"))))
-                    (js-call compiled :set item
-                      (globalThis.Uint8Array.from (readFileSync (resolve scratch "stage2-runtime" name))))))))
-              (js-call immutableStageCapsules :set tree compiled))
-            (finally (rmSync scratch (js-object :recursive t :force t))))))
-      (let ((table (js-call immutableStageCapsules :get tree)))
-        (when (and table (js-call table :has filename))
-          (js-call (js-call table :get filename) :slice)))))
+    (let* ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
+                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim))
+           (project-root (get backend-build :root))
+           (table (load-or-build-historical-table project-root immutableStageCapsules tree
+                    (str "stage-capsules-" tree)
+                    "stage-"
+                    (lambda (scratch compiled)
+                      (let ((archive (resolve scratch "source.tar")))
+                        (writeFileSync archive (checked-output (git-read root
+                          (js-array "archive" "--format=tar" revision
+                            "package.json" "compiler" "bootstrap/compiler"
+                            "bootstrap/runtime/memory.eli" "runtime" "tools/runtime/unicode-case-runtime.el"))))
+                        (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
+                          (js-object :encoding nil :timeout 30000)))
+                        (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+                          (js-array "--batch" "-Q" "--script"
+                            (resolve project-root "tools/acceptance/compile-historical-runtime.el")
+                            scratch "--stage-runtime-capsules")
+                          (js-object :cwd scratch :encoding nil :timeout 120000 :maxBuffer 4194304)))
+                        (checked-output (spawnSync (get globalThis.process :execPath)
+                          (js-array (resolve scratch "emit-stage-capsules.mjs"))
+                          (js-object :cwd scratch :encoding nil :timeout 60000 :maxBuffer 4194304)))
+                        (js-call stage-runtime-capsules :forEach (lambda (item)
+                          (if (= item "runtime/unicode-case-data.eli")
+                            (js-call compiled :set item
+                              (globalThis.Uint8Array.from (readFileSync (resolve scratch item))))
+                            (let ((name (js-call item :slice (js-length "runtime/"))))
+                              (js-call compiled :set item
+                                (globalThis.Uint8Array.from (readFileSync (resolve scratch "stage2-runtime" name)))))))))))))
+      (when (and table (js-call table :has filename))
+        (js-call (js-call table :get filename) :slice))))
+
   (defun compile-historical-transient-modules (root revision filename)
-    (let ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
-                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim)))
-      (unless (js-call immutableTransientModules :has tree)
-        (let* ((project-root (get backend-build :root))
-               (base (resolve project-root ".eliscript-cache/historical-source"))
-               (_ (mkdirSync base (js-object :recursive t)))
-               (scratch (mkdtempSync (resolve base "transient-")))
-               (archive (resolve scratch "source.tar"))
-               (compiled (new globalThis.Map)))
-          (try
-            (progn
-              (writeFileSync
-                archive
-                (checked-output
-                  (git-read
-                    root
-                    (if (revision-has-legacy-stdlib-core-p root revision)
-                      (js-array "archive" "--format=tar" revision "compiler" "stdlib/core" "runtime" "tools")
-                      (js-array "archive" "--format=tar" revision "compiler" "runtime" "tools")))))
-              (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
-                (js-object :encoding nil :timeout 30000)))
-              (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
-                (js-array "--batch" "-Q" "--script"
-                  (resolve project-root "tools/acceptance/compile-historical-runtime.el")
-                  scratch "--transient-modules")
-                (js-object :cwd scratch :encoding nil :timeout 180000 :maxBuffer 4194304)))
-              (js-call transient-extra-modules :forEach (lambda (item)
-                (let ((built (resolve scratch item)))
-                  (try (js-call compiled :set item (globalThis.Uint8Array.from (readFileSync built)))
-                    (catch _ignored nil)))))
-              (let ((core-names (js-call (js-call (js-call (new globalThis.TextDecoder) :decode
-                                  (checked-output (git-read root (js-array "ls-tree" "-r" "--name-only" revision "runtime/core")))) :trim) :split "\n")))
-                (js-call core-names :forEach (lambda (name)
-                  (when (js-call name :endsWith ".eli")
-                    (let* ((out (str (js-call name :slice 0 -4) ".mjs"))
-                           (built (resolve scratch out)))
-                      (try (js-call compiled :set out (globalThis.Uint8Array.from (readFileSync built)))
-                        (catch _ignored nil))))))
-                (js-call (Object/keys generated-runtime) :forEach (lambda (out)
-                  (let ((built (resolve scratch out)))
-                    (try (js-call compiled :set out (globalThis.Uint8Array.from (readFileSync built)))
-                      (catch _ignored nil))))))
-              (js-call immutableTransientModules :set tree compiled))
-            (finally (rmSync scratch (js-object :recursive t :force t))))))
-      (let ((table (js-call immutableTransientModules :get tree)))
-        (when (and table (js-call table :has filename))
-          (js-call (js-call table :get filename) :slice)))))
+    (let* ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
+                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim))
+           (project-root (get backend-build :root))
+           (table (load-or-build-historical-table project-root immutableTransientModules tree
+                    (str "transient-modules-" tree)
+                    "transient-"
+                    (lambda (scratch compiled)
+                      (let ((archive (resolve scratch "source.tar")))
+                        (writeFileSync
+                          archive
+                          (checked-output
+                            (git-read
+                              root
+                              (if (revision-has-legacy-stdlib-core-p root revision)
+                                (js-array "archive" "--format=tar" revision "compiler" "stdlib/core" "runtime" "tools")
+                                (js-array "archive" "--format=tar" revision "compiler" "runtime" "tools")))))
+                        (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
+                          (js-object :encoding nil :timeout 30000)))
+                        (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+                          (js-array "--batch" "-Q" "--script"
+                            (resolve project-root "tools/acceptance/compile-historical-runtime.el")
+                            scratch "--transient-modules")
+                          (js-object :cwd scratch :encoding nil :timeout 180000 :maxBuffer 4194304)))
+                        (js-call transient-extra-modules :forEach (lambda (item)
+                          (let ((built (resolve scratch item)))
+                            (try (js-call compiled :set item (globalThis.Uint8Array.from (readFileSync built)))
+                              (catch _ignored nil)))))
+                        (let ((core-names (js-call (js-call (js-call (new globalThis.TextDecoder) :decode
+                                            (checked-output (git-read root (js-array "ls-tree" "-r" "--name-only" revision "runtime/core")))) :trim) :split "\n")))
+                          (js-call core-names :forEach (lambda (name)
+                            (when (js-call name :endsWith ".eli")
+                              (let* ((out (str (js-call name :slice 0 -4) ".mjs"))
+                                     (built (resolve scratch out)))
+                                (try (js-call compiled :set out (globalThis.Uint8Array.from (readFileSync built)))
+                                  (catch _ignored nil))))))
+                          (js-call (Object/keys generated-runtime) :forEach (lambda (out)
+                            (let ((built (resolve scratch out)))
+                              (try (js-call compiled :set out (globalThis.Uint8Array.from (readFileSync built)))
+                                (catch _ignored nil)))))))))))
+      (when (and table (js-call table :has filename))
+        (js-call (js-call table :get filename) :slice))))
+
   (defun compile-historical-worker-modules (root revision filename)
     ;; Two published worker entries are ordinary maintained modules whose
     ;; generated bytes are not Git blobs at the measured revision. Reproduce
     ;; them from that revision's real compiler and sources in one isolated
     ;; tree. They are intentionally not part of generated-runtime, whose keys
     ;; are merged into the retained runtime/core inventory.
-    (let ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
-                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim)))
-      (unless (js-call immutableWorkerModules :has tree)
-        (let* ((project-root (get backend-build :root))
-               (base (resolve project-root ".eliscript-cache/historical-source"))
-               (_ (mkdirSync base (js-object :recursive t)))
-               (scratch (mkdtempSync (resolve base "workers-")))
-               (archive (resolve scratch "source.tar"))
-               (compiled (new globalThis.Map)))
-          (try
-            (progn
-              (writeFileSync archive (checked-output (git-read root
-                (js-array "archive" "--format=tar" revision
-                  "compiler" "platform" "runtime"))))
-              (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
-                (js-object :encoding nil :timeout 30000)))
-              (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
-                (js-array "--batch" "-Q" "--script"
-                  (resolve project-root "tools/acceptance/compile-historical-runtime.el")
-                  scratch "--worker-modules")
-                (js-object :cwd scratch :encoding nil :timeout 120000 :maxBuffer 4194304)))
-              (js-call worker-modules :forEach (lambda (item)
-                (js-call compiled :set item
-                  (globalThis.Uint8Array.from (readFileSync (resolve scratch item))))))
-              (js-call immutableWorkerModules :set tree compiled))
-            (finally (rmSync scratch (js-object :recursive t :force t))))))
-      (let ((table (js-call immutableWorkerModules :get tree)))
-        (when (and table (js-call table :has filename))
-          (js-call (js-call table :get filename) :slice)))))
+    (let* ((tree (js-call (js-call (new globalThis.TextDecoder) :decode
+                  (checked-output (git-read root (js-array "rev-parse" "--verify" (str revision "^{tree}"))))) :trim))
+           (project-root (get backend-build :root))
+           (table (load-or-build-historical-table project-root immutableWorkerModules tree
+                    (str "worker-modules-" tree)
+                    "workers-"
+                    (lambda (scratch compiled)
+                      (let ((archive (resolve scratch "source.tar")))
+                        (writeFileSync archive (checked-output (git-read root
+                          (js-array "archive" "--format=tar" revision
+                            "compiler" "platform" "runtime"))))
+                        (checked-output (spawnSync "tar" (js-array "-xf" archive "-C" scratch)
+                          (js-object :encoding nil :timeout 30000)))
+                        (checked-output (spawnSync (or (get (get globalThis.process :env) :EMACS) "emacs")
+                          (js-array "--batch" "-Q" "--script"
+                            (resolve project-root "tools/acceptance/compile-historical-runtime.el")
+                            scratch "--worker-modules")
+                          (js-object :cwd scratch :encoding nil :timeout 120000 :maxBuffer 4194304)))
+                        (js-call worker-modules :forEach (lambda (item)
+                          (js-call compiled :set item
+                            (globalThis.Uint8Array.from (readFileSync (resolve scratch item)))))))))))
+      (when (and table (js-call table :has filename))
+        (js-call (js-call table :get filename) :slice))))
   (defun retainedGitSnapshotBytes (root arguments)
     (unless (js-call (js-array "show" "rev-parse" "log" "ls-tree") :includes (aref arguments 0))
       (throw (new globalThis.Error "retained performance snapshot: unsupported Git read")))

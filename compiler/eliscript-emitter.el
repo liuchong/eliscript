@@ -917,6 +917,9 @@ when temporary allocation or binding setup must occur between child groups."
               (eliscript-emitter--indent
                (eliscript-emitter--emit-statement-body (cdr arguments)))
               "\n}" (if returning "\nreturn null;" "")))
+     ((and (eq operator 'try)
+           (not (eliscript-emitter--contains-raw-javascript-p form)))
+      (eliscript-emitter--emit-try-block arguments returning))
      ((and (memq operator '(let let*))
            (let ((parsed (mapcar #'eliscript-emitter--parse-binding (car arguments))))
              (cl-every (lambda (binding) (symbolp (car binding))) parsed)))
@@ -961,6 +964,11 @@ EXCLUDED operators prune their complete forms after the node predicate."
   "Return non-nil when FORM contains await outside nested functions."
   (eliscript-emitter--some-form (list form)
     (lambda (node) (and (consp node) (eq (car node) 'await))) '(lambda fn async quote)))
+
+(defun eliscript-emitter--contains-raw-javascript-p (form)
+  "Return non-nil when FORM contains any raw JavaScript form."
+  (eliscript-emitter--some-form (list form)
+    (lambda (node) (and (consp node) (eq (car node) 'js*))) '(quote)))
 
 (defun eliscript-emitter--emit-iife
     (parameters body arguments asynchronous)
@@ -1663,8 +1671,8 @@ depth once, rather than copying and reindenting the growing nested suffix."
             temporary temporary
             (eliscript-emitter-emit-expression (car arguments)))))
 
-(defun eliscript-emitter--emit-try (arguments)
-  "Emit value-producing try ARGUMENTS."
+(defun eliscript-emitter--emit-try-block (arguments returning)
+  "Emit try block body from ARGUMENTS in RETURNING or statement context."
   (let (body catch-name catch-body finally-body
              clauses-started catch-seen finally-seen)
     (dolist (argument arguments)
@@ -1699,31 +1707,37 @@ depth once, rather than copying and reindenting the growing nested suffix."
            (setq body (append body (list argument)))))))
     (unless (or catch-seen finally-seen)
       (eliscript-emitter--fail "try requires a catch or finally clause"))
-    (let ((try-block
-           (concat
-            "try {\n"
-            (eliscript-emitter--indent
-             (eliscript-emitter--emit-returning-body body))
-            "\n}"
-            (if catch-seen
-                (concat
-                 " catch ("
-                 (eliscript-emitter--emit-binding-target catch-name)
-                 ") {\n"
-                 (eliscript-emitter--indent
-                  (eliscript-emitter--emit-returning-body catch-body))
-                 "\n}")
-              "")
-            (if finally-seen
-                (concat
-                 " finally {\n"
-                 (eliscript-emitter--indent
-                  (eliscript-emitter--emit-statement-body finally-body))
-                 "\n}")
-              ""))))
-      (eliscript-emitter--emit-iife
-       "" (eliscript-emitter--indent try-block) ""
-       (eliscript-emitter--contains-await-p arguments)))))
+    (concat
+     "try {\n"
+     (eliscript-emitter--indent
+      (if returning
+          (eliscript-emitter--emit-returning-body body)
+        (eliscript-emitter--emit-statement-body body)))
+     "\n}"
+     (if catch-seen
+         (concat
+          " catch ("
+          (eliscript-emitter--emit-binding-target catch-name)
+          ") {\n"
+          (eliscript-emitter--indent
+           (if returning
+               (eliscript-emitter--emit-returning-body catch-body)
+             (eliscript-emitter--emit-statement-body catch-body)))
+          "\n}")
+       "")
+     (if finally-seen
+         (concat
+          " finally {\n"
+          (eliscript-emitter--indent
+           (eliscript-emitter--emit-statement-body finally-body))
+          "\n}")
+       ""))))
+
+(defun eliscript-emitter--emit-try (arguments)
+  "Emit value-producing try ARGUMENTS."
+  (eliscript-emitter--emit-iife
+   "" (eliscript-emitter--indent (eliscript-emitter--emit-try-block arguments t)) ""
+   (eliscript-emitter--contains-await-p arguments)))
 
 (defun eliscript-emitter--emit-while (arguments)
   "Emit a value-producing while expression from ARGUMENTS."
@@ -1876,22 +1890,26 @@ depth once, rather than copying and reindenting the growing nested suffix."
 (defun eliscript-emitter--emit-distinct (name arguments)
   "Emit a one-evaluation pairwise distinct comparison for NAME ARGUMENTS."
   (eliscript-emitter--require-arity name arguments 2)
-  (let ((parameters (mapcar (lambda (_argument)
-                              (eliscript-emitter--fresh-name))
-                            arguments))
-        comparisons)
-    (cl-loop for left-index from 0 below (length parameters)
-             do (cl-loop for right-index from (1+ left-index)
-                         below (length parameters)
-                         do (push
-                             (format "%s !== %s"
-                                     (nth left-index parameters)
-                                     (nth right-index parameters))
-                             comparisons)))
-    (format "((%s) => (%s))(%s)"
-            (string-join parameters ", ")
-            (string-join (nreverse comparisons) " && ")
-            (eliscript-emitter--emit-arguments arguments))))
+  (if (= (length arguments) 2)
+      (format "(%s !== %s)"
+              (eliscript-emitter-emit-expression (nth 0 arguments))
+              (eliscript-emitter-emit-expression (nth 1 arguments)))
+    (let ((parameters (mapcar (lambda (_argument)
+                                (eliscript-emitter--fresh-name))
+                              arguments))
+          comparisons)
+      (cl-loop for left-index from 0 below (length parameters)
+               do (cl-loop for right-index from (1+ left-index)
+                           below (length parameters)
+                           do (push
+                               (format "%s !== %s"
+                                       (nth left-index parameters)
+                                       (nth right-index parameters))
+                               comparisons)))
+      (format "((%s) => (%s))(%s)"
+              (string-join parameters ", ")
+              (string-join (nreverse comparisons) " && ")
+              (eliscript-emitter--emit-arguments arguments)))))
 
 (defun eliscript-emitter--emit-object (arguments)
   "Emit an object literal from alternating key/value ARGUMENTS."
@@ -2061,6 +2079,12 @@ calls, including short circuits, assignments, defaults and repeated operands."
                     (= (length item) 3) (symbolp (nth 2 item))) nil)
               ((and (consp item) (memq (car item) '(get aref js-length)))
                (dolist (child (cdr item)) (push child pending)))
+              ((and (consp item) (eq (car item) 'funcall) (= (length item) 4)
+                    (consp (nth 1 item)) (eq (car (nth 1 item)) 'js*)
+                    (= (length (nth 1 item)) 2)
+                    (eliscript-emitter--raw-binary-operator (cadr (nth 1 item))))
+               (push (nth 2 item) pending)
+               (push (nth 3 item) pending))
               (t (setq safe nil)))))
     safe))
 

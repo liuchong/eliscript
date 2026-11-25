@@ -7,7 +7,7 @@
   (defvar manifest undefined)
   (defconst commands
     (js-array "eliscript" "eliscript-build" "eliscript-check"
-      "eliscript-format" "eliscript-eval" "eliscript-watch" "eliscript-compiler"))
+      "eliscript-format" "eliscript-eval" "eliscript-test" "eliscript-watch" "eliscript-compiler"))
 
   (defun each (values action) (js-call values :forEach action))
   (defun does-not (value) (get (expect value) :not))
@@ -112,7 +112,7 @@
                       "compiler-cli-ground.mjs" "compiler-package.mjs" "compiler-project.mjs"
                       "stage3-targets.mjs" "managed-runtime.mjs" "managed-host.mjs"
                       "managed-source-view.mjs" "managed-module-graph.mjs" "memory-runtime.mjs"
-                      "native-managed-runtime.mjs" "native-memory.mjs" "native-node-memory.mjs"
+                      "native-managed-runtime.mjs" "native-memory.mjs" "native-node-ffi.mjs" "native-node-memory.mjs"
                       "native-node-worker.mjs" "native-node-runner.mjs" "native-node-watchdog.mjs"))
           (closure (js-array "compiler-package-ground.mjs" "compiler-package-loader.mjs"
                      "compiler-host-record.mjs" "compiler-host-iteration.mjs"

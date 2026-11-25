@@ -41,7 +41,7 @@
                           (try (put error :expected expected) (catch ignored nil)))
                         (throw error)))))))))))))))
   (defconst interop-main-sha "a5e92051bca2afbae0ee700d94672e05a221367f8ab10b68e0767444bb34534c")
-  (defconst interop-host-sha "3bbcafafdfafb89c68e9db37d3d089f7884504ad16e0c0358ddfb9ab732fa581")
+  (defconst interop-host-sha "3cda23aabf3c514d23276e7461191e13587b9ba1a26ec6ea2ffbc4513b911d65")
   (defun interop-digest (value) (js-call (js-call (createHash "sha256") :update value) :digest "hex"))
   (defun originalInteropFullRuntimeRecipe (record)
     (let* ((original (get record :original)) (execution (get record :execution)) (modules (get record :modules))

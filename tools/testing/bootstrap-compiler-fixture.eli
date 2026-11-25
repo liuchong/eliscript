@@ -10,7 +10,7 @@
       (progn
         (unless (= (js-call (js-call (createHash "sha256") :update
                      (readFileSync (resolve source-root "tests/bootstrap-compiler-test-ground.mjs"))) :digest "hex")
-                   "806b3da9a19e94484c21d6266b4aed2dbc00536935c45061f2bb7e573e23e999")
+                   "7c2f61fb0d07d2734adf3ec42756efd7f0c231351078a7f400297e62b0e68f81")
           (throw (new globalThis.TypeError "portable compiler functional deadline requires the unchanged complete original suite")))
         (let ((forwarded (js-call arguments :slice))) (put forwarded 2 0) forwarded)) arguments))
   (export bootstrapCompilerFunctionalArguments))

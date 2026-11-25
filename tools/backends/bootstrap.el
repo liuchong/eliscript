@@ -84,7 +84,7 @@ an added or changed declaration cannot silently bootstrap an incomplete graph."
                     ("runtime/managed/managed-literal-protocols.mjs" . "runtime/managed/managed-literal-protocols.eli")
                     ("runtime/managed/managed-literals.mjs" . "runtime/managed/managed-literals.eli")))
       (push pair pairs))
-    (dolist (name '("list" "vector" "map" "set" "queue" "identifier" "record" "value" "metadata" "collection" "transient" "protocol" "type"
+    (dolist (name '("array-map" "list" "vector" "map" "set" "queue" "identifier" "record" "value" "metadata" "collection" "transient" "protocol" "type"
                     "order" "sorted" "regex" "transducer" "lazy-sequence" "truth" "text" "object" "sequence"
                     "set-algebra" "collection-internals" "metadata-internals" "persistent-kind" "data" "data-text" "value-internals"))
       (push (cons (concat "runtime/core/" name ".mjs") (concat "runtime/managed/managed-runtime-" name ".eli")) pairs))
@@ -199,6 +199,7 @@ belongs to the compiler build; its former bytes are not an incremental input."
                      ("tools/backends/compiler-session.eli" . "tools/backends/compiler-session.mjs")
                      ("tools/backends/compiler-cli-ground.eli" . "tools/backends/compiler-cli-ground.mjs")
                      ("tools/backends/native-node-memory.eli" . "tools/backends/native-node-memory.mjs")
+                     ("tools/backends/native-node-ffi.eli" . "tools/backends/native-node-ffi.mjs")
                      ("tools/backends/native-node-worker.eli" . "tools/backends/native-node-worker.mjs")
                      ("tools/backends/native-node-runner.eli" . "tools/backends/native-node-runner.mjs")
                      ("runtime/core/text-impl.eli" . "runtime/core/text-impl.mjs")
@@ -590,6 +591,7 @@ Return the relative receipt path stage0.json. No generated compiler is loaded."
                   ("tools/backends/compiler-session.eli" . "tools/backends/compiler-session.mjs")
                   ("tools/backends/compiler-cli-ground.eli" . "tools/backends/compiler-cli-ground.mjs")
                   ("tools/backends/native-node-memory.eli" . "tools/backends/native-node-memory.mjs")
+                  ("tools/backends/native-node-ffi.eli" . "tools/backends/native-node-ffi.mjs")
                   ("tools/backends/native-node-worker.eli" . "tools/backends/native-node-worker.mjs")
                   ("tools/backends/native-node-runner.eli" . "tools/backends/native-node-runner.mjs")
                   ("tools/backends/compiler-build.eli" . "tools/backends/compiler-build.mjs")

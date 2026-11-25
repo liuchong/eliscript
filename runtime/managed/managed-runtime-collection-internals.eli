@@ -6,6 +6,10 @@
   (import "./protocol.eli" protocolMethod)
   (import "../../stdlib/protocol.eli" protocol-slot)
   (import "./collection.eli" SequenceView MemoizedSequenceView ReductionView
+    IMapEntry IChunk IChunkedSeq
+    COLLECTION_ENTRY_KEY COLLECTION_ENTRY_VAL CHUNK_COUNT CHUNK_NTH CHUNK_DROP_FIRST CHUNKED_FIRST CHUNKED_NEXT CHUNKED_MORE
+    entry-key-method entry-val-method chunk-count-method chunk-nth-method chunk-drop-first-method chunked-first-method chunked-next-method chunked-more-method
+    registerChunkedSliceHandler registerChunkedPrependHandler UNBOUNDED_SEQUENCE
     sequenceView unboundedSequenceView memoizedSequenceView memoizedSequenceStatus sliceSequenceView prependSequenceView reductionView)
 
   (defconst I_COUNTED (managed-literal-protocol "collection.ICounted"))
@@ -21,6 +25,9 @@
   (defconst I_SET (managed-literal-protocol "collection.ISet"))
   (defconst I_STACK (managed-literal-protocol "collection.IStack"))
   (defconst I_REVERSIBLE (managed-literal-protocol "collection.IReversible"))
+  (defconst I_MAP_ENTRY IMapEntry)
+  (defconst I_CHUNK IChunk)
+  (defconst I_CHUNKED_SEQ IChunkedSeq)
   (defconst COLLECTION_COUNT (protocol-slot I_COUNTED "count"))
   (defconst COLLECTION_EMPTY (protocol-slot I_EMPTYABLE "empty"))
   (defconst COLLECTION_CONJ (protocol-slot I_CONJ "conj"))
@@ -52,6 +59,14 @@
   (defconst dispatchCollectionPeek (protocolMethod I_STACK "peek"))
   (defconst dispatchCollectionPop (protocolMethod I_STACK "pop"))
   (defconst dispatchCollectionRseq (protocolMethod I_REVERSIBLE "rseq"))
+  (defconst dispatchCollectionEntryKey entry-key-method)
+  (defconst dispatchCollectionEntryVal entry-val-method)
+  (defconst dispatchChunkCount chunk-count-method)
+  (defconst dispatchChunkNth chunk-nth-method)
+  (defconst dispatchChunkDropFirst chunk-drop-first-method)
+  (defconst dispatchChunkedFirst chunked-first-method)
+  (defconst dispatchChunkedNext chunked-next-method)
+  (defconst dispatchChunkedMore chunked-more-method)
   (defun callable? (value) (= (js* "typeof value") "function"))
   (defun readCollectionEntry (entry)
     (unless (and (not (nullish? entry)) (callable? (aref entry (aref globalThis/Symbol "iterator"))))
@@ -79,10 +94,15 @@
   (defun reduceIterable (iterable reducer &rest initial) (managed-literal-reduce-iterable iterable reducer initial))
   (defun validateCollectionCount (value) (managed-literal-checked-count value))
   (export I_COUNTED I_EMPTYABLE I_CONJ I_LOOKUP I_ASSOCIATIVE I_INDEXED I_SEQABLE I_REDUCE I_KV_REDUCE I_MAP I_SET I_STACK I_REVERSIBLE
+    I_MAP_ENTRY I_CHUNK I_CHUNKED_SEQ
     COLLECTION_COUNT COLLECTION_EMPTY COLLECTION_CONJ COLLECTION_GET COLLECTION_ASSOC COLLECTION_CONTAINS COLLECTION_NTH
     COLLECTION_SEQ COLLECTION_REDUCE COLLECTION_REDUCE_KV COLLECTION_DISSOC COLLECTION_DISJ COLLECTION_PEEK COLLECTION_POP COLLECTION_RSEQ
+    COLLECTION_ENTRY_KEY COLLECTION_ENTRY_VAL CHUNK_COUNT CHUNK_NTH CHUNK_DROP_FIRST CHUNKED_FIRST CHUNKED_NEXT CHUNKED_MORE
     dispatchCollectionCount dispatchCollectionEmpty dispatchCollectionConj dispatchCollectionGet dispatchCollectionAssoc
     dispatchCollectionContains dispatchCollectionNth dispatchCollectionSeq dispatchCollectionReduce dispatchCollectionReduceKV
     dispatchCollectionDissoc dispatchCollectionDisj dispatchCollectionPeek dispatchCollectionPop dispatchCollectionRseq
+    dispatchCollectionEntryKey dispatchCollectionEntryVal dispatchChunkCount dispatchChunkNth dispatchChunkDropFirst
+    dispatchChunkedFirst dispatchChunkedNext dispatchChunkedMore
+    registerChunkedSliceHandler registerChunkedPrependHandler UNBOUNDED_SEQUENCE
     readCollectionEntry SequenceView MemoizedSequenceView ReductionView sequenceView unboundedSequenceView memoizedSequenceView
     memoizedSequenceStatus sliceSequenceView prependSequenceView reductionView reducedValue isReducedValue unreducedValue reduceIterable validateCollectionCount))

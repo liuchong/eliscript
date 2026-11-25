@@ -21,4 +21,7 @@
             (js-call table :set value state)))
         state)))
 
-  (export PersistentVector EMPTY_VECTOR persistentVector subvec isPersistentVector readPersistentVectorView))
+  (defun readPersistentVectorMetadataReader (_method _call)
+    undefined)
+
+  (export PersistentVector EMPTY_VECTOR persistentVector subvec isPersistentVector readPersistentVectorView readPersistentVectorMetadataReader))

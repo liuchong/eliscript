@@ -46,7 +46,7 @@
     (make-vector-node (js-array)))
 
   (defportable vector-node-slots (node)
-    (get node "slots" (js-array)))
+    (get node "slots"))
 
   (defportable make-persistent-vector (count shift root tail metadata)
     (js-object :kind persistent-vector-kind
@@ -69,19 +69,19 @@
                             nil))
 
   (defportable persistent-vector-count (vector)
-    (get vector "count" 0))
+    (get vector "count"))
 
   (defportable persistent-vector-meta (vector)
-    (get vector "metadata" nil))
+    (get vector "metadata"))
 
   (defportable persistent-vector-with-meta (vector metadata)
     (if (= metadata (persistent-vector-meta vector))
         vector
       (make-persistent-vector
        (persistent-vector-count vector)
-       (get vector "shift" persistent-vector-branch-bits)
-       (get vector "root" nil)
-       (get vector "tail" (js-array))
+       (get vector "shift")
+       (get vector "root")
+       (get vector "tail")
        metadata)))
 
   (defportable persistent-vector-tail-offset (vector)
@@ -165,9 +165,9 @@
 
   (defportable persistent-vector-array-for (vector index)
     (if (>= index (persistent-vector-tail-offset vector))
-        (get vector "tail" (js-array))
-      (let ((node (get vector "root" nil))
-            (level (get vector "shift" persistent-vector-branch-bits)))
+        (get vector "tail")
+      (let ((node (get vector "root"))
+            (level (get vector "shift")))
         (while (> level 0)
           (setq node
                 (js-nth
@@ -187,9 +187,9 @@
 
   (defportable persistent-vector-conj (vector value)
     (let* ((count (persistent-vector-count vector))
-           (tail (get vector "tail" (js-array)))
-           (shift (get vector "shift" persistent-vector-branch-bits))
-           (root (get vector "root" nil)))
+           (tail (get vector "tail"))
+           (shift (get vector "shift"))
+           (root (get vector "root")))
       (if (>= count persistent-vector-max-count)
           nil
         (if (< (js-length tail) persistent-vector-branch-width)
@@ -223,9 +223,9 @@
 
   (defportable persistent-vector-assoc (vector index value)
     (let* ((count (persistent-vector-count vector))
-           (shift (get vector "shift" persistent-vector-branch-bits))
-           (root (get vector "root" nil))
-           (tail (get vector "tail" (js-array))))
+           (shift (get vector "shift"))
+           (root (get vector "root"))
+           (tail (get vector "tail")))
       (if (not (persistent-vector-valid-index? index count t))
           nil
         (if (= index count)
@@ -249,9 +249,9 @@
 
   (defportable persistent-vector-pop (vector)
     (let* ((count (persistent-vector-count vector))
-           (shift (get vector "shift" persistent-vector-branch-bits))
-           (root (get vector "root" nil))
-           (tail (get vector "tail" (js-array))))
+           (shift (get vector "shift"))
+           (root (get vector "root"))
+           (tail (get vector "tail")))
       (if (= count 0)
           nil
         (if (= count 1)

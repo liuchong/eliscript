@@ -41,6 +41,11 @@
 
   (defvar slot-method-descriptor nil)
   (defvar slot-length-descriptor nil)
+  (defvar transient-assoc-slot nil)
+  (defvar transient-assoc-method nil)
+  (defvar transient-assoc-direct nil)
+  (defun managed-literal-register-transient-assoc-direct (fn)
+    (setq transient-assoc-direct fn) undefined)
 
   (defun ensure-reduced-state ()
     (or reduced-state (setq reduced-state (funcall protocol-intrinsic-symbol "eliscript.collection.reduced-state"))))
@@ -108,6 +113,8 @@
         (js-array "ITransientCollection" (js-array "conj!" "assoc!" "dissoc!" "persistent!")
           (js-array "eliscript.protocol.ITransientCollection/conj!" "eliscript.protocol.ITransientCollection/assoc!"
                     "eliscript.protocol.ITransientCollection/dissoc!" "eliscript.protocol.ITransientCollection/persistent!")))
+      ((= role "transient.ITransientSet")
+        (js-array "ITransientSet" (js-array "disj!") (js-array "eliscript.protocol.ITransientSet/disj!")))
       (t nil)))
 
   (defun managed-literal-known-role? (role)
@@ -143,7 +150,7 @@
 
   (defun managed-literal-extension-loader (protocol)
     (let ((role (js-call protocol-roles :get protocol)))
-      (when (and (not (undefined? role)) (/= role "transient.ITransientCollection"))
+      (when (and (not (undefined? role)) (/= role "transient.ITransientCollection") (/= role "transient.ITransientSet"))
         (managed-literal-flush-role role protocol)))
     (managed-literal-disarm-extension-protocol protocol)
     (managed-literal-flush-pending-extensions protocol)
@@ -344,6 +351,8 @@
   (defun managed-literal-sequence-reduce (receiver reducer &rest initial)
     (managed-literal-reduce-iterable receiver reducer initial))
   (defun managed-literal-sequence-tag () "EliscriptSequenceView")
+  (defun managed-literal-unbounded-sequence ()
+    (ensure-unbounded-sequence))
   (defun managed-literal-unbounded-sequence-view (factory)
     (unless (= (js* "typeof factory") "function") (managed-literal-protocol-fail "unbounded sequence view factory must be a function"))
     (new SequenceView (ensure-sequence-token) factory (ensure-unbounded-sequence)))
@@ -475,30 +484,47 @@
   (defun managed-literal-reduce-iterable (iterable reducer initial)
     (unless (= (js* "typeof reducer") "function") (managed-literal-protocol-fail "collection reducer must be a function"))
     (let* ((sentinel (ensure-no-initial))
-           (iterator (js-call (aref iterable (get globalThis/Symbol :iterator)) :call iterable))
-           (next (get iterator :next)) (accumulator (if (= (js-length initial) 0) sentinel (get initial 0)))
-           (complete false) (active false) (stopped false))
-      (try
-        (while (and (not complete) (not stopped))
-          (setq active false)
-          (let ((step (js-call next :call iterator)))
-            (unless (and (not (nil? step)) (or (= (js* "typeof step") "object") (= (js* "typeof step") "function")))
-              (managed-literal-protocol-fail "iterator result must be an object"))
-            (if (managed-literal-truth (get step :done)) (setq complete t)
-              (let ((value (get step :value)))
-                (setq active t)
-                (if (eq accumulator sentinel) (setq accumulator value)
-                  (progn (setq accumulator (funcall reducer accumulator value))
-                    (when (managed-literal-is-reduced accumulator)
-                      (setq accumulator (managed-literal-unreduced accumulator) stopped t))))))))
-        (when (eq accumulator sentinel)
-          (managed-literal-protocol-fail "cannot reduce an empty collection without an initial value"))
-        (when stopped (setq active false) (managed-literal-close-iterator iterator))
-        accumulator
-        (catch error
-          (when (and active (not complete))
-            (try (managed-literal-close-iterator iterator) (catch close-error nil)))
-          (throw error)))))
+           (accumulator (if (= (js-length initial) 0) sentinel (get initial 0))))
+      (if (and (Array/isArray iterable)
+               (not (Object/hasOwn iterable (get globalThis/Symbol :iterator)))
+               (let ((iter-fn (aref iterable (get globalThis/Symbol :iterator))))
+                 (or (eq iter-fn (aref globalThis/Array.prototype (get globalThis/Symbol :iterator)))
+                     (eq iter-fn (aref (Object/getPrototypeOf iterable) :values)))))
+        (let ((index 0) (len (js-length iterable)) (stopped false))
+          (while (and (< index len) (not stopped))
+            (let ((value (aref iterable index)))
+              (if (eq accumulator sentinel) (setq accumulator value)
+                (progn (setq accumulator (funcall reducer accumulator value))
+                  (when (managed-literal-is-reduced accumulator)
+                    (setq accumulator (managed-literal-unreduced accumulator) stopped t)))))
+            (setq index (1+ index)))
+          (when (eq accumulator sentinel)
+            (managed-literal-protocol-fail "cannot reduce an empty collection without an initial value"))
+          accumulator)
+        (let* ((iterator (js-call (aref iterable (get globalThis/Symbol :iterator)) :call iterable))
+               (next (get iterator :next))
+               (complete false) (active false) (stopped false))
+          (try
+            (while (and (not complete) (not stopped))
+              (setq active false)
+              (let ((step (js-call next :call iterator)))
+                (unless (and (not (nil? step)) (or (= (js* "typeof step") "object") (= (js* "typeof step") "function")))
+                  (managed-literal-protocol-fail "iterator result must be an object"))
+                (if (managed-literal-truth (get step :done)) (setq complete t)
+                  (let ((value (get step :value)))
+                    (setq active t)
+                    (if (eq accumulator sentinel) (setq accumulator value)
+                      (progn (setq accumulator (funcall reducer accumulator value))
+                        (when (managed-literal-is-reduced accumulator)
+                          (setq accumulator (managed-literal-unreduced accumulator) stopped t))))))))
+            (when (eq accumulator sentinel)
+              (managed-literal-protocol-fail "cannot reduce an empty collection without an initial value"))
+            (when stopped (setq active false) (managed-literal-close-iterator iterator))
+            accumulator
+            (catch error
+              (when (and active (not complete))
+                (try (managed-literal-close-iterator iterator) (catch close-error nil)))
+              (throw error)))))))
 
   (defun managed-literal-operation-arity (name)
     (cond
@@ -540,6 +566,7 @@
       ((= description "eliscript.protocol.ITransientCollection/assoc!") "[eliscript.protocol.ITransientCollection/assoc!]")
       ((= description "eliscript.protocol.ITransientCollection/dissoc!") "[eliscript.protocol.ITransientCollection/dissoc!]")
       ((= description "eliscript.protocol.ITransientCollection/persistent!") "[eliscript.protocol.ITransientCollection/persistent!]")
+      ((= description "eliscript.protocol.ITransientSet/disj!") "[eliscript.protocol.ITransientSet/disj!]")
       ((= description "eliscript.protocol.IComparable/compare") "[eliscript.protocol.IComparable/compare]")
       ((= description "eliscript.protocol.IPrint/print") "[eliscript.protocol.IPrint/print]")
       (t (str "[" description "]"))))
@@ -682,6 +709,7 @@
       ((= role "metadata.IWithMeta") 65536)
       ((= role "transient.IEditable") 131072)
       ((= role "transient.ITransientCollection") 262144)
+      ((= role "transient.ITransientSet") 524288)
       (t 0)))
 
   (defun managed-literal-mark-bound (constructor role)
@@ -815,13 +843,32 @@
           (result collection) (index 0))
       (while (< index (js-length values))
         (setq result (funcall method result (get values index)) index (1+ index))) result))
+  (defun ensure-transient-assoc-slot ()
+    (or transient-assoc-slot
+      (let ((protocol (managed-literal-protocol "transient.ITransientCollection")))
+        (setq transient-assoc-slot (protocol-slot protocol "assoc!")
+              transient-assoc-method (protocol-method protocol "assoc!"))
+        transient-assoc-slot)))
   (defun managed-literal-assoc-bang (&rest arguments)
     (unless (and (>= (js-length arguments) 3) (= (% (- (js-length arguments) 1) 2) 0))
       (managed-literal-protocol-fail "assocBang requires a transient collection followed by one or more key/value pairs"))
-    (let ((method (protocol-method (managed-literal-protocol "transient.ITransientCollection") "assoc!"))
-          (result (get arguments 0)) (index 1))
+    (let ((result (get arguments 0)) (index 1) (direct-fn transient-assoc-direct))
       (while (< index (js-length arguments))
-        (setq result (funcall method result (get arguments index) (get arguments (1+ index))) index (+ index 2))) result))
+        (let* ((key (get arguments index))
+               (val (get arguments (1+ index)))
+               (handled (if (not (nil? direct-fn)) (funcall direct-fn result key val) undefined)))
+          (if (not (undefined? handled))
+            (setq result handled index (+ index 2))
+            (let* ((slot (ensure-transient-assoc-slot))
+                   (slot-fn (when (and (not (nullish? result))
+                                       (or (= (js* "typeof result") "object") (= (js* "typeof result") "function")))
+                              (let ((candidate (aref result slot)))
+                                (when (= (js* "typeof candidate") "function") candidate)))))
+              (setq result (if (not (nil? slot-fn))
+                             (js-call slot-fn :call result key val)
+                             (funcall transient-assoc-method result key val))
+                    index (+ index 2))))))
+      result))
   (defun managed-literal-dissoc-bang (collection &rest keys)
     (let ((method (protocol-method (managed-literal-protocol "transient.ITransientCollection") "dissoc!"))
           (result collection) (index 0))
@@ -829,6 +876,11 @@
         (setq result (funcall method result (get keys index)) index (1+ index))) result))
   (defun managed-literal-persistent-bang (collection)
     (funcall (protocol-method (managed-literal-protocol "transient.ITransientCollection") "persistent!") collection))
+  (defun managed-literal-disj-bang (collection &rest values)
+    (let ((method (protocol-method (managed-literal-protocol "transient.ITransientSet") "disj!"))
+          (result collection) (index 0))
+      (while (< index (js-length values))
+        (setq result (funcall method result (get values index)) index (1+ index))) result))
   (Object/defineProperty managed-literal-assoc-bang "length" (js-object :value 3 :configurable t))
 
   (defun managed-literal-ensure-persistent-kind (type constructor callbacks)
@@ -1119,6 +1171,16 @@
                   (funcall callbacks 22 receiver key nil))))
               (put implementations "dissoc!" (aref bundles "ITransient.dissoc.f"))
               (managed-literal-define-slot-method prototype (protocol-slot protocol "dissoc!") (aref bundles "ITransient.dissoc.m")))
+            (when (= type 4)
+              (let ((set-protocol (managed-literal-protocol "transient.ITransientSet")))
+                (managed-literal-ensure-cached-op bundles "ITransientSet.disj.f" "ITransientSet.disj.m" set-protocol "disj!" (lambda ()
+                  (lambda (receiver key)
+                    (let ((ttype (funcall callbacks 19 receiver nil nil)))
+                      (unless (= ttype 4)
+                        (managed-literal-protocol-fail "incompatible transient set receiver")))
+                    (funcall callbacks 22 receiver key nil))))
+                (managed-literal-define-slot-method prototype (protocol-slot set-protocol "disj!") (aref bundles "ITransientSet.disj.m"))
+                (managed-literal-queue-type-extension set-protocol constructor (js-object :disj! (aref bundles "ITransientSet.disj.f")))))
             (setq slot-method-descriptor nil)
             (managed-literal-queue-type-extension protocol constructor implementations)))
         (js-call registered :set constructor t))))
@@ -1148,6 +1210,7 @@
         (managed-literal-protocol (aref roles index))
         (setq index (1+ index)))
       (managed-literal-protocol "transient.ITransientCollection")
+      (managed-literal-protocol "transient.ITransientSet")
       (setq index 0)
       (while (< index (js-length types))
         (let* ((type (1+ index)) (constructor (get constructors (get types index) undefined)))
@@ -1186,7 +1249,8 @@
             :IMeta (managed-literal-protocol "metadata.IMeta")
             :IWithMeta (managed-literal-protocol "metadata.IWithMeta")
             :IEditable (managed-literal-protocol "transient.IEditable")
-            :ITransientCollection (managed-literal-protocol "transient.ITransientCollection"))
+            :ITransientCollection (managed-literal-protocol "transient.ITransientCollection")
+            :ITransientSet (managed-literal-protocol "transient.ITransientSet"))
           :slots (js-object
             :count (managed-literal-slot "collection.ICounted" "count")
             :empty (managed-literal-slot "collection.IEmptyable" "empty")
@@ -1211,11 +1275,12 @@
             :conj! (managed-literal-slot "transient.ITransientCollection" "conj!")
             :assoc! (managed-literal-slot "transient.ITransientCollection" "assoc!")
             :dissoc! (managed-literal-slot "transient.ITransientCollection" "dissoc!")
+            :disj! (managed-literal-slot "transient.ITransientSet" "disj!")
             :persistent! (managed-literal-slot "transient.ITransientCollection" "persistent!"))
           :isReduced managed-literal-is-reduced :unreduced managed-literal-unreduced :reduced managed-literal-reduced
           :equalValues managed-literal-equal-values :hashValue managed-literal-hash-value
           :transient managed-literal-transient :conjBang managed-literal-conj-bang
-          :assocBang managed-literal-assoc-bang :dissocBang managed-literal-dissoc-bang :persistentBang managed-literal-persistent-bang
+          :assocBang managed-literal-assoc-bang :dissocBang managed-literal-dissoc-bang :disjBang managed-literal-disj-bang :persistentBang managed-literal-persistent-bang
           :sequenceView managed-literal-sequence-view :SequenceView SequenceView)))
     managed-literal-runtime-result)
 
@@ -1227,10 +1292,11 @@
     managed-literal-register-protocol-role managed-literal-protocol-role managed-literal-protocol-for-role
     managed-literal-sequence-view managed-literal-reduce-iterable SequenceView
     MemoizedSequenceView memoizedSequenceView memoizedSequenceStatus
-    managed-literal-unbounded-sequence-view managed-literal-install-slot managed-literal-checked-count
+    managed-literal-unbounded-sequence managed-literal-unbounded-sequence-view managed-literal-install-slot managed-literal-checked-count
     managed-literal-read-sequence-state managed-literal-shift-sequence-count managed-literal-sequence-from-count
     managed-literal-self-iterable managed-literal-string-sequence managed-literal-object-sequence
     managed-literal-mapped-iterator managed-literal-map-sequence managed-literal-reduce
     managed-literal-equal-values managed-literal-hash-value managed-literal-brand-true
-    managed-literal-transient managed-literal-conj-bang managed-literal-assoc-bang managed-literal-dissoc-bang managed-literal-persistent-bang
+    managed-literal-transient managed-literal-conj-bang managed-literal-assoc-bang managed-literal-register-transient-assoc-direct
+    managed-literal-dissoc-bang managed-literal-disj-bang managed-literal-persistent-bang
     PERSISTENT_MAP_KIND PERSISTENT_MAP_HAS_VALUE_KEY PERSISTENT_SET_KIND PERSISTENT_SET_HAS_VALUE))

@@ -38,9 +38,16 @@
         (js-call assert :ok (> firefox-step chromium-step))
         (js-call assert :ok (> webkit-step firefox-step))
         (js-call assert :ok (> upload-step webkit-step))
-        (js-call assert :strictEqual
-          (js-length (js-call workflow :split "          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE:")) 4
-          "the authoritative performance policy must occur once per engine step, never as a duplicate YAML key")
+        (let ((deferred-workflow
+                (renderBrowserWorkflow contract
+                  (Object/assign (js-object) matrix (js-object :performanceAcceptance "deferred")))))
+          (js-call assert :strictEqual
+            (js-length (js-call workflow :split "          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE:"))
+            (if (= (get matrix :performanceAcceptance) "deferred") 4 1)
+            "the authoritative performance policy must match the matrix acceptance mode")
+          (js-call assert :strictEqual
+            (js-length (js-call deferred-workflow :split "          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE:")) 4
+            "the deferred performance policy must occur once per engine step, never as a duplicate YAML key"))
         (let ((report (await (checkBrowserCompatibilityWorkflow
                 (js-object :root root :contract contract :matrix matrix :workflowText workflow)))))
           (js-call assert :deepStrictEqual (get report :browserEngines) (js-array "chromium" "firefox" "webkit"))

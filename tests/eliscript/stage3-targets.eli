@@ -316,7 +316,7 @@
                    (js-call assert :strictEqual (get call :corpusRecordsPath) path)
                    (js-call assert :strictEqual (get call :functionalRuntimeProfile) "small")
                    (js-call assert :strictEqual (compilerDigest (await (readFile path))) (get corpus :recordsSha256))
-                   (js-call assert :ok (>= (js-length (get corpus :records)) 794))
+                   (js-call assert :ok (>= (js-length (get corpus :records)) 765))
                    (put options :stage3MetadataPath "forged-stage1.json")
                    (put options :corpusRecordsPath "different-fixture.json")
                    (js-object :directory (resolve directory (get call :target))

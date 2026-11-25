@@ -563,17 +563,18 @@
               (js-call (aref self TRANSIENT_CONJ) :call self value)
               (progn
                 (assert-index index count "assocBang")
-                (if (index-at-least? index (tail-offset count))
-                    (progn
-                      (put (editable-transient-tail state) (index-mask index BRANCH_MASK) value)
-                      (recordTransientVectorTailMutation))
-                    (put state "root"
-                          (transient-assoc-node
-                            (aref state "shift")
-                            (aref state "root")
-                            index
-                            value
-                            (aref state "owner"))))
+                (let ((tail-start (tail-offset count)))
+                  (if (index-at-least? index tail-start)
+                      (progn
+                        (put (editable-transient-tail state) (index-mask index BRANCH_MASK) value)
+                        (recordTransientVectorTailMutation))
+                      (put state "root"
+                            (transient-assoc-node
+                              (aref state "shift")
+                              (aref state "root")
+                              index
+                              value
+                              (aref state "owner")))))
                 (put state "changed" t)
                 self)))))
     (define-zero-method tproto TRANSIENT_PERSISTENT "[eliscript.transient.persistent]"
@@ -804,7 +805,7 @@
                   (get state :metadata)))))))
     (define-method-value proto "peek"
       (funcall
-        (js* "(sym) => ({ peek(notFound = null) { const state = this[sym]; if (state.count === 0) return notFound; const tail = state.tail; return tail[tail.length - 1]; } }).peek")
+        (js* "(sym) => ({ peek(notFound = null) { const tail = this[sym].tail; const len = tail.length; return len === 0 ? notFound : tail[len - 1]; } }).peek")
         VECTOR_STATE))
     (define-zero-method proto "pop" "pop"
       (lambda (self)

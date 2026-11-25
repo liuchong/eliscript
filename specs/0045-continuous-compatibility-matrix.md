@@ -48,7 +48,7 @@ The current support matrix is the Cartesian product of:
 | Linux | `ubuntu-24.04-arm` | arm64 | 32.0.50 |
 | macOS | `macos-15` | arm64 | 32.0.50 |
 
-Bun 1.4.0 and Node 24.20.0 are used in every retained local cell. Bun runs the
+Bun 1.4.0 and Node 24.22.3 are used in every retained local cell. Bun runs the
 suite and compiler commands; maintained host-boundary tests execute generated
 ESM under both Bun and Node.
 
@@ -83,7 +83,7 @@ For example, a macOS Emacs 32.0.50 cell can be recorded with:
 ```sh
 bun tools/compatibility/matrix.mjs --run \
   --emacs /path/to/emacs-32.0.50 \
-  --node /path/to/node-24.20.0
+  --node /path/to/node-24.22.3
 ```
 
 Reports live under `acceptance/matrix/`. Each report retains command status,

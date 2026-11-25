@@ -64,9 +64,9 @@
       (js-call (expect (get (get report :corpus) :sourceBytes)) :toBeGreaterThan 200000)
       ;; The current thirteen modules emit multiple declaration blocks, not a
       ;; fixed two fragments per file. Keep this measured corpus exact.
-      (be (get (get report :corpus) :artifactFragments) 46)
-      (be (get (get report :corpus) :shiftedCases) 32)
-      (be (get (get report :corpus) :cases) 78)
+      (be (get (get report :corpus) :artifactFragments) 47)
+      (be (get (get report :corpus) :shiftedCases) 33)
+      (be (get (get report :corpus) :cases) 80)
       (js-call (expect (get (get report :corpus) :marks)) :toBeGreaterThan 30000)
       (js-call (expect (get (get report :measurements) :speedup)) :toBeGreaterThanOrEqual (get (get report :decision) :minimumSpeedup)))))
   (test "failed locate gates retain complete measurement evidence" (async ()

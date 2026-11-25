@@ -1,0 +1,45 @@
+(module eliscript.managed-runtime-array-map
+  (import "./map.mjs" EMPTY_MAP)
+  (import "../managed/managed-literals.eli"
+    PersistentHashMap TransientHashMap literal-is-array-map literal-map literal-instance?)
+
+  (defconst ARRAY_MAP_THRESHOLD 8)
+  (defconst EMPTY_ARRAY_MAP EMPTY_MAP)
+  (defconst PersistentArrayMap PersistentHashMap)
+  (defconst TransientArrayMap TransientHashMap)
+  (defvar registered-promoter nil)
+
+  (defun persistentArrayMap (&rest entries)
+    (js-call PersistentHashMap :from entries))
+
+  (defun arrayMapFromKeyValues (key-values)
+    (unless (Array/isArray key-values)
+      (throw (new globalThis/TypeError "hash-map expects a key/value array")))
+    (apply literal-map key-values))
+
+  (defun isPersistentArrayMap (value)
+    (literal-is-array-map value))
+
+  (defun registerArrayMapPromoter (promoter)
+    (setq registered-promoter promoter)
+    undefined)
+
+  (defun readArrayMapState (value)
+    (when (isPersistentArrayMap value)
+      (get value :state)))
+
+  (defun readTransientArrayMapState (value)
+    (when (literal-instance? value TransientHashMap)
+      (get value :state)))
+
+  (export
+    ARRAY_MAP_THRESHOLD
+    PersistentArrayMap
+    TransientArrayMap
+    EMPTY_ARRAY_MAP
+    persistentArrayMap
+    arrayMapFromKeyValues
+    isPersistentArrayMap
+    registerArrayMapPromoter
+    readArrayMapState
+    readTransientArrayMapState))

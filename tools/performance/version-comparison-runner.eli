@@ -33,7 +33,9 @@
 
   (defun timed-batch (iterations function)
     (let ((index 0) (start (js-call performance :now)))
-      (while (< index iterations) (funcall function) (setq index (1+ index)))
+      (while (funcall (js* "(a, b) => a < b") index iterations)
+        (funcall function)
+        (setq index (1+ index)))
       (- (js-call performance :now) start)))
 
   (defun calibrate-batch (minimum function)

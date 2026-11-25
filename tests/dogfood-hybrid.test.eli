@@ -87,7 +87,7 @@
                 (throw (new globalThis.Error (or (js-call (get demo :stderr) :trim) "the demo build failed"))))
               (await (cp SITE (join staging "site") (js-object :recursive t))))))
         (let*
-          ((server (await (serveTree (join staging "site") 8903))))
+          ((server (await (serveTree (join staging "site") 8904))))
           (put state :server server)
           (put state :origin (get server :origin)))
         (try

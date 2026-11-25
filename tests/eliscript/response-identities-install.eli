@@ -9,7 +9,7 @@
   (defconst original (Object/assign (js-object) framework))
   (defconst source (readFileSync (resolve root "tests/compiler-response-events-test-ground.mjs")))
   (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex")
-             "a66735658460d74f9c3bc269944b7e4b6c38c5bfe9364395a981b46593abfec4")
+             "52cc31a5aebb74de7453ffa920c57f8744a932e813d035a41d74732da3498e45")
     (throw (new globalThis.TypeError "the complete original compiler response suite source identity changed")))
   (defvar count 0)
   (defvar restored false)

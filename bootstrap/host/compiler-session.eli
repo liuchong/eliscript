@@ -69,12 +69,13 @@
       :literalSources nil :literalModules nil :literalKey nil :literalRevision 0 :literalCache (new globalThis.Map)
       :projectKey nil :projectModules nil :projectPortablePlan nil
       :projectRevision 0 :moduleCache (new globalThis.Map)
-      :responseCursor nil :responseToken 0 :responseFastJson false :phaseObserver nil :lastPhase nil))
+      :responseCursor nil :responseToken 0 :responseFastJson false :responseTrustedJson false :phaseObserver nil :lastPhase nil))
 
   (defun compiler-session-close (state)
     (session-live state)
     (session-response-clear state)
     (put state :responseFastJson false)
+    (put state :responseTrustedJson false)
     (put state :runtime nil)
     (put state :runtimeSource nil)
     (put state :runtimeFilename nil)
@@ -237,6 +238,22 @@
     (put state :literalModules (get literals :modules))
     (put state :literalKey (get literals :key))
     (put state :literalCache (get literals :cache)))
+  (defun session-deep-freeze (root)
+    (let ((stack (js-array root)) (seen (new globalThis.Set)))
+      (while (> (js-length stack) 0)
+        (let ((cur (js-call stack :pop)))
+          (when (and (not (nil? cur)) (= (value-type cur) "object") (not (js-call seen :has cur)))
+            (js-call seen :add cur)
+            (if (Array/isArray cur)
+              (let ((i 0) (n (js-length cur)))
+                (while (< i n) (js-call stack :push (aref cur i)) (setq i (1+ i))))
+              (let ((keys (Object/keys cur)) (i 0))
+                (while (< i (js-length keys))
+                  (js-call stack :push (get cur (aref keys i)))
+                  (setq i (1+ i)))))
+            (Object/freeze cur)))))
+    root)
+
   (defun session-runtime (state request)
     (session-phase state "runtime-literals-start" 0)
     (let* ((source (session-string request "source" undefined))
@@ -254,7 +271,7 @@
         (let ((program (if (and (= source (get state :runtimeSource))
                                (= filename (get state :runtimeFilename)) (get state :runtime))
                           (get state :runtime)
-                          (session-runtime-ir state source filename "runtime-program" -1))))
+                          (session-deep-freeze (session-runtime-ir state source filename "runtime-program" -1)))))
           (session-phase state "runtime-program-complete" 0)
           ;; Restore only after every literal and the runtime succeeded. A
           ;; failed restore still leaves the previous session unpublished.
@@ -285,7 +302,86 @@
       (when (or (>= (js-length pending) 2048) (>= (get sink :units) 32768))
         (session-ir-wire-flush sink))))
 
-  (defun session-ir-wire-append (value ancestors frames chunks array-element)
+  (defun session-safe-number-array-p (arr)
+    (if (not (and (Array/isArray arr)
+                  (>= (js-length arr) 16)
+                  (eq (Object/getPrototypeOf arr) globalThis.Array.prototype)
+                  (not (Object/hasOwn arr "toJSON"))))
+        false
+      (let ((n (js-length arr)) (i 0) (ok t))
+        (while (and ok (< i n))
+          (let ((v (js-nth i arr)))
+            (unless (and (= (value-type v) "number")
+                         (Number/isFinite v)
+                         (or (/= v 0) (> (/ 1 v) 0)))
+              (setq ok false)))
+          (setq i (1+ i)))
+        ok)))
+
+  (defun session-plain-json-safe-p (root ancestors)
+    (let ((active (new globalThis.Set))
+          (verified (new globalThis.Set))
+          (stack (js-array (js-array root 0)))
+          (safe t))
+      (try
+        (progn
+          (while (and safe (> (js-length stack) 0))
+            (let* ((entry (js-call stack :pop))
+                   (cur (aref entry 0))
+                   (phase (aref entry 1)))
+              (if (= phase 1)
+                  (progn
+                    (js-call active :delete cur)
+                    (js-call verified :add cur))
+                (unless (js-call verified :has cur)
+                  (if (or (js-call ancestors :has cur) (js-call active :has cur))
+                      (setq safe false)
+                    (if (Array/isArray cur)
+                        (if (or (not (eq (Object/getPrototypeOf cur) globalThis.Array.prototype))
+                                (Object/hasOwn cur "toJSON"))
+                            (setq safe false)
+                          (progn
+                            (js-call active :add cur)
+                            (js-call stack :push (js-array cur 1))
+                            (let ((n (js-length cur)) (i 0))
+                              (while (and safe (< i n))
+                                (let* ((elem (js-nth i cur)) (k (value-type elem)))
+                                  (cond
+                                    ((nil? elem) nil)
+                                    ((= k "number")
+                                      (when (and (= elem 0) (< (/ 1 elem) 0)) (setq safe false)))
+                                    ((or (= k "string") (= k "boolean")) nil)
+                                    ((= k "bigint") (setq safe false))
+                                    ((= k "object")
+                                      (js-call stack :push (js-array elem 0)))
+                                    (t nil)))
+                                (setq i (1+ i))))))
+                      (let ((proto (Object/getPrototypeOf cur)))
+                        (if (or (and (not (nil? proto)) (not (eq proto globalThis.Object.prototype)))
+                                (Object/hasOwn cur "toJSON"))
+                            (setq safe false)
+                          (progn
+                            (js-call active :add cur)
+                            (js-call stack :push (js-array cur 1))
+                            (let* ((keys (Object/keys cur)) (n (js-length keys)) (i 0))
+                              (while (and safe (< i n))
+                                (let* ((item (get cur (js-nth i keys))) (k (value-type item)))
+                                  (cond
+                                    ((nil? item) nil)
+                                    ((= k "number")
+                                      (when (and (= item 0) (< (/ 1 item) 0)) (setq safe false)))
+                                    ((or (= k "string") (= k "boolean") (= k "undefined") (= k "function") (= k "symbol")) nil)
+                                    ((= k "bigint") (setq safe false))
+                                    ((= k "object")
+                                      (js-call stack :push (js-array item 0)))
+                                    (t nil)))
+                                (setq i (1+ i)))))))))))))
+          safe)
+        (finally
+          (js-call active :clear)
+          (js-call verified :clear)))))
+
+  (defun session-ir-wire-append (value ancestors frames chunks array-element fast)
     (let ((kind (value-type value)))
       (cond
         ((nil? value) (session-ir-wire-push chunks "null") t)
@@ -301,28 +397,42 @@
         (t
           (when (js-call ancestors :has value)
             (throw (new globalThis/TypeError "compiler IR cannot contain cycles")))
-          (let ((frame (js-object :value value :array (Array/isArray value)
-                         :keys nil :index 0 :first t :active false)))
-            ;; Publish the cleanup record before adding this path element.
-            ;; Object.keys or the opening chunk may fail after the add.
-            (js-call frames :push frame)
-            (js-call ancestors :add value)
-            (put frame :active t)
-            (if (get frame :array)
-                (session-ir-wire-push chunks "[")
-              (progn
-                (session-ir-wire-push chunks "{")
-                (put frame :keys (Object/keys value)))))
-          t))))
+          (cond
+            ((and (= fast t) (session-safe-number-array-p value))
+              (session-ir-wire-push chunks "[")
+              (session-ir-wire-push chunks (Reflect/apply session-json-parts-join value (js-array ",")))
+              (session-ir-wire-push chunks "]")
+              t)
+            ((and (= fast t)
+                  (let ((depth (js-length frames)))
+                    (and (or (= depth 0) (= depth 1) (= depth 3))
+                         (session-plain-json-safe-p value ancestors))))
+              (session-ir-wire-push chunks (JSON/stringify value))
+              t)
+            (t
+              (let ((frame (js-object :value value :array (Array/isArray value)
+                             :keys nil :index 0 :first t :active false)))
+                ;; Publish the cleanup record before adding this path element.
+                ;; Object.keys or the opening chunk may fail after the add.
+                (js-call frames :push frame)
+                (js-call ancestors :add value)
+                (put frame :active t)
+                (if (get frame :array)
+                    (session-ir-wire-push chunks "[")
+                  (progn
+                    (session-ir-wire-push chunks "{")
+                    (put frame :keys (Object/keys value)))))
+              t))))))
 
-  (defun session-ir-wire (value ancestors)
+  (defun session-ir-wire (value ancestors &optional fast)
     ;; The traversal owns only its active path entries. Completed shared
     ;; subtrees may be emitted again without recursion or intermediate joins.
     (let ((frames (js-array))
-          (chunks (js-object :pending (js-array) :units 0 :complete (js-array))))
+          (chunks (js-object :pending (js-array) :units 0 :complete (js-array)))
+          (trusted (= fast t)))
       (try
         (progn
-          (unless (session-ir-wire-append value ancestors frames chunks false)
+          (unless (session-ir-wire-append value ancestors frames chunks false trusted)
             (throw (new globalThis/TypeError "compiler IR must be JSON data")))
           (while (> (js-length frames) 0)
             (let* ((frame (js-nth (1- (js-length frames)) frames))
@@ -332,7 +442,7 @@
                   (when (< index (js-length container))
                     (put frame :index (1+ index))
                     (when (> index 0) (session-ir-wire-push chunks ","))
-                    (session-ir-wire-append (js-nth index container) ancestors frames chunks t)
+                    (session-ir-wire-append (js-nth index container) ancestors frames chunks t trusted)
                     (setq advance t))
                 (let ((keys (get frame :keys)))
                   (when (< index (js-length keys))
@@ -344,7 +454,7 @@
                         (put frame :first false)
                         (session-ir-wire-push chunks (JSON/stringify key))
                         (session-ir-wire-push chunks ":")
-                        (session-ir-wire-append item ancestors frames chunks false)))
+                        (session-ir-wire-append item ancestors frames chunks false trusted)))
                     (setq advance t))))
               (unless advance
                 (session-ir-wire-push chunks (if (get frame :array) "]" "}"))
@@ -1443,6 +1553,7 @@
       (js-object :memory memory :debug (= (get request :debug false) t))))
 
   (defun session-lowered-output (state modules request target lowered)
+    (put state :responseTrustedJson t)
     (let ((entry (get request :entry undefined))
           (typed (get lowered :typed)) (descriptor (get lowered :descriptor)))
         (if (= target "wasm")
@@ -1556,14 +1667,17 @@
             ;; strings are already owned by the result; no whole reply joins.
             (unless control (session-phase state "response-serialize-start" 0))
             (let* ((fast (= (get state :responseFastJson false) t))
+                   (trusted (= (get state :responseTrustedJson false) t))
                    (_ (when fast (put state :responseFastJson false)))
-                   (text (if fast (JSON/stringify result) (session-ir-wire result (new globalThis.Set)))))
+                   (_2 (when trusted (put state :responseTrustedJson false)))
+                   (text (if fast (JSON/stringify result) (session-ir-wire result (new globalThis.Set) trusted))))
               (unless control (session-phase state "response-serialize-complete" (js-length text)))
               text))))
       (catch error
         ;; Cleanup is secondary: malformed input, getters and compilation keep
         ;; their first original thrown value even if cleanup itself fails.
         (put state :responseFastJson false)
+        (put state :responseTrustedJson false)
         (try (session-response-clear state) (catch cleanup nil))
         (throw error))))
 

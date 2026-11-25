@@ -273,7 +273,7 @@
                     (Reflect/deleteProperty metadata "sourceAssets")
                     (let* ((archive-file "tests/direct-wasm-backend-test-ground.mjs")
                            (bytes (await (readFile (resolve root archive-file))))
-                           (sha "d9f520891835b132da32e6a57426f064b73dea8288340ffd19c6ca886edf91cc")
+                           (sha "daf1e30c5883cbb7507a65e893269d7f033e4ac34d931e71a136520bf6e5414b")
                            (proof (js-object :file archive-file :bytes (js-length bytes) :sourceSha256 sha
                              :region (js-object :start 0 :end (js-length (js-call bytes :toString "utf8"))
                                :byteStart 0 :byteEnd (js-length bytes) :sha256 sha)))
@@ -301,7 +301,7 @@
                         (Object/fromEntries (js-call (Object/entries (get old :original)) :filter (lambda (entry) (/= (aref entry 0) "sourceAssets"))))
                         (js-object :suite "tests/direct-wasm-backend-test-ground.mjs"
                           :processHostDependency expected-marker
-                          :sourceSha256 "d9f520891835b132da32e6a57426f064b73dea8288340ffd19c6ca886edf91cc")))))
+                          :sourceSha256 "daf1e30c5883cbb7507a65e893269d7f033e4ac34d931e71a136520bf6e5414b")))))
                 (js-call assert :deepStrictEqual record old)))
             (setq index (1+ index)))
           (js-call assert :strictEqual changed 2)))))

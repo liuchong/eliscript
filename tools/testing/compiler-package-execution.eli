@@ -28,8 +28,8 @@
           (unless (and options (= (value-type (get options :cwd)) "string")
                        (= file (resolve (get options :cwd) (basename file)))
                        (= (js-call (js-call (createHash "sha256") :update (readFileSync file)) :digest "hex")
-                         (if package "025c8ee9df0faaf600414a3be655bbb430c9fc78ce70df83bdc65eca007eab8b"
-                           "6b878d636cc9cf6a0c76aaa6711c09f4844225c7398eac0643499d8bfdfdffb6")))
+                         (if package "39a5e433ca849e60e980668b7250f02118a8e31a52ed8f34ac287e7a2e57f625"
+                           "1d41d694df4d825b5c1c5b2a7ee5d165177c9c7c9ac7181397ed18be0b9cf2d1")))
             (throw (new globalThis.TypeError "relocated compiler package child source identity changed")))
           (if package (js-array (resolve source-root "tools/testing/compiler-package-execution.mjs"))
             (js-array (resolve source-root "tools/testing/compiler-package-product.mjs") (aref arguments 1)))) undefined)))

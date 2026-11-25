@@ -123,7 +123,7 @@
           "tools/backends/compiler-package-loader.mjs" "tools/backends/compiler-package-loader.mjs.map" "tools/backends/compiler-host-record.mjs" "tools/backends/compiler-host-record.mjs.map"
           "tools/backends/compiler-host-iteration.mjs" "tools/backends/compiler-host-iteration.mjs.map")))
           (when (eq (get input :host) "native") (js-call transport :push "tools/backends/native-managed-runtime.mjs" "tools/backends/native-memory.mjs"
-            "tools/backends/native-node-memory.mjs" "tools/backends/native-node-worker.mjs" "tools/backends/native-node-runner.mjs" "tools/backends/native-node-watchdog.mjs"))
+            "tools/backends/native-node-ffi.mjs" "tools/backends/native-node-memory.mjs" "tools/backends/native-node-worker.mjs" "tools/backends/native-node-runner.mjs" "tools/backends/native-node-watchdog.mjs"))
           (let ((__eli_iterator_19 (openHostIterator transport))) (try (while (advanceHostIterator __eli_iterator_19) (let ((path (get __eli_iterator_19 :value))) (await (funcall putFile (str "transport/" (js-call path :slice (js-length "tools/"))) (resolve sourceRoot path))))) (catch __eli_iteration_error_20 (closeHostIterator __eli_iterator_19 t) (throw __eli_iteration_error_20)) (finally (closeHostIterator __eli_iterator_19 false)))))
 (await (funcall putFile "runtime/literals.mjs" (resolve sourceRoot "runtime/literals.mjs")))
 (setq copyCore (async (directoryPath)

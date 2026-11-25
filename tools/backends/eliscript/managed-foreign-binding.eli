@@ -1,7 +1,7 @@
 (module tools.backends.managed-foreign-binding
   (import "./managed-host-ground.mjs" failManagedRuntime managedExportSignatures invokeManagedABIExport)
   (import "./managed-layout.mjs" VAL64_NIL VAL64_UNDEFINED val64-dynamic-p val64-singleton-p bits64-u64-to-f64)
-  (import "./managed-source-view.mjs" withManagedSourceDecode
+  (import "./managed-source-view.mjs" withManagedSourceDecode invokeWithManagedSourceDecode
     registerManagedSourceDecodeRuntime isManagedSourceViewForRuntime)
   (import "../../runtime/core/collection.mjs" :as collection)
   (import "../../runtime/core/protocol.mjs" protocolHostCategory)
@@ -22,6 +22,159 @@
           ((eq prototype host-map-prototype) 2)
           ((eq prototype host-set-prototype) 3)
           (t prototype)))
+
+  (defconst directHeaderNumberView (new globalThis.DataView (new globalThis.ArrayBuffer 8)))
+  (defconst directHeaderScratchItems (new globalThis.Array 8))
+  (defconst directHeaderScratchKinds (new globalThis.Array 8))
+  (defconst directHeaderScratchTokens (new globalThis.Array 8))
+  (defconst directHeaderScratchNumbers (new globalThis.Array 8))
+  (defconst directHeaderScratchObject (js-object :count 0 :opcode VAL64_NIL :opcodeNumber -1 :collections 0
+    :items directHeaderScratchItems :kinds directHeaderScratchKinds
+    :tokens directHeaderScratchTokens :numbers directHeaderScratchNumbers))
+  (defvar directHeaderScratchInUse false)
+  (defvar directHeaderLastView nil)
+  (defvar directHeaderLastHeap -1)
+  (defvar directHeaderLastCtrl 0)
+
+  (defun releaseDirectSourceOperationHeader (header)
+    (when (eq header directHeaderScratchObject)
+      (setq directHeaderScratchInUse false)))
+
+  (defun directHeaderResolveBlock (v objBase slotBase slots rawVal)
+    (js-call directHeaderNumberView :setBigUint64 0 rawVal t)
+    (let ((lo (js-call directHeaderNumberView :getUint32 0 t))
+          (hi (js-call directHeaderNumberView :getUint32 4 t)))
+      (when (= (unsigned-bit-shift-right hi 16) 65528)
+        (let ((slot (bit-and lo 16777215))
+              (gen (unsigned-bit-shift-right
+                     (bit-or (bit-shift-left (bit-and hi 65535) 8)
+                             (unsigned-bit-shift-right lo 24)) 0)))
+          (when (and (/= slot 0) (/= gen 0) (<= slot slots))
+            (let ((entry (+ slotBase (* slot 24))))
+              (when (and (= (js-call v :getUint32 entry t) gen)
+                         (/= (bit-and (js-call v :getUint32 (+ entry 4) t) 1) 0))
+                (+ objBase (js-call v :getUint32 (+ entry 8) t)))))))))
+
+  (defun readDirectSourceOperationHeader (memory heap argumentsList &optional reusable)
+    (when (and memory (not (get memory :fastApply)) (val64-dynamic-p argumentsList) (> heap 0)
+               (= (value-type (get memory :view)) "function"))
+      (let* ((v (js-call memory :view))
+             (cachedHit (and (not (nullish? v))
+                             (eq v directHeaderLastView)
+                             (= heap directHeaderLastHeap)
+                             (/= directHeaderLastCtrl 0)))
+             (control 0) (objBase 0) (slotBase 0) (ready false))
+        (if cachedHit
+          (when (and (= (js-call v :getUint32 8 t) 0)
+                     (= (js-call v :getUint32 148 t) heap))
+            (setq control directHeaderLastCtrl
+                  objBase (js-call v :getUint32 156 t)
+                  slotBase (js-call v :getUint32 224 t)
+                  ready t))
+          (let ((bl (if (not (nullish? v))
+                      (if (not (nullish? (get v :buffer))) (get (get v :buffer) :byteLength) (get v :byteLength))
+                      0)))
+            (when (and (not (nullish? v))
+                       (= (value-type (get v :getUint32)) "function")
+                       (= (value-type (get v :getBigUint64)) "function")
+                       (= (value-type (get v :getFloat64)) "function")
+                       (= (value-type bl) "number")
+                       (>= bl 232)
+                       (= (js-call v :getUint32 8 t) 0)
+                       (= (js-call v :getUint32 148 t) heap))
+              (setq control (js-call v :getUint32 (+ heap 16) t))
+              (when (and (/= control 0)
+                         (>= bl (+ control 144))
+                         (= (js-call v :getUint32 control t) 1212498256))
+                (setq objBase (js-call v :getUint32 156 t)
+                      slotBase (js-call v :getUint32 224 t)
+                      directHeaderLastView v
+                      directHeaderLastHeap heap
+                      directHeaderLastCtrl control
+                      ready t)))))
+        (when ready
+          (let* ((slots (js-call v :getUint32 (+ control 56) t))
+                 (collections (js-call v :getUint32 (+ control 108) t))
+                 (p (directHeaderResolveBlock v objBase slotBase slots argumentsList)))
+                (when (and p (= (js-call v :getUint32 p t) 7))
+                  (let* ((count (js-call v :getUint32 (+ p 4) t))
+                         (opcode (if (> count 0) (js-call v :getBigUint64 (+ p 32) t) VAL64_NIL))
+                         (opcodeNumber -1)
+                         (opcodeIsNum false)
+                         (opcodeRo false))
+                    (unless (<= opcode VAL64_UNDEFINED)
+                      (js-call directHeaderNumberView :setBigUint64 0 opcode t)
+                      (let ((olo (js-call directHeaderNumberView :getUint32 0 t))
+                            (ohi (js-call directHeaderNumberView :getUint32 4 t)))
+                        (cond
+                          ((and (>= ohi 65536) (< ohi 4294443008))
+                           (js-call directHeaderNumberView :setUint32 4 (- ohi 65536) t)
+                           (setq opcodeNumber (js-call directHeaderNumberView :getFloat64 0 t)
+                                 opcodeIsNum t))
+                          ((= (unsigned-bit-shift-right ohi 16) 65528)
+                           (let ((op (directHeaderResolveBlock v objBase slotBase slots opcode)))
+                             (when (and op (= (js-call v :getUint32 op t) 4))
+                               (setq opcodeNumber (js-call v :getFloat64 (+ op 32) t)
+                                     opcodeIsNum t))))
+                          ((= (unsigned-bit-shift-right ohi 16) 65529)
+                           (setq opcodeRo t)))))
+                    (unless opcodeRo
+                      (if (and (>= count 2) (<= count 8))
+                        (let* ((useScratch (if reusable (not directHeaderScratchInUse) false))
+                               (items (if useScratch directHeaderScratchItems (new globalThis.Array count)))
+                               (kinds (if useScratch directHeaderScratchKinds (new globalThis.Array count)))
+                               (tokens (if useScratch directHeaderScratchTokens (new globalThis.Array count)))
+                               (numbers (if useScratch directHeaderScratchNumbers (new globalThis.Array count)))
+                               (directOk t)
+                               (i 1))
+                          (put items 0 opcode)
+                          (put kinds 0 (if opcodeIsNum 4 0))
+                          (put tokens 0 undefined)
+                          (put numbers 0 (if opcodeIsNum opcodeNumber undefined))
+                          (while (and directOk (< i count))
+                            (let ((item (js-call v :getBigUint64 (+ p (+ 32 (* i 8))) t)))
+                              (put items i item)
+                              (put tokens i undefined)
+                              (put numbers i undefined)
+                              (if (<= item VAL64_UNDEFINED)
+                                (put kinds i 0)
+                                (progn
+                                  (js-call directHeaderNumberView :setBigUint64 0 item t)
+                                  (let ((ilo (js-call directHeaderNumberView :getUint32 0 t))
+                                        (ihi (js-call directHeaderNumberView :getUint32 4 t)))
+                                    (cond
+                                      ((and (>= ihi 65536) (< ihi 4294443008))
+                                       (put kinds i 4)
+                                       (js-call directHeaderNumberView :setUint32 4 (- ihi 65536) t)
+                                       (put numbers i (js-call directHeaderNumberView :getFloat64 0 t)))
+                                      ((= (unsigned-bit-shift-right ihi 16) 65528)
+                                       (let ((bp (directHeaderResolveBlock v objBase slotBase slots item)))
+                                         (if bp
+                                           (let ((ik (js-call v :getUint32 bp t)))
+                                             (put kinds i ik)
+                                             (when (= ik 35)
+                                               (put tokens i (js-call v :getUint32 (+ bp 32) t)))
+                                             (when (= ik 4)
+                                               (put numbers i (js-call v :getFloat64 (+ bp 32) t))))
+                                           (setq directOk false))))
+                                      (t (setq directOk false)))))))
+                            (setq i (1+ i)))
+                          (if directOk
+                            (if useScratch
+                              (progn
+                                (setq directHeaderScratchInUse t)
+                                (put directHeaderScratchObject :count count)
+                                (put directHeaderScratchObject :opcode opcode)
+                                (put directHeaderScratchObject :opcodeNumber opcodeNumber)
+                                (put directHeaderScratchObject :collections collections)
+                                directHeaderScratchObject)
+                              (js-object :count count :opcode opcode :opcodeNumber opcodeNumber
+                                :collections collections :items items :kinds kinds
+                                :tokens tokens :numbers numbers))
+                            (js-object :count count :opcode opcode :opcodeNumber opcodeNumber
+                              :collections collections)))
+                        (js-object :count count :opcode opcode :opcodeNumber opcodeNumber
+                          :collections collections))))))))))
 
   ;; Match the emitter's binding-get policy. The collection protocol, including
   ;; direct slots and exact prototype registrations, remains the actual runtime
@@ -90,77 +243,84 @@
                (wrapped-attach undefined))
           (setq wrapped-attach (same-function-shape (lambda (handler)
             (let ((original-handler handler))
-              (setq handler (lambda (name heap arguments &rest extra)
+              (setq handler (lambda (name heap arguments supplied)
                 (if (= heap owner)
-                  (withManagedSourceDecode
-                    (lambda ()
-                      (if (> (js-length extra) 0)
-                        (funcall original-handler name heap arguments (aref extra 0))
-                        (funcall original-handler name heap arguments)))
-                    realm)
-                  (if (> (js-length extra) 0)
-                    (funcall original-handler name heap arguments (aref extra 0))
+                  (invokeWithManagedSourceDecode realm original-handler name heap arguments supplied (not (undefined? supplied)))
+                  (if (not (undefined? supplied))
+                    (funcall original-handler name heap arguments supplied)
                     (funcall original-handler name heap arguments))))))
-            (Reflect/apply attach bridge (js-array (lambda (name heap arguments &rest extra)
-              (let ((supplied (aref extra 0)))
-                (if (or (undefined? runtime) (/= heap owner) (/= name "source-operation")
-                        (if supplied false (/= (funcall checked "value-kind" heap arguments) 7)))
-                  (funcall handler name heap arguments)
-                  (let ((count (if supplied (get supplied :count) (funcall checked "value-length" heap arguments))))
-                    (if (= count 0)
-                      (funcall handler name heap arguments (or supplied (js-object :count 0 :opcode VAL64_NIL :opcodeNumber -1)))
-                      (let* ((opcode (if supplied (get supplied :opcode) (funcall checked "value-get" heap arguments 0)))
-                             (operation (if supplied (get supplied :opcodeNumber)
-                                          (if (and (not (val64-singleton-p opcode)) (= (funcall checked "value-kind" heap opcode) 4))
-                                            (bits64-u64-to-f64 (funcall checked "value-number-bits" heap opcode)) -1))))
-                        (if (and (/= operation 32) (/= operation 33) (/= operation 34))
-                          (funcall handler name heap arguments (or supplied (js-object :count count :opcode opcode :opcodeNumber operation)))
+            (Reflect/apply attach bridge (js-array (lambda (name heap arguments supplied)
+              (let ((claimedScratch false))
+                (when (and (not supplied) (not (undefined? runtime)) (= heap owner) (= name "source-operation"))
+                  (let ((direct (readDirectSourceOperationHeader memory heap arguments t)))
+                    (when direct
+                      (setq supplied direct
+                            claimedScratch (eq direct directHeaderScratchObject)))))
+                (try
+                  (if (or (undefined? runtime) (/= heap owner) (/= name "source-operation")
+                          (if supplied false (/= (funcall checked "value-kind" heap arguments) 7)))
+                    (if supplied (funcall handler name heap arguments supplied) (funcall handler name heap arguments))
+                    (let ((count (if supplied (get supplied :count) (funcall checked "value-length" heap arguments))))
+                      (if (= count 0)
                         (progn
-                          (unless (= count (if (= operation 32) 4 2)) (failManagedRuntime 3))
-                          (let ((frame undefined) (callee undefined) (result VAL64_NIL) (primary false)
-                                (operand-count (if (= operation 32) 3 1))
-                                (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
-                            (try
-                              (progn
-                                (setq frame (js-call runtime :frame 3))
-                                (let ((frame-id (funcall checked "frame-current" heap)))
-                                  (setq callee (js-call runtime :fromHostValue
-                                    (if (= operation 32) binding-read
-                                      (if (= operation 33) readManagedForeignProtocolPrototype createManagedForeignPlainObject))))
-                                  (js-call runtime :frameSet frame 0 callee)
-                                  (let ((tuple (funcall checked "value-refs" heap 7 (+ 3 operand-count))))
-                                    (funcall checked "frame-set" heap frame-id 1 tuple)
-                                    (funcall checked "value-set" heap tuple 0 opcode)
-                                    ;; The original opcode is replaced by an owned
-                                    ;; number; the real ground codec handles Call.
-                                    (let ((number (js-call runtime :number 8)))
-                                      (try
-                                        (js-call runtime :frameSet frame 2 number)
-                                        (let ((raw-number (funcall checked "frame-get" heap frame-id 2)))
-                                          (funcall checked "value-set" heap tuple 0 raw-number))
-                                        (finally (js-call runtime :release number))))
-                                    (funcall checked "value-set" heap tuple 1 (funcall checked "frame-get" heap frame-id 0))
-                                    (funcall checked "value-set" heap tuple 2 VAL64_UNDEFINED)
-                                    (let ((index 0))
-                                      (while (< index operand-count)
-                                        (funcall checked "value-set" heap tuple (+ index 3)
-                                          (funcall checked "value-get" heap arguments (1+ index)))
-                                        (setq index (1+ index))))
-                                    (setq result (funcall handler name heap tuple
-                                      (js-object :count (+ 3 operand-count) :opcodeNumber 8
-                                                 :pendingForeign (when supplied (get supplied :pendingForeign))))))))
-                            (catch error (setq primary t) (throw error))
-                            (finally
-                              (setq status (funcall raw "last-error") source-class (if (/= status 0) (funcall raw "value-exception-class" heap) 0))
-                              (js-call (js-array
-                                (lambda () (when callee (js-call runtime :release callee)))
-                                (lambda () (unless (undefined? frame) (js-call runtime :leaveFrame frame))))
-                                :forEach (lambda (action) (try (funcall action)
-                                  (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
-                              (funcall raw "value-exception-class-set" heap source-class)
-                              (funcall raw "value-error-restore" status)
-                              (when (and cleanup-failed (not primary) (= status 0)) (throw cleanup))))
-                            result)))))))))))) attach))
+                          (unless supplied (setq supplied (js-object :count 0 :opcode VAL64_NIL :opcodeNumber -1)))
+                          (funcall handler name heap arguments supplied))
+                        (let* ((opcode (if supplied (get supplied :opcode) (funcall checked "value-get" heap arguments 0)))
+                               (operation (if supplied (get supplied :opcodeNumber)
+                                            (if (and (not (val64-singleton-p opcode)) (= (funcall checked "value-kind" heap opcode) 4))
+                                              (bits64-u64-to-f64 (funcall checked "value-number-bits" heap opcode)) -1))))
+                          (if (and (/= operation 32) (/= operation 33) (/= operation 34))
+                            (progn
+                              (unless supplied (setq supplied (js-object :count count :opcode opcode :opcodeNumber operation)))
+                              (funcall handler name heap arguments supplied))
+                          (progn
+                            (unless (= count (if (= operation 32) 4 2)) (failManagedRuntime 3))
+                            (let ((frame undefined) (callee undefined) (result VAL64_NIL) (primary false)
+                                  (operand-count (if (= operation 32) 3 1))
+                                  (status 0) (source-class 0) (cleanup undefined) (cleanup-failed false))
+                              (try
+                                (progn
+                                  (setq frame (js-call runtime :frame 3))
+                                  (let ((frame-id (funcall checked "frame-current" heap)))
+                                    (setq callee (js-call runtime :fromHostValue
+                                      (if (= operation 32) binding-read
+                                        (if (= operation 33) readManagedForeignProtocolPrototype createManagedForeignPlainObject))))
+                                    (js-call runtime :frameSet frame 0 callee)
+                                    (let ((tuple (funcall checked "value-refs" heap 7 (+ 3 operand-count))))
+                                      (funcall checked "frame-set" heap frame-id 1 tuple)
+                                      (funcall checked "value-set" heap tuple 0 opcode)
+                                      ;; The original opcode is replaced by an owned
+                                      ;; number; the real ground codec handles Call.
+                                      (let ((number (js-call runtime :number 8)))
+                                        (try
+                                          (js-call runtime :frameSet frame 2 number)
+                                          (let ((raw-number (funcall checked "frame-get" heap frame-id 2)))
+                                            (funcall checked "value-set" heap tuple 0 raw-number))
+                                          (finally (js-call runtime :release number))))
+                                      (funcall checked "value-set" heap tuple 1 (funcall checked "frame-get" heap frame-id 0))
+                                      (funcall checked "value-set" heap tuple 2 VAL64_UNDEFINED)
+                                      (let ((index 0))
+                                        (while (< index operand-count)
+                                          (funcall checked "value-set" heap tuple (+ index 3)
+                                            (funcall checked "value-get" heap arguments (1+ index)))
+                                          (setq index (1+ index))))
+                                      (setq result (funcall handler name heap tuple
+                                        (js-object :count (+ 3 operand-count) :opcodeNumber 8
+                                                   :pendingForeign (when supplied (get supplied :pendingForeign))))))))
+                              (catch error (setq primary t) (throw error))
+                              (finally
+                                (setq status (funcall raw "last-error") source-class (if (/= status 0) (funcall raw "value-exception-class" heap) 0))
+                                (js-call (js-array
+                                  (lambda () (when callee (js-call runtime :release callee)))
+                                  (lambda () (unless (undefined? frame) (js-call runtime :leaveFrame frame))))
+                                  :forEach (lambda (action) (try (funcall action)
+                                    (catch error (unless cleanup-failed (setq cleanup-failed t cleanup error))))))
+                                (funcall raw "value-exception-class-set" heap source-class)
+                                (funcall raw "value-error-restore" status)
+                                (when (and cleanup-failed (not primary) (= status 0)) (throw cleanup))))
+                              result)))))))
+                  (finally
+                    (when claimedScratch (setq directHeaderScratchInUse false))))))))) attach))
           (put (aref bridge-descriptors "attach") :value wrapped-attach)
           (put entry :value (Object/create (Object/getPrototypeOf bridge) bridge-descriptors))
           (put forwarded 1 (Object/create (Object/getPrototypeOf lifecycle) locals))
@@ -203,4 +363,4 @@
             (js-call (js-array (Object/create (Object/getPrototypeOf exports) descriptors) descriptor memory) :concat forwarded))) realm))
           (registerManagedSourceDecodeRuntime runtime realm)
           runtime))))
-  (export readManagedForeignBinding readManagedForeignProtocolPrototype createManagedForeignPlainObject createManagedForeignBindingRuntime))
+  (export readManagedForeignBinding readManagedForeignProtocolPrototype createManagedForeignPlainObject createManagedForeignBindingRuntime readDirectSourceOperationHeader releaseDirectSourceOperationHeader))

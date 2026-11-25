@@ -1,5 +1,5 @@
 (module eliscript.backend.capabilities
-  (import "./numeric.mjs" backend-fail)
+  (import "./numeric.mjs" backend-fail runtime-body-cache-get trusted-runtime-program-p)
 
   ;; A capability is declared only when a typed operation actually needs it.
   ;; Scalar and pure managed programs keep the original import-free ABI.
@@ -43,11 +43,16 @@
         same)))
 
   (defun prepare-host-capabilities-core (program fresh)
-    (let ((names (js-array)) (functions (get program :functions)) (index 0) (result (js-array)))
+    (let ((names (js-array)) (functions (get program :functions))
+          (trusted (trusted-runtime-program-p program))
+          (index 0) (result (js-array)))
       (unless (Array/isArray functions) (backend-fail program "typed capability scan requires declared functions"))
       (while (< index (js-length functions))
-        (collect-host-capabilities (get (js-nth index functions) :body) names
-          (when fresh (new globalThis.WeakMap)))
+        (let* ((body (get (js-nth index functions) :body))
+               (cached (runtime-body-cache-get body)))
+          (unless (and cached (or trusted (get cached :frozen)) (not (get cached :hasHostCall)))
+            (collect-host-capabilities body names
+              (when fresh (new globalThis.WeakMap)))))
         (setq index (1+ index)))
       (when (and (> (js-length names) 0) (/= (get program :abi) "memory-u32"))
         (backend-fail program "host capabilities require memory-u32 input"))

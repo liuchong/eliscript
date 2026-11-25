@@ -13,7 +13,7 @@ Eliscript separates the environments it intends to support from the environments
 required to accept the current core release candidate. Linux x64 remains in the
 maintained target matrix, but absence of a Linux host does not block this final
 acceptance. The required local acceptance profile is macOS arm64 with Emacs
-32.0.50, Bun 1.4.0, and Node 24.20.0.
+32.0.50, Bun 1.4.0, and Node 24.22.3.
 
 This is a support-policy migration, not removal of Linux compatibility. Linux
 cells continue to be generated, validated when retained, and reported as

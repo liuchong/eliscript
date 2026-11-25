@@ -14,18 +14,24 @@
               :rest nil
               :metadata metadata)))
 
-  (defportable make-persistent-list-node (value rest metadata)
-    (let ((count (1+ (get rest "count" 0))))
-      (if (nil? metadata)
-          (js-object :kind persistent-list-kind
-                  :count count
-                  :value value
-                  :rest rest)
+  (defportable make-persistent-list-node-with-count (count value rest metadata)
+    (if (nil? metadata)
         (js-object :kind persistent-list-kind
                 :count count
                 :value value
-                :rest rest
-                :metadata metadata))))
+                :rest rest)
+      (js-object :kind persistent-list-kind
+              :count count
+              :value value
+              :rest rest
+              :metadata metadata)))
+
+  (defportable make-persistent-list-node (value rest metadata)
+    (make-persistent-list-node-with-count
+     (1+ (get rest "count" 0))
+     value
+     rest
+     metadata))
 
   (defportable persistent-list? (value)
     (and (not (nullish? value))
@@ -42,10 +48,21 @@
     (get list "count" 0))
 
   (defportable persistent-list-cons (list value)
-    (if (>= (persistent-list-count list) persistent-list-max-count)
-        nil
-      (make-persistent-list-node
-       value list (get list "metadata" nil))))
+    (let ((count (get list "count" 0)))
+      (if (>= count persistent-list-max-count)
+          nil
+        (let ((meta (get list "metadata" nil))
+              (next-count (1+ count)))
+          (if (nil? meta)
+              (js-object :kind persistent-list-kind
+                         :count next-count
+                         :value value
+                         :rest list)
+            (js-object :kind persistent-list-kind
+                       :count next-count
+                       :value value
+                       :rest list
+                       :metadata meta))))))
 
   (defportable persistent-list-conj (list value)
     (persistent-list-cons list value))
@@ -101,16 +118,33 @@
   (defportable persistent-list-reduce (function initial list)
     (let ((result initial)
           (current list))
-      (while (not (persistent-list-empty? current))
+      (while (/= (get current "count" 0) 0)
         (setq result (funcall function result (get current "value"))
               current (get current "rest" nil)))
       result))
 
   (defportable persistent-list-reverse (list)
-    (persistent-list-reduce
-     (lambda (result value) (persistent-list-cons result value))
-     (make-empty-persistent-list (persistent-list-meta list))
-     list))
+    (let* ((meta (get list "metadata" nil))
+           (result (make-empty-persistent-list meta))
+           (current list)
+           (out-count 0))
+      (if (nil? meta)
+          (while (/= (get current "count" 0) 0)
+            (setq out-count (1+ out-count)
+                  result (js-object :kind persistent-list-kind
+                                    :count out-count
+                                    :value (get current "value")
+                                    :rest result)
+                  current (get current "rest" nil)))
+        (while (/= (get current "count" 0) 0)
+          (setq out-count (1+ out-count)
+                result (js-object :kind persistent-list-kind
+                                  :count out-count
+                                  :value (get current "value")
+                                  :rest result
+                                  :metadata meta)
+                current (get current "rest" nil))))
+      result))
 
   (defportable persistent-list-array-reverse (values)
     (let ((result (js-array))
@@ -128,10 +162,15 @@
       list)))
 
   (defportable persistent-list-from-array (values)
-    (let ((result (empty-persistent-list))
-          (index (1- (js-length values))))
+    (let ((result (make-empty-persistent-list nil))
+          (index (1- (js-length values)))
+          (out-count 0))
       (while (>= index 0)
-        (setq result (persistent-list-cons result (get values index))
+        (setq out-count (1+ out-count)
+              result (js-object :kind persistent-list-kind
+                                :count out-count
+                                :value (get values index)
+                                :rest result)
               index (1- index)))
       result))
 

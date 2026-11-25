@@ -14,6 +14,14 @@
   (defconst instant-state (new globalThis/WeakMap))
   (defconst duration-state (new globalThis/WeakMap))
 
+  (defconst make-named-class
+    (js* "(implementation, name) => { if (typeof name !== \"string\") throw new TypeError(\"class name must be a string\"); return ({ [name]: class { constructor(...args) { return implementation(this, ...args); } } })[name]; }"))
+  (defconst make-receiver-method
+    (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }"))
+
+  (defvar fallback-now-ms 1700000000000)
+  (defvar cached-host-now undefined)
+
   (defun fail (message)
     (throw (new globalThis/TypeError message)))
 
@@ -22,6 +30,90 @@
 
   (defun normalize-zero (n)
     (if (Object/is n -0.0) 0 n))
+
+  (defun get-host-now-fn ()
+    (when (undefined? cached-host-now)
+      (setq cached-host-now
+        (try
+          (let ((probe (new globalThis/Function "return typeof Date === 'function' && typeof Date.now === 'function' ? () => Date.now() : null;")))
+            (or (funcall probe) nil))
+          (catch _ignored nil))))
+    cached-host-now)
+
+  (defun current-epoch-ms ()
+    (let ((fn (get-host-now-fn)))
+      (if (not (nil? fn))
+        (funcall fn)
+        (progn
+          (setq fallback-now-ms (1+ fallback-now-ms))
+          fallback-now-ms))))
+
+  (defun is-leap-year? (year)
+    (and (= (% year 4) 0)
+         (or (/= (% year 100) 0) (= (% year 400) 0))))
+
+  (defun days-in-month (year month)
+    (cond
+      ((= month 2) (if (is-leap-year? year) 29 28))
+      ((or (= month 4) (= month 6) (= month 9) (= month 11)) 30)
+      (t 31)))
+
+  (defun days-from-civil (year month day)
+    (let* ((yy (if (<= month 2) (1- year) year))
+           (era (Math/floor (/ yy 400)))
+           (yoe (- yy (* era 400)))
+           (doy (+ (Math/floor (/ (+ (* 153 (+ month (if (> month 2) -3 9))) 2) 5)) (1- day)))
+           (doe (+ (* yoe 365) (Math/floor (/ yoe 4)) (- (Math/floor (/ yoe 100))) doy)))
+      (- (+ (* era 146097) doe) 719468)))
+
+  (defun pad2 (n)
+    (if (< n 10) (str "0" n) (str n)))
+
+  (defun pad3 (n)
+    (cond ((< n 10) (str "00" n))
+          ((< n 100) (str "0" n))
+          (t (str n))))
+
+  (defun pad4 (n)
+    (cond ((< n 10) (str "000" n))
+          ((< n 100) (str "00" n))
+          ((< n 1000) (str "0" n))
+          (t (str n))))
+
+  (defun pad6 (n)
+    (let ((s (str n)))
+      (while (< (js-length s) 6)
+        (setq s (str "0" s)))
+      s))
+
+  (defun format-iso-utc (ms)
+    (let* ((days (Math/floor (/ ms 86400000)))
+           (rem (- ms (* days 86400000)))
+           (zz (+ days 719468))
+           (era (Math/floor (/ zz 146097)))
+           (doe (- zz (* era 146097)))
+           (yoe (Math/floor (/ (- (+ (- doe (Math/floor (/ doe 1460)))
+                                     (Math/floor (/ doe 36524)))
+                                  (Math/floor (/ doe 146096)))
+                               365)))
+           (y (+ yoe (* era 400)))
+           (doy (- doe (+ (* 365 yoe) (Math/floor (/ yoe 4)) (- (Math/floor (/ yoe 100))))))
+           (mp (Math/floor (/ (+ (* 5 doy) 2) 153)))
+           (day (+ (- doy (Math/floor (/ (+ (* 153 mp) 2) 5))) 1))
+           (month (+ mp (if (< mp 10) 3 -9)))
+           (year (if (<= month 2) (1+ y) y))
+           (hour (Math/floor (/ rem 3600000)))
+           (rem1 (- rem (* hour 3600000)))
+           (minute (Math/floor (/ rem1 60000)))
+           (rem2 (- rem1 (* minute 60000)))
+           (second (Math/floor (/ rem2 1000)))
+           (millis (- rem2 (* second 1000)))
+           (year-str (cond
+                       ((< year 0) (str "-" (pad6 (- year))))
+                       ((> year 9999) (str "+" (pad6 year)))
+                       (t (pad4 year)))))
+      (str year-str "-" (pad2 month) "-" (pad2 day) "T"
+           (pad2 hour) ":" (pad2 minute) ":" (pad2 second) "." (pad3 millis) "Z")))
 
   (defun parse-digits (text start count)
     (if (> (+ start count) (js-length text))
@@ -97,48 +189,85 @@
                                 (sign (if (= tzc 43) 1 -1)))
                             (when (and (>= tzh 0) (<= tzh 23) (>= tzm 0) (<= tzm 59))
                               (setq tz-offset-ms (* sign (+ (* tzh 60) tzm) 60000))))))))
-                  (if (nil? tz-offset-ms)
+                  (if (or (nil? tz-offset-ms) (> day (days-in-month year month)))
                     nil
-                    (let ((utc-check (new globalThis/Date (Date/UTC year (1- month) day 0 0 0 0))))
-                      (if (or (not (= (js-call utc-check :getUTCFullYear) year))
-                              (not (= (1+ (js-call utc-check :getUTCMonth)) month))
-                              (not (= (js-call utc-check :getUTCDate) day)))
-                        nil
-                        (let ((epoch-ms (normalize-zero
-                                          (- (Date/UTC year (1- month) day hour minute second millis)
-                                             tz-offset-ms))))
-                          (if (and (Number/isSafeInteger epoch-ms)
-                                   (<= (Math/abs epoch-ms) MAX_INSTANT_MS))
-                            epoch-ms
-                            nil)))))))))))))
+                    (let ((epoch-ms (normalize-zero
+                                      (- (+ (* (days-from-civil year month day) 86400000)
+                                            (* hour 3600000)
+                                            (* minute 60000)
+                                            (* second 1000)
+                                            millis)
+                                         tz-offset-ms))))
+                      (if (and (Number/isSafeInteger epoch-ms)
+                               (<= (Math/abs epoch-ms) MAX_INSTANT_MS))
+                        epoch-ms
+                        nil)))))))))))
 
   (defconst Instant
-    (funcall
-      (js* "(init, getIso) => class Instant { constructor(token, ms, iso) { init(this, token, ms, iso); } toString() { return getIso(this); } toJSON() { return getIso(this); } get [Symbol.toStringTag]() { return \"Instant\"; } }")
-      (lambda (self token ms iso)
-        (unless (eq token INSTANT_TOKEN)
-          (fail "Instant instances must be created via instant(), parse-instant(), or now()"))
-        (js-call instant-state :set self (Object/freeze (js-object :ms ms :iso iso)))
-        (Object/freeze self))
-      (lambda (self)
-        (get (js-call instant-state :get self) :iso))))
+    (let ((ctor (funcall make-named-class
+                  (lambda (self token ms iso)
+                    (unless (eq token INSTANT_TOKEN)
+                      (fail "Instant instances must be created via instant(), parse-instant(), or now()"))
+                    (js-call instant-state :set self (Object/freeze (js-object :ms ms :iso iso)))
+                    (Object/freeze self))
+                  "Instant")))
+      (let ((proto (get ctor :prototype)))
+        (Object/defineProperty proto "toString"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (get (js-call instant-state :get self) :iso)) "toString")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto "toJSON"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (get (js-call instant-state :get self) :iso)) "toJSON")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto (get globalThis/Symbol :toStringTag)
+          (js-object
+            :get (funcall make-receiver-method (lambda (_self) "Instant") "get [Symbol.toStringTag]")
+            :enumerable false
+            :configurable t)))
+      ctor))
 
   (defconst Duration
-    (funcall
-      (js* "(init, getMs) => class Duration { constructor(token, ms) { init(this, token, ms); } toString() { return getMs(this) + \"ms\"; } toJSON() { return getMs(this); } get [Symbol.toStringTag]() { return \"Duration\"; } }")
-      (lambda (self token ms)
-        (unless (eq token DURATION_TOKEN)
-          (fail "Duration instances must be created via duration() or instant-diff()"))
-        (js-call duration-state :set self (Object/freeze (js-object :ms ms)))
-        (Object/freeze self))
-      (lambda (self)
-        (get (js-call duration-state :get self) :ms))))
+    (let ((ctor (funcall make-named-class
+                  (lambda (self token ms)
+                    (unless (eq token DURATION_TOKEN)
+                      (fail "Duration instances must be created via duration() or instant-diff()"))
+                    (js-call duration-state :set self (Object/freeze (js-object :ms ms)))
+                    (Object/freeze self))
+                  "Duration")))
+      (let ((proto (get ctor :prototype)))
+        (Object/defineProperty proto "toString"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (str (get (js-call duration-state :get self) :ms) "ms")) "toString")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto "toJSON"
+          (js-object
+            :value (funcall make-receiver-method (lambda (self) (get (js-call duration-state :get self) :ms)) "toJSON")
+            :writable t
+            :enumerable false
+            :configurable t))
+        (Object/defineProperty proto (get globalThis/Symbol :toStringTag)
+          (js-object
+            :get (funcall make-receiver-method (lambda (_self) "Duration") "get [Symbol.toStringTag]")
+            :enumerable false
+            :configurable t)))
+      ctor))
 
   (defun instant? (value)
-    (funcall (js* "(value, Ctor) => value instanceof Ctor") value Instant))
+    (and (not (nullish? value))
+         (or (= (value-type value) "object") (= (value-type value) "function"))
+         (js-call instant-state :has value)))
 
   (defun duration? (value)
-    (funcall (js* "(value, Ctor) => value instanceof Ctor") value Duration))
+    (and (not (nullish? value))
+         (or (= (value-type value) "object") (= (value-type value) "function"))
+         (js-call duration-state :has value)))
 
   (defun require-instant (value label)
     (unless (instant? value)
@@ -156,7 +285,7 @@
     (when (> (Math/abs ms) MAX_INSTANT_MS)
       (range-fail (str "instant epoch milliseconds out of supported range: " ms)))
     (let* ((clean-ms (normalize-zero ms))
-           (iso (js-call (new globalThis/Date clean-ms) :toISOString)))
+           (iso (format-iso-utc clean-ms)))
       (new Instant INSTANT_TOKEN clean-ms iso)))
 
   (defun parse-instant (text)
@@ -172,7 +301,7 @@
       ((instant? input) input)
       ((= (value-type input) "number")
         (make-instant-from-ms input))
-      ((funcall (js* "(v) => v instanceof Date") input)
+      ((= (js-call (get (get globalThis/Object :prototype) :toString) :call input) "[object Date]")
         (let ((ms (js-call input :getTime)))
           (when (Number/isNaN ms)
             (fail "cannot construct Instant from invalid Date"))
@@ -186,7 +315,7 @@
         (fail "instant expects an Instant, epoch ms integer, Date, or ISO-8601 string"))))
 
   (defun now ()
-    (make-instant-from-ms (Date/now)))
+    (make-instant-from-ms (current-epoch-ms)))
 
   (defun instant-ms (value)
     (require-instant value "instant-ms")

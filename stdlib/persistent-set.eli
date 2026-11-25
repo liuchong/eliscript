@@ -79,18 +79,20 @@
           set
         (if (nil? next-map)
             nil
-          (persistent-set-make-map
-           next-map
-           (persistent-set-meta set))))))
+          (let ((metadata (get set "metadata" nil)))
+            (if (nil? metadata)
+                (js-object :kind persistent-set-kind :map next-map)
+              (js-object :kind persistent-set-kind :map next-map :metadata metadata)))))))
 
   (defportable persistent-set-disj (set value)
     (let* ((map (get set "map" nil))
            (next-map (persistent-map-dissoc map value)))
       (if (= map next-map)
           set
-        (persistent-set-make-map
-         next-map
-         (persistent-set-meta set)))))
+        (let ((metadata (get set "metadata" nil)))
+          (if (nil? metadata)
+              (js-object :kind persistent-set-kind :map next-map)
+            (js-object :kind persistent-set-kind :map next-map :metadata metadata))))))
 
   (defportable persistent-set-reduce (function initial set)
     (persistent-map-reduce

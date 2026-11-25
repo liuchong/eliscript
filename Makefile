@@ -13,6 +13,8 @@ unexport ELISCRIPT_BATCH_CLEANED
 ELISCRIPT_NODE_HEAP_MIB ?= 12288
 export NODE_OPTIONS ?= --max-old-space-size=$(ELISCRIPT_NODE_HEAP_MIB)
 # The Node self-hosted suite exposes GC for completed compiler snapshots.
+ELISCRIPT_TEST_PARALLEL ?= 1
+export ELISCRIPT_TEST_PARALLEL
 BUN_TEST_RUNNER ?= tools/testing/final-functional-scope.mjs
 BUN_ARTIFACT_TEST_RUNNER ?= $(BUN_TEST_RUNNER)
 SUITE_RUNNER ?= tools/testing/file-workers.mjs
@@ -93,11 +95,11 @@ compiler-release-ci: bootstrap-release
 	$(SUITE_STEP) compiler-release-ci check-release-workflow "" -- $(NODE) tools/ci/dist/compiler-release.mjs --check
 	ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-release-ci bootstrap-selfhosted-tests "" -- $(NODE) --test --test-concurrency=1 tests/bootstrap-js-stages-selfhosted.test.mjs tests/stage3-targets-selfhosted.test.mjs tests/bootstrap-release-integration-selfhosted.test.mjs
 	$(SUITE_PREREQ) compiler-release-ci prepare-release-package "" -- $(MAKE) prepare-release-package
-	ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)" --functional-runtime-profile small
+	$(SUITE_STEP) compiler-release-ci check-stage3-targets prepare-release-package -- $(NODE) --expose-gc tools/backends/dist/release-cli.mjs targets --bootstrap-manifest "$(BOOTSTRAP_RELEASE_MANIFEST)" --output "$(BOOTSTRAP_RELEASE_OUT)/targets" --native-target "$(NATIVE_TARGET)"
 	ELISCRIPT_RELEASE_PACKAGE_BOOTSTRAP_MANIFEST=dist/stage3-release.json ELISCRIPT_TEST_FIXTURE_ROOT="$(CURDIR)" $(SUITE_STEP) compiler-release-ci check-release-package prepare-release-package -- $(NODE) --test --test-concurrency=1 tests/release-package-install-selfhosted.test.mjs
 	# Reuse the already generated and authenticated cohort. Rebuilding here
 	# would replace the installed stage3 runtime with an Emacs bootstrap product.
-	ELISCRIPT_PREPARED_STAGE3=1 ELISCRIPT_DEFER_SUITE_FINALIZE=1 ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE=small ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE=1 $(MAKE) test-bootstrap-artifacts
+	ELISCRIPT_PREPARED_STAGE3=1 ELISCRIPT_DEFER_SUITE_FINALIZE=1 $(MAKE) test-bootstrap-artifacts
 	@$(SUITE_FINALIZE) compiler-release-ci "$(RELEASE_CI_SUITE_STEPS)"
 
 .PHONY: test test-pre-bootstrap test-pre-bootstrap-originals test-bootstrap-artifacts test-core test-applications check-contracts byte-compile bootstrap-backends

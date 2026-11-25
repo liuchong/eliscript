@@ -396,11 +396,11 @@
               (js-call runtime :auto 0)
               (js-call (js-array "literal-text" "global-text" "literal-number" "global-number") :forEach
                 (lambda (name) (let ((result (js-call runtime :invoke name))) (js-call runtime :release result))))
-              (js-call runtime :collect)
               (js-call (js-array (js-array "literal-text" "global-text") (js-array "literal-number" "global-number")) :forEach
                 (lambda (pair)
                   (let ((costs (js-array)))
                     (js-call pair :forEach (lambda (name)
+                      (js-call runtime :collect)
                       (let ((before (js-call runtime :live)) (index 0))
                         (while (< index 32)
                           (let ((result (js-call runtime :invoke name))) (js-call runtime :release result))
@@ -437,7 +437,7 @@
                    (let* ((node (js-call pending :pop))
                           (callee (and (= (get node :kind) "call") (aref functions (get node :value))))
                           (name (and callee (get callee :name))))
-                     (when (or (= name "frame-new") (= name "root-scope-enter"))
+                     (when (or (= name "frame-new") (= name "root-scope-enter") (= name "rt-scope-enter"))
                        (js-call slots :push (get (aref (get node :children) 1) :value)))
                      (js-call (get node :children) :forEach (lambda (child) (js-call pending :push child)))))
                  ;; A missing allocator is not zero slots. snapshots still has one real root.

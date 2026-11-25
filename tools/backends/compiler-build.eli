@@ -267,15 +267,10 @@
           result))))
 
   (defun compilerMetadataDigest (value)
-    (let ((hash (createHash "sha256")) (encoder (new globalThis.TextEncoder))
-          (bytes (new globalThis.Uint8Array 65536)))
+    (let ((hash (createHash "sha256")))
       (forEachCompilerMetadataChunk value
         (lambda (chunk)
-          (let ((start 0))
-            (while (< start (js-length chunk))
-              (let ((result (compiler-metadata-utf8-block encoder bytes chunk start)))
-                (js-call hash :update (js-call bytes :subarray 0 (get result :written)))
-                (setq start (+ start (get result :read))))))))
+          (js-call hash :update chunk "utf8")))
       (js-call hash :digest "hex")))
 
   (defasync compiler-file-identity (path buffer)

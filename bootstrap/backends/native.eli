@@ -1,11 +1,11 @@
 (module eliscript.backend.native
   (import "./optimize.mjs" optimize-program)
-  (import "./numeric.mjs" lower-numeric-program optimize-numeric-program numeric-pure backend-fail find-function)
-  (import "./sha256.mjs" sha256-bytes sha256-words-le)
+  (import "./numeric.mjs" lower-numeric-program optimize-numeric-program numeric-pure backend-fail find-function runtime-body-cache-get)
+  (import "./sha256.mjs" sha256-bytes sha256-words-le sha256-string-utf16le)
   (import "./memory.mjs" lower-memory-program)
   (import "./elf.mjs" emit-elf-object emit-elf-library)
   (import "./capabilities.mjs" prepare-host-capabilities prepare-fresh-host-capabilities host-capability-index)
-  (import "./binary.mjs" binary-output binary-byte binary-u32 binary-append binary-append-owned binary-slice binary-finish)
+  (import "./binary.mjs" binary-output binary-byte binary-u32 binary-append binary-append-owned binary-slice binary-to-array binary-finish)
 
   ;; ARM64 numeric-f64 instruction and Mach-O image emission. Selection,
   ;; encoding, linking metadata and ad-hoc page signatures are independent.
@@ -13,7 +13,7 @@
   ;; block. Relocations may revisit any block, but never unpack the image.
   ;; Numeric assembly helpers keep their existing ordinary-array contract.
   (defun native-word-buffer ()
-    (js-object :length 0 :chunks (js-array) :cache (js-array) :units (js-array) :cacheIndex -1 :dirty false))
+    (js-object :length 0 :chunks (js-array) :cache (js-array) :units (js-array) :cacheIndex -1 :dirty false :hasHole false))
 
   (defun native-word-flush (words)
     (when (get words :dirty)
@@ -73,6 +73,8 @@
       (progn
         (unless (and (Number/isSafeInteger length) (>= length 0))
           (backend-fail nil "native word buffer length is invalid"))
+        (when (> length (js-length words))
+          (put words :hasHole t))
         (when (< length (js-length words))
           (let ((block (js-call globalThis.Math :floor (/ length 1024))) (tail (% length 1024))
                 (cached (get words :cacheIndex)) (chunks (get words :chunks)))
@@ -90,7 +92,32 @@
   (defun native-word-push (words value)
     (if (Array/isArray words) (js-call words :push (uint32 value))
       (let ((index (js-length words)))
-        (native-word-resize words (1+ index)) (native-word-set words index value) (js-length words))))
+        (put words :length (1+ index))
+        (native-word-set words index value)
+        (js-length words))))
+
+  (defun native-word-append-u32 (words u32arr)
+    (let ((len (js-length u32arr)) (src 0))
+      (if (Array/isArray words)
+        (while (< src len)
+          (js-call words :push (uint32 (aref u32arr src)))
+          (setq src (1+ src)))
+        (let ((pos (js-length words)))
+          (while (< src len)
+            (let* ((block (js-call globalThis.Math :floor (/ pos 1024)))
+                   (offset (% pos 1024))
+                   (room (- 1024 offset))
+                   (take (if (< (- len src) room) (- len src) room))
+                   (cache (native-word-cache words block))
+                   (end (+ offset take))
+                   (dst offset))
+              (while (< dst end)
+                (put cache dst (aref u32arr src))
+                (setq dst (1+ dst) src (1+ src)))
+              (put words :dirty t)
+              (setq pos (+ pos take))))
+          (put words :length pos)))
+      (js-length words)))
 
   (defun word (state value)
     (native-word-push (get state :words) value))
@@ -443,39 +470,219 @@
       (assign-register-class counts locals registers integers "i32" graph)
       (js-object :registers registers :leaf t)))
 
-  (defun allocate-memory-registers (body locals)
-    ;; All allocated locals are initialized on entry and have distinct homes.
-    ;; Weight loop references so hot induction/accumulator locals win x20-x28,
-    ;; and pack remaining spilled locals into contiguous FP-relative slots.
-    ;; The AAPCS64 preserves x20-x28 across calls; x19 belongs to the context.
-    (let* ((count (js-length locals))
-           (counts (js-call (new globalThis.Array count) :fill 0))
-           (registers (js-call (new globalThis.Array count) :fill -1))
-           (offsets (js-call (new globalThis.Array count) :fill 0))
-           (candidates (js-array))
-           (index 0)
-           (spilled 0))
-      (memory-register-weights body counts 1)
-      (while (< index count)
-        (let ((type (get (js-nth index locals) :type)))
-          (when (and (> (js-nth index counts) 1)
-                     (or (memory-word-type type) (memory-wide-type type)))
-            (js-call candidates :push index)))
-        (setq index (1+ index)))
-      (js-call candidates :sort (lambda (left right)
-        (- (js-nth right counts) (js-nth left counts))))
-      (let ((saved (Math/min 9 (js-length candidates))))
-        (setq index 0)
-        (while (< index saved)
-          (put registers (js-nth index candidates) (- -22 index))
-          (setq index (1+ index)))
-        (setq index 0)
-        (while (< index count)
-          (when (= (js-nth index registers) -1)
-            (setq spilled (1+ spilled))
-            (put offsets index (* spilled 8)))
-          (setq index (1+ index)))
-        (js-object :registers registers :saved saved :offsets offsets :spilled spilled))))
+  (defun memory-bitset-copy (bits)
+    (js-call bits :slice))
+
+  (defun memory-bitset-union (left right words)
+    (let ((out (js-call left :slice)) (w 0))
+      (while (< w words)
+        (put out w (bit-or (aref left w) (aref right w)))
+        (setq w (1+ w)))
+      out))
+
+  (defun memory-bitset-disjoint-p (left right words)
+    (let ((w 0) (disjoint t))
+      (while (and disjoint (< w words))
+        (when (/= (bit-and (aref left w) (aref right w)) 0)
+          (setq disjoint nil))
+        (setq w (1+ w)))
+      disjoint))
+
+  (defun memory-bitset-interfere (graph index live words)
+    (let ((idx-word (unsigned-bit-shift-right index 5))
+          (idx-bit (bit-shift-left 1 (bit-and index 31)))
+          (row (js-nth index graph))
+          (w 0))
+      (while (< w words)
+        (let* ((lw (aref live w))
+               (masked (if (= w idx-word) (bit-and lw (bit-not idx-bit)) lw)))
+          (when (/= masked 0)
+            (put row w (bit-or (aref row w) masked))
+            (let ((rem (bit-or masked 0)) (base-idx (* w 32)))
+              (while (/= rem 0)
+                (let* ((lsb (bit-and rem (- rem)))
+                       (bit (- 31 (Math/clz32 lsb)))
+                       (other (+ base-idx bit))
+                       (orow (js-nth other graph)))
+                  (put orow idx-word (bit-or (aref orow idx-word) idx-bit))
+                  (setq rem (bit-xor rem lsb)))))))
+        (setq w (1+ w)))))
+
+  (defun memory-addr-base-local (node)
+    (let ((kind (get node :kind)) (val (get node :value)) (children (get node :children)))
+      (cond
+        ((and (= kind "local") (memory-word-type (get node :type))) val)
+        ((and (= kind "word-arithmetic") (= val "1+") (= (js-length children) 1)
+              (memory-word-type (get node :type))
+              (= (get (js-nth 0 children) :kind) "local")
+              (memory-word-type (get (js-nth 0 children) :type)))
+         (get (js-nth 0 children) :value))
+        ((and (= kind "word-arithmetic") (= val "+") (= (js-length children) 2)
+              (memory-word-type (get node :type)))
+         (let ((left (js-nth 0 children)) (right (js-nth 1 children)))
+           (cond
+             ((and (= (get left :kind) "local") (memory-word-type (get left :type)) (>= (memory-word-imm12 right) 0))
+              (get left :value))
+             ((and (= (get right :kind) "local") (memory-word-type (get right :type)) (>= (memory-word-imm12 left) 0))
+              (get right :value))
+             (t -1))))
+        (t -1))))
+
+  (defun memory-live-before (node after graph words)
+    (let ((kind (get node :kind)) (children (get node :children)) (value (get node :value))
+          (live (memory-bitset-copy after)))
+      (cond
+        ((= kind "local")
+          (memory-bitset-interfere graph value live words)
+          (let ((w (unsigned-bit-shift-right value 5)) (b (bit-shift-left 1 (bit-and value 31))))
+            (put live w (bit-or (aref live w) b))))
+        ((or (= kind "set") (= kind "initialize"))
+          (memory-bitset-interfere graph value live words)
+          (let ((w (unsigned-bit-shift-right value 5)) (b (bit-shift-left 1 (bit-and value 31))))
+            (put live w (bit-and (aref live w) (bit-not b))))
+          (setq live (memory-live-before (js-nth 0 children) live graph words)))
+        ((= kind "if")
+          (let ((t-live (memory-live-before (js-nth 1 children) live graph words))
+                (e-live (memory-live-before (js-nth 2 children) live graph words)))
+            (setq live (memory-live-before (js-nth 0 children) (memory-bitset-union t-live e-live words) graph words))))
+        ((or (= kind "while") (= kind "remainder-while") (= kind "guarded-while"))
+          (let ((changed t))
+            (while changed
+              (setq changed nil)
+              (let* ((body-in (memory-live-before (js-nth 1 children) live graph words))
+                     (cond-after (memory-bitset-union after body-in words))
+                     (next (memory-live-before (js-nth 0 children) cond-after graph words))
+                     (w 0))
+                (while (< w words)
+                  (let* ((lw (aref live w)) (nw (bit-or lw (aref next w))))
+                    (when (/= (bit-and nw (bit-not lw)) 0)
+                      (put live w nw)
+                      (setq changed t)))
+                  (setq w (1+ w)))))))
+        ((and (= kind "memory-op") (= (js-length children) 2) (> (memory-width value) 0))
+          (let* ((c0 (js-nth 0 children))
+                 (addr-idx (memory-addr-base-local c0)))
+            (when (>= addr-idx 0)
+              (let ((aw (unsigned-bit-shift-right addr-idx 5))
+                    (ab (bit-shift-left 1 (bit-and addr-idx 31))))
+                (put live aw (bit-or (aref live aw) ab))
+                (memory-bitset-interfere graph addr-idx live words)))
+            (setq live (memory-live-before (js-nth 1 children) live graph words))
+            (setq live (memory-live-before c0 live graph words))))
+        ((and (= (js-length children) 2)
+              (or (= kind "word-compare") (= kind "v64-compare") (= kind "word-arithmetic") (= kind "memory-op"))
+              (= (get (js-nth 0 children) :kind) "local")
+              (not (memory-expr-writes-local-p (js-nth 1 children) (get (js-nth 0 children) :value))))
+          (let* ((c0 (js-nth 0 children))
+                 (lidx (get c0 :value))
+                 (lw (unsigned-bit-shift-right lidx 5))
+                 (lb (bit-shift-left 1 (bit-and lidx 31))))
+            (put live lw (bit-or (aref live lw) lb))
+            (memory-bitset-interfere graph lidx live words)
+            (setq live (memory-live-before (js-nth 1 children) live graph words))
+            (setq live (memory-live-before c0 live graph words))))
+        (t
+          (let ((i (1- (js-length children)))
+                (short (or (= kind "and") (= kind "or"))))
+            (while (>= i 0)
+              (setq live (memory-live-before (js-nth i children)
+                (if short (memory-bitset-union after live words) live) graph words))
+              (setq i (1- i))))))
+      live))
+
+  (defun allocate-memory-registers (body locals &optional pin-memory arity)
+    ;; Liveness-based graph coloring + weight ordering: hot loop locals win
+    ;; callee-saved registers x20-x28, non-interfering lifetimes share
+    ;; registers and stack spill slots, and definitely-initialized locals skip
+    ;; redundant entry zero-initialization.
+    (let ((count (js-length locals)))
+      (if (= count 0)
+        (js-object :registers (js-array) :saved 0 :offsets (js-array) :spilled 0 :noInit (js-array))
+        (let* ((counts (js-call (new globalThis.Array count) :fill 0))
+               (registers (js-call (new globalThis.Array count) :fill -1))
+               (offsets (js-call (new globalThis.Array count) :fill 0))
+               (no-init (js-call (new globalThis.Array count) :fill false))
+               (words (Math/max 1 (Math/ceil (/ count 32))))
+               (graph (new globalThis.Array count))
+               (param-count (if (nullish? arity) 0 arity))
+               (candidates (js-array))
+               (index 0))
+          (while (< index count)
+            (put graph index (new globalThis.Uint32Array words))
+            (setq index (1+ index)))
+          (memory-register-weights body counts 1)
+          (let* ((empty (new globalThis.Uint32Array words))
+                 (entry-live (memory-live-before body empty graph words))
+                 (entry-mask (memory-bitset-copy entry-live)))
+            (setq index 0)
+            (while (< index param-count)
+              (let ((w (unsigned-bit-shift-right index 5))
+                    (b (bit-shift-left 1 (bit-and index 31))))
+                (put entry-mask w (bit-or (aref entry-mask w) b)))
+              (setq index (1+ index)))
+            (setq index 0)
+            (while (< index count)
+              (when (/= (bit-and (aref entry-mask (unsigned-bit-shift-right index 5))
+                                 (bit-shift-left 1 (bit-and index 31))) 0)
+                (memory-bitset-interfere graph index entry-mask words))
+              (when (and (>= index param-count)
+                         (= (bit-and (aref entry-live (unsigned-bit-shift-right index 5))
+                                     (bit-shift-left 1 (bit-and index 31))) 0))
+                (put no-init index t))
+              (let ((type (get (js-nth index locals) :type)))
+                (when (and (> (js-nth index counts) 1)
+                           (or (memory-word-type type) (memory-wide-type type)))
+                  (js-call candidates :push index)))
+              (setq index (1+ index)))
+            (js-call candidates :sort (lambda (left right)
+              (- (js-nth right counts) (js-nth left counts))))
+            (let* ((max-regs (if pin-memory 7 9))
+                   (reg-masks (new globalThis.Array max-regs))
+                   (max-reg -1)
+                   (c-len (js-length candidates))
+                   (ci 0))
+              (setq index 0)
+              (while (< index max-regs)
+                (put reg-masks index (new globalThis.Uint32Array words))
+                (setq index (1+ index)))
+              (while (< ci c-len)
+                (let ((cand (js-nth ci candidates)) (r 0) (placed nil))
+                  (while (and (not placed) (< r max-regs))
+                    (let ((rm (js-nth r reg-masks)))
+                      (when (memory-bitset-disjoint-p (js-nth cand graph) rm words)
+                        (put registers cand (- -22 r))
+                        (let ((w (unsigned-bit-shift-right cand 5))
+                              (b (bit-shift-left 1 (bit-and cand 31))))
+                          (put rm w (bit-or (aref rm w) b)))
+                        (when (> r max-reg) (setq max-reg r))
+                        (setq placed t)))
+                    (setq r (1+ r))))
+                (setq ci (1+ ci)))
+              (let ((slot-masks (js-array)))
+                (setq index 0)
+                (while (< index count)
+                  (when (and (= (js-nth index registers) -1)
+                             (or (< index param-count) (> (js-nth index counts) 0)))
+                    (let ((s 0) (s-len (js-length slot-masks)) (placed nil)
+                          (irow (js-nth index graph)))
+                      (while (and (not placed) (< s s-len))
+                        (let ((sm (js-nth s slot-masks)))
+                          (when (memory-bitset-disjoint-p irow sm words)
+                            (let ((w (unsigned-bit-shift-right index 5))
+                                  (b (bit-shift-left 1 (bit-and index 31))))
+                              (put sm w (bit-or (aref sm w) b)))
+                            (put offsets index (* (1+ s) 8))
+                            (setq placed t)))
+                        (setq s (1+ s)))
+                      (unless placed
+                        (let ((sm (new globalThis.Uint32Array words)))
+                          (put sm (unsigned-bit-shift-right index 5)
+                               (bit-shift-left 1 (bit-and index 31)))
+                          (js-call slot-masks :push sm)
+                          (put offsets index (* (js-length slot-masks) 8))))))
+                  (setq index (1+ index)))
+                (js-object :registers registers :saved (if (>= max-reg 0) (1+ max-reg) 0)
+                           :offsets offsets :spilled (js-length slot-masks) :noInit no-init))))))))
 
   (defun assign-register-class (counts locals registers available type graph)
     (let ((i 0) (count (js-length locals)) (processed (js-array)))
@@ -811,75 +1018,106 @@
               (long-jump state (- target at 1) nil)))))))
 
   (defun finish-branches (state offsets)
-    (let ((branches (get state :branches (js-array))) (changed t))
-      (js-call branches :sort (lambda (left right) (- (get left :at) (get right :at))))
-      ;; Sizes only grow. Revisit all labels after each growth, including branches
-      ;; which were in range before another expansion shifted their destination.
-      (while changed
-        (setq changed false)
-        (let ((growth 0))
-          (js-call branches :forEach (lambda (entry)
-            (put entry :before growth) (setq growth (+ growth (1- (get entry :size)))))))
-        (js-call branches :forEach (lambda (entry)
-          (let* ((at (branch-position branches (get entry :at)))
-                 (target (branch-position branches (get entry :target)))
-                 (kind (get entry :kind)) (opcode (get entry :opcode))
-                 (always (and (= kind 1) (>= (bit-and opcode 15) 14)))
-                 (size (if (branch-fits (- target at) (branch-limit kind)) 1
-                   (if (or (= kind 0) always)
-                     (if (branch-fits (- target at) 33554432) 1 7)
-                     (if (branch-fits (- target at 1) 33554432) 2 8)))))
-            (when (> size (get entry :size)) (put entry :size size) (setq changed t))))))
-      (let* ((words (get state :words)) (original-size (js-length words))
-             (count (js-length branches))
-             (last (if (> count 0) (js-nth (1- count) branches) nil))
-             (final-size (+ original-size (if last (+ (get last :before) (1- (get last :size))) 0)))
-             (scratch (js-array)) (out (js-object :words scratch :compact nil))
-             (index (1- original-size)) (next (1- count)) (write (1- final-size)))
-        ;; Sizes have converged and only grow. Every destination is at or above
-        ;; its old position, so reverse traversal preserves the unread prefix.
-        ;; Reuse at most eight words for one relaxed branch, never a code copy.
-        (native-word-resize words final-size)
-        (while (>= index 0)
-          (let ((entry (if (>= next 0) (js-nth next branches) nil)))
-            (if (and entry (= (get entry :at) index))
-              (let ((at (- write (1- (get entry :size))))
-                    (target (branch-position branches (get entry :target))) (j 0))
-                (put scratch :length 0)
-                (relaxed-branch out entry at target)
-                (setq j (1- (js-length scratch)))
-                (while (>= j 0)
-                  (let ((value (js-nth j scratch)))
-                    ;; patch-jump already wrote every fitting branch. When no
-                    ;; earlier relaxation moved it, do not repack that same
-                    ;; immutable word block merely to write the same opcode.
-                    (unless (and (= write index) (= (native-word-at words index) value))
-                      (native-word-set words write value)))
-                  (setq write (1- write)) (setq j (1- j)))
-                (setq next (1- next)))
-              (let ((value (native-word-at words index)))
-                ;; Still read every source word in the original reverse order,
-                ;; including hole validation. Only moved words need a write.
-                (unless (= write index) (native-word-set words write value))
-                (setq write (1- write)))))
-          (setq index (1- index)))
-        (setq index 0)
-        (while (< index (js-length offsets))
-          (put offsets index (* (branch-position branches (/ (js-nth index offsets) 4)) 4))
-          (setq index (1+ index)))
-        (js-call (get state :constants (js-array)) :forEach (lambda (entry)
-          (let ((uses (get entry :uses)) (i 0))
-            (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))))
-        (let ((uses (get state :tableUses (js-array))) (i 0))
-          (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))
-        (let ((ranges (get state :debugRanges nil)) (i 0))
-          (when ranges
-            (while (< i (js-length ranges))
-              (let ((range (js-nth i ranges)))
-                (put range :start (* (branch-position branches (/ (get range :start) 4)) 4))
-                (put range :end (* (branch-position branches (/ (get range :end) 4)) 4)))
-              (setq i (1+ i)))))
-        (put state :branches (js-array)))))
+    (let* ((branches (get state :branches (js-array)))
+           (branch-count (js-length branches))
+           (fast t)
+           (k 0))
+      (while (and fast (< k branch-count))
+        (let ((entry (js-nth k branches)))
+          (unless (branch-fits (- (get entry :target) (get entry :at)) (branch-limit (get entry :kind)))
+            (setq fast nil)))
+        (setq k (1+ k)))
+      (if (and fast (or (Array/isArray (get state :words)) (not (get (get state :words) :hasHole nil))))
+          (progn
+            (put state :branches (js-array))
+            (put state :cachedBranches (js-array)))
+        (let ((changed t)
+              (cached-groups (get state :cachedBranches (js-array)))
+              (gi 0))
+          (while (< gi (js-length cached-groups))
+            (let* ((group (js-nth gi cached-groups))
+                   (base (get group :base))
+                   (arr (get group :branches))
+                   (bi 0)
+                   (blen (js-length arr)))
+              (while (< bi blen)
+                (js-call branches :push (js-object
+                  :at (+ base (aref arr bi))
+                  :target (+ base (aref arr (1+ bi)))
+                  :opcode (aref arr (+ bi 2))
+                  :kind (aref arr (+ bi 3))
+                  :size 1))
+                (setq bi (+ bi 4))))
+            (setq gi (1+ gi)))
+          (put state :cachedBranches (js-array))
+          (js-call branches :sort (lambda (left right) (- (get left :at) (get right :at))))
+          ;; Sizes only grow. Revisit all labels after each growth, including branches
+          ;; which were in range before another expansion shifted their destination.
+          (while changed
+            (setq changed false)
+            (let ((growth 0))
+              (js-call branches :forEach (lambda (entry)
+                (put entry :before growth) (setq growth (+ growth (1- (get entry :size)))))))
+            (js-call branches :forEach (lambda (entry)
+              (let* ((at (branch-position branches (get entry :at)))
+                     (target (branch-position branches (get entry :target)))
+                     (kind (get entry :kind)) (opcode (get entry :opcode))
+                     (always (and (= kind 1) (>= (bit-and opcode 15) 14)))
+                     (size (if (branch-fits (- target at) (branch-limit kind)) 1
+                       (if (or (= kind 0) always)
+                         (if (branch-fits (- target at) 33554432) 1 7)
+                         (if (branch-fits (- target at 1) 33554432) 2 8)))))
+                (when (> size (get entry :size)) (put entry :size size) (setq changed t))))))
+          (let* ((words (get state :words)) (original-size (js-length words))
+                 (count (js-length branches))
+                 (last (if (> count 0) (js-nth (1- count) branches) nil))
+                 (final-size (+ original-size (if last (+ (get last :before) (1- (get last :size))) 0)))
+                 (scratch (js-array)) (out (js-object :words scratch :compact nil))
+                 (index (1- original-size)) (next (1- count)) (write (1- final-size)))
+            ;; Sizes have converged and only grow. Every destination is at or above
+            ;; its old position, so reverse traversal preserves the unread prefix.
+            ;; Reuse at most eight words for one relaxed branch, never a code copy.
+            (native-word-resize words final-size)
+            (while (>= index 0)
+              (let ((entry (if (>= next 0) (js-nth next branches) nil)))
+                (if (and entry (= (get entry :at) index))
+                  (let ((at (- write (1- (get entry :size))))
+                        (target (branch-position branches (get entry :target))) (j 0))
+                    (put scratch :length 0)
+                    (relaxed-branch out entry at target)
+                    (setq j (1- (js-length scratch)))
+                    (while (>= j 0)
+                      (let ((value (js-nth j scratch)))
+                        ;; patch-jump already wrote every fitting branch. When no
+                        ;; earlier relaxation moved it, do not repack that same
+                        ;; immutable word block merely to write the same opcode.
+                        (unless (and (= write index) (= (native-word-at words index) value))
+                          (native-word-set words write value)))
+                      (setq write (1- write)) (setq j (1- j)))
+                    (setq next (1- next)))
+                  (let ((value (native-word-at words index)))
+                    ;; Still read every source word in the original reverse order,
+                    ;; including hole validation. Only moved words need a write.
+                    (unless (= write index) (native-word-set words write value))
+                    (setq write (1- write)))))
+              (setq index (1- index)))
+            (setq index 0)
+            (while (< index (js-length offsets))
+              (put offsets index (* (branch-position branches (/ (js-nth index offsets) 4)) 4))
+              (setq index (1+ index)))
+            (js-call (get state :constants (js-array)) :forEach (lambda (entry)
+              (let ((uses (get entry :uses)) (i 0))
+                (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))))
+            (let ((uses (get state :tableUses (js-array))) (i 0))
+              (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))
+            (let ((ranges (get state :debugRanges nil)) (i 0))
+              (when ranges
+                (while (< i (js-length ranges))
+                  (let ((range (js-nth i ranges)))
+                    (put range :start (* (branch-position branches (/ (get range :start) 4)) 4))
+                    (put range :end (* (branch-position branches (/ (get range :end) 4)) 4)))
+                  (setq i (1+ i)))))
+            (put state :branches (js-array)))))))
 
   (defun condition (state node)
     (expression state node)
@@ -992,6 +1230,227 @@
       (stack-adjust state (* count 16) nil)
       (put state :leaf leaf) (put state :depth depth)))
 
+  (defun memory-word-imm12 (node)
+    (let ((kind (get node :kind)) (value (get node :value)))
+      (if (and (memory-word-type (get node :type))
+               (or (= kind "literal") (= kind "int-literal"))
+               (= (value-type value) "number")
+               (Number/isInteger value)
+               (>= value 0)
+               (<= value 4095))
+          value -1)))
+
+  (defun memory-word-compare-code (name)
+    (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
+          ((= name "<=") 9) ((= name ">") 8) (t 2)))
+
+  (defun memory-wide-imm12 (node)
+    (when (and (memory-wide-type (get node :type)) (= (get node :kind) "literal"))
+      (let ((value (get node :value)))
+        (when (and (not (nil? value)) (= (value-type value) "object")
+                   (= (get value :high) 0)
+                   (>= (get value :low) 0) (<= (get value :low) 4095))
+          (get value :low)))))
+
+  (defun memory-word-pow2-shift (node)
+    (let ((kind (get node :kind)) (value (get node :value)))
+      (if (and (memory-word-type (get node :type))
+               (or (= kind "literal") (= kind "int-literal"))
+               (= (value-type value) "number")
+               (Number/isInteger value)
+               (> value 1)
+               (<= value 1073741824)
+               (= (bit-and value (1- value)) 0))
+        (let ((k 0) (v value))
+          (while (> v 1) (setq v (unsigned-bit-shift-right v 1) k (1+ k)))
+          k)
+        0)))
+
+  (defun memory-dynamic-ref-local (children is-or)
+    (when (= (js-length children) 2)
+      (let* ((c0 (js-nth 0 children)) (c1 (js-nth 1 children)))
+        (when (and (= (get c0 :kind) "word-compare") (= (get c1 :kind) "word-compare")
+                   (= (get c0 :value) (if is-or "/=" "="))
+                   (= (get c1 :value) (if is-or ">" "<=")))
+          (let* ((c0-ch (get c0 :children)) (c1-ch (get c1 :children))
+                 (c0-0 (js-nth 0 c0-ch)) (c0-1 (js-nth 1 c0-ch))
+                 (c1-0 (js-nth 0 c1-ch)) (c1-1 (js-nth 1 c1-ch)))
+            (when (and (= (get c0-0 :kind) "memory-op") (= (get c0-0 :value) "v64-high")
+                       (= (memory-word-imm12 c0-1) 0)
+                       (= (get c1-0 :kind) "memory-op") (= (get c1-0 :value) "v64-low")
+                       (= (memory-word-imm12 c1-1) 3))
+              (let ((arg0 (js-nth 0 (get c0-0 :children)))
+                    (arg1 (js-nth 0 (get c1-0 :children))))
+                (when (and (= (get arg0 :kind) "local") (= (get arg1 :kind) "local")
+                           (= (get arg0 :value) (get arg1 :value)))
+                  arg0))))))))
+
+  (defun memory-word-lit-val (node)
+    (let ((kind (get node :kind)) (value (get node :value)))
+      (if (and (memory-word-type (get node :type))
+               (or (= kind "literal") (= kind "int-literal"))
+               (= (value-type value) "number")
+               (Number/isInteger value))
+          value -1)))
+
+  (defun memory-bool01-p (node)
+    (let ((kind (get node :kind)) (children (get node :children)))
+      (cond
+        ((or (= kind "word-compare") (= kind "v64-compare"))
+         (= (js-length children) 2))
+        ((= kind "not") (= (js-length children) 1))
+        ((= kind "if")
+         (and (= (js-length children) 3)
+              (let ((tv (memory-word-lit-val (js-nth 1 children)))
+                    (ev (memory-word-lit-val (js-nth 2 children))))
+                (or (and (= tv 1) (= ev 0)) (and (= tv 0) (= ev 1))))))
+        ((= kind "sequence")
+         (and (> (js-length children) 0)
+              (memory-bool01-p (js-nth (1- (js-length children)) children))))
+        (t nil))))
+
+  (defun memory-bool01-jumps (state node when-true)
+    ;; Branch on whether a memory-bool01-p expression evaluates to 1 (when-true)
+    ;; or 0 (not when-true), regardless of whether its static type is i32 or u32.
+    (let ((kind (get node :kind)) (children (get node :children)))
+      (cond
+        ((= kind "sequence")
+         (let ((clen (js-length children)) (si 0))
+           (while (< si (1- clen))
+             (memory-discarded state (js-nth si children))
+             (setq si (1+ si)))
+           (memory-bool01-jumps state (js-nth (1- clen) children) when-true)))
+        ((= kind "if")
+         (let ((tv (memory-word-lit-val (js-nth 1 children))))
+           (memory-condition-jumps state (js-nth 0 children)
+             (if (= tv 1) when-true (not when-true)))))
+        (t
+         ;; word-compare, v64-compare, and not all have type i32 and return 0/1.
+         (memory-condition-jumps state node when-true)))))
+
+  (defun memory-condition-jumps (state node when-true)
+    (let ((kind (get node :kind)) (children (get node :children)) (jumps (js-array))
+          (opt (and (get state :memory nil) (get state :optimizeMemory nil) (not (get state :debugRanges nil)))))
+      (cond
+        ((and opt (= kind "sequence") (= (get node :type) "i32"))
+         (let ((clen (js-length children)))
+           (if (= clen 0)
+             (when (not when-true) (js-call jumps :push (jump state "jump")))
+             (let ((si 0))
+               (while (< si (1- clen))
+                 (memory-discarded state (js-nth si children))
+                 (setq si (1+ si)))
+               (let ((last (js-nth (1- clen) children)))
+                 (cond
+                   ((= (get last :type) "i32")
+                    (setq jumps (memory-condition-jumps state last when-true)))
+                   ((memory-bool01-p last)
+                    (setq jumps (memory-bool01-jumps state last when-true)))
+                   ((= (get last :type) "u32")
+                    (expression state last)
+                    (js-call jumps :push (jump state (if when-true "nonzero" "zero"))))
+                   (t
+                    (condition state last)
+                    (js-call jumps :push (jump state (if when-true "nonzero" "zero"))))))))))
+        ((and opt (= kind "if") (= (get node :type) "i32") (= (js-length children) 3)
+              (let ((tv (memory-word-lit-val (js-nth 1 children)))
+                    (ev (memory-word-lit-val (js-nth 2 children))))
+                (or (and (= tv 1) (= ev 0)) (and (= tv 0) (= ev 1)))))
+         (let ((tv (memory-word-lit-val (js-nth 1 children))))
+           (setq jumps (memory-condition-jumps state (js-nth 0 children)
+                         (if (= tv 1) when-true (not when-true))))))
+        ((and opt (= kind "not") (= (get node :type) "i32") (= (js-length children) 1))
+         (setq jumps (memory-condition-jumps state (js-nth 0 children) (not when-true))))
+        ((and opt (or (= kind "and") (= kind "or")) (= (get node :type) "i32"))
+         (let ((dyn (memory-dynamic-ref-local children (= kind "or"))))
+           (if (not (nil? dyn))
+             (let ((code (if (= kind "or") 8 9))
+                   (dr (local-register state dyn "v64")))
+               (if (>= dr 0)
+                 (word state (+ 4043312159 (* dr 32))) ;; cmp xR, #3
+                 (progn
+                   (expression state dyn)
+                   (word state 4043312159))) ;; cmp x0, #3
+               (js-call jumps :push (js-length (get state :words)))
+               (word state (+ 1409286144 (if when-true code (bit-xor code 1)))))
+             (let ((skip (js-array)) (i 0)
+                   (every (if (= kind "and") (not when-true) when-true)))
+               (while (< i (js-length children))
+                 (let* ((last (= i (1- (js-length children))))
+                        (output (if (or every last) jumps skip))
+                        (positions (memory-condition-jumps state (js-nth i children)
+                          (if (or every last) when-true (not when-true)))) (j 0))
+                   (while (< j (js-length positions))
+                     (js-call output :push (js-nth j positions))
+                     (setq j (1+ j))))
+                 (setq i (1+ i)))
+               (when (= (js-length children) 0)
+                 (when (= when-true (= kind "and")) (js-call jumps :push (jump state "jump"))))
+               (patch-conditions state skip (js-length (get state :words)))))))
+        ((and opt (or (= kind "word-compare") (= kind "v64-compare")) (= (js-length children) 2))
+         (let* ((name (get node :value)) (code (memory-word-compare-code name))
+                (left (js-nth 0 children)) (right (js-nth 1 children))
+                (lv (if (= kind "word-compare") (memory-word-lit-val left) -1))
+                (rv (if (= kind "word-compare") (memory-word-lit-val right) -1)))
+           (cond
+             ((and (= kind "word-compare") (or (= name "=") (= name "/="))
+                   (or (= rv 0) (= rv 1)) (memory-bool01-p left))
+              (let* ((want-one (= rv 1))
+                     (flip (if (= name "=") (not want-one) want-one)))
+                (setq jumps (memory-bool01-jumps state left (if flip (not when-true) when-true)))))
+             ((and (= kind "word-compare") (or (= name "=") (= name "/="))
+                   (or (= lv 0) (= lv 1)) (memory-bool01-p right))
+              (let* ((want-one (= lv 1))
+                     (flip (if (= name "=") (not want-one) want-one)))
+                (setq jumps (memory-bool01-jumps state right (if flip (not when-true) when-true)))))
+             (t
+              (if (= kind "word-compare")
+                (let ((imm (memory-word-imm12 right))
+                      (rL (if (memory-word-type (get left :type)) (local-register state left "u32") -1))
+                      (rR (if (memory-word-type (get right :type)) (local-register state right "u32") -1)))
+                  (if (>= imm 0)
+                    (progn
+                      (when (< rL 0) (expression state left))
+                      (word state (+ 1895825439 (* imm 1024) (if (>= rL 0) (* rL 32) 0)))) ;; cmp wRL, #imm12
+                    (if (>= rR 0)
+                      (progn
+                        (when (< rL 0) (expression state left))
+                        (word state (+ 1795162143 (* rR 65536) (if (>= rL 0) (* rL 32) 0)))) ;; cmp wRL, wRR
+                      (if (and (>= rL 0) (not (memory-expr-writes-reg-p state right rL)))
+                        (progn
+                          (expression state right)
+                          (word state (+ 1795162143 (* rL 32)))) ;; cmp wRL, w0
+                        (progn
+                          (expression state left)
+                          (if (and (get state :memory nil) (not (get state :compact nil))
+                                   (not (get state :leaf nil))
+                                   (memory-word-type (get right :type))
+                                   (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
+                            (progn (word state 704644065) (expression state right)) ;; mov w1, w0
+                            (progn (push-value state "u32") (expression state right) (pop-value state "u32")))
+                          (word state 1795162175)))))) ;; cmp w1, w0
+                (let ((wimm (memory-wide-imm12 right))
+                      (rL (if (memory-wide-type (get left :type)) (local-register state left "v64") -1))
+                      (rR (if (memory-wide-type (get right :type)) (local-register state right "v64") -1)))
+                  (if (not (nil? wimm))
+                    (progn
+                      (when (< rL 0) (expression state left))
+                      (word state (+ 4043309087 (* wimm 1024) (if (>= rL 0) (* rL 32) 0)))) ;; cmp xRL, #wimm
+                    (if (>= rR 0)
+                      (progn
+                        (when (< rL 0) (expression state left))
+                        (word state (+ 3942645791 (* rR 65536) (if (>= rL 0) (* rL 32) 0)))) ;; cmp xRL, xRR
+                      (if (and (>= rL 0) (not (memory-expr-writes-reg-p state right rL)))
+                        (progn
+                          (expression state right)
+                          (word state (+ 3942645791 (* rL 32)))) ;; cmp xRL, x0
+                        (progn (memory-wide-operands state left right)
+                               (word state 3942645823))))))) ;; cmp x1, x0
+              (js-call jumps :push (js-length (get state :words)))
+              (word state (+ 1409286144 (if when-true code (bit-xor code 1))))))))
+        (t (condition state node) (js-call jumps :push (jump state (if when-true "nonzero" "zero")))))
+      jumps))
+
   (defun emit-loop (state children used)
     (if (get state :compact nil)
         (let* ((initial (jump state "jump")) (start (js-length (get state :words))))
@@ -1000,12 +1459,13 @@
           (patch-conditions state (condition-jumps state (js-nth 0 children) t) start)
           (when used (integer-register state 0 0 0)))
       (let ((start (js-length (get state :words))))
-        (condition state (js-nth 0 children))
-        (let ((end (jump state "zero")))
+        (let ((end (if (get state :memory nil)
+                       (memory-condition-jumps state (js-nth 0 children) nil)
+                     (progn (condition state (js-nth 0 children)) (js-array (jump state "zero"))))))
           (if (get state :memory nil) (memory-discarded state (js-nth 1 children))
             (expression state (js-nth 1 children)))
           (let ((back (jump state "jump"))) (patch-jump state back start))
-          (patch-jump state end (js-length (get state :words)))
+          (patch-conditions state end (js-length (get state :words)))
           (if (get state :memory nil)
               (when used (memory-integer-register state 0 0))
             (integer-register state 0 0 0))))))
@@ -1061,10 +1521,86 @@
     ;; Reuse expression's debug ranges even when a pure result emits no words.
     (expression state node t))
 
+  (defconst native-single-sink-rd0-ops (new globalThis.Set (js-array
+    "load-u8" "load-u16" "load-u32" "load-v64" "load-bits64"
+    "v64-low" "bits64-low" "v64-high" "bits64-high"
+    "v64-from-u32" "v64-pack" "bits64-pack"
+    "word-and" "word-or" "word-xor" "word-div"
+    "v64-add" "v64-sub" "v64-and" "v64-or" "v64-xor" "v64-shl" "v64-shr"
+    "bits64-add" "bits64-sub" "bits64-and" "bits64-or" "bits64-xor" "bits64-shl" "bits64-shr")))
+
+  (defun memory-single-sink-rd0-p (node)
+    (let ((kind (get node :kind)) (val (get node :value)) (children (get node :children)))
+      (cond
+        ((= kind "word-arithmetic") (> (js-length children) 0))
+        ((= kind "memory-op")
+         (if (js-call native-single-sink-rd0-ops :has val)
+           t
+           (if (and (or (= val "word-shl") (= val "word-shr")) (= (js-length children) 2))
+             (let* ((c1 (js-nth 1 children))
+                    (ck (get c1 :kind))
+                    (cv (get c1 :value)))
+               (not (and (or (= ck "literal") (= ck "int-literal"))
+                         (= (value-type cv) "number")
+                         (= (uint32 cv) 0))))
+             nil)))
+        (t nil))))
+
   (defun memory-discarded-body (state node)
     (let ((kind (get node :kind)) (children (get node :children)) (i 0))
       (cond
         ((or (= kind "literal") (= kind "int-literal") (= kind "local")) nil)
+        ((and (= kind "memory-op") (> (memory-width (get node :value)) 0) (= (js-length children) 2))
+         (memory-operation state node t))
+        ((and (or (= kind "set") (= kind "initialize"))
+              (not (get state :debugRanges nil))
+              (not (= (get node :type) "f64")))
+         (let* ((rhs (js-nth 0 children))
+                (ltype (get node :type))
+                (dst-raw (let ((regs (get state :registers)) (idx (get node :value)))
+                           (if (< idx (js-length regs)) (js-nth idx regs) -1)))
+                (dst-reg (if (<= dst-raw -2) (- (- dst-raw) 2) -1))
+                (rk (get rhs :kind))
+                (rv (get rhs :value)))
+           (cond
+             ((and (= rk "local") (memory-same-abi-type ltype (get rhs :type)))
+              (let ((src-reg (local-register state rhs ltype)))
+                (if (>= src-reg 0)
+                  (unless (= src-reg dst-reg)
+                    (local-access state (get node :value) ltype t src-reg))
+                  (expression-body state node))))
+             ((and (>= dst-reg 0) (or (= rk "literal") (= rk "int-literal"))
+                   (if (memory-wide-type ltype)
+                     (and (memory-wide-type (get rhs :type))
+                          (or (= (value-type rv) "number")
+                              (and (not (nil? rv)) (= (value-type rv) "object"))))
+                     (and (memory-word-type ltype)
+                          (memory-word-type (get rhs :type))
+                          (= (value-type rv) "number")
+                          (Number/isInteger rv))))
+              (if (memory-wide-type ltype)
+                (if (and (not (nil? rv)) (= (value-type rv) "object"))
+                  (memory-wide-register state dst-reg (uint32 (get rv :low)) (uint32 (get rv :high)))
+                  (memory-wide-register state dst-reg (uint32 rv) 0))
+                (memory-integer-register state dst-reg rv)))
+             ((and (= dst-reg -1)
+                   (or (= rk "literal") (= rk "int-literal"))
+                   (if (memory-wide-type ltype)
+                     (if (and (not (nil? rv)) (= (value-type rv) "object"))
+                       (and (= (get rv :low) 0) (= (get rv :high) 0))
+                       (= rv 0))
+                     (= rv 0)))
+              (local-access state (get node :value) ltype t 31))
+             ((and (>= dst-reg 0)
+                   (memory-same-abi-type ltype (get rhs :type))
+                   (memory-single-sink-rd0-p rhs))
+              (expression state rhs)
+              (let* ((words (get state :words))
+                     (wlen (js-length words)))
+                (if (and (> wlen 0) (= (bit-and (native-word-at words (1- wlen)) 31) 0))
+                  (retarget-last state dst-reg)
+                  (local-access state (get node :value) ltype t))))
+             (t (expression-body state node)))))
         ((or (= kind "sequence")
              (and (or (= kind "word-compare") (= kind "v64-compare")) (= (js-length children) 2))
              (and (= kind "word-arithmetic") (<= (js-length children) 2)
@@ -1074,11 +1610,10 @@
          (while (< i (js-length children))
            (memory-discarded state (js-nth i children)) (setq i (1+ i))))
         ((= kind "if")
-         (condition state (js-nth 0 children))
-         (let ((otherwise (jump state "zero")))
+         (let ((otherwise (memory-condition-jumps state (js-nth 0 children) nil)))
            (memory-discarded state (js-nth 1 children))
            (let ((end (jump state "jump")))
-             (patch-jump state otherwise (js-length (get state :words)))
+             (patch-conditions state otherwise (js-length (get state :words)))
              (memory-discarded state (js-nth 2 children))
              (patch-jump state end (js-length (get state :words))))))
         ((or (= kind "while") (= kind "remainder-while") (= kind "guarded-while"))
@@ -1162,7 +1697,8 @@
         ((= kind "not") (condition state (js-nth 0 children)) (word state 1375731712))
         ((= kind "if")
          (let ((otherwise (if (get state :compact nil) (condition-jumps state (js-nth 0 children) nil)
-                            (progn (condition state (js-nth 0 children)) (js-array (jump state "zero"))))))
+                            (if (get state :memory nil) (memory-condition-jumps state (js-nth 0 children) nil)
+                              (progn (condition state (js-nth 0 children)) (js-array (jump state "zero")))))))
            (expression state (js-nth 1 children))
            (let ((end (jump state "jump")))
              (patch-conditions state otherwise (js-length (get state :words)))
@@ -1326,11 +1862,13 @@
 
   (defun export-trie (program offsets)
     (let ((root (js-object :children (js-array) :address -1 :offset 0))
-          (functions (get program :functions)) (nodes (js-array)) (i 0))
+          (functions (get program :functions))
+          (export-set (new globalThis.Set (get program :exports)))
+          (nodes (js-array)) (i 0))
       (while (< i (js-length functions))
-        (when (js-call (get program :exports) :includes (get (js-nth i functions) :name))
+        (when (js-call export-set :has (get (aref functions i) :name))
           (let ((bytes (js-array)) (node root) (j 0))
-            (string-bytes bytes (str "_" (get (js-nth i functions) :name)))
+            (string-bytes bytes (str "_" (get (aref functions i) :name)))
             (while (< j (1- (js-length bytes)))
               (let* ((edges (get node :children)) (k 0) (next nil))
                 (while (< k (js-length edges))
@@ -1394,10 +1932,14 @@
   (defun be64 (output value)
     (be32 output (uint32 (/ value 4294967296))) (be32 output (uint32 value)))
 
+  (defconst page-sha256-cache (new globalThis.Map))
+
   (defun page-signature (image executable-size main)
     (let* ((identifier (js-array)) (limit (js-length image))
            (pages (js-call globalThis.Math :ceil (/ limit 4096)))
-           (directory (js-array)) (output (js-array)))
+           (directory (js-array)) (output (js-array))
+           (chunks (if (Array/isArray image) nil (get image :chunks nil)))
+           (chunk-count (if (Array/isArray chunks) (js-length chunks) 0)))
       (string-bytes identifier "eliscript-native")
       (let ((hash-offset (+ 88 (js-length identifier))))
         (be32 directory 4208856066) (be32 directory (+ hash-offset (* pages 32)))
@@ -1410,7 +1952,19 @@
         (append directory identifier)
         (let ((i 0))
           (while (< i pages)
-            (append directory (sha256-bytes (binary-slice image (* i 4096) (* (1+ i) 4096))))
+            (let* ((chunk (if (< i chunk-count) (aref chunks i) nil))
+                   (digest (if (and (= (value-type chunk) "string") (= (js-length chunk) 2048))
+                               (let ((cached-digest (js-call page-sha256-cache :get chunk)))
+                                 (if cached-digest cached-digest
+                                   (let ((computed (sha256-string-utf16le chunk)))
+                                     (when (< (get page-sha256-cache :size) 4096)
+                                       (js-call page-sha256-cache :set chunk computed))
+                                     computed)))
+                             (sha256-bytes (binary-slice image (* i 4096) (* (1+ i) 4096)))))
+                   (k 0))
+              (while (< k 32)
+                (js-call directory :push (aref digest k))
+                (setq k (1+ k))))
             (setq i (1+ i))))
         (be32 output 4208856256) (be32 output (+ 20 (js-length directory)))
         (be32 output 1) (be32 output 0) (be32 output 20)
@@ -1427,20 +1981,24 @@
            (text-end (if has-ro (+ ro-file-offset ro-len) (+ 4096 size)))
            (text-size (align-size text-end 16384))
            (trie (export-trie program offsets))
+           (export-set (new globalThis.Set (get program :exports)))
            (symbols (js-array)) (strings (js-array 0)) (local-count 0)
-           (commands (js-array)) (image (binary-output options)) (i 0))
+           (want-packed (and (not (nil? options)) (= (get options :binaryEncoding nil) "u16le-chunks")))
+           (_check-encoding (when (and (not (nil? options)) (Object/hasOwn options "binaryEncoding") (not want-packed))
+                              (binary-output options)))
+           (commands (js-array)) (image (binary-output (js-object :binaryEncoding "u16le-chunks"))) (i 0))
       ;; Local symbols precede external definitions; public surface is exact.
       (let ((pass 0))
         (while (< pass 2)
         (let ((external (= pass 1)))
         (setq i 0)
         (while (< i (js-length functions))
-          (let* ((function (js-nth i functions))
-                 (public (js-call (get program :exports) :includes (get function :name))))
+          (let* ((function (aref functions i))
+                 (public (js-call export-set :has (get function :name))))
             (when (if public external (not external))
               (u32 symbols (js-length strings))
               (js-call symbols :push (if public 15 14) 1 0 0)
-               (u64 symbols (+ (if entry 4294967296 0) 4096 (js-nth i offsets)))
+               (u64 symbols (+ (if entry 4294967296 0) 4096 (aref offsets i)))
               (string-bytes strings (str "_" (get function :name)))
               (unless public (setq local-count (1+ local-count)))))
           (setq i (1+ i))))
@@ -1478,7 +2036,13 @@
           (dylib-command commands 13 "@rpath/eliscript-native.dylib"))
         (dylib-command commands 12 "/usr/lib/libSystem.B.dylib")
         (u32 commands 27) (u32 commands 24)
-        (let ((word-digest (sha256-words-le words (if (Array/isArray words) nil native-word-at))))
+        (unless (Array/isArray words) (native-word-flush words))
+        (let ((word-digest (sha256-words-le words
+                             (if (or (Array/isArray words)
+                                     (and (Array/isArray (get words :chunks nil))
+                                          (not (get words :dirty nil))
+                                          (not (get words :hasHole nil))))
+                               nil native-word-at))))
           (append commands (js-call (if has-ro
                                       (let ((combined (js-call word-digest :slice)))
                                         (append combined (sha256-bytes ro-bytes))
@@ -1518,7 +2082,7 @@
           (put code :roDataSection (js-object :name "__const" :segment "__TEXT"
             :fileOffset ro-file-offset :virtualAddress (+ (if entry 4294967296 0) ro-file-offset)
             :size ro-len :align 8)))
-        (binary-finish image))))
+        (if want-packed (binary-finish image) (binary-to-array image)))))
 
   (defun emit-native-numeric-library (program target &optional options)
     (unless (or (= target "arm64-macos") (= target "arm64-linux"))
@@ -1582,12 +2146,13 @@
     (word state 3103791721) ;; str w9, [x19, #24]
     (let ((sites (get state :trapSites nil)))
       (when sites
-        (memory-integer-register state 9 (1+ (js-length sites)))
-        (let ((range (js-object :kind "trap-site" :function (get state :debugFunction)
-                       :functionIndex (get state :debugFunctionIndex) :depth (get state :debugDepth 0)
-                       :start (* 4 (js-length (get state :words))) :end (+ 4 (* 4 (js-length (get state :words))))
-                       :span nil :code code :site (1+ (js-length sites)))))
-          (js-call sites :push range) (js-call (get state :debugRanges) :push range))
+        (let ((site-id (+ (get state :trapSiteBase 0) (1+ (js-length sites)))))
+          (memory-integer-register state 9 site-id)
+          (let ((range (js-object :kind "trap-site" :function (get state :debugFunction)
+                         :functionIndex (get state :debugFunctionIndex) :depth (get state :debugDepth 0)
+                         :start (* 4 (js-length (get state :words))) :end (+ 4 (* 4 (js-length (get state :words))))
+                         :span nil :code code :site site-id)))
+            (js-call sites :push range) (js-call (get state :debugRanges) :push range)))
         (word state 3103792745))) ;; str w9, [x19, #28]
     (js-call (get state :memoryErrors) :push (jump state "jump")))
 
@@ -1658,34 +2223,81 @@
       (memory-integer-register state 0 0)))
 
   (defun memory-word (state node)
-    (let* ((children (get node :children)) (count (js-length children)) (name (get node :value)))
+    (let* ((children (get node :children)) (count (js-length children)) (name (get node :value))
+           (opt (and (get state :memory nil) (get state :optimizeMemory nil)))
+           (no-debug (not (get state :debugRanges nil))))
       (if (= count 0)
           (if (get state :memory nil) (memory-integer-register state 0 (if (= name "*") 1 0))
             (integer-register state 0 (if (= name "*") 1 0) 0))
-        (progn
-          (expression state (js-nth 0 children))
+        (let* ((left (js-nth 0 children))
+               (rL (if (and opt no-debug (memory-word-type (get left :type)))
+                     (local-register state left "u32") -1)))
           (cond
             ((= count 2)
-             (let ((right (js-nth 1 children)))
-               (if (and (get state :memory nil) (not (get state :compact nil))
-                        (not (get state :leaf nil))
-                        (memory-word-type (get right :type))
-                        (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
-                   ;; These forms write only x0/x9 even when the local is
-                   ;; read from a callee-saved register.
-                   ;; Capture the evaluated LHS without changing evaluation order.
-                   (progn (word state 704644065) (expression state right)) ;; mov w1,w0
-                 (progn
-                   (push-value state "u32") (expression state right) (pop-value state "u32"))))
-             (if (= (get node :kind) "word-compare")
-                 (let ((code (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
-                             ((= name "<=") 9) ((= name ">") 8) (t 2))))
-                   (word state 1795162175)
-                   (word state (+ 446629856 (* (bit-xor code 1) 4096))))
-               (word state (cond ((= name "+") 184549408) ((= name "-") 1258291232) (t 453016608)))))
-            ((= name "-") (word state 1258292192))
-            ((= name "1+") (word state 285213696))
-            ((= name "1-") (word state 1358955520)))))))
+             (let* ((right (js-nth 1 children))
+                    (imm (if opt (memory-word-imm12 right) -1))
+                    (shift (if (and opt (= (get node :kind) "word-arithmetic") (= name "*"))
+                             (memory-word-pow2-shift right) 0))
+                    (rR (if (and opt no-debug (memory-word-type (get right :type)))
+                          (local-register state right "u32") -1)))
+               (cond
+                 ((and (= (get node :kind) "word-arithmetic") (or (= name "+") (= name "-")) (>= imm 0))
+                  (when (< rL 0) (expression state left))
+                  (word state (+ (if (= name "+") 285212672 1358954496) (* imm 1024) (if (>= rL 0) (* rL 32) 0))))
+                 ((> shift 0)
+                  (when (< rL 0) (expression state left))
+                  (word state (+ 1392508928 (* (- 32 shift) 65536) (* (- 31 shift) 1024) (if (>= rL 0) (* rL 32) 0))))
+                 ((and (= (get node :kind) "word-compare") (>= imm 0))
+                  (when (< rL 0) (expression state left))
+                  (word state (+ 1895825439 (* imm 1024) (if (>= rL 0) (* rL 32) 0)))
+                  (let ((code (memory-word-compare-code name)))
+                    (word state (+ 446629856 (* (bit-xor code 1) 4096)))))
+                 ((>= rR 0)
+                  (when (< rL 0) (expression state left))
+                  (if (= (get node :kind) "word-compare")
+                    (let ((code (memory-word-compare-code name)))
+                      (word state (+ 1795162143 (* rR 65536) (if (>= rL 0) (* rL 32) 0)))
+                      (word state (+ 446629856 (* (bit-xor code 1) 4096))))
+                    (word state (+ (cond ((= name "+") 184549376) ((= name "-") 1258291200) (t 453016576))
+                                   (* rR 65536) (if (>= rL 0) (* rL 32) 0)))))
+                 (t
+                  (if (and opt no-debug (>= rL 0)
+                           (not (memory-expr-writes-reg-p state right rL)))
+                    (progn
+                      (expression state right)
+                      (if (= (get node :kind) "word-compare")
+                        (let ((code (memory-word-compare-code name)))
+                          (word state (+ 1795162143 (* rL 32))) ;; cmp wRL, w0
+                          (word state (+ 446629856 (* (bit-xor code 1) 4096))))
+                        (word state (+ (cond ((= name "+") 184549376) ((= name "-") 1258291200) (t 453016576))
+                                       (* rL 32))))) ;; add/sub/mul w0, wRL, w0
+                    (progn
+                      (expression state left)
+                      (if (and (get state :memory nil) (not (get state :compact nil))
+                               (not (get state :leaf nil))
+                               (memory-word-type (get right :type))
+                               (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
+                          ;; These forms write only x0/x9 even when the local is
+                          ;; read from a callee-saved register.
+                          ;; Capture the evaluated LHS without changing evaluation order.
+                          (progn (word state 704644065) (expression state right)) ;; mov w1,w0
+                        (progn
+                          (push-value state "u32") (expression state right) (pop-value state "u32")))
+                      (if (= (get node :kind) "word-compare")
+                          (let ((code (memory-word-compare-code name)))
+                            (word state 1795162175)
+                            (word state (+ 446629856 (* (bit-xor code 1) 4096))))
+                        (word state (cond ((= name "+") 184549408) ((= name "-") 1258291232) (t 453016608))))))))))
+            ((= name "-")
+             (expression state left) (word state 1258292192))
+            ((= name "1+")
+             (if (>= rL 0)
+               (word state (+ 285213696 (* rL 32)))
+               (progn (expression state left) (word state 285213696))))
+            (t
+             (if (>= rL 0)
+               (word state (+ 1358955520 (* rL 32)))
+               (progn (expression state left) (word state 1358955520)))))))))
 
   (defun memory-grow (state node)
     (expression state (js-nth 0 (get node :children)))
@@ -1708,6 +2320,8 @@
             (word state 1409286145) (patch-jump state back loop)))
         (patch-jump state done (js-length (get state :words))))
       (word state 4177528426) ;; str x10, [x19, #8]
+      (when (get state :pinMemory nil)
+        (word state 2852783100)) ;; mov x28, x10
       (let ((end (jump state "jump")))
         (patch-jump state failed (js-length (get state :words)))
         (memory-integer-register state 0 4294967295)
@@ -1738,7 +2352,18 @@
         (word state 3943301439) ;; cmp x9,x10
         (let ((backward (js-length (get state :words))))
           (word state 1409286152) ;; b.hi backward (dst_ptr > src_ptr)
-          ;; Forward 8B + 1B loop (memmove-exact when dst_ptr <= src_ptr)
+          ;; Forward 32B + 8B + 1B loop (memmove-exact when dst_ptr <= src_ptr)
+          (let ((fwd32 (js-length (get state :words))))
+            (word state 4043342271) ;; cmp x13,#32
+            (let ((fwd8-skip (js-length (get state :words))))
+              (word state 1409286147) ;; b.lo fwd8
+              (word state 2831236428) ;; ldp x12,x15,[x10],#16
+              (word state 2827042092) ;; stp x12,x15,[x9],#16
+              (word state 2831236428) ;; ldp x12,x15,[x10],#16
+              (word state 2827042092) ;; stp x12,x15,[x9],#16
+              (word state 3506471341) ;; sub x13,x13,#32
+              (let ((back32 (jump state "jump"))) (patch-jump state back32 fwd32))
+              (patch-jump state fwd8-skip (js-length (get state :words)))))
           (let ((fwd8 (js-length (get state :words))))
             (word state 4043317695) ;; cmp x13,#8
             (let ((fwd1 (js-length (get state :words))))
@@ -1785,43 +2410,98 @@
       (memory-integer-register state 0 0)))
 
   (defun memory-fill-op (state node)
-    (let ((children (get node :children)))
-      (expression state (js-nth 0 children)) (push-value state "u32")
-      (expression state (js-nth 1 children)) (push-value state "u32")
-      (expression state (js-nth 2 children))
-      (word state 704644077) ;; mov w13,w0 (len, zero-extended in x13)
-      (pop-value state "u32")
-      (word state 704709612) ;; mov w12,w1 (byte val)
-      (pop-value state "u32")
-      (word state 704709600) ;; mov w0,w1  (dst, zero-extended in x0)
-      (word state 2332885002) ;; add x10,x0,x13
-      (word state 4181722731) ;; ldr x11,[x19,#8]
-      (word state 3943367007) ;; cmp x10,x11
-      (memory-conditional-error state 1409286153 1) ;; b.ls
-      (let ((done (js-length (get state :words))))
-        (word state 3019898893) ;; cbz x13, done
-        (word state 4181721705) ;; ldr x9,[x19]
-        (word state 2332033321) ;; add x9,x9,x0
-        (word state 3544194444) ;; and x12,x12,#0xff
-        (integer-register state 10 16843009 16843009) ;; x10 = 0x0101010101010101
-        (word state 2601155980) ;; mul x12,x12,x10
-        (let ((fill8 (js-length (get state :words))))
-          (word state 4043317695) ;; cmp x13,#8
-          (let ((fill1 (js-length (get state :words))))
-            (word state 1409286147) ;; b.lo fill1
-            (word state 4160783660) ;; str x12,[x9],#8
-            (word state 3506446765) ;; sub x13,x13,#8
-            (let ((back8 (jump state "jump"))) (patch-jump state back8 fill8))
-            (patch-jump state fill1 (js-length (get state :words)))))
-        (let ((fill-done (js-length (get state :words))))
-          (word state 3019898893) ;; cbz x13, fill-done
-          (let ((fill1-loop (js-length (get state :words))))
-            (word state 939529516) ;; strb w12,[x9],#1
-            (word state 4043310509) ;; subs x13,x13,#1
-            (let ((back1 (js-length (get state :words))))
-              (word state 1409286145) (patch-jump state back1 fill1-loop)))
-          (patch-jump state fill-done (js-length (get state :words))))
-        (patch-jump state done (js-length (get state :words))))
+    (let* ((children (get node :children))
+           (val-node (js-nth 1 children))
+           (val0 (and (or (= (get val-node :kind) "literal") (= (get val-node :kind) "int-literal"))
+                      (= (value-type (get val-node :value)) "number")
+                      (= (bit-and (uint32 (get val-node :value)) 255) 0))))
+      (if val0
+        (progn
+          (expression state (js-nth 0 children)) (push-value state "u32")
+          (expression state (js-nth 2 children))
+          (word state 704644077) ;; mov w13,w0 (len, zero-extended in x13)
+          (pop-value state "u32")
+          (word state 704709600) ;; mov w0,w1  (dst, zero-extended in x0)
+          (word state 2332885002) ;; add x10,x0,x13
+          (word state 4181722731) ;; ldr x11,[x19,#8]
+          (word state 3943367007) ;; cmp x10,x11
+          (memory-conditional-error state 1409286153 1) ;; b.ls
+          (let ((done (js-length (get state :words))))
+            (word state 3019898893) ;; cbz x13, done
+            (word state 4181721705) ;; ldr x9,[x19]
+            (word state 2332033321) ;; add x9,x9,x0
+            (let ((fill32 (js-length (get state :words))))
+              (word state 4043342271) ;; cmp x13,#32
+              (let ((fill8 (js-length (get state :words))))
+                (word state 1409286147) ;; b.lo fill8
+                (word state 2827058495) ;; stp xzr,xzr,[x9],#16
+                (word state 2827058495) ;; stp xzr,xzr,[x9],#16
+                (word state 3506471341) ;; sub x13,x13,#32
+                (let ((back32 (jump state "jump"))) (patch-jump state back32 fill32))
+                (patch-jump state fill8 (js-length (get state :words)))))
+            (let ((fill8 (js-length (get state :words))))
+              (word state 4043317695) ;; cmp x13,#8
+              (let ((fill1 (js-length (get state :words))))
+                (word state 1409286147) ;; b.lo fill1
+                (word state 4160783679) ;; str xzr,[x9],#8
+                (word state 3506446765) ;; sub x13,x13,#8
+                (let ((back8 (jump state "jump"))) (patch-jump state back8 fill8))
+                (patch-jump state fill1 (js-length (get state :words)))))
+            (let ((fill-done (js-length (get state :words))))
+              (word state 3019898893) ;; cbz x13, fill-done
+              (let ((fill1-loop (js-length (get state :words))))
+                (word state 939529535) ;; strb wzr,[x9],#1
+                (word state 4043310509) ;; subs x13,x13,#1
+                (let ((back1 (js-length (get state :words))))
+                  (word state 1409286145) (patch-jump state back1 fill1-loop)))
+              (patch-jump state fill-done (js-length (get state :words))))
+            (patch-jump state done (js-length (get state :words)))))
+        (progn
+          (expression state (js-nth 0 children)) (push-value state "u32")
+          (expression state (js-nth 1 children)) (push-value state "u32")
+          (expression state (js-nth 2 children))
+          (word state 704644077) ;; mov w13,w0 (len, zero-extended in x13)
+          (pop-value state "u32")
+          (word state 704709612) ;; mov w12,w1 (byte val)
+          (pop-value state "u32")
+          (word state 704709600) ;; mov w0,w1  (dst, zero-extended in x0)
+          (word state 2332885002) ;; add x10,x0,x13
+          (word state 4181722731) ;; ldr x11,[x19,#8]
+          (word state 3943367007) ;; cmp x10,x11
+          (memory-conditional-error state 1409286153 1) ;; b.ls
+          (let ((done (js-length (get state :words))))
+            (word state 3019898893) ;; cbz x13, done
+            (word state 4181721705) ;; ldr x9,[x19]
+            (word state 2332033321) ;; add x9,x9,x0
+            (word state 3544194444) ;; and x12,x12,#0xff
+            (integer-register state 10 16843009 16843009) ;; x10 = 0x0101010101010101
+            (word state 2601155980) ;; mul x12,x12,x10
+            (let ((fill32 (js-length (get state :words))))
+              (word state 4043342271) ;; cmp x13,#32
+              (let ((fill8 (js-length (get state :words))))
+                (word state 1409286147) ;; b.lo fill8
+                (word state 2827039020) ;; stp x12,x12,[x9],#16
+                (word state 2827039020) ;; stp x12,x12,[x9],#16
+                (word state 3506471341) ;; sub x13,x13,#32
+                (let ((back32 (jump state "jump"))) (patch-jump state back32 fill32))
+                (patch-jump state fill8 (js-length (get state :words)))))
+            (let ((fill8 (js-length (get state :words))))
+              (word state 4043317695) ;; cmp x13,#8
+              (let ((fill1 (js-length (get state :words))))
+                (word state 1409286147) ;; b.lo fill1
+                (word state 4160783660) ;; str x12,[x9],#8
+                (word state 3506446765) ;; sub x13,x13,#8
+                (let ((back8 (jump state "jump"))) (patch-jump state back8 fill8))
+                (patch-jump state fill1 (js-length (get state :words)))))
+            (let ((fill-done (js-length (get state :words))))
+              (word state 3019898893) ;; cbz x13, fill-done
+              (let ((fill1-loop (js-length (get state :words))))
+                (word state 939529516) ;; strb w12,[x9],#1
+                (word state 4043310509) ;; subs x13,x13,#1
+                (let ((back1 (js-length (get state :words))))
+                  (word state 1409286145) (patch-jump state back1 fill1-loop)))
+              (patch-jump state fill-done (js-length (get state :words))))
+            (patch-jump state done (js-length (get state :words))))))
       (memory-integer-register state 0 0)))
 
   (defun memory-wide-operands (state left right)
@@ -1832,12 +2512,31 @@
       (progn (push-value state "v64") (expression state right) (pop-value state "v64"))))
 
   (defun memory-v64-compare (state node)
-    (let ((children (get node :children)) (name (get node :value)))
-      (memory-wide-operands state (js-nth 0 children) (js-nth 1 children))
-      (let ((code (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
-                        ((= name "<=") 9) ((= name ">") 8) (t 2))))
-        (word state 3942645823) ;; cmp x1,x0
-        (word state (+ 446629856 (* (bit-xor code 1) 4096))))))
+    (let* ((children (get node :children)) (name (get node :value))
+           (left (js-nth 0 children))
+           (right (js-nth 1 children))
+           (opt (and (get state :memory nil) (get state :optimizeMemory nil)))
+           (no-debug (not (get state :debugRanges nil)))
+           (wimm (when opt (memory-wide-imm12 right)))
+           (rL (if (and opt no-debug (memory-wide-type (get left :type))) (local-register state left "v64") -1))
+           (rR (if (and opt no-debug (memory-wide-type (get right :type))) (local-register state right "v64") -1))
+           (code (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
+                       ((= name "<=") 9) ((= name ">") 8) (t 2))))
+      (if (not (nil? wimm))
+        (progn
+          (when (< rL 0) (expression state left))
+          (word state (+ 4043309087 (* wimm 1024) (if (>= rL 0) (* rL 32) 0)))) ;; cmp xRL, #imm
+        (if (>= rR 0)
+          (progn
+            (when (< rL 0) (expression state left))
+            (word state (+ 3942645791 (* rR 65536) (if (>= rL 0) (* rL 32) 0)))) ;; cmp xRL, xRR
+          (if (and (>= rL 0) (not (memory-expr-writes-reg-p state right rL)))
+            (progn
+              (expression state right)
+              (word state (+ 3942645791 (* rL 32)))) ;; cmp xRL, x0
+            (progn (memory-wide-operands state left right)
+                   (word state 3942645823))))) ;; cmp x1, x0
+      (word state (+ 446629856 (* (bit-xor code 1) 4096)))))
 
   (defun memory-f64-unary-instruction (name)
     ;; Arm A64 scalar FP one-source encoding, ftype=01, Rn=Rd=0.
@@ -1862,7 +2561,71 @@
     (word state (memory-f64-unary-instruction (get node :value)))
     (word state 3575333897)) ;; msr FPCR,x9 (0xd51b4409)
 
-  (defun memory-operation (state node)
+  (defun memory-expr-writes-local-p (node target)
+    (let ((kind (get node :kind)) (children (get node :children)) (i 0) (found nil))
+      (if (and (or (= kind "set") (= kind "initialize")) (= (get node :value) target))
+          t
+        (progn
+          (when children
+            (while (and (not found) (< i (js-length children)))
+              (when (memory-expr-writes-local-p (js-nth i children) target)
+                (setq found t))
+              (setq i (1+ i))))
+          found))))
+
+  (defun memory-expr-writes-reg-p (state node target-reg)
+    (let ((kind (get node :kind)) (children (get node :children)) (i 0) (found nil))
+      (if (and (or (= kind "set") (= kind "initialize"))
+               (let* ((regs (get state :registers)) (idx (get node :value))
+                      (raw (if (< idx (js-length regs)) (js-nth idx regs) -1)))
+                 (and (<= raw -2) (= (- (- raw) 2) target-reg))))
+          t
+        (progn
+          (when children
+            (while (and (not found) (< i (js-length children)))
+              (when (memory-expr-writes-reg-p state (js-nth i children) target-reg)
+                (setq found t))
+              (setq i (1+ i))))
+          found))))
+
+  (defun memory-addr-base-imm (state addr)
+    (let ((kind (get addr :kind)) (val (get addr :value)) (children (get addr :children)))
+      (when (and (= kind "word-arithmetic") (memory-word-type (get addr :type)))
+        (cond
+          ((and (= val "+") (= (js-length children) 2))
+           (let* ((left (js-nth 0 children))
+                  (right (js-nth 1 children))
+                  (rL (if (memory-word-type (get left :type)) (local-register state left "u32") -1))
+                  (immR (memory-word-imm12 right)))
+             (if (and (>= rL 0) (>= immR 0))
+                 (js-object :reg rL :imm immR :local (get left :value))
+               (let ((rR (if (memory-word-type (get right :type)) (local-register state right "u32") -1))
+                     (immL (memory-word-imm12 left)))
+                 (when (and (>= rR 0) (>= immL 0))
+                   (js-object :reg rR :imm immL :local (get right :value)))))))
+          ((and (= val "1+") (= (js-length children) 1))
+           (let* ((arg (js-nth 0 children))
+                  (rA (if (memory-word-type (get arg :type)) (local-register state arg "u32") -1)))
+             (when (>= rA 0)
+               (js-object :reg rA :imm 1 :local (get arg :value)))))))))
+
+  (defun memory-emit-pinned-bounds (state width idx-reg)
+    (word state (+ 2432696330 (* width 1024) (* idx-reg 32))) ;; add x10, xIdx, #width
+    (word state 3944481119) ;; cmp x10, x28
+    (if (get state :trapSites nil)
+      (memory-conditional-error state 1409286153 1) ;; b.ls safe
+      (progn
+        (js-call (get state :boundsErrors) :push (js-length (get state :words)))
+        (word state 1409286152)))) ;; b.hi bounds_trap
+
+  (defun memory-emit-pinned-store (state name width idx-reg rV &optional discard)
+    (memory-emit-pinned-bounds state width idx-reg)
+    (word state (+ (cond ((= name "store-u8") 941648736) ((= name "store-u16") 2015390560)
+                     ((= name "store-u32") 3089132384) (t 4162874208))
+                   (* idx-reg 65536) rV))
+    (unless discard (memory-integer-register state 0 0)))
+
+  (defun memory-operation (state node &optional discard)
     (let* ((name (get node :value)) (children (get node :children)) (width (memory-width name))
            (store (and (> width 0) (= (js-length children) 2))))
       (cond
@@ -1870,43 +2633,151 @@
         ((= name "memory-copy") (memory-copy-op state node))
         ((= name "memory-fill") (memory-fill-op state node))
         ((> width 0)
-         (expression state (js-nth 0 children))
-         (when store
-           (let ((right (js-nth 1 children))
-                 (move-temp (if (= name "store-f64") 509624322
-                              (if (or (= name "store-v64") (= name "store-bits64")) 2852127714 704644066))))
-             (if (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local"))
-                 (progn
-                   (word state 704644065) ;; mov w1,w0
-                   (expression state right)
-                   (word state move-temp) ;; fmov d2,d0 / mov x2,x0 / mov w2,w0
-                   (word state 704709600)) ;; mov w0,w1
-               (progn
-                 (push-value state "u32")
-                 (expression state right)
-                 (word state move-temp)
-                 (pop-value state "u32") (word state 704709600)))))
-         ;; w0 zero-extends address; compare address+width in 64 bits before
-         ;; adding the host pointer, including near-4GiB wrapping addresses.
-         (word state (+ 2432696330 (* width 1024))) ;; add x10,x0,#width
-         (word state 4181722731) (word state 3943367007)
-         (memory-conditional-error state 1409286153 1) ;; b.ls safe
-         (word state 4181721705) (word state 2332033321)
-         (word state (cond ((= name "load-u8") 960495904) ((= name "load-u16") 2034237728)
-           ((= name "load-u32") 3107979552) ((= name "load-f64") 4248830240)
-           ((or (= name "load-v64") (= name "load-bits64")) 4181721376)
-           ((= name "store-u8") 956301602) ((= name "store-u16") 2030043426)
-           ((= name "store-u32") 3103785250) ((= name "store-f64") 4244635938)
-           (t 4177527074)))
-         (when store (memory-integer-register state 0 0)))
+         (let* ((addr (js-nth 0 children))
+                (no-debug (not (get state :debugRanges nil)))
+                (pin (get state :pinMemory nil))
+                (right (when store (js-nth 1 children)))
+                (rV (if (and pin store no-debug (/= name "store-f64"))
+                      (let* ((rtype (get right :type))
+                             (rk (get right :kind))
+                             (rv (get right :value))
+                             (reg (if (or (memory-word-type rtype) (memory-wide-type rtype))
+                                    (local-register state right rtype) -1)))
+                        (if (>= reg 0) reg
+                          (if (and (or (= rk "literal") (= rk "int-literal"))
+                                   (if (memory-wide-type rtype)
+                                     (if (and (not (nil? rv)) (= (value-type rv) "object"))
+                                       (and (= (get rv :low) 0) (= (get rv :high) 0))
+                                       (= rv 0))
+                                     (= rv 0)))
+                            31 -1)))
+                      -1))
+                (constAddr (if (and pin no-debug (memory-word-type (get addr :type)))
+                             (memory-word-imm12 addr) -1))
+                (rA (if (and pin no-debug (< constAddr 0) (memory-word-type (get addr :type)))
+                      (local-register state addr "u32") -1))
+                (baseImmRaw (if (and pin no-debug (< constAddr 0) (< rA 0)) (memory-addr-base-imm state addr) nil))
+                (baseImm (when baseImmRaw
+                           (if (= (get baseImmRaw :imm) 0)
+                             (progn (setq rA (get baseImmRaw :reg)) nil)
+                             baseImmRaw)))
+                (addrReg (if (>= rA 0) rA (if baseImm (get baseImm :reg) -1))))
+           (cond
+             ((and (>= constAddr 0) (<= (+ constAddr width) 4095) (= (% constAddr width) 0) (/= name "store-f64"))
+              (when (and store (< rV 0)) (expression state right))
+              (word state (+ 4043309983 (* (+ constAddr width) 1024))) ;; cmp x28, #(constAddr+width)
+              (if (get state :trapSites nil)
+                (memory-conditional-error state 1409286146 1) ;; b.hs safe
+                (progn
+                  (js-call (get state :boundsErrors) :push (js-length (get state :words)))
+                  (word state 1409286147))) ;; b.lo bounds_trap
+              (let ((scaled (/ constAddr width)))
+                (if store
+                  (progn
+                    (word state (+ (cond ((= name "store-u8") 956302176)
+                                         ((= name "store-u16") 2030044000)
+                                         ((= name "store-u32") 3103785824)
+                                         (t 4177527648))
+                                   (* scaled 1024)
+                                   (if (>= rV 0) rV 0)))
+                    (unless discard (memory-integer-register state 0 0)))
+                  (word state (+ (cond ((= name "load-u8") 960496480)
+                                       ((= name "load-u16") 2034238304)
+                                       ((= name "load-u32") 3107980128)
+                                       ((= name "load-f64") 4248830816)
+                                       (t 4181721952))
+                                 (* scaled 1024))))))
+             ((and pin (not store) (or (>= rA 0) baseImm))
+              (let ((idx-reg (if (>= rA 0) rA
+                               (progn
+                                 (word state (+ 285212681 (* (get baseImm :imm) 1024) (* (get baseImm :reg) 32))) ;; add w9, wBase, #imm
+                                 9))))
+                (memory-emit-pinned-bounds state width idx-reg)
+                (word state (+ (cond ((= name "load-u8") 945843040) ((= name "load-u16") 2019584864)
+                                 ((= name "load-u32") 3093326688) ((= name "load-f64") 4234177376)
+                                 (t 4167068512)) (* idx-reg 65536)))))
+             ((and pin store (>= rV 0))
+              (let ((idx-reg (cond
+                               ((>= rA 0) rA)
+                               (baseImm
+                                (word state (+ 285212681 (* (get baseImm :imm) 1024) (* (get baseImm :reg) 32))) ;; add w9, wBase, #imm
+                                9)
+                               (t (expression state addr) 0))))
+                (memory-emit-pinned-store state name width idx-reg rV discard)))
+             ((and pin store no-debug (/= name "store-f64") (< rV 0)
+                   (or (>= rA 0) baseImm)
+                   (and (>= addrReg 0) (not (memory-expr-writes-reg-p state right addrReg))))
+              (expression state right)
+              (let ((idx-reg (if (>= rA 0) rA
+                               (progn
+                                 (word state (+ 285212681 (* (get baseImm :imm) 1024) (* (get baseImm :reg) 32))) ;; add w9, wBase, #imm
+                                 9))))
+                (memory-emit-pinned-store state name width idx-reg 0 discard)))
+             (t
+              (expression state addr)
+              (when store
+                (let ((move-temp (if (= name "store-f64") 509624322
+                                   (if (or (= name "store-v64") (= name "store-bits64")) 2852127714 704644066))))
+                  (if (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local"))
+                      (progn
+                        (word state 704644065) ;; mov w1,w0
+                        (expression state right)
+                        (word state move-temp) ;; fmov d2,d0 / mov x2,x0 / mov w2,w0
+                        (word state 704709600)) ;; mov w0,w1
+                    (progn
+                      (push-value state "u32")
+                      (expression state right)
+                      (word state move-temp)
+                      (pop-value state "u32") (word state 704709600)))))
+              ;; w0 zero-extends address; compare address+width in 64 bits before
+              ;; adding the host pointer, including near-4GiB wrapping addresses.
+              (word state (+ 2432696330 (* width 1024))) ;; add x10,x0,#width
+              (if pin
+                  (progn
+                    (word state 3944481119) ;; cmp x10, x28
+                    (if (get state :trapSites nil)
+                        (memory-conditional-error state 1409286153 1) ;; b.ls safe
+                      (progn
+                        (js-call (get state :boundsErrors) :push (js-length (get state :words)))
+                        (word state 1409286152))) ;; b.hi bounds_trap
+                    (word state (cond ((= name "load-u8") 945843040) ((= name "load-u16") 2019584864)
+                      ((= name "load-u32") 3093326688) ((= name "load-f64") 4234177376)
+                      ((or (= name "load-v64") (= name "load-bits64")) 4167068512)
+                      ((= name "store-u8") 941648738) ((= name "store-u16") 2015390562)
+                      ((= name "store-u32") 3089132386) ((= name "store-f64") 4229983074)
+                      (t 4162874210))))
+                (progn
+                  (word state 4181722731) (word state 3943367007)
+                  (memory-conditional-error state 1409286153 1) ;; b.ls safe
+                  (word state 4181721705) (word state 2332033321)
+                  (word state (cond ((= name "load-u8") 960495904) ((= name "load-u16") 2034237728)
+                    ((= name "load-u32") 3107979552) ((= name "load-f64") 4248830240)
+                    ((or (= name "load-v64") (= name "load-bits64")) 4181721376)
+                    ((= name "store-u8") 956301602) ((= name "store-u16") 2030043426)
+                    ((= name "store-u32") 3103785250) ((= name "store-f64") 4244635938)
+                    (t 4177527074)))))
+              (when (and store (not discard)) (memory-integer-register state 0 0))))))
         ((= name "f64-from-bits64")
          (expression state (js-nth 0 children)) (word state 2657550336)) ;; fmov d0,x0
         ((= name "bits64-from-f64")
          (expression state (js-nth 0 children)) (word state 2657484800)) ;; fmov x0,d0
         ((or (= name "v64-from-u32") (= name "v64-low") (= name "bits64-low"))
-         (expression state (js-nth 0 children)) (word state 704644064)) ;; mov w0,w0
+         (let* ((arg (js-nth 0 children))
+                (atype (get arg :type))
+                (r (if (and (not (get state :debugRanges nil))
+                            (or (memory-word-type atype) (memory-wide-type atype)))
+                     (local-register state arg atype) -1)))
+           (if (>= r 0)
+             (word state (+ 704644064 (* r 65536))) ;; mov w0, wR
+             (progn (expression state arg) (word state 704644064))))) ;; mov w0,w0
         ((or (= name "v64-high") (= name "bits64-high"))
-         (expression state (js-nth 0 children)) (word state 3546348544)) ;; lsr x0,x0,#32
+         (let* ((arg (js-nth 0 children))
+                (r (if (and (not (get state :debugRanges nil))
+                            (memory-wide-type (get arg :type)))
+                     (local-register state arg "v64") -1)))
+           (if (>= r 0)
+             (word state (+ 3546348544 (* r 32))) ;; lsr x0, xR, #32
+             (progn (expression state arg) (word state 3546348544))))) ;; lsr x0,x0,#32
         ((= name "v64-encode-bits64")
          (expression state (js-nth 0 children))
          (word state 3537895465) ;; movz x9,#1,lsl #48
@@ -1942,17 +2813,63 @@
         ((= name "memory-size") (word state 4181722720) (word state 3545299968))
         ((= name "memory-grow") (memory-grow state node))
         (t
-         (expression state (js-nth 0 children))
-         (let ((right (js-nth 1 children)))
-           (if (and (memory-word-type (get right :type))
-                    (or (= (get right :kind) "literal") (= (get right :kind) "int-literal") (= (get right :kind) "local")))
-               (progn (word state 704644065) (expression state right)) ;; mov w1,w0
-             (progn (push-value state "u32") (expression state right) (pop-value state "u32"))))
-         (when (= name "word-div") (memory-conditional-error state 889192448 2))
-         (word state (cond ((= name "word-div") 448792608) ((= name "word-shr") 448799776)
-           ((= name "word-shl") 448798752) ((= name "word-and") 167772192)
-           ((= name "word-or") 704643104) ((= name "word-xor") 1241514016)
-           (t (backend-fail node "unsupported native memory32 opcode"))))))))
+         (let* ((left (js-nth 0 children))
+                (right (js-nth 1 children))
+                (rkind (get right :kind))
+                (rlit (and (memory-word-type (get right :type))
+                           (or (= rkind "literal") (= rkind "int-literal"))
+                           (= (value-type (get right :value)) "number")
+                           (Number/isInteger (get right :value))))
+                (rval (when rlit (uint32 (get right :value))))
+                (shift-k (if (and rlit (or (= name "word-shr") (= name "word-shl"))
+                                  (>= rval 0) (< rval 32)) rval -1))
+                (mask-bits (if (and rlit (= name "word-and"))
+                             (let ((bits 0) (mask 0))
+                               (while (and (< bits 31) (< mask rval))
+                                 (setq mask (+ (* mask 2) 1) bits (1+ bits)))
+                               (if (= mask rval) bits 0))
+                             0))
+                (rL (if (and (not (get state :debugRanges nil))
+                             (memory-word-type (get left :type)))
+                      (local-register state left "u32") -1)))
+           (cond
+             ((and (= name "word-shr") (> shift-k 0)
+                   (= (get left :kind) "memory-op")
+                   (or (= (get left :value) "v64-high") (= (get left :value) "bits64-high")))
+              (let* ((inner (js-nth 0 (get left :children)))
+                     (rIn (if (and (not (get state :debugRanges nil))
+                                   (memory-wide-type (get inner :type)))
+                            (local-register state inner "v64") -1)))
+                (when (< rIn 0) (expression state inner))
+                (word state (+ 3544251392 (* (+ 32 shift-k) 65536) (if (>= rIn 0) (* rIn 32) 0)))))
+             ((>= shift-k 0)
+              (when (or (= shift-k 0) (< rL 0)) (expression state left))
+              (when (> shift-k 0)
+                (word state (if (= name "word-shr")
+                              (+ 1392540672 (* shift-k 65536) (if (>= rL 0) (* rL 32) 0))
+                              (+ 1392508928 (* (- 32 shift-k) 65536) (* (- 31 shift-k) 1024) (if (>= rL 0) (* rL 32) 0))))))
+             ((> mask-bits 0)
+              (when (< rL 0) (expression state left))
+              (word state (+ 301989888 (* (1- mask-bits) 1024) (if (>= rL 0) (* rL 32) 0))))
+             ((and (>= rL 0) (not (memory-expr-writes-reg-p state right rL)))
+              (expression state right)
+              (when (= name "word-div") (memory-conditional-error state 889192448 2))
+              (word state (+ (cond ((= name "word-div") 448792576) ((= name "word-shr") 448799744)
+                               ((= name "word-shl") 448798720) ((= name "word-and") 167772160)
+                               ((= name "word-or") 704643072) ((= name "word-xor") 1241513984)
+                               (t (backend-fail node "unsupported native memory32 opcode")))
+                             (* rL 32))))
+             (t
+              (expression state left)
+              (if (and (memory-word-type (get right :type))
+                       (or (= rkind "literal") (= rkind "int-literal") (= rkind "local")))
+                  (progn (word state 704644065) (expression state right)) ;; mov w1,w0
+                (progn (push-value state "u32") (expression state right) (pop-value state "u32")))
+              (when (= name "word-div") (memory-conditional-error state 889192448 2))
+              (word state (cond ((= name "word-div") 448792608) ((= name "word-shr") 448799776)
+                ((= name "word-shl") 448798752) ((= name "word-and") 167772192)
+                ((= name "word-or") 704643104) ((= name "word-xor") 1241514016)
+                (t (backend-fail node "unsupported native memory32 opcode")))))))))))
 
   (defun memory-word-type (type) (or (= type "u32") (= type "i32")))
   (defun memory-wide-type (type) (or (= type "v64") (= type "bits64")))
@@ -2061,14 +2978,21 @@
          (progn (emit-sp-address-x9 state offset) (word state (+ 3103785248 reg)))))))
 
   (defun memory-move-to-reg (state node reg wide)
-    ;; Move the local directly into the call's GPR and keep its debug range.
-    (let ((type (get node :type)))
-      (if (and (= (get node :kind) "local")
-               (or (memory-word-type type) (memory-wide-type type)))
-          (expression state node nil reg)
-        (progn
-          (expression state node)
-          (word state (+ (if wide 2852127712 704644064) reg))))))
+    ;; Move locals and small constants directly into the call's GPR.
+    (let ((kind (get node :kind)) (type (get node :type)))
+      (cond
+        ((and (= kind "local") (or (memory-word-type type) (memory-wide-type type)))
+         (expression state node nil reg))
+        ((and (not (get state :debugRanges nil)) (or (= kind "literal") (= kind "int-literal")) (memory-wide-type type))
+         (let ((val (get node :value)))
+           (if (and (not (nil? val)) (= (value-type val) "object"))
+             (memory-wide-register state reg (uint32 (get val :low)) (uint32 (get val :high)))
+             (memory-wide-register state reg (uint32 val) 0))))
+        ((and (not (get state :debugRanges nil)) (or (= kind "literal") (= kind "int-literal")) (memory-word-type type))
+         (memory-integer-register state reg (get node :value)))
+        (t
+         (expression state node)
+         (word state (+ (if wide 2852127712 704644064) reg))))))
   (defun memory-call (state node)
     (let* ((args (get node :children)) (indirect (= (get node :kind) "call-indirect"))
            (count (- (js-length args) (if indirect 1 0)))
@@ -2139,7 +3063,10 @@
         (put state :depth (- (get state :depth) count)))
       (word state 3107986025)
       (let ((at (js-length (get state :words))))
-        (word state 889192457) (js-call (get state :memoryErrors) :push at))))
+        (word state 889192457) (js-call (get state :memoryErrors) :push at))
+      (when (and (get state :pinMemory nil)
+                 (or indirect (not (get state :mayGrow nil)) (js-nth (get node :value) (get state :mayGrow))))
+        (word state 4181722748))))
 
   (defun memory-host-call (state node)
     (let* ((children (get node :children))
@@ -2160,7 +3087,9 @@
       ;; host value and sets the trap latch before this epilogue boundary.
       (word state 3107986025)
       (let ((at (js-length (get state :words))))
-        (word state 889192457) (js-call (get state :memoryErrors) :push at))))
+        (word state 889192457) (js-call (get state :memoryErrors) :push at))
+      (when (get state :pinMemory nil)
+        (word state 4181722748))))
 
   (defun native-phase (observer phase count words branches calls)
     (when (= (value-type observer) "function")
@@ -2189,12 +3118,472 @@
         ;; data; building the final debug document no longer needs this root.
         (put code :words nil) bytes)))
 
+  (defconst native-hot-leaf-names (new globalThis.Set (js-array
+    "heap-block" "rt-root-scope-set-abs" "rt-root-scope-get-abs"
+    "heap-ro-block" "heap-value-valid" "value-number-bits"
+    "heap-number-from-word" "heap-number-word" "heap-number-uint" "heap-check"
+    "heap-object-init-cell" "heap-string-cached-hash" "heap-object-builtin" "heap-key-equal"
+    "heap-slot-index" "heap-handle" "heap-note-allocation"
+    "val64-dynamic-p" "val64-inline-number-p" "val64-singleton-p"
+    "heap-free-tree-maximum" "heap-free-tree-height"
+    "heap-value-check" "heap-kind-check" "heap-base")))
+
+  (defun memory-leaf-candidate (function self-index)
+    (let* ((body (get function :body))
+           (locals (get function :locals))
+           (fname (get function :name nil))
+           (hot-leaf (and (= (value-type fname) "string") (js-call native-hot-leaf-names :has fname)))
+           (max-nodes (if hot-leaf 120 52))
+           (max-calls (if hot-leaf 4 3))
+           (pending (js-array body))
+           (count 0)
+           (calls 0)
+           (valid (<= (js-length locals) 12)))
+      (while (and valid (> (js-length pending) 0))
+        (let* ((node (js-call pending :pop))
+               (kind (get node :kind))
+               (children (get node :children))
+               (i 0))
+          (setq count (1+ count))
+          (when (= kind "call")
+            (setq calls (1+ calls))
+            (when (or (= (get node :value) self-index) (> calls max-calls))
+              (setq valid nil)))
+          (if (or (> count max-nodes)
+                  (not valid)
+                  (= kind "call-indirect") (= kind "host-call")
+                  (= kind "while") (= kind "remainder-while") (= kind "guarded-while")
+                  (= kind "memory-data-copy"))
+              (setq valid nil)
+            (while (< i (js-length children))
+              (js-call pending :push (js-nth i children))
+              (setq i (1+ i))))))
+      (when valid (js-object :function function :size count))))
+
+  (defun memory-uses-linear-p (node)
+    (let ((pending (js-array node)) (found nil))
+      (while (and (not found) (> (js-length pending) 0))
+        (let* ((item (js-call pending :pop))
+               (kind (get item :kind)))
+          (if (and (= kind "memory-op")
+                   (let ((op (get item :value)))
+                     (or (> (memory-width op) 0) (= op "memory-grow"))))
+              (setq found t)
+            (let ((children (get item :children)) (i 0))
+              (when (Array/isArray children)
+                (while (< i (js-length children))
+                  (js-call pending :push (js-nth i children))
+                  (setq i (1+ i))))))))
+      found))
+
+  (defun memory-has-inline-site (node candidates self-index)
+    (let ((pending (js-array node)) (found nil))
+      (while (and (not found) (> (js-length pending) 0))
+        (let* ((item (js-call pending :pop))
+               (kind (get item :kind))
+               (children (get item :children))
+               (i 0))
+          (if (and (= kind "call")
+                   (/= (get item :value) self-index)
+                   (not (nil? (js-nth (get item :value) candidates))))
+              (setq found t)
+            (while (< i (js-length children))
+              (js-call pending :push (js-nth i children))
+              (setq i (1+ i))))))
+      found))
+
+  (defun memory-shift-clone (node slot-map)
+    (let* ((kind (get node :kind))
+           (children (get node :children))
+           (clen (js-length children))
+           (is-local (or (= kind "local") (= kind "set") (= kind "initialize"))))
+      (if (and (= clen 0) (not is-local))
+        node
+        (let ((new-children nil) (changed false) (i 0))
+          (while (< i clen)
+            (let* ((orig (js-nth i children))
+                   (cloned (memory-shift-clone orig slot-map)))
+              (when (not (eq cloned orig))
+                (unless new-children (setq new-children (js-call children :slice)))
+                (put new-children i cloned)
+                (setq changed t)))
+            (setq i (1+ i)))
+          (if (and (not changed) (not is-local))
+            node
+            (let ((copy (Object/assign (js-object) node)))
+              (put copy :children (or new-children children))
+              (when is-local
+                (put copy :value (js-nth (get node :value) slot-map)))
+              copy))))))
+
+  (defun memory-rewrite-inline (node candidates self-index locals budget pools cursors)
+    (let* ((kind (get node :kind))
+           (children (get node :children))
+           (clen (js-length children))
+           (control-flow (or (= kind "sequence") (= kind "if") (= kind "while")
+                             (= kind "remainder-while") (= kind "guarded-while")))
+           (new-children nil)
+           (changed false)
+           (i 0))
+      (if control-flow
+        (let ((peak (Object/assign (js-object) cursors)))
+          (while (< i clen)
+            (let* ((orig (js-nth i children))
+                   (child-cursors (Object/assign (js-object) cursors))
+                   (rewritten (memory-rewrite-inline orig candidates self-index locals budget pools child-cursors))
+                   (pkeys (Object/keys child-cursors))
+                   (pi 0))
+              (while (< pi (js-length pkeys))
+                (let* ((pk (js-nth pi pkeys))
+                       (pv (get child-cursors pk 0)))
+                  (when (> pv (get peak pk 0)) (put peak pk pv)))
+                (setq pi (1+ pi)))
+              (when (not (eq rewritten orig))
+                (unless new-children (setq new-children (js-call children :slice)))
+                (put new-children i rewritten)
+                (setq changed t)))
+            (setq i (1+ i)))
+          (let ((pkeys (Object/keys peak)) (pi 0))
+            (while (< pi (js-length pkeys))
+              (let ((pk (js-nth pi pkeys)))
+                (put cursors pk (get peak pk)))
+              (setq pi (1+ pi)))))
+        (while (< i clen)
+          (let* ((orig (js-nth i children))
+                 (rewritten (memory-rewrite-inline orig candidates self-index locals budget pools cursors)))
+            (when (not (eq rewritten orig))
+              (unless new-children (setq new-children (js-call children :slice)))
+              (put new-children i rewritten)
+              (setq changed t)))
+          (setq i (1+ i))))
+      (let* ((target-index (if (= kind "call") (get node :value) -1))
+             (cand (when (and (= kind "call") (/= target-index self-index))
+                     (js-nth target-index candidates)))
+             (callee (when cand (get cand :function)))
+             (callee-locals (when callee (get callee :locals))))
+        (if (and cand
+                 (<= (+ (get budget :added) (get cand :size)) (get budget :maxAdded)))
+            (let ((tmp-cursors (Object/assign (js-object) cursors))
+                  (new-needed 0)
+                  (k 0))
+              (while (< k (js-length callee-locals))
+                (let* ((ltype (get (js-nth k callee-locals) :type))
+                       (pool (get pools ltype))
+                       (pos (get tmp-cursors ltype 0)))
+                  (put tmp-cursors ltype (1+ pos))
+                  (when (or (nil? pool) (>= pos (js-length pool)))
+                    (setq new-needed (1+ new-needed))))
+                (setq k (1+ k)))
+              (if (> (+ (js-length locals) new-needed) (get budget :maxLocals))
+                (if changed
+                  (let ((copy (Object/assign (js-object) node)))
+                    (put copy :children new-children)
+                    copy)
+                  node)
+                (let ((callee-arity (get callee :arity))
+                      (args (or new-children children))
+                      (slot-map (js-array))
+                      (seq-children (js-array)))
+                  (setq k 0)
+                  (while (< k (js-length callee-locals))
+                    (let* ((ltype (get (js-nth k callee-locals) :type))
+                           (pool (get pools ltype))
+                           (pos (get cursors ltype 0))
+                           (slot nil))
+                      (unless pool
+                        (setq pool (js-array))
+                        (put pools ltype pool))
+                      (if (< pos (js-length pool))
+                        (setq slot (js-nth pos pool))
+                        (progn
+                          (setq slot (js-length locals))
+                          (js-call locals :push (js-object :name (str "inline-" slot) :type ltype :index slot :noEntryInit t))
+                          (js-call pool :push slot)))
+                      (put cursors ltype (1+ pos))
+                      (js-call slot-map :push slot)
+                      (if (< k callee-arity)
+                          (js-call seq-children :push
+                            (js-object :kind "set" :type ltype :value slot
+                                       :children (js-array (js-nth k args))))
+                        (let ((zero-node (js-object :kind "literal" :type ltype
+                                           :value (if (memory-wide-type ltype) (js-object :low 0 :high 0) 0)
+                                           :children (js-array))))
+                          (js-call seq-children :push
+                            (js-object :kind "set" :type ltype :value slot
+                                       :children (js-array zero-node))))))
+                    (setq k (1+ k)))
+                  (js-call seq-children :push (memory-shift-clone (get callee :body) slot-map))
+                  (put budget :added (+ (get budget :added) (get cand :size)))
+                  (js-object :kind "sequence" :type (get node :type) :children seq-children))))
+          (if changed
+            (let ((copy (Object/assign (js-object) node)))
+              (put copy :children new-children)
+              copy)
+            node)))))
+
+  (defun inline-memory-function (self-index raw-locals raw-body candidates)
+    (when (memory-has-inline-site raw-body candidates self-index)
+      (let* ((locals (js-call raw-locals :slice))
+             (budget (js-object :added 0 :maxAdded 320 :maxLocals 80))
+             (pools (js-object))
+             (cursors (js-object))
+             (body (memory-rewrite-inline raw-body candidates self-index locals budget pools cursors)))
+        (js-object :locals locals :body body))))
+
+  (defun emit-memory-function-into (state function i raw-locals raw-body inline-candidates linux debug offsets)
+    (let* ((inlined (when inline-candidates
+                      (inline-memory-function i raw-locals raw-body inline-candidates)))
+           (locals (if inlined (get inlined :locals) raw-locals))
+           (body (if inlined (get inlined :body) raw-body))
+           (arity (get function :arity))
+           (param-types (function-param-types function))
+           (layout (compute-native-param-layout param-types linux))
+           (slots (get layout :slots))
+           (return-type (function-return-type function))
+           (pin-memory (memory-uses-linear-p body))
+           (allocation (allocate-memory-registers body locals pin-memory arity))
+           (saved (get allocation :saved))
+           (spilled (get allocation :spilled))
+           (no-init (get allocation :noInit))
+           (frame (* (js-call globalThis.Math :ceil (/ (+ (if pin-memory 3 1) saved spilled) 2)) 16)) (j 0)
+           (save-regs (let ((regs (js-array 19)) (si 0))
+                        (while (< si saved) (js-call regs :push (+ 20 si)) (setq si (1+ si)))
+                        (when pin-memory (js-call regs :push 27) (js-call regs :push 28))
+                        regs)))
+      (when offsets (js-call offsets :push (* (js-length (get state :words)) 4)))
+      (put state :registers (get allocation :registers))
+      (put state :localOffsets (get allocation :offsets))
+      (put state :depth 0) (put state :memoryErrors (js-array))
+      (put state :pinMemory pin-memory) (put state :boundsErrors (js-array))
+      (when debug
+        (put state :debugFunction (get function :name)) (put state :debugFunctionIndex i)
+        (put state :debugDepth 0)
+        (let* ((source (get function :source nil))
+               (range (js-object :kind "function" :function (get function :name) :functionIndex i :depth -1
+                        :start (* 4 (js-length (get state :words))) :end 0
+                        :span (get function :span (if source (get source :span nil) nil)))))
+          (put state :debugFunctionRange range) (js-call (get state :debugRanges) :push range)))
+      (word state 2847898621) (word state 2432697341)
+      (stack-adjust state frame t)
+      (let ((si 0) (slen (js-length save-regs)))
+        (while (< si slen)
+          (if (< (1+ si) slen)
+            (progn
+              (word state (+ 2835350496 (* si 32768) (* (js-nth (1+ si) save-regs) 1024) (js-nth si save-regs)))
+              (setq si (+ si 2)))
+            (progn
+              (word state (+ 4177527776 (* si 1024) (js-nth si save-regs)))
+              (setq si (1+ si))))))
+      (word state 2852127731) ;; mov x19,x0
+      (when pin-memory
+        (word state 4181721723) ;; ldr x27,[x19,#0]
+        (word state 4181722748)) ;; ldr x28,[x19,#8]
+      (while (< j arity)
+        (let* ((slot (js-nth j slots))
+               (kind (get slot :kind))
+               (local-type (get (js-nth j locals) :type)))
+          (cond
+            ((= kind "gpr")
+             ;; The incoming GPR is killed only by the spill. Store it
+             ;; directly instead of COPY into w0/x0 first.
+             nil)
+            ((= kind "fpr")
+             (unless (= (get slot :reg) 0)
+               (word state (+ 509624320 (* (get slot :reg) 32)))))
+            (t
+             (integer-register state 9 (+ 16 (get slot :offset)) 0)
+             (word state 2332623785) ;; add x9, x29, x9
+             (word state (if (= local-type "f64") 4248830240
+                           (if (memory-wide-type local-type) 4181721376 3107979552)))))
+          (local-access state j local-type t (if (= kind "gpr") (get slot :reg) 0))
+          (setq j (1+ j))))
+      ;; Typed memory IR follows WASM's zero-initialized local contract.
+      ;; Managed error/frame slots can be read before any explicit store.
+      (while (< j (js-length locals))
+        (let* ((local (js-nth j locals))
+               (type (get local :type)))
+          (unless (or (get local :noEntryInit nil) (and no-init (js-nth j no-init)))
+            (if (= type "f64")
+                (progn (word state 2657551328) ;; fmov d0,xzr: positive zero
+                  (local-access state j type t))
+              ;; Initialize the register or frame slot directly from WZR/XZR.
+              (local-access state j type t 31))))
+        (setq j (1+ j)))
+      (expression state body)
+      (let ((normal (jump state "jump")))
+        (when (> (js-length (get state :boundsErrors)) 0)
+          (patch-conditions state (get state :boundsErrors) (js-length (get state :words)))
+          (memory-integer-register state 9 1)
+          (word state 3103791721))
+        (patch-conditions state (get state :memoryErrors) (js-length (get state :words)))
+        (if (= return-type "f64")
+            (word state 2657551328)
+          (memory-integer-register state 0 0))
+        (patch-jump state normal (js-length (get state :words))))
+      (if (<= frame 4095)
+          (word state (+ 3506439081 (* frame 1024))) ;; sub x9,fp,#frame
+        (progn (integer-register state 9 frame 0) (word state 3406365609))) ;; sub x9,fp,x9
+      (let ((si 0) (slen (js-length save-regs)))
+        (while (< si slen)
+          (if (< (1+ si) slen)
+            (progn
+              (word state (+ 2839544096 (* si 32768) (* (js-nth (1+ si) save-regs) 1024) (js-nth si save-regs)))
+              (setq si (+ si 2)))
+            (progn
+              (word state (+ 4181721376 (* si 1024) (js-nth si save-regs)))
+              (setq si (1+ si))))))
+      (word state 2432697279) (word state 2831252477) (word state 3596551104)
+      (when debug
+        (put (get state :debugFunctionRange) :end (* 4 (js-length (get state :words)))))))
+
+  (defun pack-native-function-cache (fn-state &optional fn-name fn-arity fn-locals-len)
+    (when (and (= (js-length (get fn-state :constants)) 0)
+               (= (js-length (get fn-state :tableUses)) 0))
+      (let* ((fn-branches (get fn-state :branches (js-array)))
+             (bcount (js-length fn-branches))
+             (all-fit t) (bi 0))
+        (while (and all-fit (< bi bcount))
+          (let ((b (js-nth bi fn-branches)))
+            (unless (branch-fits (- (get b :target) (get b :at)) (branch-limit (get b :kind)))
+              (setq all-fit false)))
+          (setq bi (1+ bi)))
+        (when all-fit
+          (let* ((fn-calls (get fn-state :calls))
+                 (ccount (js-length fn-calls))
+                 (packed-calls (new globalThis.Uint32Array (* ccount 2)))
+                 (packed-branches (new globalThis.Uint32Array (* bcount 4)))
+                 (ci 0)
+                 (fn-ranges (get fn-state :debugRanges nil)))
+            (while (< ci ccount)
+              (let ((c (js-nth ci fn-calls))
+                    (off (* ci 2)))
+                (put packed-calls off (get c :at))
+                (put packed-calls (1+ off) (get c :target)))
+              (setq ci (1+ ci)))
+            (setq bi 0)
+            (while (< bi bcount)
+              (let ((b (js-nth bi fn-branches))
+                    (off (* bi 4)))
+                (put packed-branches off (get b :at))
+                (put packed-branches (1+ off) (get b :target))
+                (put packed-branches (+ off 2) (get b :opcode))
+                (put packed-branches (+ off 3) (get b :kind)))
+              (setq bi (1+ bi)))
+            (let ((entry (js-object
+                           :words (new globalThis.Uint32Array (get fn-state :words))
+                           :calls packed-calls
+                           :branches packed-branches)))
+              (when fn-ranges
+                (put entry :debugRanges fn-ranges)
+                (put entry :functionName fn-name)
+                (put entry :arity fn-arity)
+                (put entry :localsLength fn-locals-len))
+              entry))))))
+
+  (defun replay-native-function-cache (state entry offsets &optional function)
+    (let* ((base (js-length (get state :words)))
+           (packed-calls (get entry :calls))
+           (call-len (js-length packed-calls))
+           (calls (get state :calls))
+           (ci 0)
+           (packed-branches (get entry :branches))
+           (cached-ranges (get entry :debugRanges nil))
+           (dst-ranges (get state :debugRanges nil)))
+      (js-call offsets :push (* base 4))
+      (native-word-append-u32 (get state :words) (get entry :words))
+      (while (< ci call-len)
+        (js-call calls :push (js-object :at (+ base (aref packed-calls ci)) :target (aref packed-calls (1+ ci))))
+        (setq ci (+ ci 2)))
+      (when (> (js-length packed-branches) 0)
+        (js-call (get state :cachedBranches) :push (js-object :base base :branches packed-branches)))
+      (when (and cached-ranges dst-ranges)
+        (let* ((base-bytes (* base 4))
+               (dst-sites (get state :trapSites nil))
+               (source (when function (get function :source nil)))
+               (fn-span (when function (get function :span (if source (get source :span nil) nil))))
+               (ri 0)
+               (rlen (js-length cached-ranges)))
+          (while (< ri rlen)
+            (let* ((r (js-nth ri cached-ranges))
+                   (cloned (if (and (= ri 0) (= (get r :kind) "function") function)
+                             (Object/assign (js-object) r
+                               (js-object :start (+ base-bytes (get r :start))
+                                          :end (+ base-bytes (get r :end))
+                                          :span fn-span))
+                             (Object/assign (js-object) r
+                               (js-object :start (+ base-bytes (get r :start))
+                                          :end (+ base-bytes (get r :end)))))))
+              (js-call dst-ranges :push cloned)
+              (when (and dst-sites (= (get cloned :kind) "trap-site"))
+                (js-call dst-sites :push cloned)))
+            (setq ri (1+ ri)))))))
+
+  (defun compute-memory-may-grow (functions)
+    (let* ((count (js-length functions))
+           (grow (js-call (new globalThis.Array count) :fill false))
+           (edges (new globalThis.Array count))
+           (i 0))
+      (while (< i count)
+        (let ((deps (js-array)) (seen (new globalThis.Set))
+              (pending (js-array (get (js-nth i functions) :body))))
+          (while (> (js-length pending) 0)
+            (let* ((item (js-call pending :pop))
+                   (kind (get item :kind))
+                   (children (get item :children))
+                   (j 0))
+              (cond
+                ((or (= kind "host-call") (= kind "call-indirect")
+                     (and (= kind "memory-op") (= (get item :value) "memory-grow")))
+                 (put grow i t))
+                ((= kind "call")
+                 (let ((callee (get item :value)))
+                   (unless (or (= callee i) (js-call seen :has callee))
+                     (js-call seen :add callee)
+                     (js-call deps :push callee)))))
+              (when (Array/isArray children)
+                (while (< j (js-length children))
+                  (js-call pending :push (js-nth j children))
+                  (setq j (1+ j))))))
+          (put edges i deps))
+        (setq i (1+ i)))
+      (let ((changed t))
+        (while changed
+          (setq changed false i 0)
+          (while (< i count)
+            (unless (js-nth i grow)
+              (let ((deps (js-nth i edges)) (k 0))
+                (while (< k (js-length deps))
+                  (when (js-nth (js-nth k deps) grow)
+                    (put grow i t)
+                    (setq changed t k (js-length deps)))
+                  (setq k (1+ k)))))
+            (setq i (1+ i)))))
+      grow))
+
   (defun memory-code (program &optional target options observer)
     (let* ((linux (= target "arm64-linux"))
-           (debug (get (or options (js-object)) :debug nil))
+           (opts (or options (js-object)))
+           (debug (get opts :debug nil))
            (functions (get program :functions))
-           (state (js-object :words (if (get (or options (js-object)) :packedWords nil) (native-word-buffer) (js-array)) :calls (js-array) :constants (js-array)
-                    :compact nil :leaf nil :memory t :linux linux :registers (js-array) :localOffsets nil
+           (rt-prefix-count (get program :rtPrefixCount 0))
+           (optimize-memory (and (not debug) (>= (js-length functions) 16)))
+           (may-grow (when optimize-memory (compute-memory-may-grow functions)))
+           (mode-key (str (if linux "L" "M") ":" (if optimize-memory "O" "N")))
+           (packed-words (or (get opts :packedWords nil) (= (get opts :binaryEncoding nil) "u16le-chunks")))
+           (inline-candidates (when optimize-memory
+             (let ((arr (new globalThis.Array (js-length functions))) (k 0))
+               (while (< k (js-length functions))
+                 (let ((fn (js-nth k functions)))
+                   (if (< k rt-prefix-count)
+                     (let* ((rc (runtime-body-cache-get (get fn :body)))
+                            (leaf (if (and rc (get rc :frozen)) (get rc :leafCandidate) -1)))
+                       (put arr k (if (>= leaf 0) (js-object :function fn :size leaf) nil)))
+                     (put arr k (memory-leaf-candidate fn k))))
+                 (setq k (1+ k)))
+               arr)))
+           (state (js-object :words (if packed-words (native-word-buffer) (js-array)) :calls (js-array) :constants (js-array)
+                    :branches (js-array) :cachedBranches (js-array)
+                    :compact nil :leaf nil :memory t :optimizeMemory optimize-memory :mayGrow may-grow :linux linux :registers (js-array) :localOffsets nil
                     :functions functions
                     :signatureMap (get program :signatureMap nil)
                     :debugRanges (if debug (js-array) nil)
@@ -2204,80 +3593,48 @@
            (offsets (js-array)) (i 0))
       (native-phase observer "native-code-start" 0 0 0 0)
       (while (< i (js-length functions))
-        (let* ((function (js-nth i functions)) (locals (get function :locals)) (arity (get function :arity))
-               (param-types (function-param-types function))
-               (layout (compute-native-param-layout param-types linux))
-               (slots (get layout :slots))
-               (return-type (function-return-type function))
-               (allocation (allocate-memory-registers (get function :body) locals))
-               (saved (get allocation :saved))
-               (spilled (get allocation :spilled))
-               (frame (* (js-call globalThis.Math :ceil (/ (+ 1 saved spilled) 2)) 16)) (j 0))
-          (js-call offsets :push (* (js-length (get state :words)) 4))
-          (put state :registers (get allocation :registers))
-          (put state :localOffsets (get allocation :offsets))
-          (put state :depth 0) (put state :memoryErrors (js-array))
-          (when debug
-            (put state :debugFunction (get function :name)) (put state :debugFunctionIndex i)
-            (put state :debugDepth 0)
-            (let* ((source (get function :source nil))
-                   (range (js-object :kind "function" :function (get function :name) :functionIndex i :depth -1
-                            :start (* 4 (js-length (get state :words))) :end 0
-                            :span (get function :span (if source (get source :span nil) nil)))))
-              (put state :debugFunctionRange range) (js-call (get state :debugRanges) :push range)))
-          (word state 2847898621) (word state 2432697341)
-          (stack-adjust state frame t) (word state 4177527795) ;; save caller x19
-          (let ((index 0))
-            (while (< index saved)
-              (word state (+ 4177527796 (* (1+ index) 1024) index)) ;; str x20+index,[sp,#8*(1+index)]
-              (setq index (1+ index))))
-          (word state 2852127731) ;; mov x19,x0
-          (while (< j arity)
-            (let* ((slot (js-nth j slots))
-                   (kind (get slot :kind))
-                   (local-type (get (js-nth j locals) :type)))
-              (cond
-                ((= kind "gpr")
-                 ;; The incoming GPR is killed only by the spill. Store it
-                 ;; directly instead of COPY into w0/x0 first.
-                 nil)
-                ((= kind "fpr")
-                 (unless (= (get slot :reg) 0)
-                   (word state (+ 509624320 (* (get slot :reg) 32)))))
-                (t
-                 (integer-register state 9 (+ 16 (get slot :offset)) 0)
-                 (word state 2332623785) ;; add x9, x29, x9
-                 (word state (if (= local-type "f64") 4248830240
-                               (if (memory-wide-type local-type) 4181721376 3107979552)))))
-              (local-access state j local-type t (if (= kind "gpr") (get slot :reg) 0))
-              (setq j (1+ j))))
-          ;; Typed memory IR follows WASM's zero-initialized local contract.
-          ;; Managed error/frame slots can be read before any explicit store.
-          (while (< j (js-length locals))
-            (let ((type (get (js-nth j locals) :type)))
-              (if (= type "f64")
-                  (progn (word state 2657551328) ;; fmov d0,xzr: positive zero
-                    (local-access state j type t))
-                ;; Initialize the register or frame slot directly from WZR/XZR.
-                (local-access state j type t 31))) (setq j (1+ j)))
-          (expression state (get function :body))
-          (let ((normal (jump state "jump")))
-            (patch-conditions state (get state :memoryErrors) (js-length (get state :words)))
-            (if (= return-type "f64")
-                (word state 2657551328)
-              (memory-integer-register state 0 0))
-            (patch-jump state normal (js-length (get state :words))))
-          (if (<= frame 4095)
-              (word state (+ 3506439081 (* frame 1024))) ;; sub x9,fp,#frame
-            (progn (integer-register state 9 frame 0) (word state 3406365609))) ;; sub x9,fp,x9
-          (word state 4181721395) ;; restore x19 independently of temporary stack depth
-          (let ((index 0))
-            (while (< index saved)
-              (word state (+ 4181721396 (* (1+ index) 1024) index)) ;; ldr x20+index,[x9,#8*(1+index)]
-              (setq index (1+ index))))
-          (word state 2432697279) (word state 2831252477) (word state 3596551104)
-          (when debug
-            (put (get state :debugFunctionRange) :end (* 4 (js-length (get state :words))))))
+        (let* ((function (js-nth i functions))
+               (raw-locals (get function :locals))
+               (raw-body (get function :body))
+               (cache-rec (when (< i rt-prefix-count)
+                            (runtime-body-cache-get raw-body)))
+               (can-cache (and cache-rec (get cache-rec :frozen)
+                               (not (get cache-rec :hasIndirect))
+                               (not (get cache-rec :hasHostCall))
+                               (< (get cache-rec :maxCallTarget) rt-prefix-count))))
+          (if can-cache
+            (let* ((native-bodies (get cache-rec :nativeBodies))
+                   (fn-key (if debug
+                             (str (if linux "L" "M") ":N:D:" i ":" (js-length (get state :trapSites)))
+                             mode-key))
+                   (cached-entry (js-call native-bodies :get fn-key)))
+              (if (and cached-entry
+                       (or (not debug)
+                           (and (= (get cached-entry :functionName) (get function :name))
+                                (= (get cached-entry :arity) (get function :arity))
+                                (= (get cached-entry :localsLength) (js-length raw-locals)))))
+                (replay-native-function-cache state cached-entry offsets function)
+                (let ((fn-state (js-object :words (js-array) :calls (js-array) :branches (js-array) :constants (js-array)
+                                  :compact nil :leaf nil :memory t :optimizeMemory optimize-memory :mayGrow may-grow :linux linux
+                                  :registers (js-array) :localOffsets nil
+                                  :functions functions
+                                  :signatureMap (get program :signatureMap nil)
+                                  :debugRanges (if debug (js-array) nil)
+                                  :trapSites (if debug (js-array) nil)
+                                  :trapSiteBase (if debug (js-length (get state :trapSites)) 0)
+                                  :hostCapabilities (get program :hostCapabilities (js-array))
+                                  :table (get program :table nil) :tableUses (js-array))))
+                  (emit-memory-function-into fn-state function i raw-locals raw-body inline-candidates linux debug nil)
+                  (let ((packed (if debug
+                                  (pack-native-function-cache fn-state (get function :name) (get function :arity) (js-length raw-locals))
+                                  (pack-native-function-cache fn-state))))
+                    (if packed
+                      (progn
+                        (unless cached-entry
+                          (js-call native-bodies :set fn-key packed))
+                        (replay-native-function-cache state packed offsets function))
+                      (emit-memory-function-into state function i raw-locals raw-body inline-candidates linux debug offsets))))))
+            (emit-memory-function-into state function i raw-locals raw-body inline-candidates linux debug offsets)))
         (setq i (1+ i))
         (when (and (= (value-type observer) "function") (= (% i 128) 0))
           (native-phase observer "native-code-progress" i (js-length (get state :words))
@@ -2394,6 +3751,13 @@
       ;; remember a node until every check and every descendant has succeeded.
       (when completed (js-call completed :set node t))))
 
+  (defun native-locals-sig (locals)
+    (let ((parts (js-array)) (len (js-length locals)) (i 0))
+      (while (< i len)
+        (js-call parts :push (get (js-nth i locals) :type))
+        (setq i (1+ i)))
+      (js-call parts :join ",")))
+
   (defun memory-prepare-program-core (program fresh)
     (unless (= (get program :abi) "memory-u32") (backend-fail program "native memory emitter requires memory-u32 typed input"))
     (let* ((functions (get program :functions)) (exports (get program :exports))
@@ -2465,49 +3829,87 @@
         (while (< i (js-length table))
           (unless (memory-valid-index (js-nth i table) (js-length functions))
             (backend-fail program "native table entry is not a declared function index")) (setq i (1+ i))))
-      (setq i 0)
-      (while (< i (js-length functions))
-        (let ((function (js-nth i functions)))
-          (memory-validate-node (get function :body) function program allowed-indirect capabilities
-            (when fresh (new globalThis.WeakMap)))) (setq i (1+ i)))
-      ;; Existing managed aliases become direct typed wrappers; source and table
-      ;; indices remain unchanged, and no public canonical/typed IR is mutated.
-      (let ((combined (js-call functions :slice)) (public (js-call exports :slice))
-            (aliases (get program :aliases (js-array))) (seen (js-array)))
-        (unless (Array/isArray aliases) (backend-fail program "invalid native aliases"))
+      (let* ((first-cached (when (> (js-length functions) 0)
+                             (runtime-body-cache-get (get (js-nth 0 functions) :body nil))))
+             (rt-id (if first-cached (get first-cached :runtimeId 0) 0))
+             (rt-count (if first-cached (get first-cached :runtimeFnCount 0) 0))
+             (rt-prefix-ok (and (> rt-id 0) (> rt-count 0) (<= rt-count (js-length functions)))))
+        (when rt-prefix-ok
+          (let ((ri 0))
+            (while (and rt-prefix-ok (< ri rt-count))
+              (let* ((rfn (js-nth ri functions))
+                     (rc (runtime-body-cache-get (get rfn :body nil))))
+                (unless (and rc
+                             (= (get rc :runtimeId) rt-id)
+                             (= (get rc :runtimeFnCount) rt-count)
+                             (= (get rc :fnIndex) ri)
+                             (= (get rc :arity) (get rfn :arity))
+                             (= (get rc :localsSig) (native-locals-sig (get rfn :locals))))
+                  (setq rt-prefix-ok false)))
+              (setq ri (1+ ri)))))
         (setq i 0)
-        (while (< i (js-length public))
-          (unless (and (find-function functions (js-nth i public)) (not (js-call seen :includes (js-nth i public))))
-            (backend-fail program "invalid or duplicate native export"))
-          (js-call seen :push (js-nth i public)) (setq i (1+ i)))
-        (setq i 0)
-        (while (< i (js-length aliases))
-          (let* ((alias (js-nth i aliases)) (name (get alias :name))
-                 (target (find-function functions (get alias :function))))
-            (unless (and target (= (value-type name) "string") (not (js-call seen :includes name)))
-              (backend-fail program "invalid or duplicate native alias"))
-            (js-call seen :push name) (js-call public :push name)
-            (if (= name (get target :name)) nil
-              (progn
-                (when (find-function functions name) (backend-fail program "native alias shadows a function"))
-                (let ((locals (js-array)) (arguments (js-array))
-                      (target-locals (get target :locals))
-                      (target-ret (get (get target :body) :type))
-                      (j 0))
-                  (while (< j (get target :arity))
-                    (let ((param-type (get (js-nth j target-locals) :type)))
-                      (js-call locals :push (js-object :name (str "argument-" j) :type param-type :index j))
-                      (js-call arguments :push (js-object :kind "local" :type param-type :value j :children (js-array))))
-                    (setq j (1+ j)))
-                  (js-call combined :push (js-object :name name :index (js-length combined) :arity (get target :arity) :locals locals
-                    :parameterTypes (function-param-types target) :resultType (function-return-type target)
-                    :body (js-object :kind "call" :type target-ret :value (get target :index) :children arguments)))))))
+        (while (< i (js-length functions))
+          (let* ((function (js-nth i functions))
+                 (fn-body (get function :body))
+                 (c (when (and rt-prefix-ok (< i rt-count)) (runtime-body-cache-get fn-body)))
+                 (can-cache (and c (get c :frozen) (not (get c :hasIndirect))
+                                 (not (get c :hasHostCall)) (< (get c :maxCallTarget) rt-count))))
+            (if can-cache
+              (unless (get c :nativeValidated)
+                (memory-validate-node fn-body function program allowed-indirect capabilities
+                  (when fresh (new globalThis.WeakMap)))
+                (put c :nativeValidated t))
+              (memory-validate-node fn-body function program allowed-indirect capabilities
+                (when fresh (new globalThis.WeakMap)))))
           (setq i (1+ i)))
-        (let ((prepared (js-object :abi "memory-u32" :filename (get program :filename) :functions combined :exports public :table table
-                          :signatureMap signature-map)))
-          (when (> (js-length capabilities) 0) (put prepared :hostCapabilities capabilities))
-          (when (get program :roData nil) (put prepared :roData (get program :roData)))
-          prepared))))
+        ;; Existing managed aliases become direct typed wrappers; source and table
+        ;; indices remain unchanged, and no public canonical/typed IR is mutated.
+        (let ((combined (js-call functions :slice)) (public (js-call exports :slice))
+              (aliases (get program :aliases (js-array))) (seen (new globalThis.Set))
+              (fn-by-name (new globalThis.Map)))
+          (setq i 0)
+          (while (< i (js-length functions))
+            (let ((fn (js-nth i functions)))
+              (unless (js-call fn-by-name :has (get fn :name))
+                (js-call fn-by-name :set (get fn :name) fn)))
+            (setq i (1+ i)))
+          (unless (Array/isArray aliases) (backend-fail program "invalid native aliases"))
+          (setq i 0)
+          (while (< i (js-length public))
+            (let ((pub-name (js-nth i public)))
+              (unless (and (js-call fn-by-name :get pub-name) (not (js-call seen :has pub-name)))
+                (backend-fail program "invalid or duplicate native export"))
+              (js-call seen :add pub-name))
+            (setq i (1+ i)))
+          (setq i 0)
+          (while (< i (js-length aliases))
+            (let* ((alias (js-nth i aliases)) (name (get alias :name))
+                   (target (js-call fn-by-name :get (get alias :function))))
+              (unless (and target (= (value-type name) "string") (not (js-call seen :has name)))
+                (backend-fail program "invalid or duplicate native alias"))
+              (js-call seen :add name) (js-call public :push name)
+              (if (= name (get target :name)) nil
+                (progn
+                  (when (js-call fn-by-name :get name) (backend-fail program "native alias shadows a function"))
+                  (let ((locals (js-array)) (arguments (js-array))
+                        (target-locals (get target :locals))
+                        (target-ret (get (get target :body) :type))
+                        (j 0))
+                    (while (< j (get target :arity))
+                      (let ((param-type (get (js-nth j target-locals) :type)))
+                        (js-call locals :push (js-object :name (str "argument-" j) :type param-type :index j))
+                        (js-call arguments :push (js-object :kind "local" :type param-type :value j :children (js-array))))
+                      (setq j (1+ j)))
+                    (js-call combined :push (js-object :name name :index (js-length combined) :arity (get target :arity) :locals locals
+                      :parameterTypes (function-param-types target) :resultType (function-return-type target)
+                      :body (js-object :kind "call" :type target-ret :value (get target :index) :children arguments)))))))
+            (setq i (1+ i)))
+          (let ((prepared (js-object :abi "memory-u32" :filename (get program :filename) :functions combined :exports public :table table
+                            :signatureMap signature-map)))
+            (when rt-prefix-ok (put prepared :rtPrefixCount rt-count))
+            (when (> (js-length capabilities) 0) (put prepared :hostCapabilities capabilities))
+            (when (get program :roData nil) (put prepared :roData (get program :roData)))
+            prepared)))))
 
   (defun memory-prepare-program (program)
     (memory-prepare-program-core program nil))

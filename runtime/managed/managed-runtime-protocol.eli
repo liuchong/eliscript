@@ -4,7 +4,7 @@
     define-protocol define-protocol-from-definition extend-protocol-category extend-protocol-default
     extend-protocol-type implements-protocol-operation? implements-protocol? protocol-definition
     protocol-host-category protocol-method protocol-slot protocol? materialize-protocol-from-definition
-    read-protocol-operations-owner read-protocol-method-owner flush-protocol-extension-loaders)
+    read-external-protocol-method read-protocol-operations-owner read-protocol-method-owner flush-protocol-extension-loaders)
 
   (defun defineProtocol (name operations) (define-protocol name operations))
   (defun defineProtocolFromDefinition (definition) (define-protocol-from-definition definition))
@@ -22,10 +22,12 @@
       slot))
   (defun isProtocol (value) (protocol? value))
   (defun materializeProtocolFromDefinition (definition slots) (materialize-protocol-from-definition definition slots))
+  (defun readExternalProtocolMethod (protocol operation receiver)
+    (read-external-protocol-method protocol operation receiver))
   (defun readProtocolOperationsOwner (value) (read-protocol-operations-owner value))
   (defun readProtocolMethodOwner (value) (read-protocol-method-owner value))
 
   (export ProtocolDispatchError defineProtocol defineProtocolFromDefinition extendProtocolCategory
     extendProtocolDefault extendProtocolType implementsProtocolOperation implementsProtocol
     protocolDefinition protocolHostCategory protocolMethod protocolSlot isProtocol materializeProtocolFromDefinition
-    readProtocolOperationsOwner readProtocolMethodOwner))
+    readExternalProtocolMethod readProtocolOperationsOwner readProtocolMethodOwner))
