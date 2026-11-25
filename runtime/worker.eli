@@ -30,52 +30,59 @@
     (js* "import(specifier)"))
 
   (defun installPackageResolver ()
-    (when (and (not (undefined? globalThis.Bun))
-               (eq (value-type (get globalThis.Bun :plugin)) "function"))
-      (js-call globalThis.Bun :plugin
-        (js-object
-          :name "eliscript-worker-package"
-          :setup (lambda (build)
-                   (js-call build :onResolve
-                     (js-object :filter package-filter)
-                     (lambda (arg)
-                       (let* ((specifier (get arg :path))
-                              (entries (Array/from packageDirectories))
-                              (matched (js-call entries :find
-                                         (lambda (entry)
-                                           (js-call specifier :startsWith (aref entry 0)))))
-                              (prefix (aref matched 0))
-                              (directory (aref matched 1))
-                              (suffix (js-call specifier :slice (js-length prefix)))
-                              (target (resolve directory suffix))
-                              (local (relative directory target)))
-                         (when (or (eq (js-length suffix) 0)
-                                   (isAbsolute local)
-                                   (eq local "..")
-                                   (js-call local :startsWith (str ".." sep)))
-                           (let ((area (aref (js-call prefix :split "/") 1)))
-                             (throw (new globalThis.Error
-                                      (str "worker " area " import escapes package " area ": " specifier)))))
-                         (js-object :namespace "file" :path target)))))))))
+    (if (and (not (undefined? globalThis.Bun))
+             (eq (value-type (get globalThis.Bun :plugin)) "function"))
+        (progn
+          (js-call globalThis.Bun :plugin
+            (js-object
+              :name "eliscript-worker-package"
+              :setup (lambda (build)
+                       (js-call build :onResolve
+                         (js-object :filter package-filter)
+                         (lambda (arg)
+                           (let* ((specifier (get arg :path))
+                                  (entries (Array/from packageDirectories))
+                                  (matched (js-call entries :find
+                                             (lambda (entry)
+                                               (js-call specifier :startsWith (aref entry 0)))))
+                                  (prefix (aref matched 0))
+                                  (directory (aref matched 1))
+                                  (suffix (js-call specifier :slice (js-length prefix)))
+                                  (target (resolve directory suffix))
+                                  (local (relative directory target)))
+                             (when (or (eq (js-length suffix) 0)
+                                       (isAbsolute local)
+                                       (eq local "..")
+                                       (js-call local :startsWith (str ".." sep)))
+                               (let ((area (aref (js-call prefix :split "/") 1)))
+                                 (throw (new globalThis.Error
+                                          (str "worker " area " import escapes package " area ": " specifier)))))
+                             (js-object :namespace "file" :path target)))))))
+          t)
+      false))
 
-  (installPackageResolver)
+  (defconst hasRuntimeResolution (installPackageResolver))
+
+  (defconst base-capabilities
+    (js-array
+      "request"
+      "progress"
+      "cancel"
+      "timeout"
+      "shutdown"
+      "module-cache"
+      "module-digest"
+      "operation-capabilities"
+      "project-manifest"
+      "portable-manifest"
+      "value-codec"
+      "value-chunks"))
 
   (defconst capabilities
     (Object/freeze
-      (js-array
-        "request"
-        "progress"
-        "cancel"
-        "timeout"
-        "shutdown"
-        "module-cache"
-        "module-digest"
-        "operation-capabilities"
-        "project-manifest"
-        "portable-manifest"
-        "runtime-resolution"
-        "value-codec"
-        "value-chunks")))
+      (if hasRuntimeResolution
+          (js-call base-capabilities :concat (js-array "runtime-resolution"))
+        base-capabilities)))
 
   (defconst manifest-keys
     (js-array "format" "entries" "modules" "digest" "cache"))

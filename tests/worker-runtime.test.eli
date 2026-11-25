@@ -44,9 +44,10 @@
                      (t (str (aref command 0) " exited with " exitCode)))))))
       stdout)))
 
-  (defun createWorkerClient ()
-    (let* ((child (js-call globalThis.Bun :spawn
-                    (js-array (get globalThis.process :execPath) workerPath)
+  (defun createWorkerClient (&optional runtimeExecutable)
+    (let* ((executable (or runtimeExecutable (get globalThis.process :execPath)))
+           (child (js-call globalThis.Bun :spawn
+                    (js-array executable workerPath)
                     (js-object :cwd projectDirectory :stdin "pipe" :stdout "pipe" :stderr "pipe")))
            (messages (js-array))
            (waiters (js-array))
@@ -840,4 +841,25 @@
               (js-call (get client :child) :kill)
               (await (get (get client :child) :exited)))
             (await (rm directory (js-object :recursive t :force t)))))))
-    20000))
+    20000)
+
+  (test "node worker omits runtime-resolution when no package resolver plugin is installed"
+    (async ()
+      (let* ((nodeExecutable (or (get (get globalThis.process :env) :ELISCRIPT_NODE_EXECUTABLE)
+                                 (js-call globalThis.Bun :which "node")
+                                 "node"))
+             (client (createWorkerClient nodeExecutable)))
+        (try
+          (let ((ready (await (js-call client :next (lambda (message) (= (get message :type) "ready"))))))
+            (js-call (expect (get ready :capabilities)) :toContain "request")
+            (js-call (expect (get ready :capabilities)) :toContain "value-codec")
+            (js-call (expect (get ready :capabilities)) :toContain "value-chunks")
+            (js-call (get (expect (get ready :capabilities)) :not) :toContain "runtime-resolution"))
+          (let ((stopped (await (js-call client :close))))
+            (setq client undefined)
+            (js-call (expect (get stopped :exitCode)) :toBe 0))
+          (finally
+            (when client
+              (js-call (get client :child) :kill)
+              (await (get (get client :child) :exited))))))))
+)

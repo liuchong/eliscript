@@ -278,6 +278,17 @@ installed candidate (`6992faaf`: 4,851,866 bytes), the package is 1.93% smaller.
 Any future increase still requires a payload audit and does not waive version
 comparison or deferred strict performance/capacity gates.
 
+For the joint host/worker release packaging, the full audit measured
+**5,196,179 bytes** packed (`739` entries, `33,809,839` bytes unpacked, zero
+identical payloads of 1 MB or more — a `+4.60%` increase over the `0.1.3`
+tarball at `4,967,449` bytes). The growth reflects the expanded `352`-file
+stage2/stage3 stdlib/compiler product closure plus the required `122,216` bytes
+(uncompressed) Emacs worker Lisp client closure under `tools/worker/`
+(`README.md`, `eliscript-worker.el`, `eliscript-service.el`,
+`eliscript-value-codec.el`, and `eliscript-value-stream.el`). The automated
+`MAX_PACKED_BYTES` limit in `tests/eliscript/release-package-install.eli` is
+accordingly set to **5.5 MB** (`5,500,000` bytes).
+
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the
 npm file list excludes it even if a prior interrupted build left it behind.

@@ -25,7 +25,8 @@ and is not evidence for its correctness.
 
 ## Protocol Negotiation
 
-The worker ready message advertises two additive capabilities:
+The worker ready message advertises `value-codec`, and advertises
+`runtime-resolution` when the JS runtime installs the worker package resolver:
 
 ```text
 value-codec

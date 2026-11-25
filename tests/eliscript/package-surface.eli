@@ -153,6 +153,21 @@
       (js-call (expect (js-call entry :startsWith "tools/backends/compiler-corpus")) :toBe false)
       (js-call (expect (js-call entry :startsWith "tools/backends/compiler-matrix")) :toBe false)))))
 
+  (test "the published file list carries the worker runtime and Emacs client closure" (async ()
+    (let ((entries (js-array "tools/worker/README.md"
+                     "tools/worker/eliscript-service.el"
+                     "tools/worker/eliscript-value-codec.el"
+                     "tools/worker/eliscript-value-stream.el"
+                     "tools/worker/eliscript-worker.el"))
+          (index 0))
+      (while (< index (js-length entries))
+        (let ((entry (aref entries index)))
+          (js-call (expect (get manifest :files)) :toContain entry)
+          (await (access (resolve root entry))))
+        (setq index (1+ index))))
+    (await (access (resolve root "platform/worker.mjs")))
+    (await (access (resolve root "runtime/worker.mjs")))))
+
   (test "the package keeps development trees out of the tarball" (lambda ()
     (each (js-array "!dist/bootstrap/runtime/" "!dist/bootstrap/package.json" "!**/*.elc")
       (lambda (excluded) (js-call (expect (get manifest :files)) :toContain excluded)))

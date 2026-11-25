@@ -101,3 +101,28 @@ live buffers and run `eliscript-mode-watch-event-hook`.
 - `editor/eliscript-runtime.el` mirrors standalone runtime additions including
   `entry-key`, `entry-val`, `chunked-seq-p`, `volatile!`, `volatile-p`,
   `vderef`, `vreset!`, and `vswap!`.
+
+## Local Runtime Scope And Host Cache
+
+`editor/eliscript-runtime.el` interprets modern `.eli` extension forms directly
+in Emacs via `eliscript-runtime-eval-string` and `eliscript-runtime-eval-file`
+without invoking a JavaScript engine.
+
+- **Supported local subset**: Lisp-2 symbol/function namespaces, unique `nil`
+  falsiness (including non-nil `js-false` / `js-null` / `js-undefined` sentinels),
+  lexical and dynamic bindings, `condition-case`/`unwind-protect` unwinding and
+  side-effect order, `defmacro-checked`/`macro-gensym`, persistent collections
+  (`persistent-vector`, `persistent-map`, `persistent-set`, `persistent-queue`,
+  transients, protocols), and `defmodule` lexical encapsulation with live
+  `import-functions`/`import-values`.
+- **Explicit out-of-scope rejections**: Calling non-local engines via
+  `engine-call` fails with `eliscript-engine-handle-error`; invoking imported JS
+  host stubs (`js-import`, non-callable `js-object` methods) with `js-call` or
+  `js-call-raw` errors instead of contacting an external JS engine;
+  `eliscript-runtime-compile-elisp-module` fails clearly when no JS runtime
+  (`bun`/`node`) is on `PATH`; static `:pure`/`:portable`/`:abi` and invalid
+  `await` violations fail with `eliscript-compile-error`.
+
+For JS-free Seed bootstrap caching against a standalone FEmacs Lisp package,
+`tools/femacs-host-cache.el` verifies `manifest.json`, binaries, resource tree
+digests, and `package_sha256` before returning a cached `femacs-lisp` executable.

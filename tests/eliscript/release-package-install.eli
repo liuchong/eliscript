@@ -86,8 +86,8 @@
     "  (js-call (get globalThis.process :stdout) :write (str (JSON/stringify (js-object :targets results :rootsReleased t :node (get globalThis.process :version) :sourceIdentity (get certificate :sourceIdentity) :producerIdentity (get certificate :productIdentity))) \"\\n\")))"
     " (main))") :join "\n"))
 
-  ;; Clean formal products fit the original baseline documented in docs/releasing.md.
-  (defconst MAX_PACKED_BYTES 5000000)
+  ;; Clean formal products follow RELEASE-02 documented in docs/releasing.md.
+  (defconst MAX_PACKED_BYTES 5500000)
 
   (defun clean-environment ()
     (let ((env (Object/assign (js-object) (get globalThis.process :env))))
@@ -459,10 +459,10 @@
                   (put receipt :tarballSha256 (await (file-sha tarball)))
                   ;; A size failure remains a failed acceptance gate, but must not prevent
                   ;; independent installed JS/WASM/Native semantics from being collected.
-                  (await (js-call context :test "release tarball remains compact (< 5 MB)"
+                  (await (js-call context :test "release tarball remains compact (< 5.5 MB)"
                     (async ()
                       (js-call assert :ok (< (get pack-result :size) MAX_PACKED_BYTES)
-                        (str "release tarball must remain compact (< 5 MB); actual " (get pack-result :size))))))
+                        (str "release tarball must remain compact (< 5.5 MB); actual " (get pack-result :size))))))
                   (await (check-package-payloads (get pack-result :files)))
                   (child "install" "npm" (js-array "install" "--ignore-scripts" "--no-audit" "--no-fund" "--package-lock=false" tarball) consumer env receipt))
                 (let* ((installed (resolve consumer "node_modules/eliscript"))
@@ -476,6 +476,40 @@
                   (js-call assert :deepStrictEqual (get identity :productIdentity) (get receipt :producerIdentity))
                   (js-call assert :ok (js-call (await (realpath (get identity :stage3MetadataPath))) :startsWith (str (await (realpath installed)) sep)))
                   (js-call assert :strictEqual (get (JSON/parse (await (readFile (resolve installed "package.json") "utf8"))) :version) (get receipt :packageVersion))
+                  (await (js-call context :test "installed worker closure and Node capability honesty" (async ()
+                    (let ((worker-assets (js-array
+                            "platform/worker.mjs"
+                            "runtime/worker.mjs"
+                            "tools/worker/README.md"
+                            "tools/worker/eliscript-service.el"
+                            "tools/worker/eliscript-value-codec.el"
+                            "tools/worker/eliscript-value-stream.el"
+                            "tools/worker/eliscript-worker.el"))
+                          (asset-index 0))
+                      (while (< asset-index (js-length worker-assets))
+                        (let ((text (await (readFile (resolve installed (aref worker-assets asset-index)) "utf8"))))
+                          (js-call assert :ok (> (js-length text) 0)))
+                        (setq asset-index (1+ asset-index))))
+                    (let* ((worker-proc (spawnSync node (js-array (resolve installed "runtime/worker.mjs"))
+                                          (js-object :cwd consumer :env env :encoding "utf8"
+                                            :input "{\"type\":\"shutdown\"}\n" :timeout 15000)))
+                           (lines undefined)
+                           (ready undefined)
+                           (stopped undefined))
+                      (js-call assert :strictEqual (get worker-proc :error) undefined (get worker-proc :stderr))
+                      (js-call assert :strictEqual (get worker-proc :signal) nil (get worker-proc :stderr))
+                      (js-call assert :strictEqual (get worker-proc :status) 0 (get worker-proc :stderr))
+                      (setq lines (js-call (js-call (get worker-proc :stdout) :trim) :split "\n"))
+                      (js-call assert :strictEqual (js-length lines) 2 (get worker-proc :stdout))
+                      (setq ready (JSON/parse (aref lines 0)))
+                      (setq stopped (JSON/parse (aref lines 1)))
+                      (js-call assert :strictEqual (get ready :type) "ready")
+                      (js-call assert :ok (js-call (get ready :capabilities) :includes "request"))
+                      (js-call assert :ok (js-call (get ready :capabilities) :includes "value-codec"))
+                      (js-call assert :ok (js-call (get ready :capabilities) :includes "value-chunks"))
+                      (js-call assert :strictEqual (js-call (get ready :capabilities) :includes "runtime-resolution") false)
+                      (js-call assert :strictEqual (get stopped :type) "shutdown")
+                      (js-call assert :strictEqual (get stopped :ok) t)))))
                   (let ((public-cli (resolve consumer "node_modules/.bin/eliscript")) (index 0)
                         (extensions (js-array "el" "eli")) (cli-results (js-array)))
                     (put receipt :ordinaryCliResults cli-results)

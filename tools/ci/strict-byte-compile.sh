@@ -18,9 +18,12 @@ cd "$ROOT"
   compiler/*.el \
   editor/*.el \
   tools/clean.el \
+  tools/femacs-host-cache.el \
   tools/org/*.el \
   tools/worker/*.el \
   tests/eliscript-tests.el \
+  tests/eliscript-femacs-host-cache-tests.el \
+  tests/eliscript-local-scope-tests.el \
   tests/eliscript-analyzer-depth-tests.el \
   tests/eliscript-lower-depth-tests.el \
   tests/eliscript-emitter-depth-tests.el \
