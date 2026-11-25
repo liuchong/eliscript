@@ -262,32 +262,34 @@ for the final commit's four required remote workflows.
 
 ## What Ships
 
-The compressed size baseline is 5 MB. A small increase for necessary payload
-can be accepted after checking duplication, growth proportion and installation
-cost, with actual bytes and the reason documented before adjusting the automated
-budget. Required source and debug assets take priority over shaving a few bytes.
+The original compressed size baseline was 5 MB. A small increase for necessary
+payload can be accepted after checking duplication, growth proportion and
+installation cost, with actual bytes and the reason documented before adjusting
+the automated budget. Required source and debug assets take priority over
+shaving a few bytes.
 
-The current clean-build package measures 4,758,372 bytes (706 entries,
-32,041,705 bytes unpacked). Clean installation and installed JS/WASM/native
-execution pass all seven checks. No identical payloads of at least 1 MB occur.
-The full Lisp frontend, maintained compiler sources and source maps remain.
-Building from absent generated outputs excludes incremental bootstrap and
-diagnostic leftovers, reducing the package below the original 5 MB baseline;
-the automatic limit is therefore restored to 5 MB. Compared with the last
-installed candidate (`6992faaf`: 4,851,866 bytes), the package is 1.93% smaller.
-Any future increase still requires a payload audit and does not waive version
-comparison or deferred strict performance/capacity gates.
+Earlier `0.1.3` clean-build packaging (prior to the joint host/worker closure)
+measured 4,758,372 bytes (706 entries, 32,041,705 bytes unpacked) and passed all
+seven clean-installation and JS/WASM/native execution checks with zero identical
+payloads of at least 1 MB. Because building from absent generated outputs
+excluded incremental bootstrap and diagnostic leftovers (1.93% smaller than
+`6992faaf` at 4,851,866 bytes), that prior baseline kept the automated budget at
+5 MB while retaining the full Lisp frontend, maintained compiler sources, and
+source maps.
 
-For the joint host/worker release packaging, the full audit measured
-**5,196,179 bytes** packed (`739` entries, `33,809,839` bytes unpacked, zero
-identical payloads of 1 MB or more — a `+4.60%` increase over the `0.1.3`
-tarball at `4,967,449` bytes). The growth reflects the expanded `352`-file
-stage2/stage3 stdlib/compiler product closure plus the required `122,216` bytes
-(uncompressed) Emacs worker Lisp client closure under `tools/worker/`
-(`README.md`, `eliscript-worker.el`, `eliscript-service.el`,
-`eliscript-value-codec.el`, and `eliscript-value-stream.el`). The automated
-`MAX_PACKED_BYTES` limit in `tests/eliscript/release-package-install.eli` is
-accordingly set to **5.5 MB** (`5,500,000` bytes).
+For the current joint host/worker release packaging on `0.1.3`, the full audit
+measured **5,196,179 bytes** packed (`739` entries, `33,809,839` bytes unpacked,
+zero identical payloads of 1 MB or more — a `+4.60%` increase over the published
+`0.1.3` tarball at `4,967,449` bytes). The growth reflects the expanded
+`352`-file stage2/stage3 stdlib/compiler product closure plus the required
+`122,216` bytes (uncompressed) Emacs worker Lisp client closure under
+`tools/worker/` (`README.md`, `eliscript-worker.el`, `eliscript-service.el`,
+`eliscript-value-codec.el`, and `eliscript-value-stream.el`). Any future
+increase still requires a payload audit and does not waive version comparison or
+deferred strict performance/capacity gates; for this current closure, the active
+automated `MAX_PACKED_BYTES` limit in
+`tests/eliscript/release-package-install.eli` is **5.5 MB** (`5,500,000`
+bytes).
 
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the

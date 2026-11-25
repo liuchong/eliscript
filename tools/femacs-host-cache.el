@@ -313,16 +313,20 @@ EXPECT-TARGET may be a string or `'host' to assert the current host target."
                  "binary-sha256-mismatch"
                  "Binary %s sha256 mismatch: manifest=%s actual=%s"
                  name exp-sha act-sha))))))
-      (let* ((bin-dir (expand-file-name "bin" resolved-pkg))
-             (actual-bins (sort (directory-files bin-dir nil "\\`[^.]" t) #'string<))
-             (expected-bins '("femacs-lisp" "femacs-lisp.pdmp" "http-host")))
+      (let ((bin-dir (expand-file-name "bin" resolved-pkg))
+            (expected-bins '("femacs-lisp" "femacs-lisp.pdmp" "http-host")))
         (when (or (file-symlink-p bin-dir) (not (file-directory-p bin-dir)))
           (eliscript-femacs-host--fail
            "missing-binary-file" "Package bin directory missing: %s" bin-dir))
-        (unless (equal actual-bins expected-bins)
-          (eliscript-femacs-host--fail
-           "unexpected-bin-entry" "Package bin/ entries %S differ from %S"
-           actual-bins expected-bins))
+        (let ((actual-bins
+               (sort (cl-remove-if
+                      (lambda (name) (member name '("." "..")))
+                      (directory-files bin-dir nil nil t))
+                     #'string<)))
+          (unless (equal actual-bins expected-bins)
+            (eliscript-femacs-host--fail
+             "unexpected-bin-entry" "Package bin/ entries %S differ from %S"
+             actual-bins expected-bins)))
         (unless (file-executable-p (expand-file-name "femacs-lisp" bin-dir))
           (eliscript-femacs-host--fail
            "binary-not-executable" "Packaged femacs-lisp is not executable"))))
