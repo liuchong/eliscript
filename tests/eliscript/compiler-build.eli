@@ -1214,7 +1214,7 @@
             (js-call assert :strictEqual (js-length module-ids) 36)
             (js-call assert :deepStrictEqual
               (js-call (js-call (get sources :modules) :map (lambda (record) (get record :id))) :sort) sorted-module-ids)
-            (js-call assert :strictEqual (js-length (get sources :literalSources)) 56)
+            (js-call assert :strictEqual (js-length (get sources :literalSources)) 57)
             (let* ((artifact (await (buildIndependentCompiler
                      (js-object :host "javascript" :profile "full-runtime" :sources sources :outputRoot directory
                        :onPhase (lambda (phase counts)
@@ -1284,7 +1284,7 @@
                     (js-call assert :ok identity)
                     (js-call assert :strictEqual (get identity :bytes) (js-length scope-bytes))
                     (js-call assert :strictEqual (get identity :sha256) (sha256-text scope-bytes)))
-                  (js-call assert :strictEqual (js-length (get artifact :literalSources)) 56)
+                  (js-call assert :strictEqual (js-length (get artifact :literalSources)) 57)
                   (js-call assert :deepStrictEqual sources original)
                   (js-call assert :deepStrictEqual (get metadata :sourceIdentity) (get artifact :sourceIdentity))
                   (js-call assert :strictEqual (get (get (get artifact :sourceIdentity) :runtime) :sha256)
@@ -1319,9 +1319,9 @@
                              (js-object :id (get record :id) :filename (get record :filename)
                                :source (if (= index 55) "(" (get record :source)))))))
                     (js-call assert :strictEqual (get ready :ready) t)
-                    (js-call assert :strictEqual (js-length literal-modules) 56)
+                    (js-call assert :strictEqual (js-length literal-modules) 57)
                     (let ((index 0))
-                      (while (< index 56)
+                      (while (< index 57)
                         (let* ((record (aref (get sources :literalSources) index))
                                (module (aref literal-modules index))
                                (cached (js-call literal-cache :get (get record :id))))

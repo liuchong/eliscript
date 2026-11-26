@@ -1043,7 +1043,7 @@
           (js-call assert :strictEqual process-hosts 2))
         (let* ((libraries (await (loadLiteralSources (js-object :sourceRoot root))))
                (evidence (js-call (get state :reader) :evidence)))
-          (js-call assert :strictEqual (js-length libraries) 56)
+          (js-call assert :strictEqual (js-length libraries) 57)
           (js-call libraries :forEach (lambda (library)
             (js-call assert :ok (js-call evidence :some (lambda (asset)
               (= (get asset :file) (get library :filename)))))))))))
@@ -1411,7 +1411,8 @@
              (body (js-call (js-call selected :map (lambda (form)
                (let ((span (get form :span))) (js-call source :slice (get span :start) (get span :end))))) :join "\n")))
         (js-call assert :strictEqual (js-length selected) (js-length names))
-        (let* ((code (compile-string (str body "\n(setq literal-has-transients t)\n"
+        (let* ((code (compile-string (str "(defun managed-transient-enable-revision-tracking () nil)\n"
+                       body "\n(setq literal-has-transients t)\n"
                        "(export literal-vector-node-view literal-map-node-view)") "actual-node-mirrors.eli"))
                (parent (resolve root "_worktree/evidence/node-mirror"))
                (directory (progn (await (mkdir parent (js-object :recursive t)))
