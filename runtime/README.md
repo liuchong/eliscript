@@ -339,3 +339,10 @@ standard-library primitives (`cl-defstruct`, `setf`/`cl-incf`/`cl-decf`/`push`/`
 `io-hub`, and Emacs regular-expression translation), and
 `compileModule` / `callElisp` for genuine AOT compilation of `.el`
 modules into ES modules accelerated by `eliscript-worker`.
+
+## License
+
+All files in `runtime/` (and materialized `dist/runtime/` outputs) are governed
+by `GPL-3.0-or-later` ([`../LICENSE`](../LICENSE)) **with the Eliscript Runtime
+Library Exception** ([`../COPYING.RUNTIME`](../COPYING.RUNTIME)) under Section 7
+of the GNU GPLv3.

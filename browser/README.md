@@ -31,3 +31,10 @@ Import `eliscript/browser` to compile single modules (`compileSource`,
 Closure-style IR optimization (`optimizeProgramIr`), optional JavaScript
 compaction (`optimizeJavaScript` / `{ minify: true }`), and extensionless
 `eliscript/*` package subpath resolution.
+
+## License
+
+All files in `browser/` (and materialized `dist/browser/` outputs) are governed
+by `GPL-3.0-or-later` ([`../LICENSE`](../LICENSE)) **with the Eliscript Runtime
+Library Exception** ([`../COPYING.RUNTIME`](../COPYING.RUNTIME)) under Section 7
+of the GNU GPLv3.

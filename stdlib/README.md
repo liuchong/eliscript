@@ -826,3 +826,10 @@ reject URL credentials and redirects and do not automatically retry POST.
 
 See [the wire contract](../specs/0181-markdown-wire-and-http-rpc.md) for the
 complete API and local verification scenarios.
+
+## License
+
+All files in `stdlib/` (and materialized `dist/stdlib/` outputs) are governed
+by `GPL-3.0-or-later` ([`../LICENSE`](../LICENSE)) **with the Eliscript Runtime
+Library Exception** ([`../COPYING.RUNTIME`](../COPYING.RUNTIME)) under Section 7
+of the GNU GPLv3.

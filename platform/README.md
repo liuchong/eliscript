@@ -67,3 +67,9 @@ The reference Emacs compute worker appends a request context whose
 The same package re-exports the canonical worker value-codec and chunk-stream
 APIs (`worker.eli`). Exact semantics and limitations are specified in
 [0126](../specs/0126-explicit-host-capability-packages.md).
+
+## License
+
+All files in `platform/` are governed by `GPL-3.0-or-later`
+([`../LICENSE`](../LICENSE)) **with the Eliscript Runtime Library Exception**
+([`../COPYING.RUNTIME`](../COPYING.RUNTIME)) under Section 7 of the GNU GPLv3.

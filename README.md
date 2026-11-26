@@ -195,6 +195,18 @@ never committed; contract checks compare it against its sources instead.
 
 ## License
 
-GPL-3.0-or-later. The compiler and standard library ship as source alongside
-the generated output they produce, which is the preferred form for
-modification.
+`GPL-3.0-or-later` (see [`LICENSE`](LICENSE)) with the
+[`COPYING.RUNTIME`](COPYING.RUNTIME) additional permission under Section 7 of
+the GNU GPLv3:
+
+- The compiler, seed compiler, backends, and build toolchain (`compiler/`,
+  `bootstrap/`, `tools/`) are licensed strictly under `GPL-3.0-or-later`.
+- The runtime modules, standard library, platform capability packages, and
+  browser loader/host runtime (`runtime/`, `stdlib/`, `platform/`, `browser/`,
+  and their materialized `dist/runtime/`, `dist/stdlib/`, and `dist/browser/`
+  outputs) are licensed under `GPL-3.0-or-later` **with the Eliscript Runtime
+  Library Exception** ([`COPYING.RUNTIME`](COPYING.RUNTIME)), permitting
+  applications compiled through an eligible compilation process to bundle and
+  distribute those covered libraries under terms of their choice (including
+  proprietary/closed-source terms), while keeping improvements to Eliscript and
+  the libraries themselves reciprocal under `GPL-3.0-or-later`.
