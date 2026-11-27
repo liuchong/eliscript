@@ -40,6 +40,12 @@
     "portable-result.test.mjs" "portable-value-semantics.test.mjs"
     "reader-program-fuzz.test.mjs" "regex.test.mjs" "stdlib-bit.test.mjs"
     "value-dispatch.test.mjs" "watch.test.mjs" "wire-compiler.test.mjs")))
+  (defconst shared-builder-files (new globalThis.Set (js-array
+    "docs-site.test.mjs" "pages-assembly.test.mjs"
+    "pages-derived-transports-selfhosted.test.mjs" "pages-runtime.test.mjs"
+    "dogfood-action.test.mjs" "dogfood-workflow.test.mjs")))
+  (defun isSharedBuilderTestFile (file)
+    (js-call shared-builder-files :has (basename file)))
   (defconst standard-bun-files (new globalThis.Set (js-array
     "compiler-seed-runtime-identity.test.mjs" "compiler-corpus-matchers-selfhosted.test.mjs"
     "compiler-package-session.test.mjs" "direct-wasm-backend.test.mjs" "wasm-managed-symbols.test.mjs"
@@ -209,33 +215,41 @@
       (let ((queue (js-call items :slice))
             (active-total 0)
             (active-heavy 0)
+            (active-exclusive 0)
             (settled false))
         (letfn ((pump ()
           (unless settled
             (let ((can-launch t))
               (while (and can-launch
+                          (= active-exclusive 0)
                           (< active-total max-workers)
                           (not (funcall should-stop))
                           (> (js-length queue) 0))
                 (let ((pos -1) (k 0))
                   (while (and (< pos 0) (< k (js-length queue)))
-                    (when (or (not (get (aref queue k) :heavy))
-                              (< active-heavy heavy-workers))
-                      (setq pos k))
+                    (let ((cand (aref queue k)))
+                      (when (if (get cand :exclusive)
+                              (= active-total 0)
+                              (or (not (get cand :heavy))
+                                  (< active-heavy heavy-workers)))
+                        (setq pos k)))
                     (setq k (1+ k)))
                   (if (< pos 0)
                     (setq can-launch false)
                     (let ((entry (aref (js-call queue :splice pos 1) 0)))
                       (setq active-total (1+ active-total))
                       (when (get entry :heavy) (setq active-heavy (1+ active-heavy)))
+                      (when (get entry :exclusive) (setq active-exclusive (1+ active-exclusive)))
                       (js-call (funcall (async () (await (funcall run-item entry)))) :then
                         (lambda ()
                           (setq active-total (1- active-total))
                           (when (get entry :heavy) (setq active-heavy (1- active-heavy)))
+                          (when (get entry :exclusive) (setq active-exclusive (1- active-exclusive)))
                           (pump))
                         (lambda (error)
                           (setq active-total (1- active-total))
                           (when (get entry :heavy) (setq active-heavy (1- active-heavy)))
+                          (when (get entry :exclusive) (setq active-exclusive (1- active-exclusive)))
                           (unless settled (setq settled t) (funcall reject-done error)))))))))
             (when (and (not settled)
                        (= active-total 0)
@@ -355,7 +369,7 @@
                             (let* ((file (aref files index))
                                    (heavy (isHeavyParallelTestFile file))
                                    (weight (estimateTestWeight profile file (test-file-weight file))))
-                              (js-object :index index :file file :heavy heavy :weight weight
+                              (js-object :index index :file file :heavy heavy :exclusive (isSharedBuilderTestFile file) :weight weight
                                 :estimatedRssBytes (estimateTestRssBytes profile file heavy)))))
                             :sort (lambda (a b)
                               (let ((diff (- (get b :weight) (get a :weight))))
@@ -987,4 +1001,4 @@
   (when (and (> (js-length (get globalThis.process :argv)) 1)
              (= (basename (aref (get globalThis.process :argv) 1)) "file-workers.mjs"))
     (main))
-  (export FILE_WORKERS isExclusiveTestFile isHeavyParallelTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments collectPassedFileDigests computeCommandSignature parseSuiteArgs runSuiteCommand sortFilesByLpt lptFileIndices resolveParallelConfig nodeTestPlan workerRunRequest runLptQueue raiseProcessMaxListeners testFileWeight))
+  (export FILE_WORKERS isExclusiveTestFile isHeavyParallelTestFile isSharedBuilderTestFile partitionTestFiles parseTestFileArgs scheduleTestFiles runTestFiles workerTestArguments collectPassedFileDigests computeCommandSignature parseSuiteArgs runSuiteCommand sortFilesByLpt lptFileIndices resolveParallelConfig nodeTestPlan workerRunRequest runLptQueue raiseProcessMaxListeners testFileWeight))

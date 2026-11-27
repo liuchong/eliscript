@@ -1,5 +1,5 @@
 (module tools.testing.final-functional-scope
-  (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles workerTestArguments collectPassedFileDigests isExclusiveTestFile isHeavyParallelTestFile lptFileIndices resolveParallelConfig workerRunRequest runLptQueue raiseProcessMaxListeners testFileWeight)
+  (import "./file-workers.mjs" parseTestFileArgs partitionTestFiles runTestFiles workerTestArguments collectPassedFileDigests isExclusiveTestFile isHeavyParallelTestFile isSharedBuilderTestFile lptFileIndices resolveParallelConfig workerRunRequest runLptQueue raiseProcessMaxListeners testFileWeight)
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" prepareFixtureEnvironment fixtureChildArguments)
   (import "./wire-call-cases.mjs" wireCallProfile)
@@ -354,6 +354,7 @@
                                       1)))
                   (if (<= shard-count 1)
                     (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
+                      :exclusive (isSharedBuilderTestFile file)
                       :shardIndex 0 :shardCount 1
                       :weight (if profile (estimateTestWeight profile file (testFileWeight file)) (testFileWeight file))
                       :estimatedRssBytes (if profile (estimateTestRssBytes profile file heavy) (* 512 1024 1024))))
@@ -365,6 +366,7 @@
                       (while (< s shard-count)
                         (js-call bucket :push nil)
                         (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
+                          :exclusive (isSharedBuilderTestFile file)
                           :shardIndex s :shardCount shard-count :weight per-weight :estimatedRssBytes est-rss))
                         (setq s (1+ s)))
                       (js-call shard-buckets :set plan-idx bucket))))))
