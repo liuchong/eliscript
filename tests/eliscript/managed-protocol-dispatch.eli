@@ -408,7 +408,7 @@
             (try
               (progn
                 (setq observed (await (canonical-hash-observed-runtime image
-                  (js-object :maxSlots 8192 :initialBytes 1048576 :maxBytes 16777216 :auto 1))))
+                  (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))))
                 (setq adapter (get observed :adapter))
                 (setq result (js-call adapter :invoke "hashReport" (js-array)))
                 (js-call assert :strictEqual (js-call adapter :readString result) expected)
@@ -447,7 +447,7 @@
         (try
           (progn
             (setq observed (await (canonical-hash-observed-runtime image
-              (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 1))))
+              (js-object :initialBytes 8388608 :maxBytes 67108864 :auto 1))))
             (setq adapter (get observed :adapter) handle (js-call adapter :getExport "report"))
             (let ((report (js-call adapter :toHostValue handle)))
               (js-call assert :strictEqual (funcall report) 1222682721))
@@ -599,7 +599,7 @@
                      (entry "runtime/core/main.mjs")
                      (graph (createManagedModuleGraph descriptor))
                      (base (get (pathToFileURL (+ deployment "/")) :href))
-                     (options (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 1
+                     (options (js-object :initialBytes 8388608 :maxBytes 67108864 :auto 1
                        :initializeModule false :moduleGraph graph :projectEntry entry :projectModuleBaseURL base
                        :nativeTarget native-target :hostModules
                        (new globalThis.Map (js-call (get descriptor :hostModules) :map
@@ -844,7 +844,7 @@
         (exercise-map-set independent)
         (while (< position (js-length targets))
           (let* ((target (aref targets position)) (adapter undefined) (handles (js-array)) (failed false)
-                 (options (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 1
+                 (options (js-object :initialBytes 8388608 :maxBytes 67108864 :auto 1
                    :initialPages 128 :maximumPages 4096 :nativeTarget native-target)))
             (try
               (progn
@@ -946,7 +946,7 @@
         (exercise-object-intrinsics independent)
         (while (< position (js-length targets))
           (let* ((target (aref targets position))
-                 (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216
+                 (options (js-object :initialBytes 1048576 :maxBytes 16777216
                    :nativeTarget native-target))
                  (adapter undefined) (handles (js-array)) (api (js-object)) (failed false))
             (try
@@ -1012,7 +1012,7 @@
              (independent (await (loadReference (resolve directory "native-error-binding-label-reference.mjs")
                (js-call compiler :emit_ir_string program))))
              (image (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program runtime-ir)))
-             (adapter (instantiateManagedRuntime image (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))))
+             (adapter (instantiateManagedRuntime image (js-object :initialBytes 1048576 :maxBytes 16777216))))
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image)) (js-array))
         (js-call adapter :auto 1)
         (try
@@ -1079,7 +1079,7 @@
              (independent (await (loadReference (resolve directory "native-error-binding-first-error-reference.mjs")
                (js-call compiler :emit_ir_string program))))
              (image (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program runtime-ir)))
-             (adapter (instantiateManagedRuntime image (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))))
+             (adapter (instantiateManagedRuntime image (js-object :initialBytes 1048576 :maxBytes 16777216))))
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image)) (js-array))
         (js-call adapter :auto 1)
         (try
@@ -1351,7 +1351,7 @@
              (image (globalThis.Uint8Array.from (js-call (get backend :wasm) :append_metadata_section
                (js-call (get backend :wasm) :emit_typed_memory_wasm (get actual :typed))
                "eliscript-managed-control" (JSON/stringify (get actual :descriptor)))))
-             (options (js-object :maxSlots 65536 :initialBytes 8388608 :maxBytes 67108864 :auto 1))
+             (options (js-object :initialBytes 8388608 :maxBytes 67108864 :auto 1))
              (observed (await (intrinsic-boundary-observed-runtime image options)))
              (expected (js-call independent :intrinsicBoundaryReport (intrinsic-boundary-hosts)))
              (object-expected (js-call independent :objectBoundaryReport (intrinsic-boundary-hosts)))
@@ -1641,7 +1641,7 @@
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module image)) (js-array))
         (while (< position (js-length targets))
           (let* ((target (aref targets position)) (adapter undefined) (failed false)
-                 (options (Object/assign (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216
+                 (options (Object/assign (js-object :initialBytes 262144 :maxBytes 16777216
                             :nativeTarget native-target) memory)))
             (try
               (progn
@@ -1683,9 +1683,9 @@
   (test "the actual protocol error constructor distinguishes omitted undefined null false and invalid direct slots in JS and real WASM"
     (lambda ()
       (js-call assert :strictEqual (js-call reference :report) (expected))
-      (exercise (instantiateManagedRuntime bytes (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))
+      (exercise (instantiateManagedRuntime bytes (js-object :initialBytes 1048576 :maxBytes 16777216)))))
   (test "real native preserves the same actual protocol reason defaults and error fields without a WASM execution fallback"
     (js-object :skip (not native-target))
     (async ()
       (exercise (await (instantiateNativeManagedRuntime library lowered
-        (js-object :nativeTarget native-target :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))))
+        (js-object :nativeTarget native-target :initialBytes 1048576 :maxBytes 16777216)))))))

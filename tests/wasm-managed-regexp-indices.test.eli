@@ -26,7 +26,7 @@
         undefined))
 
   (defconst options
-    (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576 :maximumPages 32))
+    (js-object :initialBytes 65536 :maxBytes 1048576 :maximumPages 32))
 
   (defconst cases
     (js-array
@@ -165,7 +165,7 @@
   (test "indices allocation capacity and input-conversion throws preserve caller roots and permit later execution"
     (async ()
       (await (each-target (lambda (a _kind) (failure-recovery a reference))))
-      (let ((rejected-options (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384 :maximumPages 32)))
+      (let ((rejected-options (js-object :initialBytes 8192 :maxBytes 16384 :maximumPages 32)))
         (await (each-target
                  (lambda (a _kind)
                    (js-call assert :throws

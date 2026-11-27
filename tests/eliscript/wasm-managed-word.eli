@@ -72,7 +72,7 @@
           (setq i (1+ i)))))))
   (test "ordinary word loops preserve evaluation order and automatically reclaim boxed results"
     (lambda () (let ((a (instantiateManagedRuntime (get fixture :bytes)
-      (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 1048576))))
+      (js-object :initialBytes 8192 :maxBytes 1048576))))
       (js-call a :auto 1)
       (js-call (js-array 0 -0 globalThis.NaN globalThis.Infinity globalThis.Number.MAX_VALUE 2147483649) :forEach
         (lambda (seed) (verify a "loop-mix" (js-array 128 seed))))

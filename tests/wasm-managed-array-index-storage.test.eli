@@ -414,10 +414,10 @@
         (lambda (record)
           (js-call assert :equal (aref record 1) 0 "own key enumeration must not invoke the replacement getter"))))))
 
-  (js-call (js-array 64 256) :forEach
-    (lambda (maxSlots)
-      (test (str "failed first native member materialization recovers in the original " maxSlots " slot budget") (lambda ()
-        (let* ((a (instance (js-object :maxSlots maxSlots :initialBytes 16384 :maxBytes 65536)))
+  (js-call (js-array 32768 65536) :forEach
+    (lambda (maxBytes)
+      (test (str "failed first native member materialization recovers in the " maxBytes " byte budget") (lambda ()
+        (let* ((a (instance (js-object :initialBytes 16384 :maxBytes maxBytes)))
                (prototype (js-call a :invoke "prototype"))
                (caller (js-call a :frame 1))
                (padding (js-array))
@@ -428,7 +428,7 @@
           (try
             (try
               (let ((index 0))
-                (while (< index (* maxSlots 2))
+                (while (< index 2000)
                   (js-call padding :push (js-call a :array))
                   (setq index (1+ index))))
               (catch error
@@ -458,7 +458,7 @@
 
   (test "ordinary indexed storage does not consume one permanent descriptor handle per element" (lambda ()
     (let* ((r (get (new globalThis.WebAssembly.Instance module) :exports))
-           (heap (js-call r "heap-new" 64 4096 32768)))
+           (heap (js-call r "heap-new" 4096 32768)))
       (js-call assert :notEqual heap 0)
       (js-call r "heap-auto" heap 1)
       (let ((frame (js-call r "frame-new" heap 2))

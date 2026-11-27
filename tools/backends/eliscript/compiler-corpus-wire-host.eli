@@ -1,6 +1,38 @@
 (module tools.backends.compiler-corpus-wire-host
   (import "node:assert/strict" :default assert)
-  (defconst wireSuiteSha "f080b52ee5079906ae636ca9a97d003eee5fb9cde817950788448d1c54001746")
+  (import "node:fs" writeSync)
+  (import "node:buffer" Buffer)
+  (defconst wire-wait-view
+    (when (= (value-type globalThis.SharedArrayBuffer) "function")
+      (new globalThis.Int32Array (new globalThis.SharedArrayBuffer 4))))
+  (defun wire-pause-5ms ()
+    (if wire-wait-view
+      (try (js-call globalThis.Atomics :wait wire-wait-view 0 0 5)
+        (catch ignored nil))
+      (let ((until (+ (js-call globalThis.Date :now) 5)))
+        (while (< (js-call globalThis.Date :now) until) nil))))
+  (defun write-wire-case-event (payload)
+    ;; Blocking chunk loop handles non-blocking stderr EAGAIN under Bun when the
+    ;; parent pauses the pipe; console.error can silently drop later lines.
+    (let* ((bytes (js-call Buffer :from (str "[wire-original-case] " (JSON/stringify payload) "\n") "utf8"))
+           (total (get bytes :length))
+           (offset 0)
+           (deadline (+ (js-call globalThis.Date :now) 60000)))
+      (while (< offset total)
+        (try
+          (let ((written (writeSync 2 bytes offset (- total offset))))
+            (if (> written 0)
+              (setq offset (+ offset written))
+              (if (> (js-call globalThis.Date :now) deadline)
+                (throw (new globalThis.Error "timed out writing wire case event to stderr"))
+                (wire-pause-5ms))))
+          (catch error
+            (let ((code (if error (get error :code) nil)))
+              (if (and (or (= code "EAGAIN") (= code "EWOULDBLOCK") (= code "EINTR"))
+                       (<= (js-call globalThis.Date :now) deadline))
+                (wire-pause-5ms)
+                (throw error))))))))
+  (defconst wireSuiteSha "1aa64057034a3726043cc24784515f18f45a92b2d28be6bd0f266779de0376f9")
   (defconst wireWholePart (Object/freeze (js-object :name "whole" :kind "whole" :start 0 :end 253)))
   (defconst wireFunctionalParts
     (Object/freeze (js-call (Array/from (js-object :length 16) (lambda (ignored index)
@@ -88,8 +120,8 @@
             (while (< index (get part :end))
               (let* ((record (aref cases index)) (name (get record :fn)) (arguments (get record :args))
                      (started (performance/now)) (actual undefined))
-                (console/error "[wire-original-case]" (JSON/stringify (js-object :event "start" :index index
-                  :name (get record :name) :function name :resources (wireCaseResources runtime))))
+                (write-wire-case-event (js-object :event "start" :index index
+                  :name (get record :name) :function name :resources (wireCaseResources runtime)))
                 (setq actual (JSON/parse (if runtime
                        (Reflect/apply (get library :call) undefined (js-array runtime name arguments))
                        (await (Reflect/apply (get m (js-call name :replaceAll "-" "_")) m arguments)))))
@@ -99,8 +131,8 @@
                   (js-call runtime :collect)
                   (js-call assert :strictEqual (get (js-call runtime :stats) :frameDepth) 0
                     (str (get record :name) " frames")))
-                (console/error "[wire-original-case]" (JSON/stringify (js-object :event "complete" :index index
-                  :name (get record :name) :elapsedMs (- (performance/now) started) :resources (wireCaseResources runtime)))))
+                (write-wire-case-event (js-object :event "complete" :index index
+                  :name (get record :name) :elapsedMs (- (performance/now) started) :resources (wireCaseResources runtime))))
               (setq index (1+ index)))))
         ((= kind "negative-zero")
           (let ((actual (if runtime

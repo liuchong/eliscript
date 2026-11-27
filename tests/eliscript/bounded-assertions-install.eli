@@ -14,7 +14,7 @@
               (isCompilerRequestFixture root argument (get globalThis.process :env)))))
     (throw (new globalThis.TypeError "bounded compiler assertions require their exact original suite")))
   (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root suite))) :digest "hex")
-             "8463ca604119f8342d1735b11a5ca607d6ab878fd75539ac2d2d4243bd517000")
+             "94cdcc46462a0df41059db03cc0d550e9476585777aed3915568bfcb28b5fe2b")
     (throw (new globalThis.TypeError "bounded compiler assertions refuse changed original suite bytes")))
   (defconst saved (Object/assign (js-object) exports))
   (defconst facade (boundedStrictAssertions original))

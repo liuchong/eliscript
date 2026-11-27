@@ -270,7 +270,7 @@
 
   (test "rest and spread capacity failures release temporary argument lists and preserve existing roots"
     (lambda ()
-      (let* ((a (make-instance (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 8192)))
+      (let* ((a (make-instance (js-object :initialBytes 4096 :maxBytes 8192)))
              (n (js-call a :number 7))
              (frame (js-call a :frame 1))
              (failed false)
@@ -441,7 +441,7 @@
       (let ((raw (Uint8Array/from (js-call (get backends :wasm) :emit_memory_wasm ir))))
         (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module raw)) (js-array))
         (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module raw)) :exports))
-               (heap (funcall (aref e "heap-new") 128 5296 32768))
+               (heap (funcall (aref e "heap-new") 5296 32768))
                (call-fn (lambda (name &rest args)
                           (let ((res (funcall normalize-u64 (apply (aref e name) (js-call (js-array heap) :concat args)))))
                             (js-call assert :equal (funcall (aref e "last-error")) 0 name)
@@ -651,7 +651,7 @@
           (funcall assert (Object/hasOwn host (get entry :name)) (get entry :name))))
         (put imports "eliscript.host" host)
         (let* ((e (get (new globalThis.WebAssembly.Instance module imports) :exports))
-               (heap (funcall (aref e "heap-new") 128 5296 32768))
+               (heap (funcall (aref e "heap-new") 5296 32768))
                (argv (funcall normalize-u64 (funcall (aref e "value-refs") heap 7 1))))
           (put box :e e)
           (put box :argv argv)

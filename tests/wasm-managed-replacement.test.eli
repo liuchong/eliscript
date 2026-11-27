@@ -250,7 +250,7 @@
   (test "replacement grows actual memory and capacity failures retain exact text and caller-owned roots"
     (async ()
       (let* ((c (await (compile-case ordinary)))
-             (a (make-instance c (js-object :maxSlots 4096 :initialBytes 131072 :maxBytes 4194304))))
+             (a (make-instance c (js-object :initialBytes 131072 :maxBytes 4194304))))
         (js-call a :auto 1)
         (let* ((original (js-call "中😀\ud800" :repeat 10000))
                (text (js-call a :string original))
@@ -262,7 +262,7 @@
           (funcall assert (> (get (js-call a :stats) :capacityBytes) before))
           (funcall assert (> (get (js-call a :stats) :collections) 0))
           (finish a (js-array text search replacement out)))
-        (let ((small (make-instance c (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+        (let ((small (make-instance c (js-object :initialBytes 8192 :maxBytes 8192))))
           (js-call small :auto 1)
           (let* ((s (js-call small :string "held😀\ud800"))
                  (needle (js-call small :string "held"))

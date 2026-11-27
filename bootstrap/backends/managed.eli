@@ -1494,7 +1494,7 @@
              (runtime-arguments state (js-array (word-constant 7) (word-constant 0)))) t)))
       ;; The original initialized test still owns the observation boundary.
       ;; Only its actual first observation allocates the private ABI vector.
-      (word-if (word-compare (runtime-call state (if (= builtin 0)
+      (managed-guard state (word-if (word-compare (runtime-call state (if (= builtin 0)
         "value-function-number-prototype-ready" "value-function-initialized")
         (runtime-arguments state (js-array value))) (word-constant 0) "=")
         (word-sequence (js-array (get arguments :steps)
@@ -1502,7 +1502,7 @@
             (runtime-arguments state (js-array value (get arguments :result) (word-constant 0)))
             (get initializer :index)))
           (capture-error state)))
-        (word-constant 0))))
+        (word-constant 0)))))
   (defun lower-managed-object-constructor-publication (value key state)
     (let ((steps (js-array))
           (operations (js-array 16 17 18 21 22 23 27 37 38 39 170 171 172 173 174 175 176 177 178 179 194 195))
@@ -1703,9 +1703,9 @@
         ;; Nested member/iterator assembly borrows the caller's guard. Restore
         ;; it instead of clearing an enclosing Array publication's guard.
         (put state :describingNative describing))
-      (word-if (word-compare (runtime-call state (if defer-number-statics
+      (managed-guard state (word-if (word-compare (runtime-call state (if defer-number-statics
         "value-function-number-prototype-ready" "value-function-initialized") (runtime-arguments state (js-array value)))
-        (word-constant 0) "=") (word-sequence steps) (word-constant 0)))))))
+        (word-constant 0) "=") (word-sequence steps) (word-constant 0))))))))
   (defun lower-managed-realm-initialization (state)
     ;; Only this existing private callback owns the common native assembly IR.
     ;; Nested Object/member descriptions retain the original recursion guards.
@@ -1847,7 +1847,7 @@
           (let ((described (lower-managed-function-description (get value :result) function state)))
             (js-call steps :push (get described :steps))
             (unless (nil? (get function :builtin nil))
-              (js-call steps :push (lower-managed-native-initialization (get described :result) function state)))
+              (js-call steps :push (managed-guard state (lower-managed-native-initialization (get described :result) function state))))
             ;; Native registration retains its actual members through the realm
             ;; object graph. Names, argument vectors and nested initialization
             ;; intermediates cease to be caller roots once this expression ends.

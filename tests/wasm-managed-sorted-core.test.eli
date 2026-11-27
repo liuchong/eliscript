@@ -15,7 +15,7 @@
   (import "../runtime/core/sorted.mjs" :as OriginalSorted)
   (import "../runtime/literals.mjs" :as OriginalLiterals)
   (import "../runtime/core/metadata.mjs" :as OriginalMetadata)
-  (defconst options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+  (defconst options (js-object :initialBytes 262144 :maxBytes 16777216))
   (defconst memory (js-object :initialPages 4 :maximumPages 1024))
   (defconst entry "tests/sorted-entry.mjs")
   (defconst units (js-array (js-array entry "tests/fixtures/wasm-managed-sorted.eli")

@@ -114,7 +114,7 @@
       (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
         (while (< index (js-length targets))
           (let* ((runtime (await (runtime-for (aref targets index)
-                           (js-object :maxSlots 256 :initialBytes 8192 :maxBytes 65536))))
+                           (js-object :initialBytes 8192 :maxBytes 16384))))
                  (value (js-call runtime :number -0)) (tail (js-call runtime :sourceArray))
                  (caller (js-call runtime :frame 1)) (padding (js-array)) (failed false))
             (js-call runtime :auto 1) (js-call runtime :frameSet caller 0 value)

@@ -44,7 +44,7 @@
     (if (= (get process :platform) "linux") "arm64-linux" "arm64-macos"))
 
   (defconst memory (Object/freeze (js-object :initialPages 128 :maximumPages 4096)))
-  (defconst budget (Object/freeze (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+  (defconst budget (Object/freeze (js-object :initialBytes 65536 :maxBytes 16777216)))
 
   (defconst exported
     (js-array
@@ -185,7 +185,7 @@
                        "protocol-error" "list" "vector" "map" "set" "queue" "identifier" "record" "value"
                        "metadata" "collection" "transient" "protocol" "type" "order" "sorted" "regex"
                        "transducer" "lazy-sequence" "text" "text-impl" "object" "object-impl" "protocol-impl"
-                       "truth" "sequence" "set-algebra"
+                       "truth" "sequence" "set-algebra" "array-map"
                        "collection-internals" "metadata-internals" "persistent-kind" "data" "data-text" "value-internals")
                      :map (lambda (name) (str "runtime/core/" name ".mjs")))
                    "runtime/literals.mjs"

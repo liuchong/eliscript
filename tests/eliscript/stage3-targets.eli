@@ -38,7 +38,7 @@
       :modules (js-array (js-object :id "sequence-data.mjs" :source "(defun result () -0) (export result)"))
       :request (js-object :operation "project" :phased t)
       :execution (js-object :kind "original-program" :hostSource "unchanged original host bytes"
-        :runtimeOptions (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216))
+        :runtimeOptions (js-object :initialBytes 65536 :maxBytes 16777216))
       :expected (js-object :kind "seed-program" :oracleRequired t)
       :original (js-object :suite "tests/wasm-managed-sequence-data.test.mjs"
         :fixture "tests/fixtures/wasm-managed-sequence-data.eli")))
@@ -58,9 +58,9 @@
           (Object/assign (js-object) (get resources :budget) (js-object :auto 65536)))
         (js-call assert :deepStrictEqual record before)
         (js-call assert :strictEqual (JSON/stringify record) wire)
-        (put (get acceptance :effectiveRuntimeOptions) :maxSlots 1)
-        (js-call assert :strictEqual (get (get (compilerCorpusRuntimeAcceptance record options) :effectiveRuntimeOptions) :maxSlots)
-          (get (get resources :budget) :maxSlots))
+        (put (get acceptance :effectiveRuntimeOptions) :initialBytes 1)
+        (js-call assert :strictEqual (get (get (compilerCorpusRuntimeAcceptance record options) :effectiveRuntimeOptions) :initialBytes)
+          (get (get resources :budget) :initialBytes))
         (js-call assert :strictEqual (Object/hasOwn acceptance "verification") false))))
 
   (test "functional resources cannot override diagnostic capacity recovery other-suite or unbound records and reject unknown profiles"
@@ -768,8 +768,8 @@
                     (if (and (= (aref flags 0) "1") (= (aref flags 1) "small"))
                       (progn
                         (js-call assert :strictEqual (get acceptance :resourceAcceptance) "deferred")
-                        (js-call assert :strictEqual (get (get acceptance :originalRuntimeOptions) :maxSlots) 8192)
-                        (js-call assert :strictEqual (get (get acceptance :effectiveRuntimeOptions) :maxSlots) 131072)
+                        (js-call assert :strictEqual (get (get acceptance :originalRuntimeOptions) :initialBytes) 262144)
+                        (js-call assert :strictEqual (get (get acceptance :effectiveRuntimeOptions) :initialBytes) 8388608)
                         (js-call assert :strictEqual (get (get acceptance :effectiveRuntimeOptions) :auto) 1))
                       (js-call assert :strictEqual acceptance undefined)))))
               (finally
@@ -802,7 +802,7 @@
                          (strict (originalCorpusExecutionPolicy context)))
                     (js-call assert :strictEqual (get record :auto) 1)
                     (js-call assert :strictEqual (get execution :zeroImports) t)
-                    (js-call assert :strictEqual (get (get execution :runtimeOptions) :maxSlots) 8192)
+                    (js-call assert :strictEqual (get (get execution :runtimeOptions) :initialBytes) 262144)
                     (js-call assert :strictEqual (get strict :originalDeadlineMs) 120000)
                     (js-call assert :strictEqual (get strict :effectiveDeadlineMs) 120000)
                     (put context :options (js-object :functionalRuntimeProfile "small"))
@@ -931,7 +931,7 @@
                       (js-call assert :strictEqual (get source :sourceSha256) wireSuiteSha)
                       (js-call assert :strictEqual (get (get record :request) :foreignEntry) t)
                       (js-call assert :strictEqual (get execution :zeroImports) false)
-                      (js-call assert :strictEqual (get (get execution :runtimeOptions) :maxSlots) 8192)
+                      (js-call assert :strictEqual (get (get execution :runtimeOptions) :initialBytes) 262144)
                       (js-call assert :strictEqual (get policy :originalDeadlineMs) 120000)
                       (js-call assert :strictEqual (get policy :effectiveDeadlineMs) 120000)
                       (js-call assert :deepStrictEqual (get record :request) (get (aref group 0) :request))

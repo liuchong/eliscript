@@ -310,7 +310,7 @@
                       (make-artifact (js-call (get b :compiler) :compile_ir_string
                                        "(defconst marker 1) (defun f (value) (value-type value)) (export f)"
                                        "type-oom.eli"))
-                      (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+                      (js-object :initialBytes 8192 :maxBytes 8192))))
         (js-call small :auto 1)
         (let ((retained (js-call small :number -0.0))
               (outer (js-call small :frame 1))

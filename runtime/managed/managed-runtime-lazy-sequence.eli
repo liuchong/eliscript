@@ -141,11 +141,13 @@
       iterator))
 
   ;; 32-element chunked sequence infrastructure
+  (defvar array-chunk-prototype-ready false)
   (defconst ArrayChunk
     (define-named-class
       (lambda (self token array off end)
-        (unless (eq token (ensure-array-chunk-token))
+        (unless (and (not (nil? ARRAY_CHUNK_TOKEN)) (eq token ARRAY_CHUNK_TOKEN))
           (fail "ArrayChunk values must be created with arrayChunk"))
+        (ensure-array-chunk-prototype)
         (js-call (ensure-array-chunk-states) :set self
           (Object/freeze (js-object :array array :off off :end end :count (- end off))))
         (Object/freeze self))
@@ -168,66 +170,71 @@
   (defun array-chunk-owned (frozen-array off end)
     (new ArrayChunk (ensure-array-chunk-token) frozen-array off end))
 
-  (let ((cproto (get ArrayChunk :prototype)))
-    (install-getter cproto "count" "count"
-      (lambda (self) (get (chunk-state self) :count)))
-    (install-getter cproto "size" "size"
-      (lambda (self) (get (chunk-state self) :count)))
-    (install-method cproto "chunkCount" "chunkCount" 0
-      (lambda (self) (get (chunk-state self) :count)))
-    (install-method cproto "chunkNth" "chunkNth" 1
-      (lambda (self index &rest args)
-        (let* ((state (chunk-state self))
-               (count (get state :count))
-               (missing (ensure-array-chunk-missing))
-               (not-found (if (= (js-length args) 0) missing (aref args 0))))
-          (if (and (Number/isInteger index) (>= index 0) (< index count))
-            (aref (get state :array) (+ (get state :off) index))
-            (if (not (eq not-found missing))
-              not-found
-              (range-fail (str "chunk index " (funcall globalThis/String index) " is outside [0, " count ")")))))))
-    (install-method cproto "dropFirst" "dropFirst" 0
-      (lambda (self)
-        (let ((state (chunk-state self)))
-          (when (= (get state :count) 0)
-            (range-fail "cannot dropFirst on empty chunk"))
-          (array-chunk-owned (get state :array) (+ (get state :off) 1) (get state :end)))))
-    (install-method cproto CHUNK_COUNT "[eliscript.chunk.count]" 0
-      (lambda (self) (get (chunk-state self) :count)))
-    (install-method cproto CHUNK_NTH "[eliscript.chunk.nth]" 1
-      (lambda (self index &rest args)
-        (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
-    (install-method cproto CHUNK_DROP_FIRST "[eliscript.chunk.dropFirst]" 0
-      (lambda (self) (js-call self :dropFirst)))
-    (install-method cproto COLLECTION_COUNT "[eliscript.collection.count]" 0
-      (lambda (self) (get (chunk-state self) :count)))
-    (install-method cproto COLLECTION_NTH "[eliscript.collection.nth]" 1
-      (lambda (self index &rest args)
-        (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
-    (install-method cproto iterator-symbol "[Symbol.iterator]" 0
-      (lambda (self)
-        (let* ((state (chunk-state self))
-               (array (get state :array))
-               (end (get state :end))
-               (cursor (get state :off)))
-          (let ((iter (js-object :next (method
-                        (lambda (_self)
-                          (if (< cursor end)
-                            (let ((value (aref array cursor)))
-                              (setq cursor (1+ cursor))
-                              (js-object :value value :done false))
-                            (js-object :value undefined :done t)))
-                        "next" 0))))
-            (put iter iterator-symbol (method (lambda (s) s) "[Symbol.iterator]" 0))
-            iter))))
-    (install-getter cproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
-      (lambda (_self) "EliscriptArrayChunk")))
+  (defun ensure-array-chunk-prototype ()
+    (unless array-chunk-prototype-ready
+      (let ((cproto (get ArrayChunk :prototype)))
+        (install-getter cproto "count" "count"
+          (lambda (self) (get (chunk-state self) :count)))
+        (install-getter cproto "size" "size"
+          (lambda (self) (get (chunk-state self) :count)))
+        (install-method cproto "chunkCount" "chunkCount" 0
+          (lambda (self) (get (chunk-state self) :count)))
+        (install-method cproto "chunkNth" "chunkNth" 1
+          (lambda (self index &rest args)
+            (let* ((state (chunk-state self))
+                   (count (get state :count))
+                   (missing (ensure-array-chunk-missing))
+                   (not-found (if (= (js-length args) 0) missing (aref args 0))))
+              (if (and (Number/isInteger index) (>= index 0) (< index count))
+                (aref (get state :array) (+ (get state :off) index))
+                (if (not (eq not-found missing))
+                  not-found
+                  (range-fail (str "chunk index " (funcall globalThis/String index) " is outside [0, " count ")")))))))
+        (install-method cproto "dropFirst" "dropFirst" 0
+          (lambda (self)
+            (let ((state (chunk-state self)))
+              (when (= (get state :count) 0)
+                (range-fail "cannot dropFirst on empty chunk"))
+              (array-chunk-owned (get state :array) (+ (get state :off) 1) (get state :end)))))
+        (install-method cproto CHUNK_COUNT "[eliscript.chunk.count]" 0
+          (lambda (self) (get (chunk-state self) :count)))
+        (install-method cproto CHUNK_NTH "[eliscript.chunk.nth]" 1
+          (lambda (self index &rest args)
+            (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
+        (install-method cproto CHUNK_DROP_FIRST "[eliscript.chunk.dropFirst]" 0
+          (lambda (self) (js-call self :dropFirst)))
+        (install-method cproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+          (lambda (self) (get (chunk-state self) :count)))
+        (install-method cproto COLLECTION_NTH "[eliscript.collection.nth]" 1
+          (lambda (self index &rest args)
+            (funcall host-apply (get cproto :chunkNth) self (js-call (js-array index) :concat args))))
+        (install-method cproto iterator-symbol "[Symbol.iterator]" 0
+          (lambda (self)
+            (let* ((state (chunk-state self))
+                   (array (get state :array))
+                   (end (get state :end))
+                   (cursor (get state :off)))
+              (let ((iter (js-object :next (method
+                            (lambda (_self)
+                              (if (< cursor end)
+                                (let ((value (aref array cursor)))
+                                  (setq cursor (1+ cursor))
+                                  (js-object :value value :done false))
+                                (js-object :value undefined :done t)))
+                            "next" 0))))
+                (put iter iterator-symbol (method (lambda (s) s) "[Symbol.iterator]" 0))
+                iter))))
+        (install-getter cproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+          (lambda (_self) "EliscriptArrayChunk")))
+      (setq array-chunk-prototype-ready t)))
 
+  (defvar chunk-buffer-prototype-ready false)
   (defconst ChunkBuffer
     (define-named-class
       (lambda (self token capacity)
-        (unless (eq token (ensure-chunk-buffer-token))
+        (unless (and (not (nil? CHUNK_BUFFER_TOKEN)) (eq token CHUNK_BUFFER_TOKEN))
           (fail "ChunkBuffer values must be created with chunkBuffer"))
+        (ensure-chunk-buffer-prototype)
         (js-call (ensure-chunk-buffer-states) :set self
           (js-object :items (js-array) :capacity capacity :consumed false))
         (Object/freeze self))
@@ -265,19 +272,22 @@
       (Object/freeze items)
       (array-chunk-owned items 0 len)))
 
-  (let ((bproto (get ChunkBuffer :prototype)))
-    (install-getter bproto "count" "count"
-      (lambda (self)
-        (let ((state (chunk-buffer-state self)))
-          (if (get state :consumed) 0 (js-length (get state :items))))))
-    (install-getter bproto "size" "size"
-      (lambda (self) (get self :count)))
-    (install-method bproto "add" "add" 1
-      (lambda (self value) (chunkAppend self value)))
-    (install-method bproto "chunk" "chunk" 0
-      (lambda (self) (chunkFromBuffer self)))
-    (install-getter bproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
-      (lambda (_self) "EliscriptChunkBuffer")))
+  (defun ensure-chunk-buffer-prototype ()
+    (unless chunk-buffer-prototype-ready
+      (let ((bproto (get ChunkBuffer :prototype)))
+        (install-getter bproto "count" "count"
+          (lambda (self)
+            (let ((state (chunk-buffer-state self)))
+              (if (get state :consumed) 0 (js-length (get state :items))))))
+        (install-getter bproto "size" "size"
+          (lambda (self) (get self :count)))
+        (install-method bproto "add" "add" 1
+          (lambda (self value) (chunkAppend self value)))
+        (install-method bproto "chunk" "chunk" 0
+          (lambda (self) (chunkFromBuffer self)))
+        (install-getter bproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+          (lambda (_self) "EliscriptChunkBuffer")))
+      (setq chunk-buffer-prototype-ready t)))
 
   (defun chunk-count-of (chunk)
     (let ((direct (aref chunk CHUNK_COUNT)))
@@ -457,11 +467,13 @@
       (when (eq acc no-init) (fail "cannot reduce an empty collection without an initial value"))
       acc))
 
+  (defvar chunked-cons-prototype-ready false)
   (defconst ChunkedCons
     (define-named-class
       (lambda (self token chunk more count-hint)
-        (unless (eq token (ensure-chunked-cons-token))
+        (unless (and (not (nil? CHUNKED_CONS_TOKEN)) (eq token CHUNKED_CONS_TOKEN))
           (fail "ChunkedCons values must be created with chunkedCons"))
+        (ensure-chunked-cons-prototype)
         (js-call (ensure-chunked-cons-states) :set self
           (js-object :chunk chunk :more more :countHint count-hint
             :moreRealized false :cachedMore nil :failure (ensure-no-failure)))
@@ -479,41 +491,46 @@
       (if (callable? more) (funcall more) (if (nil? more) nil (seq more)))
       (make-chunked-cons chunk more (ensure-unknown-count))))
 
-  (let ((ccproto (get ChunkedCons :prototype)))
-    (install-method ccproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
-      (lambda (self) (get (js-call (ensure-chunked-cons-states) :get self) :chunk)))
-    (install-method ccproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
-      (lambda (self)
-        (let ((next-val (resolve-more-seq (js-call (ensure-chunked-cons-states) :get self))))
-          (if (nil? next-val) nil
-            (if (or (literal-instance? next-val ChunkedCons) (literal-instance? next-val LazyChunkedSeq))
-              next-val (seq next-val))))))
-    (install-method ccproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
-      (lambda (self)
-        (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
-          (if (nil? next-val) EMPTY_LIST next-val))))
-    (install-method ccproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
-      (lambda (self) self))
-    (install-method ccproto COLLECTION_COUNT "[eliscript.collection.count]" 0
-      (lambda (self)
-        (let* ((state (js-call (ensure-chunked-cons-states) :get self))
-               (hint (get state :countHint)))
-          (cond
-            ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
-            ((not (eq hint (ensure-unknown-count))) hint)
-            (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
-    (install-method ccproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
-      (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
-    (install-method ccproto iterator-symbol "[Symbol.iterator]" 0
-      (lambda (self) (chunked-seq-iterator self)))
-    (install-getter ccproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
-      (lambda (_self) "EliscriptChunkedCons")))
+  (defun ensure-chunked-cons-prototype ()
+    (unless chunked-cons-prototype-ready
+      (let ((ccproto (get ChunkedCons :prototype)))
+        (install-method ccproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
+          (lambda (self) (get (js-call (ensure-chunked-cons-states) :get self) :chunk)))
+        (install-method ccproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
+          (lambda (self)
+            (let ((next-val (resolve-more-seq (js-call (ensure-chunked-cons-states) :get self))))
+              (if (nil? next-val) nil
+                (if (or (literal-instance? next-val ChunkedCons) (literal-instance? next-val LazyChunkedSeq))
+                  next-val (seq next-val))))))
+        (install-method ccproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
+          (lambda (self)
+            (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
+              (if (nil? next-val) EMPTY_LIST next-val))))
+        (install-method ccproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+          (lambda (self) self))
+        (install-method ccproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+          (lambda (self)
+            (let* ((state (js-call (ensure-chunked-cons-states) :get self))
+                   (hint (get state :countHint)))
+              (cond
+                ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
+                ((not (eq hint (ensure-unknown-count))) hint)
+                (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
+        (install-method ccproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+          (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
+        (install-method ccproto iterator-symbol "[Symbol.iterator]" 0
+          (lambda (self) (chunked-seq-iterator self)))
+        (install-getter ccproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+          (lambda (_self) "EliscriptChunkedCons")))
+      (setq chunked-cons-prototype-ready t)))
 
+  (defvar lazy-chunked-prototype-ready false)
   (defconst LazyChunkedSeq
     (define-named-class
       (lambda (self token thunk count-hint)
-        (unless (eq token (ensure-lazy-chunked-token))
+        (unless (and (not (nil? LAZY_CHUNKED_TOKEN)) (eq token LAZY_CHUNKED_TOKEN))
           (fail "LazyChunkedSeq values must be created with lazyChunkedSeq"))
+        (ensure-lazy-chunked-prototype)
         (js-call (ensure-lazy-chunked-states) :set self
           (js-object :thunk thunk :countHint count-hint :started false :value nil :failure (ensure-no-failure)))
         (Object/freeze self))
@@ -523,38 +540,41 @@
     (new LazyChunkedSeq (ensure-lazy-chunked-token) thunk
       (if (nullish? count-hint) (ensure-unknown-count) count-hint)))
 
-  (let ((lcproto (get LazyChunkedSeq :prototype)))
-    (install-method lcproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
-      (lambda (self)
-        (let ((resolved (resolve-lazy-chunk self)))
-          (if (nil? resolved) nil (chunked-first-of resolved)))))
-    (install-method lcproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
-      (lambda (self)
-        (let ((resolved (resolve-lazy-chunk self)))
-          (if (nil? resolved) nil (chunked-next-of resolved)))))
-    (install-method lcproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
-      (lambda (self)
-        (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
-          (if (nil? next-val) EMPTY_LIST next-val))))
-    (install-method lcproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
-      (lambda (self)
-        (let ((state (js-call (ensure-lazy-chunked-states) :get self)))
-          (if (eq (get state :countHint) UNBOUNDED_SEQUENCE) self
-            (let ((resolved (resolve-lazy-chunk self))) (if (nil? resolved) nil self))))))
-    (install-method lcproto COLLECTION_COUNT "[eliscript.collection.count]" 0
-      (lambda (self)
-        (let* ((state (js-call (ensure-lazy-chunked-states) :get self))
-               (hint (get state :countHint)))
-          (cond
-            ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
-            ((not (eq hint (ensure-unknown-count))) hint)
-            (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
-    (install-method lcproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
-      (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
-    (install-method lcproto iterator-symbol "[Symbol.iterator]" 0
-      (lambda (self) (chunked-seq-iterator self)))
-    (install-getter lcproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
-      (lambda (_self) "EliscriptLazyChunkedSeq")))
+  (defun ensure-lazy-chunked-prototype ()
+    (unless lazy-chunked-prototype-ready
+      (let ((lcproto (get LazyChunkedSeq :prototype)))
+        (install-method lcproto CHUNKED_FIRST "[eliscript.chunked-seq.chunkedFirst]" 0
+          (lambda (self)
+            (let ((resolved (resolve-lazy-chunk self)))
+              (if (nil? resolved) nil (chunked-first-of resolved)))))
+        (install-method lcproto CHUNKED_NEXT "[eliscript.chunked-seq.chunkedNext]" 0
+          (lambda (self)
+            (let ((resolved (resolve-lazy-chunk self)))
+              (if (nil? resolved) nil (chunked-next-of resolved)))))
+        (install-method lcproto CHUNKED_MORE "[eliscript.chunked-seq.chunkedMore]" 0
+          (lambda (self)
+            (let ((next-val (js-call (aref self CHUNKED_NEXT) :call self)))
+              (if (nil? next-val) EMPTY_LIST next-val))))
+        (install-method lcproto COLLECTION_SEQ "[eliscript.collection.seq]" 0
+          (lambda (self)
+            (let ((state (js-call (ensure-lazy-chunked-states) :get self)))
+              (if (eq (get state :countHint) UNBOUNDED_SEQUENCE) self
+                (let ((resolved (resolve-lazy-chunk self))) (if (nil? resolved) nil self))))))
+        (install-method lcproto COLLECTION_COUNT "[eliscript.collection.count]" 0
+          (lambda (self)
+            (let* ((state (js-call (ensure-lazy-chunked-states) :get self))
+                   (hint (get state :countHint)))
+              (cond
+                ((eq hint UNBOUNDED_SEQUENCE) (range-fail "unbounded sequence does not have a finite count"))
+                ((not (eq hint (ensure-unknown-count))) hint)
+                (t (let ((computed (chunked-seq-count self))) (put state "countHint" computed) computed))))))
+        (install-method lcproto COLLECTION_REDUCE "[eliscript.collection.reduce]" 1
+          (lambda (self reducer &rest initial) (reduce-chunked-seq self reducer initial)))
+        (install-method lcproto iterator-symbol "[Symbol.iterator]" 0
+          (lambda (self) (chunked-seq-iterator self)))
+        (install-getter lcproto (get globalThis/Symbol :toStringTag) "[Symbol.toStringTag]"
+          (lambda (_self) "EliscriptLazyChunkedSeq")))
+      (setq lazy-chunked-prototype-ready t)))
 
   (defun build-range-cons (start step total offset)
     (if (and (not (eq total UNBOUNDED_SEQUENCE)) (>= offset total))

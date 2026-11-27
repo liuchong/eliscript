@@ -12,9 +12,9 @@ tracked checkout.
 | Property | Value |
 | --- | --- |
 | Provider | Local machine |
-| Operating system | Darwin 25.6.0 |
+| Operating system | Darwin 27.2.0 |
 | Architecture | arm64 |
-| Bun | 1.4.0 |
+| Bun | 1.4.5 |
 | Node.js | 24.22.3 |
 | Emacs | 32.0.50 |
 

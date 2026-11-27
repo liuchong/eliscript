@@ -106,7 +106,7 @@
              (wread (lambda (h v) (funcall read-num wi h v))))
         (js-call assert :equal (JSON/stringify (get lowered :typed)) saved)
         (try (each (js-array (js-array wi wread) (js-array ni nread)) (lambda (entry)
-          (let* ((invoke (aref entry 0)) (read (aref entry 1)) (heap (funcall invoke "heap-new" 64 16384 1048576)))
+          (let* ((invoke (aref entry 0)) (read (aref entry 1)) (heap (funcall invoke "heap-new" 16384 1048576)))
             (assert (> heap 0)) (js-call assert :equal (funcall invoke "heap-auto" heap 1) 1)
             (let ((input (funcall number invoke heap 10)))
               (assert (> input (globalThis.BigInt 0))) (js-call assert :equal (funcall invoke "heap-pin" heap input) 1)

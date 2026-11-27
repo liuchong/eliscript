@@ -110,11 +110,11 @@ values share the same compiled replacement.  No library file is written."
     format-name))
 
 (defun eliscript-cli--parse (arguments)
-  "Parse ARGUMENTS into input, output, maps, portable, and diagnostic fields."
+  "Parse ARGUMENTS into input, output, maps, portable, diagnostic, and batch."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
   (let ((diagnostic-format "human")
-        input output source-map portable-entries)
+        input output source-map portable-entries batch-manifest)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -131,6 +131,10 @@ values share the same compiled replacement.  No library file is written."
           (unless arguments
             (error "%s requires a function name" argument))
           (push (pop arguments) portable-entries))
+         ((equal argument "--batch-manifest")
+          (unless arguments
+            (error "%s requires a file" argument))
+          (setq batch-manifest (pop arguments)))
          ((equal argument "--diagnostic-format")
           (unless arguments
             (error "%s requires human or json" argument))
@@ -141,12 +145,49 @@ values share the same compiled replacement.  No library file is written."
           (error "unknown option: %s" argument))
          (input (error "multiple input files are not supported yet"))
          (t (setq input argument)))))
-    (unless input
-      (error "missing input file"))
-    (when (and source-map (null output))
-      (error "--source-map requires --output"))
+    (if batch-manifest
+        (when (or input output source-map portable-entries)
+          (error "--batch-manifest cannot be combined with single-file options"))
+      (unless input
+        (error "missing input file"))
+      (when (and source-map (null output))
+        (error "--source-map requires --output")))
     (list input output source-map (nreverse portable-entries)
-          diagnostic-format)))
+          diagnostic-format batch-manifest)))
+
+(defun eliscript-cli--run-batch-manifest (manifest-file)
+  "Compile all entries listed in JSON MANIFEST-FILE in order."
+  (let* ((entries
+          (with-temp-buffer
+            (insert-file-contents manifest-file)
+            (json-parse-buffer :object-type 'alist :array-type 'list
+                               :null-object nil :false-object nil)))
+         (should-byte-compile (>= (length entries) 8)))
+    (unless (listp entries)
+      (error "batch manifest must contain a JSON array"))
+    (unless should-byte-compile
+      (let ((remaining entries))
+        (while (and remaining (not should-byte-compile))
+          (let ((in (alist-get 'input (car remaining))))
+            (when (and (stringp in) (eliscript-cli--large-readable-input-p in))
+              (setq should-byte-compile t)))
+          (setq remaining (cdr remaining)))))
+    (when should-byte-compile
+      (eliscript-cli--byte-compile-loaded-compiler))
+    (dolist (entry entries)
+      (let ((in (alist-get 'input entry))
+            (out (alist-get 'output entry))
+            (smap (alist-get 'sourceMap entry))
+            (portable (alist-get 'portable entry)))
+        (unless (and (stringp in) (stringp out))
+          (error "batch manifest entry requires string input and output"))
+        (if smap
+            (if portable
+                (eliscript-compile-portable-file-with-source-map in portable out)
+              (eliscript-compile-file-with-source-map in out))
+          (if portable
+              (eliscript-compile-portable-file in portable out)
+            (eliscript-compile-file in out)))))))
 
 (defun eliscript-cli-main (arguments)
   "Compile according to command-line ARGUMENTS."
@@ -154,23 +195,26 @@ values share the same compiled replacement.  No library file is written."
          (eliscript-cli--requested-diagnostic-format arguments)))
     (condition-case error-data
         (pcase-let ((`(,input ,output ,source-map ,portable-entries
-                              ,diagnostic-format)
+                              ,diagnostic-format ,batch-manifest)
                       (eliscript-cli--parse arguments)))
           (setq requested-format diagnostic-format)
-          (when (eliscript-cli--large-readable-input-p input)
-            (eliscript-cli--byte-compile-loaded-compiler))
-          (if source-map
-              (if portable-entries
-                  (eliscript-compile-portable-file-with-source-map
-                   input portable-entries output)
-                (eliscript-compile-file-with-source-map input output))
-            (let ((generated
-                   (if portable-entries
-                       (eliscript-compile-portable-file
-                        input portable-entries output)
-                     (eliscript-compile-file input output))))
-              (unless output
-                (princ generated)))))
+          (if batch-manifest
+              (eliscript-cli--run-batch-manifest batch-manifest)
+            (progn
+              (when (eliscript-cli--large-readable-input-p input)
+                (eliscript-cli--byte-compile-loaded-compiler))
+              (if source-map
+                  (if portable-entries
+                      (eliscript-compile-portable-file-with-source-map
+                       input portable-entries output)
+                    (eliscript-compile-file-with-source-map input output))
+                (let ((generated
+                       (if portable-entries
+                           (eliscript-compile-portable-file
+                            input portable-entries output)
+                         (eliscript-compile-file input output))))
+                  (unless output
+                    (princ generated)))))))
       (error
        (if (equal requested-format "json")
            (message

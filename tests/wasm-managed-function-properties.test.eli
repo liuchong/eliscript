@@ -606,7 +606,7 @@
 
   (test "manual initialization retains its capacity refusal and complete cleanup while the same bytes initialize under collecting GC"
     (lambda ()
-      (let ((unpressured (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
+      (let ((unpressured (instantiateManagedRuntime bytes (js-object :initializeModule false :initialBytes 69216 :maxBytes 69216))))
         (try
           (progn
             (js-call unpressured :initializeModule)
@@ -626,7 +626,7 @@
                                 (setq i (1+ i))))
                             (js-call assert :equal (js-call a :live) 1024)
                             (js-call assert :equal (get (js-call a :stats) :collections) 0))))
-        (let ((manual (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
+        (let ((manual (instantiateManagedRuntime bytes (js-object :initializeModule false :initialBytes 69216 :maxBytes 69216))))
           (try
             (progn
               (funcall fill-garbage manual)
@@ -640,7 +640,7 @@
               (js-call assert :equal (js-call manual :live) 0)
               (js-call assert :equal (get (js-call manual :stats) :frameDepth) 0))
             (finally (finish manual))))
-        (let ((collecting (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
+        (let ((collecting (instantiateManagedRuntime bytes (js-object :initializeModule false :initialBytes 69216 :maxBytes 69216))))
           (try
             (progn
               (funcall fill-garbage collecting)

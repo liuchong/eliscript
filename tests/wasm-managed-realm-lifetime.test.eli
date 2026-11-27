@@ -98,7 +98,7 @@
   (test "plain function values and missing reads fit the original 64-slot heap without materializing unrelated builtins"
     (lambda ()
       (let ((a (instantiateManagedRuntime bytes
-                 (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536))))
+                 (js-object :initialBytes 8192 :maxBytes 65536))))
         (js-call a :auto 1)
         (try
           (let ((f (js-call a :invoke "function-value")))
@@ -114,12 +114,12 @@
 
   (js-call (js-array "object-static" "object-prototype-member") :forEach
     (lambda (lookup)
-      (js-call (js-array 64 256) :forEach
-        (lambda (max-slots)
-          (test (str lookup " recovers after exhaustion within its original " max-slots " slots and keeps its identity across GC")
+      (js-call (js-array 32768 65536) :forEach
+        (lambda (max-bytes)
+          (test (str lookup " recovers after exhaustion within " max-bytes " bytes and keeps its identity across GC")
             (lambda ()
               (let* ((a (instantiateManagedRuntime bytes
-                          (js-object :maxSlots max-slots :initialBytes 16384 :maxBytes 65536)))
+                          (js-object :initialBytes 16384 :maxBytes max-bytes)))
                      (constructor (progn (js-call a :auto 1) (js-call a :invoke "object-reference")))
                      (key (js-call a :string (if (= lookup "object-static") "keys" "hasOwnProperty")))
                      (caller (js-call a :frame 2))
@@ -132,7 +132,7 @@
                   (js-call assert :throws
                     (lambda ()
                       (let ((idx 0)
-                            (limit (* max-slots 2)))
+                            (limit 2000))
                         (while (< idx limit)
                           (js-call padding :push (js-call a :array))
                           (setq idx (+ idx 1)))))
@@ -164,7 +164,7 @@
   (test "reading default null and custom Array prototype identity does not observe its methods in the original 64 slots"
     (lambda ()
       (let ((a (instantiateManagedRuntime bytes
-                 (js-object :maxSlots 64 :initialBytes 16384 :maxBytes 65536))))
+                 (js-object :initialBytes 16384 :maxBytes 65536))))
         (js-call a :auto 1)
         (try
           (let ((mode 0))

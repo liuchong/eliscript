@@ -188,7 +188,7 @@
           (while (< index (js-length targets))
             (let* ((target (aref targets index)) (deployment (resolve directory "foreign-initializers" target))
                    (graph (createManagedModuleGraph descriptor))
-                   (options (js-object :initializeModule false :moduleGraph graph :maxSlots 4096
+                   (options (js-object :initializeModule false :moduleGraph graph
                      :initialBytes 1048576 :maxBytes 16777216 :auto 1 :nativeTarget native-target))
                    (adapter undefined))
               (try
@@ -250,7 +250,7 @@
         (while (< index (js-length targets))
           (let* ((target (aref targets index)) (deployment (resolve directory target))
                  (graph (createManagedModuleGraph descriptor))
-                 (options (js-object :initializeModule false :moduleGraph graph :maxSlots 4096
+                 (options (js-object :initializeModule false :moduleGraph graph
                    :initialBytes 1048576 :maxBytes 16777216 :auto 1
                    :initialPages 1 :maximumPages 256 :nativeTarget native-target))
                  (adapter undefined))
@@ -692,7 +692,7 @@
             (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module image)) (js-array))
           (while (< index (js-length targets))
             (let* ((target (aref targets index))
-                   (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216 :auto 1))
+                   (options (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))
                    (adapter undefined) (result undefined))
               (try
                 (progn
@@ -769,7 +769,7 @@
                 (js-call payload :slice (- (js-length payload) (js-length expected-metadata))) expected-metadata)))
           (while (< index (js-length targets))
             (let* ((target (aref targets index))
-                   (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216 :auto 1))
+                   (options (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))
                    (adapter undefined) (result undefined))
               (try
                 (progn
@@ -841,7 +841,7 @@
           (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module image)) (js-array))
         (while (< index (js-length targets))
           (let* ((target (aref targets index))
-                 (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216 :auto 1))
+                 (options (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))
                  (adapter undefined) (result undefined) (failed false))
             (try
               (if (= target "wasm")
@@ -904,7 +904,7 @@
               (lambda (item) (and (= (get item :name) "value-error-restore") (= (get item :kind) "function")))))
           (while (< position (js-length targets))
             (let* ((target (aref targets position))
-                   (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216 :auto 1))
+                   (options (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))
                    (adapter undefined) (handle undefined) (measure-handle undefined) (result undefined))
               (try
                 (progn
@@ -1029,7 +1029,7 @@
         (js-call assert :strictEqual expected-async "async-done")
         (while (< position (js-length targets))
           (let* ((target (aref targets position))
-                 (options (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864 :auto 65536))
+                 (options (js-object :initialBytes 8388608 :maxBytes 67108864 :auto 65536))
                  (adapter undefined) (handles (js-array)) (failed false))
             (try
               (progn
@@ -1130,7 +1130,7 @@
              (position 0))
         (while (< position (js-length targets))
           (let* ((target (aref targets position))
-                 (options (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216 :auto 1))
+                 (options (js-object :initialBytes 1048576 :maxBytes 16777216 :auto 1))
                  (adapter undefined) (handle undefined) (failed false))
             (try
               (progn
@@ -1268,7 +1268,7 @@
            (checked (lambda (name &rest arguments)
              (let ((result (Reflect/apply raw undefined (js-call (js-array name) :concat arguments))))
                (js-call assert :strictEqual (funcall raw "last-error") 0 name) result)))
-           (heap (funcall checked "heap-new" (get budget :maxSlots) (get budget :initialBytes) (get budget :maxBytes)))
+           (heap (funcall checked "heap-new" (get budget :initialBytes) (get budget :maxBytes)))
            (literal (get descriptor :literalRuntime)) (probe (get literal :brandProbe))
            (binding (get (get literal :bindings) "literal-kind")) (original (get probe :original))
            (role-probe (get literal :roleProbe))
@@ -1440,7 +1440,7 @@
         (js-call assert :deepStrictEqual (get functional :effectiveRuntimeOptions)
           (Object/assign (js-object) (get full :budget) (js-object :auto (get full :auto))))
         (js-call assert :deepStrictEqual (get functional :resources) full)
-        (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :maxSlots) 1048575)
+        (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :initialBytes) 67108864)
         (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :maxBytes) 268435456)
         (js-call assert :strictEqual (get (get functional :originalRuntimeOptions) :auto) 65536)
         (js-call assert :strictEqual (get (get functional :effectiveRuntimeOptions) :auto) 4194304)

@@ -245,7 +245,7 @@
 
   (test "Given a bounded heap, when copying exceeds capacity, then argument effects stay observed and inputs and caller frames remain intact" (async ()
     (let* ((c (await (compiled (str "(defun f (items trace) (js-call items :concat items items (progn (put trace :calls 1) items)))" own "(export f own)")
-                               (js-object :maxSlots 64 :initialBytes 12288 :maxBytes 12288))))
+                               (js-object :initialBytes 12288 :maxBytes 12288))))
            (a (get c :a))
            (items (array a (js-call (new globalThis.Array 512) :fill t)))
            (trace (js-call a :sourceObject (js-object)))
@@ -293,7 +293,7 @@
            (bytes (get c :bytes)))
       (finish a)
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (js-call e "heap-new" 32 4520 65536))
+             (heap (js-call e "heap-new" 4520 65536))
              (items (js-call e "value-array-new" heap 1))
              (args (js-call e "value-refs" heap 7 1))
              (caller (js-call e "frame-new" heap 2)))

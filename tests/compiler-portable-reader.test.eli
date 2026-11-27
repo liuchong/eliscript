@@ -179,7 +179,7 @@
             (try (setq y (if (= mode "skip") (skip r cb) (token r begin right))) (catch e (setq ye (get (get e :constructor) :name))))
             (eqv xe ye) (assert (Object/is x y)) (same a r))))))))))
   (test "Given live caller roots and allocation pressure, when callbacks exhaust capacity, then state writeback stops and later scans recover" (lambda ()
-    (let* ((p (withSupport)) (a (get (instance p runtime (js-object :maxSlots 256 :initialBytes 8192 :maxBytes 16384)) :a))
+    (let* ((p (withSupport)) (a (get (instance p runtime (js-object :initialBytes 8192 :maxBytes 16384)) :a))
            (input (state a "abc ")) (trace (js-call a :sourceObject (js-object :called false))) (callback (js-call a :invoke "reader-exhaust" (js-array trace)))
            (saved (js-call a :number (js* "-0"))) (frame (js-call a :frame 1)))
       (js-call a :frameSet frame 0 saved)

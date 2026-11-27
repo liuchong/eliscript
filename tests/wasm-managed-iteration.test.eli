@@ -329,7 +329,7 @@
         (finish a)))))
 
   (test "iteration capacity failures retain completed callback effects and caller roots and recover after collection" (lambda ()
-    (let ((a (instantiateManagedRuntime (artifact) (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536))))
+    (let ((a (instantiateManagedRuntime (artifact) (js-object :initialBytes 8192 :maxBytes 8192))))
       (js-call a :auto 1)
       (let ((input (js-call a :sourceArray (js-call (globalThis.Array 64) :fill false)))
             (trace (js-call a :sourceArray (js-array)))
@@ -382,7 +382,7 @@
   (test "the iteration ABI rejects illegal handles counts and modes and does not accept nearby arbitrary raw functions" (lambda ()
     (let* ((bytes (artifact))
            (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-           (heap (funcall uint32 (js-call e "heap-new" 64 8192 65536)))
+           (heap (funcall uint32 (js-call e "heap-new" 8192 65536)))
            (argv (js-call e "value-refs" heap 7 0)))
       (js-call assert :equal (js-call e "last-error") 0)
       (js-call

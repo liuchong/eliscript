@@ -194,7 +194,7 @@
 
   (test "cyclic arrays, assignment references and growing arrays retain edges through GC and release them on shrink"
     (lambda ()
-      (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 512 :initialBytes 32768 :maxBytes 1048576)))
+      (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 32768 :maxBytes 1048576)))
              (x (js-call a :string "x"))
              (y (js-call a :map)))
         (js-call a :auto 1)
@@ -403,7 +403,7 @@
 
   (test "capacity failure and original errors leave arrays unchanged, suppress later traps and unwind only owned frames"
     (async ()
-      (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 10000 :maxBytes 10000)))
+      (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 10000 :maxBytes 10000)))
              (arr (js-call a :invoke "make" (js-array t false undefined)))
              (n (js-call a :number 2000))
              (huge (js-call a :number 4294967295))
@@ -474,7 +474,7 @@
   (test "the exported array setter protects a borrowed child across allocating growth without relying on generated frames"
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (funcall (aref e "heap-new") 64 5296 65536)))
+             (heap (funcall (aref e "heap-new") 5296 65536)))
         (funcall (aref e "heap-auto") heap 1)
         (let* ((arr (globalThis.BigInt.asUintN 64 (funcall (aref e "value-array-new") heap 1)))
                (_arr-root (funcall (aref e "heap-pin") heap arr))
@@ -870,7 +870,7 @@
           (js-call a :collect)
           (js-call assert :equal (js-call a :live) 0)))
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (h (funcall (aref e "heap-new") 32 4520 16384))
+             (h (funcall (aref e "heap-new") 4520 16384))
              (sparse (globalThis.BigInt.asUintN 64 (funcall (aref e "value-array-new") h 16)))
              (i 0))
         (funcall (aref e "heap-pin") h sparse)
@@ -889,7 +889,7 @@
 
   (test "array named-property capacity failure is atomic and raw allocating setters protect all borrowed operands"
     (lambda ()
-      (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 9840 :maxBytes 9840)))
+      (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 9840 :maxBytes 9840)))
              (arr (js-call a :sourceArray (new globalThis.Array 550)))
              (key (js-call a :string "new"))
              (value (js-call a :number 7)))
@@ -904,7 +904,7 @@
         (js-call a :collect)
         (js-call assert :equal (js-call a :live) 0))
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (h (funcall (aref e "heap-new") 64 5296 65536))
+             (h (funcall (aref e "heap-new") 5296 65536))
              (target (globalThis.BigInt.asUintN 64 (funcall (aref e "value-array-new") h 0)))
              (name (globalThis.BigInt.asUintN 64 (funcall (aref e "value-string") h 1))))
         (funcall (aref e "value-unit-set") h name 0 120)

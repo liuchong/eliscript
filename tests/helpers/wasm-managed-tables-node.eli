@@ -10,7 +10,7 @@
       (js-call assert :deepEqual (WebAssembly.Module/imports mod) (js-array))
       (let* ((inst (new WebAssembly.Instance mod))
              (e (get inst :exports))
-             (h (funcall (get e "heap-new") 96 16384 16384)))
+             (h (funcall (get e "heap-new") 16384 16384)))
         (funcall (get e "heap-auto") h 1)
         (let ((out (funcall normalize-u64 (funcall (get e "table-pressure") h 1000))))
           (funcall assert (> out (funcall globalThis.BigInt 0)))

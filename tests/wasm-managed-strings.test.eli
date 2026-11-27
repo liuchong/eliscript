@@ -225,7 +225,7 @@
   (test "raw text queries reject unfinished string keys and protect borrowed receiver, positions and results across allocating GC"
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (funcall (get e "heap-new") 64 8192 65536))
+             (heap (funcall (get e "heap-new") 8192 65536))
              (call-fn (lambda (name &rest args)
                         (let ((out (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
                           (js-call assert :equal (funcall (get e "last-error")) 0 name)
@@ -482,8 +482,7 @@
                             (let ((heap-context "stats unavailable"))
                               (try
                                 (setq heap-context
-                                  (JSON/stringify (js-object :stats (js-call dead :stats) :auto 1
-                                                             :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+                                  (JSON/stringify (js-object :stats (js-call dead :stats) :auto 1 :initialBytes 65536 :maxBytes 16777216)))
                                 (catch ignored nil))
                               (throw (new globalThis.Error
                                        (str "active string case " name " " (inspect inputs) "; heap=" heap-context)
@@ -699,7 +698,7 @@
   (test "native initialization root-range release preserves returned values caller roots and exact refusal before any partial clearing"
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (funcall (get e "heap-new") 64 8192 65536))
+             (heap (funcall (get e "heap-new") 8192 65536))
              (outer (funcall (get e "frame-new") heap 1))
              (inner (funcall (get e "frame-new") heap 4)))
         (funcall assert (and (/= heap 0)
@@ -749,7 +748,7 @@
   (test "immediate temporary roots preserve manual collection metadata binding cells and caller roots across capacity refusal"
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (funcall (get e "heap-new") 256 16384 65536))
+             (heap (funcall (get e "heap-new") 8192 16384))
              (call-fn (lambda (name &rest args)
                         (let ((value (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
                           (js-call assert :equal (funcall (get e "last-error")) 0 name)
@@ -771,16 +770,14 @@
                    (lambda ()
                      (let* ((view (new globalThis.DataView (get (get e :memory) :buffer)))
                             (control (js-call view :getUint32 (+ heap 16) t))
-                            (slots (js-call view :getUint32 (+ control 8) t))
-                            (base (js-call view :getUint32 (+ slots 16) t)))
+                            (base (+ control 3544)))
                        (Array/from (js-object :length 6)
                          (lambda (unused i) (js-call view :getUint32 (+ base (* i 4)) t))))))
                  (immediate-slots
                    (lambda ()
                      (let* ((view (new globalThis.DataView (get (get e :memory) :buffer)))
                             (control (js-call view :getUint32 (+ heap 16) t))
-                            (slots (js-call view :getUint32 (+ control 8) t))
-                            (base (js-call view :getUint32 (+ slots 16) t)))
+                            (base (+ control 3544)))
                        (Array/from (js-object :length 6)
                          (lambda (unused i) (js-call view :getUint32 (+ base (* i 4)) t))))))
                  (before (funcall metadata))
@@ -871,7 +868,7 @@
 
   (test "source searches retain bounded Two-Way behavior on long periodic and overlapping text in both directions"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 65536 :maxBytes 4194304)))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 4194304)))
             (lone (String/fromCharCode 55296)))
         (js-call a :auto 1)
         (js-call (js-array
@@ -932,7 +929,7 @@
           (js-call a :closeModule)
           (js-call a :collect)
           (js-call assert :equal (js-call a :live) 0)))
-      (let* ((bounded (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 6000 :maxBytes 6000)))
+      (let* ((bounded (instantiateManagedRuntime bytes (js-object :initialBytes 6000 :maxBytes 6000)))
              (_ (js-call bounded :auto 1))
              (lone-str (str "中😀" (String/fromCharCode 55296)))
              (original (js-call bounded :string lone-str))
@@ -1124,7 +1121,7 @@
     (async ()
       (let ((product (await (static-literal-artifact))))
         (assert-static-literal
-          (instantiateManagedRuntime (get product :bytes) (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152))
+          (instantiateManagedRuntime (get product :bytes) (js-object :initialBytes 65536 :maxBytes 2097152))
           product)
         (let ((small-texts (js-array "" "a" (str "中😀" (String/fromCharCode 55296 0 57343))))
               (idx 0))
@@ -1132,7 +1129,7 @@
             (let* ((text (aref small-texts idx))
                    (p (js-call (get backend :compiler) :compile_ir_string (static-literal-source text) "static-small.eli"))
                    (artifact (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm p runtime-program)))
-                   (a (instantiateManagedRuntime artifact (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152)))
+                   (a (instantiateManagedRuntime artifact (js-object :initialBytes 65536 :maxBytes 2097152)))
                    (output undefined))
               (try
                 (progn
@@ -1175,6 +1172,6 @@
                                    (get (get product :lowered) :typed) target))))
         (assert-static-literal
           (await (instantiateNativeManagedRuntime path (get product :lowered)
-                   (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 2097152)))
+                   (js-object :initialBytes 65536 :maxBytes 2097152)))
           product)))
     120000))

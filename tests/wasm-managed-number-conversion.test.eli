@@ -204,7 +204,7 @@
   (test "long coefficients, balanced exponents and nondecimal integers retain every rounding digit and reject trailing invalid data"
     (lambda ()
       (let ((api (open-runtime "number-parse" parse-source
-                   (js-object :maxSlots 256 :initialBytes 65536 :maxBytes 4194304)))
+                   (js-object :initialBytes 65536 :maxBytes 4194304)))
             (inputs (js-array
                       (str (js-call "0" :repeat 4096) "1")
                       (str "1" (js-call "0" :repeat 4096) "e-4096")
@@ -365,7 +365,7 @@
       (open-runtime "number-parse" parse-source)
       (let* ((inst (new WebAssembly.Instance (new WebAssembly.Module (js-call compiled :get "number-parse"))))
              (e (get inst :exports))
-             (heap (funcall (get e "heap-new") 64 16384 65536))
+             (heap (funcall (get e "heap-new") 16384 65536))
              (call-raw (lambda (name &rest args)
                          (let ((value (funcall normalize-u64 (apply (get e name) heap args))))
                            (js-call assert :equal (funcall (get e "last-error")) 0 name)
@@ -405,7 +405,7 @@
 
   (test "conversion capacity failures preserve exact input bits and caller roots, while successful growth reloads all pool addresses"
     (lambda ()
-      (let* ((options (js-object :maxSlots 64 :initialBytes 6176 :maxBytes 6176))
+      (let* ((options (js-object :initialBytes 6176 :maxBytes 6176))
              (parse (open-runtime "number-parse" parse-source options))
              (input (str "1." (js-call "0" :repeat 400) "1"))
              (source (js-call parse :string input))

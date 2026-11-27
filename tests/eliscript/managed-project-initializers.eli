@@ -127,7 +127,7 @@
              (targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (index 0))
         (while (< index (js-length targets))
           (let* ((target (aref targets index)) (graph (createManagedModuleGraph descriptor))
-                 (options (js-object :initializeModule false :moduleGraph graph :maxSlots 4096
+                 (options (js-object :initializeModule false :moduleGraph graph
                    :initialBytes 1048576 :maxBytes 16777216 :auto 4096
                    :initialPages 1 :maximumPages 256 :nativeTarget native-target))
                  (adapter undefined))
@@ -221,11 +221,14 @@
                (oracle (funcall (createRequire path) path)))
           (js-object :lowered lowered :bytes bytes :nativePath native-path :oracle oracle)))))
 
-  (defasync with-namespace-runtime (target run)
-    (let* ((lowered (get namespace-fixture :lowered)) (descriptor (get lowered :descriptor))
+  (defasync with-namespace-runtime (target run &rest __rest_args)
+    (let* ((extra (aref __rest_args 0))
+           (lowered (get namespace-fixture :lowered)) (descriptor (get lowered :descriptor))
            (graph (createManagedModuleGraph descriptor)) (adapter undefined)
-           (options (js-object :initializeModule false :moduleGraph graph :maxSlots 1024
-             :initialBytes 65536 :maxBytes 16777216 :auto 1 :initialPages 1 :maximumPages 256 :nativeTarget native-target)))
+           (options (Object/assign
+                      (js-object :initializeModule false :moduleGraph graph
+                        :initialBytes 65536 :maxBytes 16777216 :auto 1 :initialPages 1 :maximumPages 256 :nativeTarget native-target)
+                      (if extra extra (js-object)))))
       (try
         (if (= target "wasm")
           (setq adapter (await (instantiateManagedRuntimeWithHostModules (get namespace-fixture :bytes) options)))
@@ -337,7 +340,7 @@
                   (finally
                     (js-call fillers :forEach (lambda (value) (js-call adapter :release value)))
                 (js-call adapter :release result)
-                (js-call adapter :release held)))))))
+                (js-call adapter :release held))))) (js-object :maxBytes 65536)))
     (await (check-namespace-closed-environment target t))
     (await (check-namespace-closed-environment target false)))
   (defasync check-namespace-closed-environment (target initialized)

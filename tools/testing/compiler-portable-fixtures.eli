@@ -65,7 +65,7 @@
       (validate-serializable-program program)
       (let* ((before (JSON/stringify program))
              (bytes (globalThis.Uint8Array.from (js-call (get backend :managed) :emit_managed_wasm program (get readerFixture :runtime))))
-             (a (instantiateManagedRuntime bytes (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576)))
+             (a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 1048576)))
              (ignored (js-call a :auto 1))
              (values (js-array (js-call a :string "abc ") (js-call a :number 0) (js-call a :number 11) (js-call a :number 3) (js-call a :number 7)))
              (input (js-call a :sourceObject (Object/fromEntries (js-call (js-array "source" "index" "offset" "line" "column") :map

@@ -318,7 +318,7 @@
              (artifact (Uint8Array/from (js-call (get backend :managed) :emit_managed_wasm program injected))))
         (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module artifact)) (js-array))
         (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module artifact)) :exports))
-               (h (js-call e "heap-new" 128 32768 65536))
+               (h (js-call e "heap-new" 32768 65536))
                (prototype (js-call e "value-standard-prototype" h 0))
                (key (js-call e "value-string" h 1)))
           (js-call (new globalThis.DataView (get (get e :memory) :buffer))
@@ -342,7 +342,7 @@
             (js-call assert :equal (js-call e "heap-live" h) 0)))))))
 
   (test "inherited-array allocation failure keeps caller frames and live prototype edges, then copying recovers" (lambda ()
-    (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 16384 :maxBytes 65536)))
+    (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 20480 :maxBytes 20480)))
            (_ (js-call a :auto 1))
            (prototype (js-call a :invoke "prototype"))
            (input (js-call a :sourceArray (new globalThis.Array 4)))
@@ -354,7 +354,7 @@
       (js-call a :set prototype 1 undefined)
       (try
         (let ((i 0))
-          (while (< i 128)
+          (while (< i 256)
             (js-call padding :push (js-call a :array))
             (setq i (1+ i))))
         (catch error
@@ -465,7 +465,7 @@
         (js-call (js-array 6 7 8) :forEach
           (lambda (method)
             (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module artifact)) :exports))
-                   (h (js-call e "heap-new" 128 32768 65536))
+                   (h (js-call e "heap-new" 32768 65536))
                    (prototype (js-call e "value-standard-prototype" h 0))
                    (key (js-call e "value-string" h 1)))
               (js-call (new globalThis.DataView (get (get e :memory) :buffer))

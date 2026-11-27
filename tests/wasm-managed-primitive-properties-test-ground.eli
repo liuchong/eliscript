@@ -179,7 +179,7 @@
           (lambda (err) (diag-code? err "ELI-RT0001")))
         (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
                (e (get inst :exports))
-               (heap (funcall (aref e "heap-new") 64 8192 65536))
+               (heap (funcall (aref e "heap-new") 8192 65536))
                (num (funcall (aref e "value-number") heap 0 0)))
           (funcall (aref e "value-property-get") heap (globalThis.BigInt 4294967295) (globalThis.BigInt 3) 0)
           (js-call assert :equal (funcall (aref e "last-error")) 1)
@@ -190,18 +190,19 @@
 
   (test "primitive read allocation failures retain caller roots and later missing-property reads recover"
     (lambda ()
-      (let ((a (instantiateManagedRuntime (make-artifact) (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536))))
+      (let ((a (instantiateManagedRuntime (make-artifact) (js-object :initialBytes 8192 :maxBytes 8192))))
         (js-call a :auto 1)
         (let ((key (js-call a :string "missing"))
               (held (js-call a :number -0.0))
               (frame (js-call a :frame 1))
               (fillers (js-array)))
           (js-call a :frameSet frame 0 held)
-          ;; A real one-slot value per iteration, with a finite bound: an inline
-          ;; number takes no dynamic slot and would never raise `live`.
-          (let ((steps 0))
-            (while (and (< (js-call a :live) 64) (< steps 256))
-              (js-call fillers :push (js-call a :array))
+          ;; Exhaust the bounded heap with pinned 1-slot arrays before checking OOM.
+          (let ((steps 0) (filling t))
+            (while (and filling (< steps 2048))
+              (try
+                (js-call fillers :push (js-call a :array))
+                (catch _ (setq filling false)))
               (setq steps (+ steps 1))))
           (js-call assert :throws
             (lambda () (js-call a :invoke "member" (js-array t key)))
@@ -218,7 +219,7 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (make-artifact))))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 128 16384 131072)))
+             (h (funcall (aref e "heap-new") 16384 131072)))
         (funcall (aref e "heap-auto") h 1)
         (let* ((raw-call (lambda (name &rest args)
                            ;; Two-domain normalization: `u32` -> Number, `v64` -> BigInt.
@@ -470,7 +471,7 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (make-artifact))))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 16384 131072))
+             (h (funcall (aref e "heap-new") 16384 131072))
              (raw-call (lambda (name &rest args)
                          ;; `u32` results stay host Numbers; `v64` results are
                          ;; unsigned BigInt and cannot be folded with `>>>`.
@@ -535,7 +536,7 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (make-artifact))))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 16384 131072))
+             (h (funcall (aref e "heap-new") 16384 131072))
              (raw-call (lambda (name &rest args)
                          ;; `u32` results stay host Numbers; `v64` results are
                          ;; unsigned BigInt and cannot be folded with `>>>`.

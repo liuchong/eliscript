@@ -176,7 +176,7 @@
 
   (defasync instantiate (target artifact events)
     (let* ((graph (createManagedModuleGraph (get artifact :descriptor)))
-           (options (js-object :initializeModule false :moduleGraph graph :maxSlots 1024
+           (options (js-object :initializeModule false :moduleGraph graph
              :initialBytes 65536 :maxBytes 16777216 :auto 65536 :nativeTarget native-target
              :console (js-object :log (lambda (value) (js-call events :push value)))))
            (runtime (if (= target "wasm")

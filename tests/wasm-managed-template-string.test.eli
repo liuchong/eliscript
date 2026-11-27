@@ -141,7 +141,7 @@
   (test "template ToString ABI rejects invalid heaps and handles before allocation and recovers after collection" (lambda ()
     (let* ((bytes (artifact source))
            (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-           (heap (funcall uint32 (js-call e "heap-new" 64 5296 16384))))
+           (heap (funcall uint32 (js-call e "heap-new" 5296 16384))))
       (js-call assert :equal (js-call e "last-error") 0)
       (js-call assert :equal (js-call e "value-source-to-string" 0 (funcall globalThis.BigInt 3)) (funcall globalThis.BigInt 0))
       (js-call assert :equal (js-call e "last-error") 1)

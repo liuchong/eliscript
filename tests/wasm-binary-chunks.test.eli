@@ -690,7 +690,7 @@
         (js-call assert :equal
           (js-length (js-call globalThis.WebAssembly.Module :customSections module "eliscript-managed-control")) 1)
         (js-call assert :equal (get (get packed :debug) :moduleByteLength) (js-length bytes))
-        (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384))))
+        (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 4096 :maxBytes 16384))))
           (js-call a :auto 1)
           (try
             (let ((result (js-call a :invoke "run")))

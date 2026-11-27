@@ -362,7 +362,7 @@
 
   (test "actual capacity failure during declaration does not publish an initialized module or leak cells"
     (lambda ()
-      (let* ((a (make-instance (js-object :maxSlots 8 :initialBytes 4096 :maxBytes 8192 :initializeModule false)))
+      (let* ((a (make-instance (js-object :initialBytes 4096 :maxBytes 4096 :initializeModule false)))
              (keep (js-call a :number 7))
              (frame (js-call a :frame 1))
              (i 0))
@@ -503,7 +503,7 @@
       (let ((bytes (Uint8Array/from (js-call (get b :wasm) :emit_memory_wasm ir))))
         (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
         (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-               (heap (funcall (aref e "heap-new") 64 4096 32768))
+               (heap (funcall (aref e "heap-new") 4096 32768))
                (call-fn (lambda (name &rest args)
                           (let ((res (funcall normalize-u64 (apply (aref e name) (js-call (js-array heap) :concat args)))))
                             (js-call assert :equal (funcall (aref e "last-error")) 0 name)

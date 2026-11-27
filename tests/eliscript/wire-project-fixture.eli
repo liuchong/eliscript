@@ -402,7 +402,7 @@
                  (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)
                  "eliscript-managed-control" (JSON/stringify (get lowered :descriptor)))))
                (fixture (createWireProjectFixture)) (runtime undefined) (failed false)
-               (settings (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864
+               (settings (js-object :initialBytes 8388608 :maxBytes 67108864
                  :hostModules (new globalThis.Map (js-array (js-array "eliscript/platform/http.mjs" httpPlatform)))
                  :importModule (lambda (specifier) (js-call assert :equal specifier "eliscript/platform/http.mjs") httpPlatform))))
           (js-call assert :strictEqual (JSON/stringify modules) before)
@@ -456,7 +456,7 @@
              (abi (JSON/parse (await (readFile (resolve directory "wire-abi.json") "utf8"))))
              (descriptor (readWireProjectDescriptor bytes)) (fixture (createWireProjectFixture))
              (runtime undefined) (failed false)
-             (settings (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864
+             (settings (js-object :initialBytes 8388608 :maxBytes 67108864
                :hostModules (new globalThis.Map (js-array (js-array "eliscript/platform/http.mjs" httpPlatform)))
                :importModule (lambda (specifier) (js-call assert :equal specifier "eliscript/platform/http.mjs") httpPlatform))))
         (js-call assert :deepStrictEqual descriptor (get abi :descriptor))
@@ -542,20 +542,20 @@
                     (await (readFile (resolve root "tests/wasm-managed-wire-test-ground.mjs")))) :digest "hex"))
              (environment (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1" :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"))
              (importer (lambda () "original")) (modules (new globalThis.Map))
-             (original (Object/freeze (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216
+             (original (Object/freeze (js-object :initialBytes 262144 :maxBytes 16777216
                :initialPages 4 :maximumPages 1024 :nativeTarget "original-target" :hostModules modules :importModule importer)))
              (selected (wireFixtureRuntimeOptions sha environment original)) (effective (get selected :options)))
         (js-call assert :strictEqual (get selected :originalCapacityAcceptance) "DEFERRED / NOT ACCEPTED")
         (js-call assert :strictEqual (get selected :originalRuntimeOptions) original)
         (js-call assert :notStrictEqual effective original)
-        (js-call assert :deepStrictEqual (js-array (get effective :maxSlots) (get effective :initialBytes) (get effective :maxBytes))
-          (js-array 131072 8388608 67108864))
+        (js-call assert :deepStrictEqual (js-array (get effective :initialBytes) (get effective :maxBytes))
+          (js-array 8388608 67108864))
         (js-call assert :strictEqual (get effective :initialPages) 4)
         (js-call assert :strictEqual (get effective :maximumPages) 1024)
         (js-call assert :strictEqual (get effective :nativeTarget) "original-target")
         (js-call assert :strictEqual (get effective :hostModules) modules)
         (js-call assert :strictEqual (get effective :importModule) importer)
-        (js-call assert :strictEqual (get original :maxSlots) 8192)
+        (js-call assert :strictEqual (get original :initialBytes) 262144)
         (js-call (js-array (js-object) (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1")
           (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")
           (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "0" :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")
@@ -565,7 +565,7 @@
               (js-call assert :strictEqual (get result :options) original)
               (js-call assert :strictEqual (get result :originalCapacityAcceptance) "required-by-original-gate"))))
         (js-call assert :strictEqual (get (wireFixtureRuntimeOptions "unknown-source" environment original) :options) original)
-        (js-call (js-array "maxSlots" "initialBytes" "maxBytes") :forEach (lambda (key)
+        (js-call (js-array "initialBytes" "maxBytes") :forEach (lambda (key)
           (let ((changed (Object/assign (js-object) original)))
             (Reflect/set changed key (1+ (get changed key)))
             (js-call assert :strictEqual (get (wireFixtureRuntimeOptions sha environment changed) :options) changed)))))))
@@ -573,10 +573,10 @@
     (lambda ()
       (let* ((actual (Object/freeze (js-object :usedBytes 123456 :capacityBytes 262144 :liveValues 8191 :frameDepth 2 :collections 17)))
              (calls 0) (runtime (js-object :stats (lambda () (setq calls (1+ calls)) actual)))
-             (options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+             (options (js-object :initialBytes 262144 :maxBytes 16777216))
              (snapshot (wireRuntimeResourceSnapshot runtime options)))
         (js-call assert :strictEqual calls 1)
-        (js-call assert :deepStrictEqual snapshot (js-object :maxSlots 8192 :maxBytes 16777216
+        (js-call assert :deepStrictEqual snapshot (js-object :maxBytes 16777216
           :usedBytes 123456 :capacityBytes 262144 :liveValues 8191 :frameDepth 2 :collections 17))
         (js-call assert :strictEqual (Object/hasOwn snapshot "peakBytes") false)
         (js-call assert :strictEqual (get actual :frameDepth) 2))))
@@ -696,7 +696,7 @@
              (host-modules (new globalThis.Map))
              (importer (lambda () (js-call assert :fail "fixture setup must not import host modules")))
              (settings (js-object :projectModuleBaseURL "file:///already-deployed/"
-               :hostModules host-modules :importModule importer :maxSlots 8192)))
+               :hostModules host-modules :importModule importer)))
         (try
           (js-call assert :strictEqual (await (js-call fixture :options (js-object :project (js-object)) settings)) settings)
           (js-call assert :strictEqual (await (js-call fixture :options (js-object) settings)) settings)

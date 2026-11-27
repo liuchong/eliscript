@@ -197,7 +197,7 @@
   (test "Given callback allocation pressure, when live iteration exhausts capacity, then prior effects remain and only private roots unwind" (lambda ()
     (js-call (js-array false t) :forEach
       (lambda (set-mode)
-        (let* ((a (instance (js-object :maxSlots 96 :initialBytes 65536 :maxBytes 262144)))
+        (let* ((a (instance (js-object :initialBytes 32768 :maxBytes 32768)))
                (values (if set-mode
                          (Array/from (js-object :length 128) (lambda (_ i) i))
                          (js-call (globalThis.Array 128) :fill t)))
@@ -251,7 +251,7 @@
 
   (test "Given malformed raw references, when collection forEach validates them, then invalid-handle errors do not become WASM traps" (lambda ()
     (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-           (heap (js-call e "heap-new" 32 8192 65536))
+           (heap (js-call e "heap-new" 8192 65536))
            (items (js-call e "value-source-collection-new" heap 15 (funcall globalThis.BigInt 3)))
            (caller (js-call e "frame-new" heap 1)))
       (funcall assert items)

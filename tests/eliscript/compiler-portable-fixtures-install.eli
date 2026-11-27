@@ -21,7 +21,7 @@
   (defconst root (get original :root))
   (defconst plans (js-array
     (js-object :suite "tests/compiler-portable-predicates.test.mjs" :sha256 "ca12d4ee9809ada1edbd16d2575d38b346ef08ea0461fcb51420f5d130783593")
-    (js-object :suite "tests/compiler-portable-reader.test.mjs" :sha256 "c59b04872a39d5a50fd12eb5176a2c62c53d7dd1fe2e3b2e56a7fc6d81f7ae9e")
+    (js-object :suite "tests/compiler-portable-reader.test.mjs" :sha256 "f40a02aeae02fbc290bb80aa2056b3821171098d1d277785228d3d6f56413bec")
     (js-object :suite "tests/native-node-memory.test.mjs" :sha256 "82e460634279420f07f8fdbbea0edcc9a50bfe0653fd54fa674297778c62e385")))
   (defconst selected (js-call plans :filter (lambda (plan)
     (js-call (get globalThis.process :argv) :some (lambda (argument) (= (resolve root argument) (resolve root (get plan :suite))))))))

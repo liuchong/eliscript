@@ -1,12 +1,15 @@
 (module tools.backends.compiler-matrix
-  (import "node:fs/promises" mkdir readFile writeFile mkdtemp statfs rm)
+  (import "node:fs/promises" mkdir readFile writeFile mkdtemp statfs rm link copyFile readdir)
+  (import "node:os" availableParallelism cpus totalmem)
   (import "node:path" resolve join relative)
   (import "node:child_process" spawn)
   (import "node:buffer" Buffer)
   (import "node:perf_hooks" performance)
+  (import "node:worker_threads" Worker isMainThread parentPort workerData)
   (import "../testing/original-regression-product.mjs" requestOriginalCompilerProduct)
   (import "./build.mjs" root)
   (import "./compiler-build.mjs" loadCompilerSources compilerMetadataDigest decodeCompilerBinary compilerFunctionalRuntimeProfile)
+  (import "./native-managed-runtime.mjs" snapshotNativeManagedRuntimeABI)
   (import "./compiler-corpus.mjs" loadOriginalCompilerCorpus compilerCorpusRequest cloneCompilerCorpusData compilerCorpusResourceDeferred)
   (import "./compiler-corpus-sorted-observation.mjs" sortedFunctionalPartition)
   (import "./compiler-corpus-wire-host.mjs" wireFunctionalPartition)
@@ -359,9 +362,14 @@
                 (matrix-type-error "compiler did not return actual output bytes"))
               (put result index byte)) (setq index (1+ index))) result))))
 
-  (defasync archiveProduct (input target directory)
-    (let ((response (clone input)))
+  (defasync archive-stage3-product (input target directory compact-native-typed owned)
+    (let ((response (if owned input (clone input))))
       (unless (= (field response "target") target) (matrix-error "compiler returned a different product target"))
+      (when (and compact-native-typed (= target "native") (/= (get response :abi) "memory-u32")
+                 (not (undefined? (get response :typed))))
+        (let ((abi (snapshotNativeManagedRuntimeABI
+                     (js-object :typed (get response :typed) :descriptor (get response :descriptor)))))
+          (setq response (Object/assign (js-object) response (js-object :typed (get abi :typed))))))
       (await (mkdir directory (js-object :recursive t)))
       (let ((product (js-object :target target :entry (get response :entry) :directory directory :modules (js-array))))
         (if (= target "javascript")
@@ -444,6 +452,9 @@
         (await (saveCompilerMetadata (join directory "product.json")
           (matrix-spread product (js-object :typed undefined :debug undefined))))
         product)))
+
+  (defasync archiveProduct (input target directory)
+    (await (archive-stage3-product input target directory false false)))
 
   (defun aborted (signal)
     (when (field signal "aborted")
@@ -655,8 +666,204 @@
             :index index :cellIndex cell-index :caseId (get record :id)
             :response (if reused (get previous :response) (clone response))))))
       response))
-  (defasync matrix-case-execution (record index host target session mode cell-directory metadata manifest corpus execution-options options cell
-                                  literal-sources literal-identity)
+  (defun matrix-pipeline-concurrency (target options stage3-scope)
+    (if (or (not stage3-scope)
+            (not (undefined? (get options :execute)))
+            (not (undefined? (get options :compare)))
+            (= (get (get globalThis.process :env) :ELISCRIPT_MATRIX_SERIAL) "1"))
+      1
+      (let* ((cpu-count (if (= (value-type availableParallelism) "function")
+                          (availableParallelism)
+                          (js-length (cpus))))
+             (cpu-cap (cond ((= target "javascript") (Math/floor (/ cpu-count 1.5)))
+                            ((= target "native") (Math/floor (/ cpu-count 3)))
+                            (t (Math/floor (/ cpu-count 2)))))
+             (mem-div (if (= target "javascript") 3221225472 (if (= target "native") 6442450944 4294967296)))
+             (mem-cap (Math/floor (/ (totalmem) mem-div)))
+             (target-cap (if (= target "javascript") 10 (if (= target "native") 6 8))))
+        (Math/max 1 (Math/min target-cap (Math/min (Math/max 2 cpu-cap) (Math/max 1 mem-cap)))))))
+
+  (defun can-cache-stage3-request-p (record request)
+    (and (not (nil? request))
+         (/= (get record :kind) "stage")
+         (js-call (js-array "project" "compile" "emit-ir") :includes (field request "operation"))
+         (not (Object/hasOwn request "literalSources"))))
+
+  (defasync copy-or-link-tree (src-dir dst-dir)
+    (await (mkdir dst-dir (js-object :recursive t)))
+    (let ((entries (await (readdir src-dir (js-object :withFileTypes t))))
+          (i 0))
+      (while (< i (js-length entries))
+        (let* ((entry (aref entries i))
+               (name (get entry :name))
+               (src-path (join src-dir name))
+               (dst-path (join dst-dir name)))
+          (if (js-call entry :isDirectory)
+            (await (copy-or-link-tree src-path dst-path))
+            (if (or (js-call name :endsWith ".wasm") (js-call name :endsWith ".dylib")
+                    (js-call name :endsWith ".o") (js-call name :endsWith ".so"))
+              (try (await (link src-path dst-path))
+                (catch ignored (await (copyFile src-path dst-path))))
+              (await (copyFile src-path dst-path)))))
+        (setq i (1+ i)))))
+
+  (defasync materialize-cached-product (template-dir target-dir cached-product)
+    (await (copy-or-link-tree template-dir target-dir))
+    (let ((cloned (clone cached-product))
+          (rewrite (lambda (p) (if p (join target-dir (relative template-dir p)) p))))
+      (put cloned :directory target-dir)
+      (when (get cloned :path) (put cloned :path (funcall rewrite (get cloned :path))))
+      (when (get cloned :debugPath) (put cloned :debugPath (funcall rewrite (get cloned :debugPath))))
+      (when (Array/isArray (get cloned :modules))
+        (js-call (get cloned :modules) :forEach (lambda (m)
+          (when (get m :path) (put m :path (funcall rewrite (get m :path))))
+          (when (get m :sourceMapPath) (put m :sourceMapPath (funcall rewrite (get m :sourceMapPath)))))))
+      (when (Array/isArray (get cloned :facades))
+        (js-call (get cloned :facades) :forEach (lambda (f)
+          (when (get f :path) (put f :path (funcall rewrite (get f :path)))))))
+      cloned))
+
+  (defun serialize-worker-error (error)
+    (let ((plain (js-object
+                   :name (if (and error (get error :name)) (get error :name) "Error")
+                   :message (if (and error (get error :message)) (get error :message) (globalThis.String error)))))
+      (when (and error (not (undefined? (get error :code))))
+        (put plain :code (get error :code)))
+      (when (and error (not (undefined? (get error :stack))))
+        (put plain :stack (get error :stack)))
+      (when (and error (not (undefined? (get error :eliscriptDiagnostic))))
+        (try (put plain :eliscriptDiagnostic (JSON/parse (JSON/stringify (get error :eliscriptDiagnostic))))
+          (catch ignored nil)))
+      plain))
+
+  (defun deserialize-worker-error (payload)
+    (let ((error (new globalThis.Error (if (and payload (get payload :message)) (get payload :message) "stage3 worker error"))))
+      (when (and payload (get payload :name)) (put error :name (get payload :name)))
+      (when (and payload (not (undefined? (get payload :code)))) (put error :code (get payload :code)))
+      (when (and payload (not (undefined? (get payload :stack)))) (put error :stack (get payload :stack)))
+      (when (and payload (not (undefined? (get payload :eliscriptDiagnostic))))
+        (put error :eliscriptDiagnostic (get payload :eliscriptDiagnostic)))
+      error))
+
+  (defasync create-stage3-worker-pool (worker-count init-data signal)
+    (let ((workers (js-array))
+          (idle (js-array))
+          (waiters (js-array))
+          (closed false)
+          (next-job-id 1)
+          (i 0))
+      (while (< i worker-count)
+        (let* ((worker (new Worker (new globalThis.URL (js* "import.meta.url"))
+                         (js-object :workerData init-data :resourceLimits (js-object :maxOldGenerationSizeMb 6144))))
+               (slot (js-object :worker worker :busy false :dead false :pending nil :readyPromise nil :closeResolve nil)))
+          (put slot :readyPromise
+            (new globalThis.Promise (lambda (accept reject)
+              (let ((ready-settled false))
+                (js-call worker :on "message" (lambda (msg)
+                  (cond
+                    ((= (get msg :type) "ready")
+                     (unless ready-settled (setq ready-settled t) (funcall accept slot)))
+                    ((= (get msg :type) "fatal")
+                     (put slot :dead t)
+                     (let ((err (deserialize-worker-error (get msg :error))))
+                       (unless ready-settled (setq ready-settled t) (funcall reject err))
+                       (when (get slot :pending)
+                         (let ((p (get slot :pending)))
+                           (put slot :pending nil)
+                           (js-call p :reject err)))))
+                    ((= (get msg :type) "closed")
+                     (when (get slot :closeResolve) (js-call slot :closeResolve)))
+                    ((= (get msg :type) "result")
+                     (let ((pending (get slot :pending)))
+                       (when (and pending (= (get pending :id) (get msg :id)))
+                         (put slot :pending nil)
+                         (if (get msg :ok)
+                           (js-call pending :resolve msg)
+                           (js-call pending :reject (deserialize-worker-error (get msg :error))))))))))
+                (js-call worker :on "error" (lambda (err)
+                  (put slot :dead t)
+                  (unless ready-settled (setq ready-settled t) (funcall reject err))
+                  (when (get slot :pending)
+                    (let ((p (get slot :pending)))
+                      (put slot :pending nil)
+                      (js-call p :reject err)))
+                  (when (get slot :closeResolve) (js-call slot :closeResolve))))
+                (js-call worker :on "exit" (lambda (code)
+                  (put slot :dead t)
+                  (unless ready-settled
+                    (setq ready-settled t)
+                    (funcall reject (new globalThis.Error (str "stage3 compile worker exited before ready: " code))))
+                  (when (get slot :pending)
+                    (let ((p (get slot :pending)))
+                      (put slot :pending nil)
+                      (js-call p :reject (new globalThis.Error (str "stage3 compile worker exited during compile: " code)))))
+                  (when (get slot :closeResolve) (js-call slot :closeResolve))))))))
+          (js-call workers :push slot))
+        (setq i (1+ i)))
+      (await (Promise/all (js-call workers :map (lambda (s) (get s :readyPromise)))))
+      (js-call workers :forEach (lambda (s) (js-call idle :push s)))
+      (let* ((acquire (async ()
+               (aborted signal)
+               (if (> (js-length idle) 0)
+                 (js-call idle :pop)
+                 (await (new globalThis.Promise (lambda (accept) (js-call waiters :push accept)))))))
+             (release (lambda (slot)
+               (if (or closed (get slot :dead))
+                 (when (> (js-length waiters) 0)
+                   (let ((next-waiter (js-call waiters :shift)))
+                     (if (> (js-length idle) 0)
+                       (funcall next-waiter (js-call idle :pop))
+                       (let ((alive (js-call workers :find (lambda (s) (and (not (get s :dead)) (not (get s :busy)))))))
+                         (if alive (funcall next-waiter alive) (funcall next-waiter slot))))))
+                 (if (> (js-length waiters) 0)
+                   (funcall (js-call waiters :shift) slot)
+                   (js-call idle :push slot)))))
+             (submit (async (job)
+               (let ((slot (await (funcall acquire))))
+                 (when closed (throw (new globalThis.Error "stage3 worker pool is closed")))
+                 (when (get slot :dead) (throw (new globalThis.Error "stage3 compile worker unavailable")))
+                 (put slot :busy t)
+                 (try
+                   (let ((job-id next-job-id))
+                     (setq next-job-id (1+ next-job-id))
+                     (await (new globalThis.Promise (lambda (resolve reject)
+                       (put slot :pending (js-object :id job-id :resolve resolve :reject reject))
+                       (js-call (get slot :worker) :postMessage (matrix-spread (js-object :type "compile" :id job-id) job))))))
+                   (finally
+                     (put slot :busy false)
+                     (funcall release slot))))))
+             (close (async ()
+               (setq closed t)
+               (await (Promise/all (js-call workers :map (async (slot)
+                 (unless (get slot :dead)
+                   (await (new globalThis.Promise (lambda (accept)
+                     (let ((timer (globalThis.setTimeout (lambda ()
+                                    (put slot :closeResolve nil)
+                                    (try (js-call (get slot :worker) :terminate) (catch ignored nil))
+                                    (funcall accept)) 1500)))
+                       (put slot :closeResolve (lambda ()
+                         (globalThis.clearTimeout timer)
+                         (put slot :closeResolve nil)
+                         (funcall accept)))
+                       (try (js-call (get slot :worker) :postMessage (js-object :type "close"))
+                         (catch ignored
+                           (globalThis.clearTimeout timer)
+                           (put slot :closeResolve nil)
+                           (funcall accept)))))))))))))))
+        (js-object :submit submit :close close))))
+
+  (defun matrix-pipeline-eligible-p (record)
+    (let* ((kind (get record :kind))
+           (execution (get record :execution))
+           (exec-kind (when execution (field execution "kind"))))
+      (and (/= kind "original-suite")
+           (/= kind "sequence")
+           (not (and execution (= (field execution "compilerSourceMaps") t)))
+           (not (and execution (field execution "compilerGenerations")))
+           (/= exec-kind "compiler-session-program"))))
+
+  (defasync matrix-case-prepare (record index host target session mode cell-directory metadata corpus execution-options options cell
+                                 literal-sources literal-identity defer-commit &optional compile-fn compact-native-typed)
     (aborted (get options :signal))
     (let* ((started (js-call performance :now))
            (directory (join cell-directory (+ (js-call (funcall globalThis.String index) :padStart 6 "0") "-"
@@ -666,15 +873,18 @@
            (request (compilerCorpusRequest record target
                       (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)
                         :literalSources literal-sources :literalSourceIdentity literal-identity))))
-           (observation undefined) (response undefined) (product undefined) (execution-started false)
-           (comparison-result undefined) (trace (js-array)))
-      (js-call (get cell :records) :push outcome)
-      (unless (undefined? runtime-acceptance)
-        (Object/assign outcome runtime-acceptance)
-        (put metadata :resourceAcceptance "deferred")
-        (unless (get metadata :resourceOutcomes) (put metadata :resourceOutcomes (js-array)))
-        (js-call (get metadata :resourceOutcomes) :push
-          (matrix-spread (js-object :id (get record :id)) runtime-acceptance)))
+           (response undefined) (product undefined) (execution-started false) (compile-error undefined) (has-compile-error false)
+           (trace (js-array)))
+      (unless defer-commit
+        (js-call (get cell :records) :push outcome)
+        (unless (undefined? runtime-acceptance)
+          (Object/assign outcome runtime-acceptance)
+          (put metadata :resourceAcceptance "deferred")
+          (unless (get metadata :resourceOutcomes) (put metadata :resourceOutcomes (js-array)))
+          (js-call (get metadata :resourceOutcomes) :push
+            (matrix-spread (js-object :id (get record :id)) runtime-acceptance))))
+      (when (and defer-commit (not (undefined? runtime-acceptance)))
+        (Object/assign outcome runtime-acceptance))
       (put outcome :sourceIdentity (await (matrix-phase outcome "inputArchiveMs"
         (async () (await (archiveCompilerCorpusSources record (join directory "sources")))))))
       (when (and request (Object/hasOwn request "runtimeImportTransport"))
@@ -729,18 +939,36 @@
         (try
           (progn
             (unless (nil? request)
-              (setq response (await (matrix-phase outcome "compilationMs"
-                (async () (await (matrix-project-response record request session mode options outcome index))))))
-              (if (= (get record :kind) "stage")
+              (if (not (nil? compile-fn))
+                (let ((built (await (funcall compile-fn record request target mode directory outcome))))
+                  (put (get outcome :timing) :compilationMs (get built :compilationMs))
+                  (put outcome :responseTransfer (get built :responseTransfer))
+                  (if (= (get record :kind) "stage")
+                    (progn
+                      (setq response (get built :response))
+                      (await (saveCompilerMetadata (join directory "stage-response.json") response))
+                      (when (= (value-type (field response "data")) "string")
+                        (put outcome :stageIdentitySha256 (compilerDigest (JSON/stringify
+                          (js-object :stage (get response :stage) :filename (get response :filename) :data (get response :data)))))))
+                    (progn
+                      (put (get outcome :timing) :archiveMs (get built :archiveMs))
+                      (setq product (get built :product))
+                      (put outcome :productIdentitySha256 (get product :identitySha256)))))
                 (progn
-                  (await (saveCompilerMetadata (join directory "stage-response.json") response))
-                  (when (= (value-type (field response "data")) "string")
-                    (put outcome :stageIdentitySha256 (compilerDigest (JSON/stringify
-                      (js-object :stage (get response :stage) :filename (get response :filename) :data (get response :data)))))))
-                (progn
-                  (setq product (await (matrix-phase outcome "archiveMs"
-                    (async () (await (archiveProduct response target (join directory "product")))))))
-                  (put outcome :productIdentitySha256 (get product :identitySha256))))
+                  (setq response (await (matrix-phase outcome "compilationMs"
+                    (async () (await (matrix-project-response record request session mode options outcome index))))))
+                  (if (= (get record :kind) "stage")
+                    (progn
+                      (await (saveCompilerMetadata (join directory "stage-response.json") response))
+                      (when (= (value-type (field response "data")) "string")
+                        (put outcome :stageIdentitySha256 (compilerDigest (JSON/stringify
+                          (js-object :stage (get response :stage) :filename (get response :filename) :data (get response :data)))))))
+                    (progn
+                      (setq product (await (matrix-phase outcome "archiveMs"
+                        (async () (await (archive-stage3-product response target (join directory "product") compact-native-typed
+                                           (and (= (get options :retainArtifacts) false)
+                                                (isOwnedCompilerBuildProduct response))))))))
+                      (put outcome :productIdentitySha256 (get product :identitySha256))))))
               (put outcome :status "produced"))
             (setq execution-started t)
             ;; The built-in executor consumes archived products, except for
@@ -748,51 +976,102 @@
             (when (and (= (get options :retainArtifacts) false)
                        (undefined? (get options :execute)) (/= (get record :kind) "stage"))
               (setq response undefined)
-              (collect-disposable-graphs options))
-            (setq observation (await (matrix-phase outcome "executionMs" (async ()
-              (await (funcall (otherwise (get options :execute) executeCompilerCorpusRecord)
-                (matrix-spread context (js-object :response response :artifact product))))))))
-            (await (saveCompilerMetadata (join directory "execution.json") observation))
-            (put outcome :status (if (= (field observation "status") "executor-required") "executor-required" "executed"))
-            (when (and (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
-                       (not (undefined? (field observation "identity"))))
-              (put outcome :observationIdentitySha256 (compilerMetadataDigest (get observation :identity)))))
+              (unless defer-commit
+                (collect-disposable-graphs options))))
           (catch error
-            (put outcome :failure (compilerFailure error))
-            (put outcome :status (if execution-started "execution-failed" "compilation-failed"))
-            (setq observation (if (undefined? (get options :execute))
-              (await (executeCompilerCorpusRecord (matrix-spread context (js-object :failure error))))
-              (js-object :kind "diagnostic" :error (get outcome :failure))))
-            (put outcome :diagnosticIdentitySha256 (compilerDigest (JSON/stringify
-              (otherwise (get (get outcome :failure) :eliscriptDiagnostic)
-                (js-object :name (get (get outcome :failure) :name) :message (get (get outcome :failure) :message))))))
-            (await (saveCompilerMetadata (join directory "diagnostic.json") (get outcome :failure)))))
-        ;; Execution has settled and its product is already archived. Do not
-        ;; pin decoded and detached typed/debug graphs during the independent
-        ;; Seed comparison; its inputs are the record and observation.
-        (setq response undefined product undefined)
-        (collect-disposable-graphs options)
-        (when (Object/hasOwn (get context :transportEvidence) "nativeProviderIdentity")
-          (put outcome :nativeProviderIdentity (get (get context :transportEvidence) :nativeProviderIdentity)))
-        (when (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
-          (await (saveCompilerMetadata (join directory "suite-request-trace.json") trace)))
-        (unless (undefined? observation)
-          (try
-            (let ((comparison (await (matrix-phase outcome "comparisonMs" (async ()
-              (await (funcall (otherwise (get options :compare) compareCompilerCorpusObservation)
-                (matrix-spread context (js-object :observation observation)))))))))
-              (setq comparison-result comparison)
-              (await (saveCompilerMetadata (join directory "comparison.json") comparison))
-              (cond ((= (field comparison "status") "equivalent") (put outcome :verification "equivalent"))
-                    ((= (field comparison "status") "different") (put outcome :verification "different")))
-              (unless (undefined? (field comparison "reason")) (put outcome :verificationReason (get comparison :reason))))
-            (catch error (put outcome :comparisonFailure (compilerFailure error)) (put outcome :verification "different")))))
+            (setq compile-error error has-compile-error t)))
+        (js-object :record record :index index :host host :target target :started started :directory directory
+          :outcome outcome :runtimeAcceptance runtime-acceptance :trace trace :context context
+          :response response :product product :executionStarted execution-started
+          :compileError compile-error :hasCompileError has-compile-error))))
+
+  (defasync matrix-case-run (prepared options defer-commit)
+    (let* ((record (get prepared :record))
+           (index (get prepared :index))
+           (host (get prepared :host))
+           (target (get prepared :target))
+           (started (get prepared :started))
+           (directory (get prepared :directory))
+           (outcome (get prepared :outcome))
+           (runtime-acceptance (get prepared :runtimeAcceptance))
+           (trace (get prepared :trace))
+           (context (get prepared :context))
+           (response (get prepared :response))
+           (product (get prepared :product))
+           (execution-started (get prepared :executionStarted))
+           (observation undefined)
+           (comparison-result undefined))
+      (try
+        (progn
+          (when (get prepared :hasCompileError)
+            (throw (get prepared :compileError)))
+          (setq observation (await (matrix-phase outcome "executionMs" (async ()
+            (await (funcall (otherwise (get options :execute) executeCompilerCorpusRecord)
+              (matrix-spread context (js-object :response response :artifact product))))))))
+          (await (saveCompilerMetadata (join directory "execution.json") observation))
+          (put outcome :status (if (= (field observation "status") "executor-required") "executor-required" "executed"))
+          (when (and (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
+                     (not (undefined? (field observation "identity"))))
+            (put outcome :observationIdentitySha256 (compilerMetadataDigest (get observation :identity)))))
+        (catch error
+          (put outcome :failure (compilerFailure error))
+          (put outcome :status (if execution-started "execution-failed" "compilation-failed"))
+          (setq observation (if (undefined? (get options :execute))
+            (await (executeCompilerCorpusRecord (matrix-spread context (js-object :failure error))))
+            (js-object :kind "diagnostic" :error (get outcome :failure))))
+          (put outcome :diagnosticIdentitySha256 (compilerDigest (JSON/stringify
+            (otherwise (get (get outcome :failure) :eliscriptDiagnostic)
+              (js-object :name (get (get outcome :failure) :name) :message (get (get outcome :failure) :message))))))
+          (await (saveCompilerMetadata (join directory "diagnostic.json") (get outcome :failure)))))
+      ;; Execution has settled and its product is already archived. Do not
+      ;; pin decoded and detached typed/debug graphs during the independent
+      ;; Seed comparison; its inputs are the record and observation.
+      (setq response undefined product undefined)
+      (put prepared :response undefined)
+      (put prepared :product undefined)
+      (unless defer-commit
+        (collect-disposable-graphs options))
+      (when (Object/hasOwn (get context :transportEvidence) "nativeProviderIdentity")
+        (put outcome :nativeProviderIdentity (get (get context :transportEvidence) :nativeProviderIdentity)))
+      (when (or (= (get record :kind) "original-suite") (= (get record :kind) "sequence"))
+        (await (saveCompilerMetadata (join directory "suite-request-trace.json") trace)))
+      (unless (undefined? observation)
+        (try
+          (let ((comparison (await (matrix-phase outcome "comparisonMs" (async ()
+            (await (funcall (otherwise (get options :compare) compareCompilerCorpusObservation)
+              (matrix-spread context (js-object :observation observation)))))))))
+            (setq comparison-result comparison)
+            (await (saveCompilerMetadata (join directory "comparison.json") comparison))
+            (cond ((= (field comparison "status") "equivalent") (put outcome :verification "equivalent"))
+                  ((= (field comparison "status") "different") (put outcome :verification "different")))
+            (unless (undefined? (field comparison "reason")) (put outcome :verificationReason (get comparison :reason))))
+          (catch error (put outcome :comparisonFailure (compilerFailure error)) (put outcome :verification "different"))))
       (unless (undefined? runtime-acceptance)
         (put outcome :functionalVerification (if (= (get outcome :verification) "equivalent") "passed"
           (if (= (get outcome :verification) "different") "failed" "unverified"))))
       (put (get outcome :timing) :elapsedMs (- (js-call performance :now) started))
       (await (saveCompilerMetadata (join directory "outcome.json") outcome))
-      (await (saveCompilerMetadata manifest metadata))
+      (js-object :record record :index index :host host :target target :directory directory
+        :outcome outcome :comparison comparison-result :runtimeAcceptance runtime-acceptance)))
+
+  (defasync matrix-case-commit (executed metadata manifest cell options defer-commit &optional skip-manifest-save)
+    (let* ((record (get executed :record))
+           (index (get executed :index))
+           (host (get executed :host))
+           (target (get executed :target))
+           (directory (get executed :directory))
+           (outcome (get executed :outcome))
+           (comparison-result (get executed :comparison))
+           (runtime-acceptance (get executed :runtimeAcceptance)))
+      (when defer-commit
+        (js-call (get cell :records) :push outcome)
+        (unless (undefined? runtime-acceptance)
+          (put metadata :resourceAcceptance "deferred")
+          (unless (get metadata :resourceOutcomes) (put metadata :resourceOutcomes (js-array)))
+          (js-call (get metadata :resourceOutcomes) :push
+            (matrix-spread (js-object :id (get record :id)) runtime-acceptance))))
+      (unless skip-manifest-save
+        (await (saveCompilerMetadata manifest metadata)))
       (await (matrix-progress options directory
         (matrix-spread (js-object :host host :target target :id (get record :id) :index index :phase "record-complete")
           (get outcome :timing))))
@@ -811,8 +1090,16 @@
         ;; repeat all earlier source metadata.
         (Reflect/deleteProperty outcome "sourceIdentity")
         (put outcome :artifactsRetained false)
-        (await (saveCompilerMetadata manifest metadata))
+        (unless skip-manifest-save
+          (await (saveCompilerMetadata manifest metadata)))
         (await (rm directory (js-object :recursive t :force t))))))
+
+  (defasync matrix-case-execution (record index host target session mode cell-directory metadata manifest corpus execution-options options cell
+                                  literal-sources literal-identity &optional compact-native-typed)
+    (let* ((prepared (await (matrix-case-prepare record index host target session mode cell-directory metadata corpus execution-options options cell
+                              literal-sources literal-identity false nil compact-native-typed)))
+           (executed (await (matrix-case-run prepared options false))))
+      (await (matrix-case-commit executed metadata manifest cell options false false))))
 
   (defun stage3-original-js-generations-p (record)
     (let* ((execution (get record :execution)) (original (get record :original))
@@ -988,24 +1275,207 @@
             (put cell :runtimeSourceSha256 (get (get source-identity :runtime) :sha256))
             (put cell :literalSourceIdentity (clone (otherwise (get source-identity :literalSources) (js-array))))
             (put cell :compilerIdentity (field (get artifact :productIdentity) "sha256"))
-            (let ((index retained-count) (records (get corpus :records)))
-              (while (< index (js-length records))
-                (let* ((record (aref records index))
-                       (reason (when stage3-scope (stage3-compiler-host-reason record target)))
-                       (deferred (when (and stage3-scope (not reason))
-                         (compilerCorpusResourceDeferred record target
-                           (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)))))))
-                  (if reason
-                    (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
-                      :status "cancelled" :verification "cancelled" :reason reason))
-                    (if deferred
-                      (await (matrix-resource-deferred record index host target cell-directory metadata manifest cell deferred))
+            (let* ((index retained-count)
+                   (records (get corpus :records))
+                   (concurrency (matrix-pipeline-concurrency target options stage3-scope))
+                   (cache-enabled (and stage3-scope (= (get options :retainArtifacts) false)
+                                       (undefined? (get options :execute)) (undefined? (get options :compare))
+                                       (/= (get (get globalThis.process :env) :ELISCRIPT_MATRIX_SERIAL) "1")))
+                   (compact-native (and stage3-scope (= (get options :retainArtifacts) false)
+                                        (undefined? (get options :execute))))
+                   (pool-enabled (and cache-enabled (> concurrency 1) (= host "javascript") (/= target "javascript")
+                                      (undefined? (get options :sessionOptions))
+                                      (not (undefined? (get artifact :metadataPath)))))
+                   (worker-count (if pool-enabled
+                                   (Math/max 1 (Math/min 4 (Math/min concurrency (Math/floor (/ (totalmem) 12884901888)))))
+                                   0))
+                   (cache-root (when cache-enabled (join cell-directory ".stage3-product-cache")))
+                   (product-cache (when cache-enabled (new globalThis.Map)))
+                   (worker-pool (when (and pool-enabled (> worker-count 0))
+                                  (await (create-stage3-worker-pool worker-count
+                                    (js-object :__eliscriptStage3CompileWorker t
+                                      :artifactMetadataPath (get artifact :metadataPath)
+                                      :runtimeSource (get (get sources :runtime) :source)
+                                      :runtimeFilename (get (get sources :runtime) :filename)
+                                      :literalSources (when (Object/hasOwn sources "literalSources")
+                                                        (cloneCompilerCorpusData (get sources :literalSources))))
+                                    (get options :signal)))))
+                   (compile-with-pool
+                     (when worker-pool
+                       (async (record request rec-target rec-mode rec-directory rec-outcome)
+                         (let ((product-dir (join rec-directory "product")))
+                           (if (can-cache-stage3-request-p record request)
+                             (let* ((cache-key (compilerMetadataDigest (js-object :target rec-target :mode rec-mode :request request)))
+                                    (hit (js-call product-cache :get cache-key))
+                                    (cached-entry hit))
+                               (unless cached-entry
+                                 (let* ((template-dir (join cache-root cache-key))
+                                        (build-promise
+                                          (funcall (async ()
+                                            (try
+                                              (let ((built (await (js-call worker-pool :submit
+                                                             (js-object :request request :target rec-target :mode rec-mode
+                                                               :stageKind false :productDirectory template-dir
+                                                               :compactNativeTyped compact-native)))))
+                                                (js-object :templateDir template-dir :product (get built :product)
+                                                  :compilationMs (get built :compilationMs) :archiveMs (get built :archiveMs)
+                                                  :responseTransfer (get built :responseTransfer) :fromCase (get record :id)))
+                                              (catch error
+                                                (js-call product-cache :delete cache-key)
+                                                (try (await (rm template-dir (js-object :recursive t :force t))) (catch ignored nil))
+                                                (throw error)))))))
+                                   (setq cached-entry (js-object :promise build-promise :owner (get record :id)))
+                                   (js-call product-cache :set cache-key cached-entry)))
+                               (let* ((built (await (get cached-entry :promise)))
+                                      (is-owner (= (get cached-entry :owner) (get record :id)))
+                                      (mat-start (js-call performance :now))
+                                      (product (await (materialize-cached-product (get built :templateDir) product-dir (get built :product))))
+                                      (mat-ms (- (js-call performance :now) mat-start)))
+                                 (put rec-outcome :compilation (js-object
+                                   :kind (if is-owner "compiled" "reused")
+                                   :fromCase (get built :fromCase)
+                                   :requestSha256 cache-key))
+                                 (js-object
+                                   :compilationMs (if is-owner (get built :compilationMs) 0)
+                                   :archiveMs (if is-owner (get built :archiveMs) mat-ms)
+                                   :responseTransfer (get built :responseTransfer)
+                                   :product product)))
+                             (await (js-call worker-pool :submit
+                               (js-object :request request :target rec-target :mode rec-mode
+                                 :stageKind (= (get record :kind) "stage")
+                                 :productDirectory product-dir
+                                 :compactNativeTyped compact-native)))))))))
+              (try
+                (if (<= concurrency 1)
+                (while (< index (js-length records))
+                  (let* ((record (aref records index))
+                         (reason (when stage3-scope (stage3-compiler-host-reason record target)))
+                         (deferred (when (and stage3-scope (not reason))
+                           (compilerCorpusResourceDeferred record target
+                             (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence)))))))
+                    (if reason
+                      (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
+                        :status "cancelled" :verification "cancelled" :reason reason))
+                      (if deferred
+                        (await (matrix-resource-deferred record index host target cell-directory metadata manifest cell deferred))
+                        (progn
+                          (when stage3-scope (await (matrix-output-space cell-directory target)))
+                          (await (matrix-case-execution record index host target session mode cell-directory
+                            metadata manifest corpus execution-options options cell (get sources :literalSources)
+                            (get source-identity :literalSources) compact-native))
+                          (collect-disposable-graphs options)))))
+                  (setq index (1+ index)))
+                (let ((in-flight (new globalThis.Map))
+                      (ready (new globalThis.Map))
+                      (committed-index retained-count)
+                      (fatal-error undefined)
+                      (has-fatal false)
+                      (committed-since-gc 0))
+                  (let* ((flush-commits
+                           (async ()
+                             (let ((did-commit false))
+                               (while (js-call ready :has committed-index)
+                                 (let ((executed (js-call ready :get committed-index)))
+                                   (js-call ready :delete committed-index)
+                                   (await (matrix-case-commit executed metadata manifest cell options t t))
+                                   (setq committed-index (1+ committed-index)
+                                         committed-since-gc (1+ committed-since-gc)
+                                         did-commit t)))
+                               (when did-commit
+                                 (await (saveCompilerMetadata manifest metadata)))
+                               (when (>= committed-since-gc 16)
+                                 (setq committed-since-gc 0)
+                                 (collect-disposable-graphs options)))))
+                         (drain-all
+                           (async ()
+                             (while (or (> (get in-flight :size) 0)
+                                        (js-call ready :has committed-index))
+                               (when (> (get in-flight :size) 0)
+                                 (await (Promise/race (Array/from (js-call in-flight :values)))))
+                               (await (funcall flush-commits)))
+                             (when has-fatal
+                               (throw fatal-error))
+                             (when (> (get ready :size) 0)
+                               (throw (new globalThis.Error
+                                        (+ "compiler matrix pipeline left " (get ready :size)
+                                           " uncommitted record(s) at index " committed-index)))))))
+                    (try
                       (progn
-                        (when stage3-scope (await (matrix-output-space cell-directory target)))
-                        (await (matrix-case-execution record index host target session mode cell-directory
-                        metadata manifest corpus execution-options options cell (get sources :literalSources)
-                        (get source-identity :literalSources)))
-                        (collect-disposable-graphs options)))) (setq index (1+ index))))
+                        (while (< index (js-length records))
+                          (when has-fatal
+                            (await (funcall drain-all)))
+                          (aborted (get options :signal))
+                          (let* ((record (aref records index))
+                                 (reason (when stage3-scope (stage3-compiler-host-reason record target)))
+                                 (deferred (when (and stage3-scope (not reason))
+                                   (compilerCorpusResourceDeferred record target
+                                     (matrix-spread options (js-object :sourceAssets (get (get corpus :document) :evidence))))))
+                                 (eligible (and (not reason) (not deferred) (matrix-pipeline-eligible-p record))))
+                            (if (not eligible)
+                              (progn
+                                (await (funcall drain-all))
+                                (if reason
+                                  (js-call (get cell :records) :push (js-object :id (get record :id) :host host :target target
+                                    :status "cancelled" :verification "cancelled" :reason reason))
+                                  (if deferred
+                                    (await (matrix-resource-deferred record index host target cell-directory metadata manifest cell deferred))
+                                    (progn
+                                      (when stage3-scope (await (matrix-output-space cell-directory target)))
+                                      (await (matrix-case-execution record index host target session mode cell-directory
+                                        metadata manifest corpus execution-options options cell (get sources :literalSources)
+                                        (get source-identity :literalSources) compact-native))
+                                      (collect-disposable-graphs options))))
+                                (setq committed-index (1+ index)))
+                              (progn
+                                (while (>= (get in-flight :size) concurrency)
+                                  (await (Promise/race (Array/from (js-call in-flight :values))))
+                                  (await (funcall flush-commits))
+                                  (when has-fatal
+                                    (await (funcall drain-all)))
+                                  (aborted (get options :signal)))
+                                (when stage3-scope (await (matrix-output-space cell-directory target)))
+                                (if compile-with-pool
+                                  (let* ((task-record record)
+                                         (task-index index)
+                                         (worker (funcall
+                                                   (async ()
+                                                     (try
+                                                       (let* ((prepared (await (matrix-case-prepare task-record task-index host target session mode cell-directory metadata corpus execution-options options cell
+                                                                                 (get sources :literalSources) (get source-identity :literalSources) t compile-with-pool compact-native)))
+                                                              (executed (await (matrix-case-run prepared options t))))
+                                                         (js-call ready :set task-index executed))
+                                                       (catch error
+                                                         (unless has-fatal
+                                                           (setq has-fatal t fatal-error error)))
+                                                       (finally
+                                                         (js-call in-flight :delete task-index)))))))
+                                    (js-call in-flight :set task-index worker)
+                                    (await (funcall flush-commits)))
+                                  (let* ((prepared (await (matrix-case-prepare record index host target session mode cell-directory metadata corpus execution-options options cell
+                                                            (get sources :literalSources) (get source-identity :literalSources) t nil compact-native)))
+                                         (task-index index)
+                                         (worker (funcall
+                                                   (async ()
+                                                     (try
+                                                       (let ((executed (await (matrix-case-run prepared options t))))
+                                                         (js-call ready :set task-index executed))
+                                                       (catch error
+                                                         (unless has-fatal
+                                                           (setq has-fatal t fatal-error error)))
+                                                       (finally
+                                                         (js-call in-flight :delete task-index)))))))
+                                    (js-call in-flight :set task-index worker)
+                                    (await (funcall flush-commits)))))))
+                          (setq index (1+ index)))
+                        (await (funcall drain-all)))
+                      (finally
+                        (when (> (get in-flight :size) 0)
+                          (await (Promise/allSettled (Array/from (js-call in-flight :values))))))))))
+                (finally
+                  (when worker-pool
+                    (try (await (js-call worker-pool :close)) (catch ignored nil)))
+                  (when cache-root
+                    (try (await (rm cache-root (js-object :recursive t :force t))) (catch ignored nil)))))
               (await (saveCompilerMetadata manifest metadata))))
           (put cell :status "constructed")
           (await (matrix-progress options cell-directory
@@ -1322,6 +1792,68 @@
                 (await (saveCompilerMetadata manifest metadata)) (js-object :directory directory :metadata metadata))
               (catch error (put metadata :status "failed") (put metadata :failure (compilerFailure error))
                 (await (saveCompilerMetadata manifest metadata)) (throw error))))))))
+
+  (defasync run-stage3-compile-worker ()
+    (let ((session nil) (closed false))
+      (try
+        (let* ((meta-path (get workerData :artifactMetadataPath))
+               (artifact (await (readCompilerMetadata meta-path))))
+          (put artifact :metadataPath meta-path)
+          (setq session (await (openCompilerArtifact artifact (get workerData :sessionOptions))))
+          (await (js-call session :request
+            (matrix-spread (js-object :operation "runtime"
+                            :source (get workerData :runtimeSource)
+                            :filename (get workerData :runtimeFilename))
+              (if (Array/isArray (get workerData :literalSources))
+                (js-object :literalSources (get workerData :literalSources))
+                (js-object)))))
+          (let ((on-message (async (msg)
+                  (if (= (get msg :type) "close")
+                    (progn
+                      (setq closed t)
+                      (when session
+                        (let ((closing session))
+                          (setq session nil)
+                          (try (await (js-call closing :close)) (catch ignored nil))))
+                      (js-call parentPort :postMessage (js-object :type "closed"))
+                      (try (js-call parentPort :close) (catch ignored nil)))
+                    (when (= (get msg :type) "compile")
+                      (let ((compile-started (js-call performance :now))
+                            (response undefined))
+                        (try
+                          (let* ((req-options (if (undefined? (get msg :mode)) (js-object) (js-object :responseMode (get msg :mode))))
+                                 (res (await (requestOriginalCompilerProduct session (get msg :request) req-options)))
+                                 (comp-ms (- (js-call performance :now) compile-started))
+                                 (xfer (if (isOwnedCompilerBuildProduct res) "owned-build" "public-wire")))
+                            (setq response res)
+                            (if (get msg :stageKind)
+                              (progn
+                                (setq response undefined)
+                                (js-call parentPort :postMessage (js-object :type "result" :id (get msg :id) :ok t
+                                  :compilationMs comp-ms :responseTransfer xfer :response res)))
+                              (let* ((arch-started (js-call performance :now))
+                                     (product (await (archive-stage3-product response (get msg :target) (get msg :productDirectory)
+                                                       (get msg :compactNativeTyped) t)))
+                                     (arch-ms (- (js-call performance :now) arch-started)))
+                                (setq response undefined)
+                                (when (and (= (get msg :target) "native") (= (value-type globalThis.gc) "function"))
+                                  (try (funcall globalThis.gc) (catch ignored nil)))
+                                (js-call parentPort :postMessage (js-object :type "result" :id (get msg :id) :ok t
+                                  :compilationMs comp-ms :archiveMs arch-ms :responseTransfer xfer :product product)))))
+                          (catch error
+                            (setq response undefined)
+                            (js-call parentPort :postMessage (js-object :type "result" :id (get msg :id) :ok false
+                              :compilationMs (- (js-call performance :now) compile-started)
+                              :error (serialize-worker-error error)))))))))))
+            (js-call parentPort :on "message" on-message)
+            (js-call parentPort :postMessage (js-object :type "ready"))))
+        (catch error
+          (when session
+            (try (await (js-call session :close)) (catch ignored nil)))
+          (js-call parentPort :postMessage (js-object :type "fatal" :error (serialize-worker-error error)))))))
+
+  (when (and (not isMainThread) workerData (= (get workerData :__eliscriptStage3CompileWorker) t))
+    (run-stage3-compile-worker))
 
   (export loadOriginalCompilerManifests loadCompilerMatrixCorpus verifyOriginalCompilerCorpusFiles
     archiveProduct runOriginalCompilerGates buildCompilerMatrix runCompilerMatrixCell

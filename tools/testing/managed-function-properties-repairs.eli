@@ -55,7 +55,7 @@
            (compiled (image backend runtime program)) (bytes (get compiled :bytes)))
       (try
         (let* ((js (await (loadGeneratedFixture (get fixture :directory) (js-call (get backend :compiler) :emit_ir_string program) "function-properties-oracle")))
-               (unpressured (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
+               (unpressured (instantiateManagedRuntime bytes (js-object :initializeModule false))))
           (try
             (progn
               (js-call unpressured :initializeModule)
@@ -65,7 +65,7 @@
               (js-call unpressured :collect)
               (js-call assert :deepStrictEqual (value unpressured "cached" (js-array)) (js-call js :cached)))
             (finally (finish unpressured)))
-          (let ((collecting (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initializeModule false))))
+          (let ((collecting (instantiateManagedRuntime bytes (js-object :initializeModule false))))
             (try
               (progn
                 (let ((index 0)) (while (< index 1024)

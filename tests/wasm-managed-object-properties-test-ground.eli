@@ -145,7 +145,7 @@
   (test "raw Object property calls preserve caller roots on invalid handles, private frames, unsealed strings and malformed argument lists"
     (async () (let* ((c (await (compiled))) (a (get c :a)) (bytes (get c :bytes))) (finish a)
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-        (heap (js-call e "heap-new" 64 8192 65536)) (call (raw e heap)) (args (funcall call "value-refs" 7 2))
+        (heap (js-call e "heap-new" 8192 65536)) (call (raw e heap)) (args (funcall call "value-refs" 7 2))
         (caller (funcall call "frame-new" 4)) (refs (funcall call "value-refs" 7 0))
         (text (funcall call "value-string" 1)) (object (funcall call "value-object-new" (funcall globalThis.BigInt 3))))
         (each (js-array args refs text object) (lambda (value index) (funcall call "frame-set" caller index value)))
@@ -162,7 +162,7 @@
   (test "frozen-header integration rejects mutations but permits inherited __proto__ setter no-ops with unchanged target identity"
     (async () (let* ((c (await (compiled))) (a (get c :a)) (bytes (get c :bytes))) (finish a)
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-        (heap (js-call e "heap-new" 64 8192 65536)) (call (raw e heap)) (prototype (funcall call "value-object-new" (funcall globalThis.BigInt 3)))
+        (heap (js-call e "heap-new" 8192 65536)) (call (raw e heap)) (prototype (funcall call "value-object-new" (funcall globalThis.BigInt 3)))
         (target (funcall call "value-object-new" prototype)) (source (funcall call "value-object-new" (funcall globalThis.BigInt 0)))
         (args (funcall call "value-refs" 7 2)) (caller (funcall call "frame-new" 6)) (key (funcall call "value-string" 9)) (normal (funcall call "value-string" 1)))
         (each (js-array prototype target source args key normal) (lambda (value index) (funcall call "frame-set" caller index value)))
@@ -186,7 +186,7 @@
           (same (Object/assign frozen (Object/defineProperty (js-object) "__proto__" (js-object :value value :enumerable t))) frozen)))
         (js-call assert :throws (lambda () (Object/assign frozen (Object/defineProperty (js-object) "__proto__" (js-object :value nil :enumerable t)))) globalThis.TypeError)))))
   (test "capacity exhaustion during key enumeration and assignment keeps prior source writes and allows later calls to recover"
-    (async () (let* ((a (get (await (compiled undefined (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 65536))) :a))
+    (async () (let* ((a (get (await (compiled undefined (js-object :initialBytes 16384 :maxBytes 16384))) :a))
       (text (js-call a :string (js-call "x" :repeat 256))) (target (js-call a :sourceObject (js-object))) (first (js-call a :sourceObject (js-object :saved t))))
       (js-call assert :throws (lambda () (js-call a :invoke "keys" (js-array text))) (code "ELI-RT0002"))
       (same (get (js-call a :stats) :frameDepth) 0)

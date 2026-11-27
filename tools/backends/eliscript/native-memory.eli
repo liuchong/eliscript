@@ -159,16 +159,19 @@
       (unless (js-call (js-array "u32" "f64" "bits64" "v64") :includes result)
         (throw (new globalThis.TypeError "native export requires exact resultType")))
       types))
+  (defconst fast-u64-in-range (js* "(v) => typeof v === 'bigint' && v >= 0n && v <= 0xffffffffffffffffn"))
+  (defconst fast-u32-in-range (js* "(v) => Number.isInteger(v) && v >= 0 && v <= 4294967295"))
+  (defconst fast-safe-nonneg (js* "(v) => Number.isSafeInteger(v) && v >= 0"))
   (defun normalize-u32-result (value) (uint32 value))
   (defun normalize-f64-result (value) (funcall globalThis.Number value))
   (defun normalize-u64-result (value)
     ;; Bun may return a lossless small u64 as Number; reject any lossy word.
     (if (= (value-type value) "bigint")
-      (if (and (>= value U64_ZERO) (<= value U64_MAX))
+      (if (funcall fast-u64-in-range value)
         value
         (js-call globalThis.BigInt :asUintN 64 value))
       (progn
-        (unless (and (Number/isSafeInteger value) (>= value 0))
+        (unless (funcall fast-safe-nonneg value)
           (throw (new globalThis.TypeError "native u64 result is not exact")))
         (funcall globalThis.BigInt value))))
   (defun make-result-normalizer (type)
@@ -180,7 +183,7 @@
     (funcall (make-result-normalizer type) value))
 
   (defun check-u32-argument (value)
-    (unless (and (Number/isInteger value) (>= value 0) (<= value 4294967295))
+    (unless (funcall fast-u32-in-range value)
       (throw (new globalThis.RangeError "native u32 argument is out of range")))
     value)
   (defun check-f64-argument (value)
@@ -190,7 +193,7 @@
   (defun check-u64-argument (value)
     (unless (= (value-type value) "bigint")
       (throw (new globalThis.TypeError "native v64/bits64 argument must be a bigint")))
-    (if (and (>= value U64_ZERO) (<= value U64_MAX))
+    (if (funcall fast-u64-in-range value)
       value
       (js-call globalThis.BigInt :asUintN 64 value)))
   (defun make-arg-checker (type)

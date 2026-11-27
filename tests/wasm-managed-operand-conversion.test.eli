@@ -428,7 +428,7 @@
 
   (test "capacity failure and a real comparison trap preserve caller roots and earlier conversion effects without retaining private frames"
     (async ()
-      (let* ((a (make-instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192)))
+      (let* ((a (make-instance (js-object :initialBytes 8192 :maxBytes 8192)))
              (empty (js-call a :string ""))
              (trace (js-call a :sourceObject (js-object :events empty)))
              (left (make-hook a trace "l" 2 2))
@@ -495,7 +495,7 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 8192 8192)))
+             (h (funcall (aref e "heap-new") 8192 8192)))
         (let* ((num-live (funcall (aref e "heap-live") h))
                (num-used (funcall (aref e "heap-used") h))
                (num (funcall (aref e "value-number") h 0 1072693248)))

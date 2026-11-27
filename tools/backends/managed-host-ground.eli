@@ -53,7 +53,7 @@
         (throw (new globalThis.TypeError "managed runtime options must be an object")))
       (js-call (Reflect/ownKeys options) :forEach (lambda (key)
         (unless (and (eq (host-type key) "string")
-                     (js-call (js-array "maxSlots" "initialBytes" "maxBytes" "auto" "initializeModule" "unicodeVersion" "randomSeed" "console" "hostModules" "moduleGraph" "literalHostProvider" "jobLimit" "initialPages" "maximumPages" "nativeTarget" "libcLibrary" "bunExecutable" "debug" "trapSites" "importModule" "importProjectModule" "moduleBaseURL" "projectEntry" "projectModuleBaseURL" "projectPrivateDirectory" "privateDirectory" "entry" "target" "signal" "onClose" "invoke" "operations" "directGet" "state" "all" "strict" "preserveBOM") :includes key))
+                     (js-call (js-array "initialBytes" "maxBytes" "auto" "initializeModule" "unicodeVersion" "randomSeed" "console" "hostModules" "moduleGraph" "literalHostProvider" "jobLimit" "initialPages" "maximumPages" "nativeTarget" "libcLibrary" "bunExecutable" "debug" "trapSites" "importModule" "importProjectModule" "moduleBaseURL" "projectEntry" "projectModuleBaseURL" "projectPrivateDirectory" "privateDirectory" "entry" "target" "signal" "onClose" "invoke" "operations" "directGet" "state" "all" "strict" "preserveBOM") :includes key))
           (throw (new globalThis.TypeError "unknown managed runtime option")))))
       (unless (and (eq (host-type initialize) "boolean") (js-call (js-array "host" 15.1 16 17) :includes unicodeVersion)) (failManagedRuntime 3))
       (if (undefined? randomSeed) undefined

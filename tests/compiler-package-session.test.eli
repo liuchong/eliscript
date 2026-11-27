@@ -865,7 +865,7 @@
   (test "small actual WASM HTTP package streams source chunks once per URL with strict UTF16 dual decoding and reader cleanup" (async ()
     (let* ((pack (await (sourceObserverPackage "wasm"))) (fixture (await (observerHTTP pack)))
       (compiler (await (js-call pack :openCompilerPackage (js-object :manifestURL (get fixture :manifestURL) :fetch (get fixture :fetchResource)
-        :options (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 4194304 :auto 1))))))
+        :options (js-object :initialBytes 65536 :maxBytes 4194304 :auto 1))))))
       (try
         (await (Promise/all (js-array (js-call compiler :loadRuntime) (js-call compiler :loadRuntime) (js-call compiler :loadRuntime))))
         (let ((observed (await (js-call compiler :request (js-object :operation "inspect")))))

@@ -100,7 +100,7 @@
           (let ((sparse (js-object :text "a\nb" :marks sparseMarks))) (js-call assert :deepEqual (invoke a sparse) (oracle sparse)))))
       (finish a))))
   (test "nullish, invalid handles and capacity failures unwind only their own frames and recover without leaking roots" (lambda ()
-    (let ((a (instantiateManagedRuntime (currentBytes) (js-object :maxSlots 256))))
+    (let ((a (instantiateManagedRuntime (currentBytes) (js-object :initialBytes 8192 :maxBytes 16384))))
       (js-call a :auto 1)
       (js-call (invalidInputs) :forEach (lambda (input) (js-call assert :throws (lambda () (invoke a input)) (lambda (e) (js-call (js-array "ELI-RT0001" "ELI-RT0003") :includes (diagnosticCode e))))))
       (js-call assert :throws (lambda () (js-call a :invoke "native-indent")) (lambda (e) (= (diagnosticCode e) "ELI-RT0001")))

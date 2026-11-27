@@ -11,7 +11,7 @@
   (import "../tools/backends/native-managed-runtime.mjs" instantiateNativeManagedRuntime)
 
   ;; Match the complete portable stdlib graph's existing resource contract.
-  (defconst options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+  (defconst options (js-object :initialBytes 262144 :maxBytes 16777216))
   (defconst memory (js-object :initialPages 4 :maximumPages 1024))
   (defconst counts (js-array 0 1 31 32 33 63 64 1023 1024 1055 1056 1057))
   (defconst node-helper (resolve "tests/helpers/wasm-managed-transient-state-node.mjs"))

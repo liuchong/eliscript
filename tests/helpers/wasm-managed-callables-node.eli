@@ -26,7 +26,7 @@
            (js-call assert :equal (js-call tbl :dispatch 1 41) 41)
            (js-call assert :throws (lambda () (js-call tbl :dispatch 2 0)) globalThis.WebAssembly.RuntimeError)
            (js-call assert :throws (lambda () (js-call tbl :mismatch 0)) globalThis.WebAssembly.RuntimeError)
-           (let* ((h (funcall (get e "heap-new") 128 5296 32768))
+           (let* ((h (funcall (get e "heap-new") 5296 32768))
                   (c (lambda (name &rest args)
                        (let ((r (funcall normalize-u64
                                   (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))

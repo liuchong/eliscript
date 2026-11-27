@@ -3,6 +3,7 @@
   (import "node:buffer" Buffer)
   (import "node:child_process" spawn)
   (import "node:fs/promises" mkdir mkdtemp readFile readdir writeFile lstat symlink rm)
+  (import "node:os" availableParallelism cpus)
   (import "node:path" resolve relative sep isAbsolute dirname basename)
 
   (defun digest (bytes)
@@ -50,57 +51,78 @@
         (await (writeFile path bytes (js-object :flag "wx")))
         path)))
 
-  (defasync seed-compile (source-root input output portable-entries options signal)
+  (defun reference-module-output (module javascript-bytes map-bytes inv-rec)
+    (js-object
+      :invRec inv-rec
+      :responseMod
+        (js-object
+          :id (get module :id)
+          :javascript (js-call javascript-bytes :toString "utf8")
+          :sourceMap (js-call map-bytes :toString "utf8"))
+      :manifestMod
+        (js-object
+          :id (get module :id)
+          :filename (get module :filename)
+          :javascript (js-object :bytes (js-length javascript-bytes) :sha256 (digest javascript-bytes))
+          :sourceMap (js-object :bytes (js-length map-bytes) :sha256 (digest map-bytes)))))
+
+  (defasync seed-spawn (source-root args options signal)
     (aborted signal)
+    (new globalThis.Promise
+      (lambda (accept)
+        (let ((stdout (js-array))
+              (stderr (js-array))
+              (failure undefined)
+              (child undefined)
+              (env (Object/assign (js-object) (get globalThis.process :env))))
+          (put env :EMACS
+            (let ((opt-emacs (get options :emacs)))
+              (if (nullish? opt-emacs)
+                (let ((env-emacs (get (get globalThis.process :env) :EMACS)))
+                  (if (nullish? env-emacs) "emacs" env-emacs))
+                opt-emacs)))
+          (try
+            (setq child
+              (spawn (resolve source-root "bin/eliscript-seed") args
+                (js-object
+                  :cwd source-root
+                  :signal signal
+                  :stdio (js-array "ignore" "pipe" "pipe")
+                  :env env)))
+            (catch error
+              (funcall accept
+                (js-object
+                  :exitCode nil
+                  :signal nil
+                  :error error
+                  :stdout (js-call Buffer :alloc 0)
+                  :stderr (js-call Buffer :alloc 0)))
+              (setq child nil)))
+          (when child
+            (js-call (get child :stdout) :on "data" (lambda (bytes) (js-call stdout :push bytes)))
+            (js-call (get child :stderr) :on "data" (lambda (bytes) (js-call stderr :push bytes)))
+            (js-call child :once "error" (lambda (error) (setq failure error)))
+            (js-call child :once "close"
+              (lambda (exit-code termination-signal)
+                (funcall accept
+                  (js-object
+                    :exitCode exit-code
+                    :signal termination-signal
+                    :error failure
+                    :stdout (js-call Buffer :concat stdout)
+                    :stderr (js-call Buffer :concat stderr))))))))))
+
+  (defasync seed-compile (source-root input output portable-entries options signal)
     (let ((args
             (js-call
               (js-array "--source-map")
               :concat
               (js-call portable-entries :flatMap (lambda (name) (js-array "--portable" name)))
               (js-array "--output" output input))))
-      (new globalThis.Promise
-        (lambda (accept)
-          (let ((stdout (js-array))
-                (stderr (js-array))
-                (failure undefined)
-                (child undefined)
-                (env (Object/assign (js-object) (get globalThis.process :env))))
-            (put env :EMACS
-              (let ((opt-emacs (get options :emacs)))
-                (if (nullish? opt-emacs)
-                  (let ((env-emacs (get (get globalThis.process :env) :EMACS)))
-                    (if (nullish? env-emacs) "emacs" env-emacs))
-                  opt-emacs)))
-            (try
-              (setq child
-                (spawn (resolve source-root "bin/eliscript-seed") args
-                  (js-object
-                    :cwd source-root
-                    :signal signal
-                    :stdio (js-array "ignore" "pipe" "pipe")
-                    :env env)))
-              (catch error
-                (funcall accept
-                  (js-object
-                    :exitCode nil
-                    :signal nil
-                    :error error
-                    :stdout (js-call Buffer :alloc 0)
-                    :stderr (js-call Buffer :alloc 0)))
-                (setq child nil)))
-            (when child
-              (js-call (get child :stdout) :on "data" (lambda (bytes) (js-call stdout :push bytes)))
-              (js-call (get child :stderr) :on "data" (lambda (bytes) (js-call stderr :push bytes)))
-              (js-call child :once "error" (lambda (error) (setq failure error)))
-              (js-call child :once "close"
-                (lambda (exit-code termination-signal)
-                  (funcall accept
-                    (js-object
-                      :exitCode exit-code
-                      :signal termination-signal
-                      :error failure
-                      :stdout (js-call Buffer :concat stdout)
-                      :stderr (js-call Buffer :concat stderr)))))))))))
+      (await (seed-spawn source-root args options signal))))
+
+  (defasync seed-compile-batch (source-root manifest-path options signal)
+    (await (seed-spawn source-root (js-array "--batch-manifest" manifest-path) options signal)))
 
   (defasync seed-identity (source-root)
     (let* ((compiler-files
@@ -322,76 +344,163 @@
                           (let ((pair (aref fn-entries f-idx)))
                             (await (put-file sources-directory (aref pair 0) (aref pair 1))))
                           (setq f-idx (1+ f-idx))))
-                      (let ((response (js-object :target "javascript" :entry entry :modules (js-array)))
-                            (index 0))
-                        (while (< index (js-length modules))
-                          (let* ((module (aref modules index))
-                                 (input (resolve sources-directory (get module :filename)))
-                                 (output (resolve emitted (get module :id)))
-                                 (_ (await (mkdir (dirname output) (js-object :recursive t))))
-                                 (module-portable-entries (if (= (get module :id) entry) portable-entries (js-array)))
-                                 (invocation (await (seed-compile source-root input output module-portable-entries options signal)))
-                                 (stdout-path (str "invocation-" index ".stdout.log"))
-                                 (stderr-path (str "invocation-" index ".stderr.log")))
-                            (await (put-file work stdout-path (get invocation :stdout)))
-                            (await (put-file work stderr-path (get invocation :stderr)))
-                            (let ((inv-rec
-                                    (js-object
-                                      :module (get module :id)
-                                      :command "bin/eliscript-seed"
-                                      :arguments
-                                        (js-call
-                                          (js-array "--source-map")
-                                          :concat
-                                          (js-call module-portable-entries :flatMap (lambda (name) (js-array "--portable" name)))
-                                          (js-array "--output" (local-path work output) (local-path work input)))
-                                      :exitCode (get invocation :exitCode)
-                                      :signal (get invocation :signal))))
-                              (when (get invocation :error)
-                                (put inv-rec :error
-                                  (js-object
-                                    :name (get (get invocation :error) :name)
-                                    :message (get (get invocation :error) :message))))
-                              (put inv-rec :stdout
-                                (js-object
-                                  :path stdout-path
-                                  :bytes (js-length (get invocation :stdout))
-                                  :sha256 (digest (get invocation :stdout))))
-                              (put inv-rec :stderr
-                                (js-object
-                                  :path stderr-path
-                                  :bytes (js-length (get invocation :stderr))
-                                  :sha256 (digest (get invocation :stderr))))
-                              (js-call (get manifest :invocations) :push inv-rec))
-                            (await (funcall save))
-                            (when (get invocation :error)
-                              (put (get invocation :error) :moduleId (get module :id))
-                              (throw (get invocation :error)))
+                      (let* ((response (js-object :target "javascript" :entry entry :modules (js-array)))
+                             (total (js-length modules))
+                             (results (new globalThis.Array total)))
+                        (if (<= total 1)
+                          (let ((idx 0))
+                            (while (and (< idx total) (not (and (not (nullish? signal)) (get signal :aborted))))
+                              (let* ((module (aref modules idx))
+                                     (input (resolve sources-directory (get module :filename)))
+                                     (output (resolve emitted (get module :id))))
+                                (await (mkdir (dirname output) (js-object :recursive t)))
+                                (let* ((module-portable-entries (if (= (get module :id) entry) portable-entries (js-array)))
+                                       (invocation (await (seed-compile source-root input output module-portable-entries options signal)))
+                                       (stdout-path (str "invocation-" idx ".stdout.log"))
+                                       (stderr-path (str "invocation-" idx ".stderr.log")))
+                                  (await (put-file work stdout-path (get invocation :stdout)))
+                                  (await (put-file work stderr-path (get invocation :stderr)))
+                                  (let ((inv-rec
+                                          (js-object
+                                            :module (get module :id)
+                                            :command "bin/eliscript-seed"
+                                            :arguments
+                                              (js-call
+                                                (js-array "--source-map")
+                                                :concat
+                                                (js-call module-portable-entries :flatMap (lambda (name) (js-array "--portable" name)))
+                                                (js-array "--output" (local-path work output) (local-path work input)))
+                                            :exitCode (get invocation :exitCode)
+                                            :signal (get invocation :signal)))
+                                        (failure-error nil))
+                                    (when (get invocation :error)
+                                      (put inv-rec :error
+                                        (js-object
+                                          :name (get (get invocation :error) :name)
+                                          :message (get (get invocation :error) :message)))
+                                      (setq failure-error (get invocation :error))
+                                      (put failure-error :moduleId (get module :id)))
+                                    (put inv-rec :stdout
+                                      (js-object
+                                        :path stdout-path
+                                        :bytes (js-length (get invocation :stdout))
+                                        :sha256 (digest (get invocation :stdout))))
+                                    (put inv-rec :stderr
+                                      (js-object
+                                        :path stderr-path
+                                        :bytes (js-length (get invocation :stderr))
+                                        :sha256 (digest (get invocation :stderr))))
+                                    (when (and (nil? failure-error)
+                                               (or (/= (get invocation :exitCode) 0)
+                                                   (not (nil? (get invocation :signal)))))
+                                      (let* ((err-msg (js-call (js-call (get invocation :stderr) :toString "utf8") :trim))
+                                             (err (new globalThis.Error
+                                                    (if (= err-msg "")
+                                                      (str "independent reference Seed exited with " (get invocation :exitCode))
+                                                      err-msg))))
+                                        (put err :code "ELISCRIPT_ORIGINAL_REFERENCE_COMPILE")
+                                        (put err :moduleId (get module :id))
+                                        (setq failure-error err)))
+                                    (if (not (nil? failure-error))
+                                      (put results idx (js-object :invRec inv-rec :error failure-error))
+                                      (let ((javascript-bytes (await (readFile output)))
+                                            (map-bytes (await (readFile (str output ".map")))))
+                                        (put results idx (reference-module-output module javascript-bytes map-bytes inv-rec)))))))
+                              (setq idx (1+ idx)))))
+                          (let* ((cpu-count (if (= (value-type availableParallelism) "function")
+                                              (availableParallelism)
+                                              (js-length (cpus))))
+                                 (batch-count (Math/max 1 (Math/min cpu-count (Math/min 4 (Math/ceil (/ total 20))))))
+                                 (chunk-size (Math/ceil (/ total batch-count)))
+                                 (batches (js-array))
+                                 (b-start 0)
+                                 (b-idx 0))
+                            (while (< b-start total)
+                              (let* ((b-end (Math/min total (+ b-start chunk-size)))
+                                     (indices (js-array))
+                                     (manifest-entries (js-array))
+                                     (k b-start))
+                                (while (< k b-end)
+                                  (let* ((module (aref modules k))
+                                         (input (resolve sources-directory (get module :filename)))
+                                         (output (resolve emitted (get module :id)))
+                                         (module-portable-entries (if (= (get module :id) entry) portable-entries (js-array)))
+                                         (entry-obj (js-object :input input :output output :sourceMap t)))
+                                    (await (mkdir (dirname output) (js-object :recursive t)))
+                                    (when (> (js-length module-portable-entries) 0)
+                                      (put entry-obj :portable module-portable-entries))
+                                    (js-call indices :push k)
+                                    (js-call manifest-entries :push entry-obj))
+                                  (setq k (1+ k)))
+                                (let ((manifest-file (resolve emitted (str "__eliscript_seed_batch_" b-idx ".json"))))
+                                  (await (writeFile manifest-file (str (JSON/stringify manifest-entries) "\n")))
+                                  (js-call batches :push (js-object :batchIndex b-idx :indices indices :manifestFile manifest-file)))
+                                (setq b-start b-end b-idx (1+ b-idx))))
+                            (await (Promise/all
+                              (js-call batches :map (async (batch)
+                                (aborted signal)
+                                (let* ((batch-no (get batch :batchIndex))
+                                       (invocation (await (seed-compile-batch source-root (get batch :manifestFile) options signal)))
+                                       (stdout-path (str "invocation-batch-" batch-no ".stdout.log"))
+                                       (stderr-path (str "invocation-batch-" batch-no ".stderr.log")))
+                                  (await (put-file work stdout-path (get invocation :stdout)))
+                                  (await (put-file work stderr-path (get invocation :stderr)))
+                                  (let ((stdout-meta (js-object :path stdout-path :bytes (js-length (get invocation :stdout)) :sha256 (digest (get invocation :stdout))))
+                                        (stderr-meta (js-object :path stderr-path :bytes (js-length (get invocation :stderr)) :sha256 (digest (get invocation :stderr))))
+                                        (failure-error nil))
+                                    (when (get invocation :error)
+                                      (setq failure-error (get invocation :error)))
+                                    (when (and (nil? failure-error)
+                                               (or (/= (get invocation :exitCode) 0)
+                                                   (not (nil? (get invocation :signal)))))
+                                      (let ((err-msg (js-call (js-call (get invocation :stderr) :toString "utf8") :trim)))
+                                        (setq failure-error (new globalThis.Error
+                                          (if (= err-msg "")
+                                            (str "independent reference Seed exited with " (get invocation :exitCode))
+                                            err-msg)))
+                                        (put failure-error :code "ELISCRIPT_ORIGINAL_REFERENCE_COMPILE")))
+                                    (let* ((indices (get batch :indices)) (j 0))
+                                      (while (< j (js-length indices))
+                                        (let* ((idx (aref indices j))
+                                               (module (aref modules idx))
+                                               (output (resolve emitted (get module :id)))
+                                               (inv-rec (js-object
+                                                 :module (get module :id)
+                                                 :command "bin/eliscript-seed"
+                                                 :arguments (js-array "--batch-manifest" (local-path work (get batch :manifestFile)))
+                                                 :exitCode (get invocation :exitCode)
+                                                 :signal (get invocation :signal)
+                                                 :stdout stdout-meta
+                                                 :stderr stderr-meta)))
+                                          (when (get invocation :error)
+                                            (put inv-rec :error (js-object :name (get (get invocation :error) :name)
+                                              :message (get (get invocation :error) :message))))
+                                          (if (not (nil? failure-error))
+                                            (let ((err (Object/assign (new globalThis.Error (get failure-error :message))
+                                                         (when (get failure-error :code) (js-object :code (get failure-error :code)))
+                                                         (js-object :moduleId (get module :id)))))
+                                              (put results idx (js-object :invRec inv-rec :error err)))
+                                            (let ((javascript-bytes (await (readFile output)))
+                                                  (map-bytes (await (readFile (str output ".map")))))
+                                              (put results idx (reference-module-output module javascript-bytes map-bytes inv-rec))))
+                                        (setq j (1+ j))))))))))))
+                        (let ((index 0) (loop-done false))
+                          (while (and (< index total) (not loop-done))
                             (aborted signal)
-                            (when (or (/= (get invocation :exitCode) 0)
-                                      (not (nil? (get invocation :signal))))
-                              (let* ((err-msg (js-call (js-call (get invocation :stderr) :toString "utf8") :trim))
-                                     (error (new globalThis.Error
-                                              (if (= err-msg "")
-                                                (str "independent reference Seed exited with " (get invocation :exitCode))
-                                                err-msg))))
-                                (put error :code "ELISCRIPT_ORIGINAL_REFERENCE_COMPILE")
-                                (put error :moduleId (get module :id))
-                                (throw error)))
-                            (let ((javascript-bytes (await (readFile output)))
-                                  (map-bytes (await (readFile (str output ".map")))))
-                              (js-call (get response :modules) :push
-                                (js-object
-                                  :id (get module :id)
-                                  :javascript (js-call javascript-bytes :toString "utf8")
-                                  :sourceMap (js-call map-bytes :toString "utf8")))
-                              (js-call (get manifest :modules) :push
-                                (js-object
-                                  :id (get module :id)
-                                  :filename (get module :filename)
-                                  :javascript (js-object :bytes (js-length javascript-bytes) :sha256 (digest javascript-bytes))
-                                  :sourceMap (js-object :bytes (js-length map-bytes) :sha256 (digest map-bytes))))))
-                          (setq index (1+ index)))
+                            (let ((item (aref results index)))
+                              (if (undefined? item)
+                                (setq loop-done t)
+                                (progn
+                                  (js-call (get manifest :invocations) :push (get item :invRec))
+                                  (if (get item :error)
+                                    (progn
+                                      (await (funcall save))
+                                      (throw (get item :error)))
+                                    (progn
+                                      (js-call (get response :modules) :push (get item :responseMod))
+                                      (js-call (get manifest :modules) :push (get item :manifestMod)))))))
+                            (setq index (1+ index))))
+                        (await (funcall save))
                         (let* ((archive
                                  (let ((ctx-arch (get context :archiveProduct)))
                                    (if (nullish? ctx-arch)

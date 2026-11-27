@@ -17,7 +17,7 @@
   (defconst environment-key "ELISCRIPT_ORIGINAL_PROGRAM_CONTEXT")
   (defconst program-contexts (new globalThis.Map))
   (defconst contexts (new globalThis.WeakMap))
-  (defconst full-runtime-budget (Object/freeze (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456)))
+  (defconst full-runtime-budget (Object/freeze (js-object :initialBytes 67108864 :maxBytes 268435456)))
   (defvar bun-assert-adapter-installed false)
   (defun installOriginalBunAssertSourceViewAdapter ()
     (when (and (not bun-assert-adapter-installed)
@@ -60,7 +60,7 @@
                     (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
                     (js-call (js-array "wasm" "native") :includes (get input :target))
                     (= (get input :entry) "stdlib/interop/js.mjs") settings
-                    (= (get settings :maxSlots) 131072) (= (get settings :initialBytes) 8388608)
+                    (= (get settings :initialBytes) 8388608)
                     (= (get settings :maxBytes) 67108864) (= (get settings :auto) 65536))) settings
         (let* ((host-path (fileURLToPath (new globalThis.URL "tests/fixtures/interop-js-host.mjs" (get input :base))))
                (record-path (fileURLToPath (new globalThis.URL "../sources/record.json" (get input :base))))
@@ -71,9 +71,9 @@
               (throw (new globalThis.TypeError "complete interop functional resources require the original source and host identity")))
           (let ((selected (Object/assign (js-object) settings full-runtime-budget)))
             (js-call globalThis.console :error "original interop strict and small capacity DEFERRED / NOT ACCEPTED; full-runtime functional resources"
-              (js-object :original (js-object :maxSlots (get settings :maxSlots) :initialBytes (get settings :initialBytes)
+              (js-object :original (js-object :initialBytes (get settings :initialBytes)
                 :maxBytes (get settings :maxBytes) :auto (get settings :auto))
-                :effective (js-object :maxSlots (get selected :maxSlots) :initialBytes (get selected :initialBytes)
+                :effective (js-object :initialBytes (get selected :initialBytes)
                   :maxBytes (get selected :maxBytes) :auto (get selected :auto)))) selected)))))))
   (defun closeOriginalProgramResources (runtime graph)
     (let ((failed false) (failure undefined))

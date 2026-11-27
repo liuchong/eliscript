@@ -22,7 +22,7 @@
   (defconst producerProfiles (Object/freeze (js-object
     :small (Object/freeze (js-object :budget compilerBudget :memory compilerMemory :auto 65536))
     "full-runtime" (Object/freeze (js-object
-      :budget (Object/freeze (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456))
+      :budget (Object/freeze (js-object :initialBytes 67108864 :maxBytes 268435456))
       :memory (Object/freeze (js-object :initialPages 2048 :maximumPages 16384)) :auto 4194304)))))
   (defun compilerInputWire (value)
     (let ((ancestors (new globalThis.Set)) (negativeZeroCount 0))

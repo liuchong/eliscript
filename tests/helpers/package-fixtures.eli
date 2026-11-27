@@ -318,7 +318,7 @@
                       (if (= host "javascript") (js-object :target host :modules (js-array (js-object :id (get sources :entry) :javascript (get products :javascript))))
                         (let ((result (js-object :target host :bytes (if (= host "wasm") (get products :bytes) (get (get products :native) :bytes)) :descriptor (get (get products :lowered) :descriptor))))
                           (when (= host "native") (put result :typed (get (get products :lowered) :typed))) result))))))) (output (resolve directory (str "source-observer-" host "-" encoding))) (options (js-object :host host :sources sources :session producer :outputRoot (resolve output "artifact") :profile "small"
-                  :budget (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 4194304) :memory (js-object :initialPages 1 :maximumPages 128) :auto 1 :retainIR false :debug false)))
+                  :budget (js-object :initialBytes 65536 :maxBytes 4194304) :memory (js-object :initialPages 1 :maximumPages 128) :auto 1 :retainIR false :debug false)))
 (when (= host "native") (put options :nativeTarget (get (get products :native) :target)))
 (let* ((emitted (await (buildIndependentCompiler options))) (packaged (await (packageIndependentCompiler (js-object :artifact emitted :outputRoot (resolve output "package")))))
                   (saved (await (readCompilerMetadata (resolve (get packaged :directory) (get (get packaged :manifest) :artifact))))))

@@ -28,7 +28,7 @@
            (runtime (js-call (get backend :compiler) :compile_ir_string
              (await (readFile (resolve root "bootstrap/runtime/memory.eli") "utf8")) "runtime.eli"))
            (program (js-call (get backend :compiler) :compile_ir_string
-             "(module loading (defconst marker 1) (defun identity (value) value) (defun fail (value) (throw value)) (export identity fail))"
+             "(module loading (defconst marker 1) (defun identity (value) value) (defun fail (value) (throw value)) (defun make-obj (idx) (js-object :idx idx)) (export identity fail make-obj))"
              "extended-loading.eli")))
       (setq lowered (js-call (get backend :managed) :lower_managed_program program runtime t))
       (let ((configuration (js-object :initialPages 1 :maximumPages 32768)))
@@ -43,7 +43,8 @@
                (exports (js-call (get typed :exports) :slice))
                (helpers (js-array "value-module-begin" "value-module-status" "value-module-check"
                  "value-module-abort" "value-module-declare" "value-module-get" "value-module-init"
-                 "value-module-set" "value-module-complete" "value-module-close" "heap-defragment")))
+                 "value-module-set" "value-module-complete" "value-module-close"
+                 "ffi-handle-new" "ffi-handle-get" "ffi-handle-release" "ffi-handle-count")))
           (js-call helpers :forEach (lambda (name)
             (unless (js-call exports :includes name) (js-call exports :push name))))
           (put typed :exports exports)
@@ -70,7 +71,7 @@
     (when directory (await (rm directory (js-object :recursive t :force t))))))
 
   (defun small-options ()
-    (js-object :maxSlots 64 :initialBytes 5296 :maxBytes 65536 :initializeModule false))
+    (js-object :initialBytes 5296 :maxBytes 65536 :initializeModule false))
 
   (defun slab-exports ()
     (get (new globalThis.WebAssembly.Instance raw-module) :exports))
@@ -97,7 +98,7 @@
     (lambda ()
       (let ((counts (js-array 9586979 9586980 613566757 4294967295)) (index 0))
         (while (< index (js-length counts))
-          (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 8192)))
+          (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 8192)))
             (try
               (progn
                 (js-call assert :ok (> heap 0))
@@ -111,7 +112,7 @@
                 (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 3))
               (finally (slab-finish e heap))))
           (setq index (1+ index))))
-      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 8192)))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 8192)))
         (js-call assert :strictEqual (slab-call e "value-module-begin" 1 0 4294967295) 0)
         (js-call assert :strictEqual (slab-call e "value-module-status" 0 heap) 0)
         (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 0) 1)
@@ -120,7 +121,7 @@
 
   (test "raw module declarations preserve repeated declaration immutable initialization TDZ and completion priorities"
     (lambda ()
-      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 8192)))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 8192)))
         (try
           (progn
             (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) (funcall globalThis.BigInt 0))
@@ -155,16 +156,17 @@
 
   (test "raw module rejected stale payloads preserve TDZ existing values and a later valid initialization"
     (lambda ()
-      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 16384))
-             (stale (slab-call e "value-bytes" 0 heap 8)))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 16384))
+             (stale undefined))
         (try
           (progn
-            (js-call assert :ok (> stale (funcall globalThis.BigInt 3)))
-            (slab-call e "heap-collect" 0 heap)
-            (js-call assert :strictEqual (slab-call e "value-kind" 1 heap stale) 0)
             (js-call assert :strictEqual (slab-call e "value-module-begin" 0 heap 2) 1)
             (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 0 0) 1)
             (js-call assert :strictEqual (slab-call e "value-module-declare" 0 heap 1 1) 1)
+            (setq stale (slab-call e "value-bytes" 0 heap 8))
+            (js-call assert :ok (> stale (funcall globalThis.BigInt 3)))
+            (slab-call e "heap-collect" 0 heap)
+            (js-call assert :strictEqual (slab-call e "value-kind" 1 heap stale) 0)
             (js-call assert :strictEqual (slab-call e "value-module-init" 1 heap 0 stale) (funcall globalThis.BigInt 0))
             (js-call assert :strictEqual (slab-call e "value-module-get" 8 heap 0) (funcall globalThis.BigInt 0))
             (js-call assert :strictEqual (slab-call e "value-module-complete" 8 heap) 0)
@@ -180,15 +182,14 @@
             (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) (funcall globalThis.BigInt 0))
             (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
             (slab-call e "heap-collect" 0 heap)
-            (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
             (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) (funcall globalThis.BigInt 3))
             (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 1) (funcall globalThis.BigInt 0))
             (js-call assert :strictEqual (slab-call e "frame-depth" 0 heap) 0))
           (finally (slab-finish e heap))))))
 
-  (test "raw module external declarations validate actual sealed strings in order and keep their owners across GC and compaction"
+  (test "raw module external declarations validate actual sealed strings in order and keep their owners across GC"
     (lambda ()
-      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 16384))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 16384))
              (module (slab-string e heap "模块😀" false)))
         (try
           (progn
@@ -207,16 +208,15 @@
               (js-call assert :strictEqual (slab-call e "value-module-external-init" 0 heap 1 module export) 3)
               (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
               (slab-call e "heap-collect" 0 heap)
-              (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
               (js-call assert :strictEqual (slab-call e "value-kind" 0 heap module) 5)
               (js-call assert :strictEqual (slab-call e "value-unit-get" 0 heap module 0) 27169)
               (js-call assert :strictEqual (slab-call e "value-kind" 0 heap export) 5)
               (js-call assert :strictEqual (slab-call e "value-length" 0 heap export) 5)))
           (finally (slab-finish e heap))))))
 
-  (test "raw module slab preserves inline negative zero through collection movement and close without retaining dead payloads"
+  (test "raw module slab preserves inline negative zero through collection and close without retaining dead payloads"
     (lambda ()
-      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 32 8192 16384))
+      (let* ((e (slab-exports)) (heap (slab-call e "heap-new" 0 8192 16384))
              (dead (slab-call e "value-bytes" 0 heap 128)))
         (try
           (progn
@@ -227,11 +227,10 @@
               (js-call assert :strictEqual (slab-call e "value-module-init" 0 heap 0 number) number)
               (js-call assert :strictEqual (slab-call e "value-module-complete" 0 heap) 1)
               (js-call assert :strictEqual (slab-call e "heap-auto" 0 heap 1) 1)
-              (slab-call e "heap-collect" 0 heap)
-              (js-call assert :strictEqual (slab-call e "value-kind" 1 heap dead) 0)
-              (let ((used (slab-call e "heap-used" 0 heap)))
-                (js-call assert :strictEqual (slab-call e "heap-defragment" 0 heap) 1)
-                (js-call assert :ok (< (slab-call e "heap-used" 0 heap) used)))
+              (let ((used-before (slab-call e "heap-used" 0 heap)))
+                (slab-call e "heap-collect" 0 heap)
+                (js-call assert :strictEqual (slab-call e "value-kind" 1 heap dead) 0)
+                (js-call assert :ok (< (slab-call e "heap-used" 0 heap) used-before)))
               (js-call assert :strictEqual (slab-call e "value-module-get" 0 heap 0) number)
               (let ((view (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
                 (js-call view :setBigUint64 0 (js-call globalThis.BigInt :asUintN 64
@@ -244,10 +243,10 @@
               (js-call assert :strictEqual (slab-call e "value-module-check" 3 heap) 0)))
           (finally (slab-finish e heap))))))
   (defun large-options ()
-    (js-object :maxSlots 4194303 :initialBytes 134217728 :maxBytes 1073741824
+    (js-object :initialBytes 134217728 :maxBytes 1073741824
       :initializeModule false :initialPages 1 :maximumPages 32768 :nativeTarget native-target))
   (defun wide-options ()
-    (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824
+    (js-object :initialBytes 268435456 :maxBytes 1073741824
       :initializeModule false :initialPages 1 :maximumPages 32768 :nativeTarget native-target))
   (defun heap-bounds-p (error)
     (and (= (get error :name) "Error")
@@ -319,13 +318,13 @@
           (lambda (error) (= (get error :message) "native managed runtime is closed"))))))
 
   (defun assert-snapshot-counts (snapshot)
-    (js-call assert :strictEqual (+ (get snapshot :liveValues) (get snapshot :freeReusableSlots)
-      (get snapshot :retiredSlots)) (get snapshot :highWater))
-    (js-call assert :strictEqual (+ (get snapshot :highWater) (get snapshot :neverAllocatedSlots)) (get snapshot :maxSlots))
-    (js-call assert :strictEqual (get snapshot :availableSlots)
-      (+ (get snapshot :freeReusableSlots) (get snapshot :neverAllocatedSlots)))
+    (js-call assert :strictEqual (get snapshot :format) "eliscript-managed-allocator-snapshot")
+    (js-call assert :ok (>= (get snapshot :segmentCount) 1))
+    (js-call assert :ok (>= (get snapshot :heapId) 1))
+    (js-call assert :ok (> (get snapshot :segmentHead) 0))
+    (js-call assert :ok (> (get snapshot :segmentTail) 0))
     (js-call assert :strictEqual (get snapshot :capacityBytes) (get snapshot :usedBytes))
-    (js-call assert :ok (<= (get snapshot :tailCapacityBytes) (get snapshot :objectCapacity)))
+    (js-call assert :ok (<= (get snapshot :tailCapacityBytes) (get snapshot :segmentTotalBytes)))
     (js-call assert :strictEqual (+ (get snapshot :usedBytes) (get snapshot :byteHeadroomBytes)) (get snapshot :maxBytes))
     (js-call assert :ok (<= (get snapshot :largestFreeBlock) (get snapshot :freeBytes)))
     (js-call assert :ok (Object/isFrozen snapshot)))
@@ -435,8 +434,6 @@
               (js-call assert :deepStrictEqual (Object/keys stats)
                 (js-array "usedBytes" "capacityBytes" "liveValues" "frameDepth" "collections"))
               (js-call assert :deepStrictEqual (js-call runtime :stats) stats)
-              (js-call assert :strictEqual (get snapshot :slotBits) 24)
-              (js-call assert :strictEqual (get snapshot :generationMax) 16777215)
               (js-call assert :strictEqual (get snapshot :liveValues) (get stats :liveValues)))
             (setq left (js-call runtime :bytes (new globalThis.Uint8Array 64)))
             (setq middle (js-call runtime :bytes (new globalThis.Uint8Array 4096)))
@@ -468,55 +465,45 @@
             (unless (undefined? right) (js-call runtime :release right))
             (js-call runtime :closeModule) (js-call runtime :collect))))))
 
-  (test "allocator snapshot reports the fixed 24-bit layout for large heaps"
+  (test "allocator snapshot reports the direct-pointer layout for large heaps"
     (lambda ()
       (let ((configurations (js-array
-              (js-object :maxSlots 1048576 :initialBytes 33554432 :maxBytes 67108864 :initializeModule false)
+              (js-object :initialBytes 33554432 :maxBytes 67108864 :initializeModule false)
               (large-options))) (index 0))
         (while (< index (js-length configurations))
           (let* ((options (aref configurations index)) (runtime (instantiateManagedRuntime bytes options)))
             (try
               (let ((snapshot (readManagedAllocatorSnapshot runtime)))
                 (assert-snapshot-counts snapshot)
-                (js-call assert :strictEqual (get snapshot :maxSlotsCeiling) (get options :maxSlots))
-                (js-call assert :strictEqual (get snapshot :slotBits) 24)
-                (js-call assert :strictEqual (get snapshot :slotMask) 16777215)
-                (js-call assert :strictEqual (get snapshot :generationMax) 16777215)
-                (js-call assert :ok (<= (get snapshot :maxSlots) 1024))
-                (js-call assert :strictEqual (get snapshot :retiredSlots) 0))
+                (js-call assert :strictEqual (get snapshot :segmentCount) 1)
+                (js-call assert :strictEqual (get snapshot :maxBytes) (get options :maxBytes)))
               (finally (js-call runtime :closeModule) (js-call runtime :collect))))
           (setq index (1+ index))))))
 
-  (defun assert-wide-snapshot (runtime slots)
+  (defun assert-wide-snapshot (runtime)
     (let* ((before (js-call runtime :stats)) (snapshot (readManagedAllocatorSnapshot runtime)))
       (assert-snapshot-counts snapshot)
-      (js-call assert :strictEqual (get snapshot :slotBits) 24)
-      (js-call assert :strictEqual (get snapshot :slotMask) 16777215)
-      (js-call assert :strictEqual (get snapshot :generationMax) 16777215)
-      (js-call assert :strictEqual (get snapshot :maxSlotsCeiling) slots)
-      (js-call assert :ok (<= (get snapshot :maxSlots) 1024))
-      (js-call assert :strictEqual (get snapshot :slotTableBytes) (* (1+ (get snapshot :maxSlots)) 24))
+      (js-call assert :strictEqual (get snapshot :segmentCount) 1)
       (js-call assert :strictEqual (get snapshot :maxBytes) 1073741824)
-      (js-call assert :strictEqual (get snapshot :retiredSlots) 0)
       (js-call assert :deepStrictEqual (js-call runtime :stats) before)))
 
-  (test "WASM factories use fixed 24-bit heaps through the eight million slot ceiling"
+  (test "WASM factories use pure byte-budget direct-pointer heaps"
     (async ()
       (let ((runtime (instantiateManagedRuntime bytes
               (Object/assign (wide-options)
-                (js-object :maxSlots 4194304 :initialBytes 134217728)))))
-        (assert-wide-snapshot runtime 4194304)
+                (js-object :initialBytes 134217728)))))
+        (assert-wide-snapshot runtime)
         (exercise-loader runtime))
       (let ((runtime (instantiateManagedRuntime bytes (wide-options))))
-        (assert-wide-snapshot runtime 8388607)
+        (assert-wide-snapshot runtime)
         (exercise-loader runtime))
       (let ((runtime (await (instantiateManagedRuntimeWithHostModules bytes (wide-options)))))
-        (assert-wide-snapshot runtime 8388607)
+        (assert-wide-snapshot runtime)
         (exercise-loader runtime))))
 
-  (test "single-spec heap construction accepts eight million slots and refuses only real bounds"
+  (test "single-spec heap construction rejects maxSlots as unknown and enforces byte bounds"
     (async ()
-      (let ((invalid (unknown-options)) (index 0))
+      (let ((invalid (js-call (unknown-options) :concat (js-array (js-object :maxSlots 1024)))) (index 0))
         (while (< index (js-length invalid))
           (let ((options (aref invalid index)))
             (js-call assert :throws (lambda () (instantiateManagedRuntime bytes options)) unknown-option-p)
@@ -524,8 +511,6 @@
               (instantiateManagedRuntimeWithHostModules bytes options) unknown-option-p)))
           (setq index (1+ index))))
       (let ((cases (js-array
-              (js-object :maxSlots 0)
-              (js-object :maxSlots 16777216)
               (js-object :initialBytes 1024)
               (js-object :initialBytes 134217728 :maxBytes 1000)
               (js-object :maxBytes 1073741825))) (index 0))
@@ -537,20 +522,18 @@
           (setq index (1+ index))))
       ;; Rejected construction must not damage a later genuine heap.
       (let ((runtime (instantiateManagedRuntime bytes (wide-options))))
-        (assert-wide-snapshot runtime 8388607)
+        (assert-wide-snapshot runtime)
         (exercise-loader runtime))))
 
-  (test "native factory preserves the fixed 24-bit ABI and refuses only real bounds"
+  (test "native factory rejects maxSlots as unknown and enforces byte bounds"
     (js-object :skip (not native-target) :timeout 120000)
     (async ()
-      (let ((invalid (unknown-options)) (index 0))
+      (let ((invalid (js-call (unknown-options) :concat (js-array (js-object :maxSlots 1024)))) (index 0))
         (while (< index (js-length invalid))
           (await (js-call assert :rejects
             (instantiateNativeManagedRuntime library lowered (aref invalid index)) unknown-option-p))
           (setq index (1+ index))))
       (let ((cases (js-array
-              (js-object :maxSlots 0)
-              (js-object :maxSlots 16777216)
               (js-object :initialBytes 1024)
               (js-object :maxBytes 1073741825))) (index 0))
         (while (< index (js-length cases))
@@ -571,29 +554,24 @@
         (js-call assert :throws (lambda () (js-call runtime :stats))
           (lambda (error) (= (get error :message) "native managed runtime is closed")))))))
 
-  (test "allocator snapshot keeps fresh reusable slots in bounded generations"
+  (test "allocator snapshot tracks non-moving object count and zero-cost block reuse"
     (js-object :timeout 30000)
     (lambda ()
       (let ((runtime (instantiateManagedRuntime bytes
-              (js-object :maxSlots 8 :initialBytes 3944 :maxBytes 65536 :initializeModule false))))
+              (js-object :initialBytes 4096 :maxBytes 65536 :initializeModule false))))
         (try
           (progn
             (js-call runtime :collect)
             (let* ((before (readManagedAllocatorSnapshot runtime))
                    (index 0))
-              (js-call assert :ok (> (get before :availableSlots) 0))
-              ;; Retirement is a 16,777,215-generation boundary; a release and
-              ;; collect cycle must return the slot to the reusable FIFO instead
-              ;; of retiring it or changing the live accounting.
               (while (< index 32)
-                (let ((value (js-call runtime :number 1)))
+                (let ((value (js-call runtime :string "x")))
                   (js-call runtime :release value) (js-call runtime :collect))
                 (setq index (1+ index)))
               (let ((after (readManagedAllocatorSnapshot runtime)))
                 (assert-snapshot-counts after)
                 (js-call assert :strictEqual (get after :liveValues) (get before :liveValues))
-                (js-call assert :strictEqual (get after :retiredSlots) 0)
-                (js-call assert :ok (>= (get after :availableSlots) 1)))))
+                (js-call assert :strictEqual (get after :liveBytes) (get before :liveBytes)))))
           (finally (js-call runtime :closeModule) (js-call runtime :collect))))))
 
   (test "allocator snapshot refuses unknown and closed instances without extending the runtime object"
@@ -609,7 +587,7 @@
         (js-call runtime :collect))))
   (test "independent heaps keep object next chains through descriptor initialization and the fixed control snapshot"
     (lambda ()
-      (let* ((options (js-object :maxSlots 256 :initialBytes 65536 :maxBytes 1048576 :initializeModule false))
+      (let* ((options (js-object :initialBytes 65536 :maxBytes 1048576 :initializeModule false))
              (first (instantiateManagedRuntime ground-bytes options))
              (second (instantiateManagedRuntime ground-bytes options))
             (firstObjects (js-array)) (secondObjects (js-array)))
@@ -649,8 +627,8 @@
           (let ((firstAfter (readManagedAllocatorSnapshot first))
                 (secondAfter (readManagedAllocatorSnapshot second)))
             (assert-snapshot-counts firstAfter) (assert-snapshot-counts secondAfter)
-            (js-call assert :ok (> (get firstAfter :availableSlots) 0))
-            (js-call assert :ok (> (get secondAfter :availableSlots) 0))
+            (js-call assert :ok (>= (get firstAfter :freeBytes) 0))
+            (js-call assert :ok (>= (get secondAfter :freeBytes) 0))
             ;; The surviving chain still reads through its header next link.
             (let ((key (js-call second :string "a")))
               (try
@@ -672,3 +650,141 @@
             (js-call (js-array first second) :forEach (lambda (runtime)
               (try (js-call runtime :closeModule) (catch ignored nil))
               (try (js-call runtime :collect) (catch ignored nil)))))))))
+
+  (test "pure byte budget sustains over 100000 live objects and collects cleanly"
+    (js-object :timeout 60000)
+    (lambda ()
+      (let* ((runtime (instantiateManagedRuntime bytes
+               (js-object :initialBytes 65536 :maxBytes 33554432 :initializeModule false)))
+             (handles (new globalThis.Array 105000))
+             (i 0))
+        (try
+          (progn
+            (while (< i 105000)
+              (put handles i (js-call runtime :array))
+              (setq i (1+ i)))
+            (let ((snap (readManagedAllocatorSnapshot runtime)))
+              (assert-snapshot-counts snap)
+              (js-call assert :ok (>= (get snap :liveValues) 105000)))
+            (setq i 0)
+            (while (< i 105000)
+              (js-call runtime :release (aref handles i))
+              (setq i (1+ i)))
+            (put handles :length 0)
+            (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0))
+          (finally (try (js-call runtime :closeModule) (catch ignored nil)))))))
+
+  (test "out-of-line body relocation preserves Val64 handle identity and frees prior bodies"
+    (lambda ()
+      (let* ((runtime (instantiateManagedRuntime bytes (small-options)))
+             (arr (js-call runtime :array))
+             (b (js-call runtime :bytes (new globalThis.Uint8Array 8))))
+        (try
+          (progn
+            (js-call runtime :resize arr 4)
+            (js-call runtime :set arr 0 (js-call runtime :number 42))
+            (js-call runtime :resize arr 256)
+            (js-call runtime :set arr 255 (js-call runtime :number 99))
+            (let ((v0 (js-call runtime :get arr 0)) (v255 (js-call runtime :get arr 255)))
+              (js-call assert :strictEqual (js-call runtime :readNumber v0) 42)
+              (js-call assert :strictEqual (js-call runtime :readNumber v255) 99))
+            (js-call runtime :resize b 4096)
+            (js-call assert :strictEqual (get (js-call runtime :readBytes b) :length) 4096)
+            (let ((snap (readManagedAllocatorSnapshot runtime)))
+              (assert-snapshot-counts snap)
+              (js-call assert :ok (> (get snap :freeBytes) 0))))
+          (finally
+            (js-call runtime :release arr)
+            (js-call runtime :release b)
+            (js-call runtime :closeModule)
+            (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0))))))
+
+  (test "multi-segment growth reclaims empty secondary segments on collect and allows reallocation"
+    (lambda ()
+      (let* ((e (slab-exports))
+             (heap (slab-call e "heap-new" 0 8192 4194304))
+             (blocker (slab-call e "heap-new" 0 4096 4096))
+             (items (js-array))
+             (i 0))
+        (try
+          (progn
+            (while (< i 240)
+              (let ((arr (slab-call e "value-array-new" 0 heap 4)))
+                (slab-call e "heap-pin" 0 heap arr)
+                (js-call items :push arr))
+              (setq i (1+ i)))
+            (let* ((view (new globalThis.DataView (get (get e :memory) :buffer)))
+                   (ctrl (js-call view :getUint32 (+ heap 16) t))
+                   (segs-mid (js-call view :getUint32 (+ ctrl 48) t))
+                   (owned-mid (js-call view :getUint32 (+ ctrl 84) t)))
+              (js-call assert :ok (>= segs-mid 2))
+              (js-call items :forEach (lambda (item) (slab-call e "heap-release" 0 heap item)))
+              (put items :length 0)
+              (slab-call e "heap-collect" 0 heap)
+              (let ((segs-after (js-call view :getUint32 (+ ctrl 48) t))
+                    (owned-after (js-call view :getUint32 (+ ctrl 84) t)))
+                (js-call assert :strictEqual segs-after 1)
+                (js-call assert :ok (< owned-after owned-mid)))
+              (let ((again (slab-call e "value-array-new" 0 heap 8)))
+                (js-call assert :ok (> again (funcall globalThis.BigInt 3)))
+                (slab-call e "heap-pin" 0 heap again)
+                (slab-call e "heap-release" 0 heap again)
+                (slab-call e "heap-collect" 0 heap))))
+          (finally (slab-finish e heap))))))
+
+  (test "ffi-handle API roots objects across GC, grows handle table, and rejects released handles"
+    (lambda ()
+      (let* ((e (slab-exports))
+             (heap (slab-call e "heap-new" 0 8192 4194304))
+             (handles (js-array))
+             (values (js-array))
+             (i 0))
+        (try
+          (progn
+            (while (< i 72)
+              (let* ((s (slab-string e heap (str "ffi-" i) t))
+                     (id (slab-call e "ffi-handle-new" 0 heap s)))
+                (js-call assert :ok (> id 0))
+                (js-call handles :push id)
+                (js-call values :push s))
+              (setq i (1+ i)))
+            (js-call assert :strictEqual (slab-call e "ffi-handle-count" 0 heap) 72)
+            (slab-call e "heap-collect" 0 heap)
+            (js-call assert :strictEqual (slab-call e "heap-live" 0 heap) 72)
+            (setq i 0)
+            (while (< i 72)
+              (let ((got (slab-call e "ffi-handle-get" 0 heap (aref handles i))))
+                (js-call assert :strictEqual got (aref values i))
+                (js-call assert :strictEqual (slab-call e "ffi-handle-release" 0 heap (aref handles i)) 1))
+              (setq i (1+ i)))
+            (js-call assert :strictEqual (slab-call e "ffi-handle-count" 0 heap) 0)
+            (js-call assert :strictEqual (slab-call e "ffi-handle-get" 1 heap (aref handles 0)) (funcall globalThis.BigInt 0))
+            (js-call assert :strictEqual (slab-call e "ffi-handle-release" 1 heap (aref handles 0)) 0)
+            (slab-call e "heap-collect" 0 heap)
+            (js-call assert :strictEqual (slab-call e "heap-live" 0 heap) 0))
+          (finally (slab-finish e heap))))))
+
+  (test "bounded host temporary pin churn stays within modest byte budgets via adaptive sweeping"
+    (js-object :timeout 60000)
+    (lambda ()
+      (let ((runtime (instantiateManagedRuntime bytes
+              (js-object :initialBytes 65536 :maxBytes 1048576)))
+            (i 0))
+        (try
+          (progn
+            (js-call runtime :auto 1)
+            (while (< i 22000)
+              (let ((handle (js-call runtime :invoke "make-obj" (js-array i))))
+                (let ((obj (try (js-call runtime :toHostValue handle)
+                             (finally (js-call runtime :release handle)))))
+                  (js-call assert :strictEqual (get obj :idx) i)))
+              (setq i (1+ i)))
+            (let ((snap (readManagedAllocatorSnapshot runtime)))
+              (assert-snapshot-counts snap)
+              (js-call assert :ok (< (get snap :liveValues) 16000))))
+          (finally
+            (js-call runtime :closeModule)
+            (js-call runtime :collect)
+            (js-call assert :strictEqual (js-call runtime :live) 0))))))

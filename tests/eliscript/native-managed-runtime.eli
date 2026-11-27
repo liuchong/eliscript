@@ -92,12 +92,12 @@
   (defasync open (artifact &rest arguments)
     (let ((options (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0))) (js-object) (aref arguments 0))))
       (await (instantiateNativeManagedRuntime (get artifact :path) (get artifact :lowered)
-        (Object/assign (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576 :maximumPages 32) options)))))
+        (Object/assign (js-object :initialBytes 16384 :maxBytes 1048576 :maximumPages 32) options)))))
   (defun wasm (&rest arguments)
     (let ((artifact (if (or (= (js-length arguments) 0) (undefined? (aref arguments 0))) normal (aref arguments 0)))
           (options (if (or (< (js-length arguments) 2) (undefined? (aref arguments 1))) (js-object) (aref arguments 1))))
       (instantiateManagedRuntime (get artifact :wasm)
-        (Object/assign (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576) options))))
+        (Object/assign (js-object :initialBytes 16384 :maxBytes 1048576) options))))
   (defun value (runtime input)
     (let ((kind (if (nullish? input) undefined (get input :kind))))
       (cond ((= kind 4) (js-call runtime :readNumber input))
@@ -155,7 +155,7 @@
              (reference-path (resolve directory "literal-key-coercion-reference.mjs"))
              (seed-source (resolve directory "literal-key-coercion.eli"))
              (seed-reference (resolve directory "literal-key-coercion-seed.mjs"))
-             (options (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576))
+             (options (js-object :initialBytes 65536 :maxBytes 1048576))
              (reports (js-array)))
         (await (writeFile reference-path (js-call (get backend :compiler) :compile_string
           literal-key-coercible-source "literal-key-coercion.eli")))
@@ -199,7 +199,7 @@
                "(defun make (value rest) (js-object :value value :rest rest :read (lambda (callback) (funcall callback value rest))))\n"
                "(defun echo (value) value) (export make echo)"))
              (artifact (await (build-artifact runtime-source "ordinary-host-call-lifetime" text t)))
-             (configuration (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))
+             (configuration (js-object :initialBytes 1048576 :maxBytes 16777216))
              (runtimes (js-array (await (instantiateManagedRuntimeWithHostModules (get artifact :wasm) configuration))
                          (await (open artifact configuration)))))
         (js-call runtimes :forEach (lambda (runtime)
@@ -260,7 +260,7 @@
           (setq enumerations (1+ enumerations)) (Reflect/apply original exports (js-array heap buffer))))
         (setq runtime (createManagedHostRuntime (Object/defineProperties (Object/create nil) descriptors)
           (get (get normal :lowered) :descriptor) memory
-          (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216) lifecycle))
+          (js-object :initialBytes 1048576 :maxBytes 16777216) lifecycle))
         (try
           (let ((index 0))
             (while (< index 128)
@@ -292,7 +292,7 @@
                      "(defun echo (value) value)\n"
                      "(defun aliases (value) (js-array value value)) (export call echo aliases)"))
              (artifact (await (build-artifact runtime-source "fresh-foreign-identities" text t)))
-             (configuration (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216))
+             (configuration (js-object :initialBytes 1048576 :maxBytes 16777216))
              (runtimes (js-array (await (instantiateManagedRuntimeWithHostModules (get artifact :wasm) configuration))
                          (await (open artifact configuration)))))
         (js-call runtimes :forEach (lambda (runtime)
@@ -345,7 +345,7 @@
                "(export retain report computed)") :join "\n"))
              (artifact (await (build-artifact runtime-source "shared-literal-keys" text)))
              (reference-path (resolve directory "shared-literal-keys-reference.mjs"))
-             (options (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576)))
+             (options (js-object :initialBytes 65536 :maxBytes 1048576)))
         (await (writeFile reference-path (js-call (get backend :compiler) :compile_string text "shared-literal-keys.eli")))
         (let* ((reference (await (native-js-reference reference-path
                              "(js-object :retained (reference/retain 128) :report (reference/report) :computed (reference/computed))")))
@@ -383,7 +383,7 @@
                "(export literal-text global-text literal-number global-number report)") :join "\n"))
              (artifact (await (build-artifact runtime-source "shared-primitive-literals" text)))
              (reference-path (resolve directory "shared-primitive-literals-reference.mjs"))
-             (options (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576)))
+             (options (js-object :initialBytes 65536 :maxBytes 1048576)))
         (await (writeFile reference-path (js-call (get backend :compiler) :compile_string text "shared-primitive-literals.eli")))
         (let ((reference (await (native-js-reference reference-path "(reference/report)")))
               (runtimes (js-array (wasm artifact options) (await (open artifact options)))))
@@ -475,12 +475,12 @@
                "(defun call (callback) (funcall callback)) (export make call)") :join "\n"))
              (collect-definition (definition runtime-source "heap-maybe-collect"))
              (moving-definition (js-call collect-definition :replace "(heap-collect heap)"
-               "(progn (heap-collect heap) (heap-defragment heap))"))
+               "(progn (heap-collect heap) (heap-collect heap))"))
              (moving-runtime (js-call runtime-source :replace collect-definition moving-definition))
              (_changed (js-call assert :notStrictEqual moving-runtime runtime-source))
              (artifact (await (build-artifact moving-runtime "moving-primitive-literals" text)))
              (reference-path (resolve directory "moving-primitive-literals-reference.mjs"))
-             (options (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576))
+             (options (js-object :initialBytes 65536 :maxBytes 1048576))
              (runtimes (js-array (wasm artifact options) (await (open artifact options))
                          (wasm artifact options) (await (open artifact options)))))
         (await (writeFile reference-path (js-call (get backend :compiler) :compile_string text "moving-primitive-literals.eli")))
@@ -533,7 +533,7 @@
                "(defun count () (let ((head saved) (result 0)) (while head (setq result (1+ result) head (get head :rest))) result))\n"
                "(export retain count)"))
              (artifact (await (build-artifact runtime-source "lazy-literal-keys" text)))
-             (configuration (js-object :maxSlots 128 :initialBytes 65536 :maxBytes 1048576))
+             (configuration (js-object :initialBytes 65536 :maxBytes 1048576))
              (runtimes (js-array (wasm artifact configuration) (await (open artifact configuration)))))
         (js-call runtimes :forEach (lambda (runtime)
           (try
@@ -578,7 +578,7 @@
           (while (< target 2)
             (let* ((target-deployment (resolve deployment (str target)))
                    (graph (createManagedModuleGraph (get lowered :descriptor)))
-                   (options (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576
+                   (options (js-object :initialBytes 65536 :maxBytes 1048576
                      :initializeModule false :moduleGraph graph))
                    (runtime (if (= target 0) (instantiateManagedRuntime bytes options)
                      (await (instantiateNativeManagedRuntime path lowered options)))))
@@ -642,7 +642,7 @@
             (await (writeFile path (globalThis.Uint8Array.from
               (js-call (get backend :native) :emit_typed_native_memory_library (get lowered :typed) "arm64-macos"))))
             (setq runtime (await (instantiateNativeManagedRuntime path lowered
-              (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864
+              (js-object :initialBytes 8388608 :maxBytes 67108864
                 :initialPages 128 :maximumPages 4096 :initializeModule false :moduleGraph graph :hostModules providers)))))
           (js-call runtime :auto 65536)
           (let* ((loaded (await (loadManagedProjectGraph runtime (get lowered :descriptor)
@@ -760,7 +760,7 @@
           (let* ((size (aref sizes size-index))
                  (artifact (await (build-artifact runtime-source (str "module-getter-" size) (module-getter-source size))))
                  (cost (module-getter-cost artifact))
-                 (options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 1048576)))
+                 (options (js-object :initialBytes 262144 :maxBytes 1048576)))
             (js-call assert :ok (>= (get cost :cases) size))
             (js-call assert :ok (<= (get cost :depth) (+ (Math/ceil (Math/log2 (get cost :cases))) 2))
               (JSON/stringify cost))
@@ -1061,7 +1061,7 @@
               (put globalThis.WebAssembly :Module (lambda (&rest arguments) (throw (new globalThis.Error "native snapshot loading must not construct WASM"))))
               (put globalThis.WebAssembly :Instance (lambda (&rest arguments) (throw (new globalThis.Error "native snapshot execution must not construct WASM"))))
               (let ((pending (instantiateNativeManagedRuntime (get normal :path) input
-                       (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576 :maximumPages 32 :initializeModule false
+                       (js-object :initialBytes 16384 :maxBytes 1048576 :maximumPages 32 :initializeModule false
                          :importModule (lambda (specifier declaration)
                            (setq imports (1+ imports))
                            (js-call assert :strictEqual specifier "./snapshot-provider.mjs")
@@ -1187,8 +1187,8 @@
         (finish second (js-array other owned)) (js-call first :close))))
   (native-test "native managed capacity failures retain caller roots and source operands"
     (async ()
-      (js-call (js-array (wasm normal (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))
-                        (await (open normal (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192)))) :forEach (lambda (runtime)
+      (js-call (js-array (wasm normal (js-object :initialBytes 8192 :maxBytes 8192))
+                        (await (open normal (js-object :initialBytes 8192 :maxBytes 8192)))) :forEach (lambda (runtime)
         (js-call runtime :auto 1)
         (let* ((text (js-call runtime :string "中😀\ud800")) (count (js-call runtime :number 10000)) (frame (js-call runtime :frame 1)))
           (js-call runtime :frameSet frame 0 text)

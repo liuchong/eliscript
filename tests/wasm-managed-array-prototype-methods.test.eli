@@ -135,7 +135,7 @@
         (js-call assert :equal (get child :status) 0 (get child :stderr))))))
 
   (test "override dispatch capacity failure preserves caller frames and recovers without retained roots" (lambda ()
-    (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 32768 :maxBytes 131072)))
+    (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 24576 :maxBytes 24576)))
            (_ (js-call a :auto 1))
            (mode (js-call a :number 6))
            (caller (js-call a :frame 1))

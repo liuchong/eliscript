@@ -101,7 +101,7 @@
              (environment (js-object :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE "1"
                :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small"))
              (functional undefined) (events (js-array))
-             (original-budget "(defconst budget (Object/freeze (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))"))
+             (original-budget "(defconst budget (Object/freeze (js-object :initialBytes 65536 :maxBytes 16777216)))"))
         (let ((original-error (get globalThis.console :error)))
           (try
             (put globalThis.console :error (lambda (&rest arguments) (js-call events :push arguments)))
@@ -112,13 +112,12 @@
           (js-object :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE "small")) :forEach (lambda (env)
           (js-call assert :strictEqual (projectPersistentLiteralSuite root source env) strict)))
         (js-call assert :strictEqual (js-call (get (projectPersistentLiteralSource root source environment) :source) :includes original-budget) false)
-        (js-call assert :ok (js-call functional :includes "131072"))
         (js-call assert :ok (js-call functional :includes "8388608"))
         (js-call assert :ok (js-call functional :includes "67108864"))
         (js-call assert :deepStrictEqual events (js-array (js-array
-          "persistent literal original 1024-slot capacity DEFERRED / NOT ACCEPTED"
-          (js-object :original (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
-            :effective (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
+          "persistent literal original capacity DEFERRED / NOT ACCEPTED"
+          (js-object :original (js-object :initialBytes 65536 :maxBytes 16777216)
+            :effective (js-object :initialBytes 8388608 :maxBytes 67108864)))
           (js-array "persistent literal original 60000ms host and case deadlines retained"
             (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 60000))))
         (js-call assert :strictEqual (js-length (js-call functional :split "host_test("))

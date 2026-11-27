@@ -437,10 +437,10 @@
     (test "producer profiles keep the original default budget distinct from the explicit full-runtime candidate"
       (lambda ()
         (js-call assert :deepStrictEqual (get producerProfiles :small)
-          (js-object :budget (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)
+          (js-object :budget (js-object :initialBytes 8388608 :maxBytes 67108864)
             :memory (js-object :initialPages 128 :maximumPages 4096) :auto 65536))
         (js-call assert :deepStrictEqual (get producerProfiles "full-runtime")
-          (js-object :budget (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456)
+          (js-object :budget (js-object :initialBytes 67108864 :maxBytes 268435456)
             :memory (js-object :initialPages 2048 :maximumPages 16384) :auto 4194304))))
 
     (test "compiler teardown closes a native adapter on success and every cleanup failure"
@@ -1027,12 +1027,12 @@
 
     (test "prefix OOM preserves caller-owned roots and recovery while a real append trap unwinds only private frames"
       (lambda ()
-        (let* ((a (instance prefix-bytes (js-object :maxSlots 64 :initialBytes 16384 :maxBytes 65536)))
+        (let* ((a (instance prefix-bytes (js-object :initialBytes 16384 :maxBytes 16384)))
                (head (js-call a :sourceObject (js-object :x t)))
                (tail (js-call a :sourceArray (js-call (new globalThis.Array 48) :fill t)))
                (caller (js-call a :frame 2)) (padding (js-array)))
           (js-call a :frameSet caller 0 head) (js-call a :frameSet caller 1 tail)
-          (try (let ((index 0)) (while (< index 128) (js-call padding :push (js-call a :array)) (setq index (1+ index))))
+          (try (let ((index 0)) (while (< index 512) (js-call padding :push (js-call a :array)) (setq index (1+ index))))
             (catch error (js-call assert :strictEqual (get (get error :eliscriptDiagnostic) :code) "ELI-RT0002")))
           (js-call assert :throws (lambda () (js-call a :invoke "prefix" (js-array head tail))) capacity-p)
           (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 1)
@@ -1054,7 +1054,7 @@
     (test "prefix raw ABI rejects mismatched counts invalid stale private and unsealed values with original codes and caller frames intact"
       (lambda ()
         (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module prefix-bytes)) :exports))
-               (h (raw e "heap-new" 128 32768 65536)) (args (raw e "value-refs" h 7 2))
+               (h (raw e "heap-new" 32768 65536)) (args (raw e "value-refs" h 7 2))
                (tail (raw e "value-array-new" h 1)) (frame (raw e "frame-new" h 1)))
           (raw e "frame-set" h frame 0 args) (raw e "value-set" h args 0 (globalThis.BigInt 2)) (raw e "value-set" h args 1 tail)
           (each (js-array (js-array args 1 2 3) (js-array args 2 3 3) (js-array 4294967295 2 2 1) (js-array frame 2 2 1))
@@ -1132,7 +1132,7 @@
         (let* ((program (js-call (compiler) :compile_ir_string
                  "(defun own (value key) (Object/getOwnPropertyDescriptor value key)) (export own)" "reflection-abi.eli"))
                (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (emit program))) :exports))
-               (h (raw e "heap-new" 256 32768 262144)) (args (raw e "value-refs" h 7 2))
+               (h (raw e "heap-new" 32768 262144)) (args (raw e "value-refs" h 7 2))
                (target (raw e "value-object-new" h (globalThis.BigInt 3))) (caller (raw e "frame-new" h 2)))
           (raw e "frame-set" h caller 0 args) (raw e "frame-set" h caller 1 target)
           (raw e "value-set" h args 0 target) (raw e "value-set" h args 1 (globalThis.BigInt 3))

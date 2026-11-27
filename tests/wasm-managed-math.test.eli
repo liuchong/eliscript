@@ -680,7 +680,7 @@
   (test "cold exact integer Math references and calls retain their metadata aliases errors and caller roots within 256 slots"
     (lambda ()
       (let ((a (instantiateManagedRuntime cold-bytes
-                 (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576))))
+                 (js-object :initialBytes 16384 :maxBytes 16384))))
         (try
           (check-cold-integers a)
           (finally (finish a))))))
@@ -692,7 +692,7 @@
     "actual native cold integer Math callables retain the same 256-slot and namespace mutation contracts"
     (async ()
       (let ((cases (js-array
-                     (js-array (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576) check-cold-integers)
+                     (js-array (js-object :initialBytes 16384 :maxBytes 16384) check-cold-integers)
                      (js-array (js-object) check-cold-integer-namespace)))
             (idx 0))
         (while (< idx (get cases :length))
@@ -852,7 +852,7 @@
         (setq mode (1+ mode)))))
 
   (test "cold Number boxing defers unrelated statics while every first observation publishes the complete native property contract"
-    (lambda () (check-cold-numbers (lambda () (instantiateManagedRuntime number-bytes (js-object :maxSlots 1024)))))
+    (lambda () (check-cold-numbers (lambda () (instantiateManagedRuntime number-bytes (js-object :initialBytes 16384 :maxBytes 65536)))))
     30000)
 
   (funcall (js-call test :skipIf (not native-target))
@@ -861,7 +861,7 @@
       (check-cold-numbers
         (lambda ()
           (instantiateNativeManagedRuntime number-native-path number-lowered
-            (js-object :nativeTarget native-target :maxSlots 1024)))))
+            (js-object :nativeTarget native-target :initialBytes 16384 :maxBytes 65536)))))
     30000)
 
   (test "Given Math as an ordinary value when passed read and reflected then globals aliases descriptors and canonical methods agree"
@@ -899,7 +899,7 @@
       ;; `check-pressure` asserts the original 1024-slot hard budget, so this
       ;; instance declares that ceiling explicitly rather than inheriting the
       ;; wider default capacity.
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 1024))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 16384 :maxBytes 65536))))
         (js-call a :auto 1)
         (try (check-pressure a) (finally (finish a))))))
 
@@ -910,7 +910,7 @@
     "Given the same complete Math fixture in actual native machine code when all semantic groups execute then the WASM contracts and original default budget remain intact"
     (async ()
       (let ((a (await (instantiateNativeManagedRuntime native-path lowered
-                        (js-object :nativeTarget native-target :maxSlots 1024)))))
+                        (js-object :nativeTarget native-target :initialBytes 65536 :maxBytes 81920)))))
         (js-call a :auto 1)
         (try
           (check-math-composite a reference frozen-reference (str "actual-native/" native-target))
@@ -949,7 +949,7 @@
 
   (test "sqrt preserves caller roots thrown identity and exact recovery at the original default capacity"
     (lambda ()
-      (let ((a (instantiateManagedRuntime sqrt-bytes (js-object :maxSlots 1024))))
+      (let ((a (instantiateManagedRuntime sqrt-bytes (js-object :initialBytes 16384 :maxBytes 65536))))
         (try
           (check-sqrt-pressure a)
           (finally (finish a)))))
@@ -967,7 +967,9 @@
             (idx 0))
         (while (< idx (get checks :length))
           (let ((a (await (instantiateNativeManagedRuntime sqrt-native-path sqrt-lowered
-                            (js-object :nativeTarget native-target :maxSlots 1024)))))
+                            (if (= (aref checks idx) check-sqrt-pressure)
+                              (js-object :nativeTarget native-target :initialBytes 16384 :maxBytes 65536)
+                              (js-object :nativeTarget native-target))))))
             (try
               (funcall (aref checks idx) a)
               (finally (finish a))))

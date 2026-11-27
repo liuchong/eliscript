@@ -13,7 +13,7 @@
              (bytes (globalThis.Uint8Array.from (js-call (get backend :wasm) :emit_memory_wasm program)))
              (module (new globalThis.WebAssembly.Module bytes))
              (e (get (new globalThis.WebAssembly.Instance module) :exports))
-             (heap (js-call e "heap-new" 1024 32768 16777216))
+             (heap (js-call e "heap-new" 32768 16777216))
              (view (new globalThis.DataView (get (get e :memory) :buffer))))
         (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports module) (js-array))
         (js-call assert :ok (> heap 0))

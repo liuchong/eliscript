@@ -42,7 +42,7 @@
 
   (defun runtime ()
     (instantiateManagedRuntime (bytes)
-      (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216)))
+      (js-object :initialBytes 65536 :maxBytes 16777216)))
 
   ;; One real guest→host round trip. The exported call crosses the managed host
   ;; boundary, which is where the runtime publishes the two words.

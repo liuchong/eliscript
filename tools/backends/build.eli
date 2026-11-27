@@ -274,11 +274,21 @@
                 (finally
                   (when lock-held
                     (try (await (rm (str cache-dir ".lock") (js-object :recursive t :force t))) (catch _ nil)))))))
-          (let ((result (js-object :compiler compiler :directory directory)))
+          (let* ((env (get globalThis.process :env))
+                 (ir-cache-path (resolve (dirname (fileURLToPath module-url)) "../testing/artifact-cache.mjs"))
+                 (cached-compiler
+                   (if (and (= (aref env "ELISCRIPT_TEST_IR_CACHE") "1")
+                            (/= (aref env "ELISCRIPT_DISABLE_TEST_IR_CACHE") "1")
+                            (existsSync ir-cache-path))
+                     (let ((cache-mod (await (funcall host-import (get (pathToFileURL ir-cache-path) :href)))))
+                       (js-call cache-mod :createCachedCompiler compiler cache-key
+                         (js-object :cacheRoot (resolve root ".eliscript-cache/test-framework/ir-cache"))))
+                     compiler))
+                 (result (js-object :compiler cached-compiler :directory directory)))
             (put result :loadLiteralModules (async ()
               (let ((literalSources (await (loadLiteralSources))))
                 (js-object :literalSources literalSources :literalModules (js-call literalSources :map (lambda (record)
-                  (js-object :id (get record :id) :program (js-call compiler :compile_ir_string (get record :source) (get record :filename)))))))))
+                  (js-object :id (get record :id) :program (js-call cached-compiler :compile_ir_string (get record :source) (get record :filename)))))))))
             (put result :optimizer (await (funcall host-import (get (pathToFileURL (resolve directory "optimize.mjs")) :href))))
             (put result :numeric (await (funcall host-import (get (pathToFileURL (resolve directory "numeric.mjs")) :href))))
             (put result :wasm (await (funcall host-import (get (pathToFileURL (resolve directory "wasm.mjs")) :href))))

@@ -33,7 +33,7 @@
              :dispatch (lambda (name heap arguments) (funcall handler name heap arguments))
              :close (lambda () (setq closed (1+ closed))))))
            (exports (js-object
-             :heap-new (lambda (slots initial maximum) owner)
+             :heap-new (lambda (initial maximum) owner)
              :last-error (lambda () code)
              :value-error-restore (lambda (failure) (setq code failure) 0)
              :value-exception-class (lambda (heap) (setq code 0) source-class)
@@ -75,7 +75,7 @@
               :functions (js-array (js-object :name "__eliscript_project_prepare" :arity 1 :publicArity 0
                                      :parameterTypes (js-array "u32") :resultType "u32"))
               :exportSignatures (js-object
-                :heap-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+                :heap-new (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
                 :last-error (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
                 :value-error-restore (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
                 :value-exception-class (js-object :arity 1 :parameterTypes (js-array "u32") :resultType "u32")
@@ -106,7 +106,7 @@
                (creator (lambda (received descriptor memory supplied local)
                  (when (get options :cloneLifecycle false)
                    (setq local (Object/create (Object/getPrototypeOf local) (Object/getOwnPropertyDescriptors local))))
-                 (let ((heap (js-call received "heap-new" 1024 65536 1048576)))
+                 (let ((heap (js-call received "heap-new" 65536 1048576)))
                    (js-call (get local :capabilityBridge) :attach (lambda (name actual raw)
                      (unless (= actual heap) (throw (new globalThis.TypeError "original owner mismatch")))
                      (let ((tuple (js-call tuples :get raw)))
@@ -257,7 +257,7 @@
   (after (async () (when directory (await (rm directory (js-object :recursive t :force t))))))
 
   (defun lifecycle-options (graph logs)
-    (js-object :initializeModule false :moduleGraph graph :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576
+    (js-object :initializeModule false :moduleGraph graph :initialBytes 65536 :maxBytes 1048576
       :console (js-object :log (lambda (&rest values) (js-call logs :push values)))))
 
   (defun exercise-project (runtime graph logs)

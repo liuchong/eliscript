@@ -43,7 +43,7 @@
     (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
           ((= (get globalThis.process :platform) "linux") "arm64-linux"))))
   (defun num-val (runtime value) (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
-  (defun options () (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576))
+  (defun options () (js-object :initialBytes 65536 :maxBytes 1048576))
 
   (test "only actual automatic literal probes suppress same-owner reentry and always restore their scope"
     (lambda ()
@@ -342,8 +342,8 @@
   (test "Unicode defaults defer option Get preserve frozen undefined and never evaluate unrelated getters"
     (lambda ()
       (let* ((configuration (js-object)) (trace (js-array))
-             (names (js-array "maxSlots" "initialBytes" "maxBytes" "initializeModule" "randomSeed"))
-             (values (js-array 1024 65536 1048576 t undefined))
+             (names (js-array "initialBytes" "maxBytes" "initializeModule" "randomSeed"))
+             (values (js-array 65536 1048576 t undefined))
              (status 0) (versions (js-array))
              ;; A real raw call reads last-error after invoking its selector.
              ;; Deliberately fail that first raw operation, before heap-new;
@@ -1438,7 +1438,7 @@
       (let* ((exports (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
              (descriptor (get lowered :descriptor)) (module (get descriptor :module))
              (original (get exports "value-object-get"))
-             (heap (js-call exports "heap-new" 1024 65536 1048576))
+             (heap (js-call exports "heap-new" 65536 1048576))
              (entry (js-call (get module :exports) :find (lambda (item) (= (get item :name) "dispatch"))))
              (function (globalThis.BigInt 0)) (key (globalThis.BigInt 0)))
         (try
@@ -1852,7 +1852,7 @@
         (let ((__targets (openHostIterator targets)))
           (try (while (advanceHostIterator __targets)
             (let* ((target (get __targets :value))
-                   (configuration (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216 :nativeTarget native-target))
+                   (configuration (js-object :initialBytes 65536 :maxBytes 16777216 :nativeTarget native-target))
                    (path (resolve directory (if (= native-target "arm64-macos") "guest-has.dylib" "guest-has.so")))
                    (runtime (if (= target "wasm") (await (instantiateManagedRuntimeWithHostModules image configuration))
                      (progn (await (writeFile path (globalThis.Uint8Array.from
@@ -2555,7 +2555,7 @@
         (while (> (js-length targets) 0)
           (let ((target (js-call targets :shift)))
           (let ((runtime undefined) (roots (js-array)) (frame undefined) (primary false)
-                (configuration (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))
+                (configuration (js-object :initialBytes 1048576 :maxBytes 16777216)))
             (try
               (progn
                 (if (= target "wasm")
@@ -2606,7 +2606,7 @@
         (while (> (js-length targets) 0)
           (let ((target (js-call targets :shift)) (runtime undefined) (roots (js-array))
                 (frame undefined) (failed false)
-                (configuration (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))
+                (configuration (js-object :initialBytes 1048576 :maxBytes 16777216)))
             (try
               (progn
                 (if (= target "wasm")
@@ -2735,7 +2735,7 @@
         (let ((targets (if native-target (js-array "wasm" "native") (js-array "wasm"))) (position 0))
           (while (< position (js-length targets))
             (let* ((target (aref targets position)) (runtime undefined) (roots (js-array))
-                   (configuration (Object/assign (options) (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216
+                   (configuration (Object/assign (options) (js-object :initialBytes 1048576 :maxBytes 16777216
                      :nativeTarget native-target))) (failed false))
               (try
                 (progn
@@ -2948,7 +2948,7 @@
   ;; implementation of the snapshot algorithm. No public debug API is needed.
   (defun counted-collection-runtime (fixture)
     (let* ((descriptor (get (get fixture :actual) :descriptor))
-           (configuration (js-object :maxSlots 32768 :initialBytes 4194304 :maxBytes 33554432))
+           (configuration (js-object :initialBytes 4194304 :maxBytes 33554432))
            (bridge (js-call host :createManagedHostCapabilityBridge descriptor configuration))
            (imports (js-object)) (reads (js-array)) (recording false))
       (js-call (get descriptor :hostCapabilities) :forEach (lambda (capability)
@@ -3403,7 +3403,7 @@
                            (js-call (get shared-backend :wasm) :emit_typed_memory_wasm (get low :typed)
                              (js-object :initialPages 2 :maximumPages 64))
                            "eliscript-managed-control" (JSON/stringify (get low :descriptor)))))
-             (rt (instantiateManagedRuntime wasm-bytes (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 1048576)))
+             (rt (instantiateManagedRuntime wasm-bytes (js-object :initialBytes 65536 :maxBytes 1048576)))
              (original-set-has (Object/getOwnPropertyDescriptor globalThis.Set.prototype "has"))
              (prop-name "reentrantSetterTest")
              (seen (js-array))

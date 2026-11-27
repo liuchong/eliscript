@@ -233,7 +233,7 @@
 
   (test "str capacity failure preserves caller roots and permits a later conversion"
     (lambda ()
-      (let ((a (instantiateManagedRuntime (get (make-artifact) :bytes) (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384))))
+      (let ((a (instantiateManagedRuntime (get (make-artifact) :bytes) (js-object :initialBytes 8192 :maxBytes 16384))))
         (js-call a :auto 1)
         (let* ((input (js-call a :string (js-call "x" :repeat 1800)))
                (held (js-call a :number -0.0))
@@ -334,7 +334,7 @@
 
   (funcall native-test "native str OOM and actual machine memory bounds traps preserve caller roots"
     (async ()
-      (let ((small (await (native-of (make-artifact) "native-small" (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)))))
+      (let ((small (await (native-of (make-artifact) "native-small" (js-object :initialBytes 8192 :maxBytes 16384)))))
         (js-call small :auto 1)
         (let* ((text (js-call small :string (js-call "x" :repeat 1800)))
                (held (js-call small :number -0.0))

@@ -94,7 +94,7 @@
            (target (if (= (get globalThis.process :arch) "arm64")
              (cond ((= (get globalThis.process :platform) "darwin") "arm64-macos")
                    ((= (get globalThis.process :platform) "linux") "arm64-linux") (t undefined)) undefined))
-           (options (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576 :maximumPages 32))
+           (options (js-object :initialBytes 65536 :maxBytes 1048576 :maximumPages 32))
            (library undefined))
       (try
         (let ((js (await (loadManagedReference (get fixture :directory) (js-call (get backend :compiler) :emit_ir_string program) "regexp-indices-oracle"))))

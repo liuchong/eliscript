@@ -9,7 +9,7 @@
   ;; The public runtime default keeps its own 65536 bytes; no public runtime
   ;; default or compiler profile changes here.
   (defconst programCorpusResourceBudget
-    (Object/freeze (js-object :maxSlots 16777215 :initialBytes 8388608 :maxBytes 1073741824)))
+    (Object/freeze (js-object :initialBytes 8388608 :maxBytes 1073741824)))
   (defconst programCorpusResourceMemory
     (Object/freeze (js-object :initialPages 128 :maximumPages 65535)))
   (defconst programCorpusResourceAuto 65536)
@@ -17,7 +17,7 @@
     (Object/freeze (js-array "memory" "auto" "budget" "runtimeOptions"
       "runtimeProfile" "functionalRuntimeProfile" "compilerProfile")))
   (defconst programCorpusRuntimeBudgetKeys
-    (Object/freeze (js-array "maxSlots" "initialBytes" "maxBytes" "auto")))
+    (Object/freeze (js-array "initialBytes" "maxBytes" "auto")))
 
   (defun programCorpusField (value key)
     (if (nullish? value) undefined (get value key)))

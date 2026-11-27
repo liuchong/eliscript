@@ -26,7 +26,7 @@
             (await (mkdir (dirname path) (js-object :recursive t)))
             (await (writeFile path (get file :source))))
           (setq index (1+ index))))
-      (js-object :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216
+      (js-object :initialBytes 1048576 :maxBytes 16777216
         :moduleGraph (createManagedModuleGraph descriptor)
         :projectModuleBaseURL (get (pathToFileURL (+ directory "/")) :href))))
 

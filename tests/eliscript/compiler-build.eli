@@ -300,7 +300,7 @@
                         ((= value -1) (setq negative-one-count (1+ negative-one-count)))))))))
         (let* ((entries (Array/from (js-call numbers :entries))) (sum 0) (index 0)
                (object-lower-bound (+ (get nodes :size) (get spans :size) (get collection-arrays :size)))
-               (ground-limit (get (get (get independentCompilerProfiles "full-runtime") :budget) :maxSlots))
+               (full-runtime-budget (get (get independentCompilerProfiles "full-runtime") :budget))
                (common (js-call entries :map (lambda (entry)
                  (js-object :value (if (= (value-type (aref entry 0)) "string") "-0"
                                       (funcall globalThis.String (aref entry 0)))
@@ -313,11 +313,11 @@
           (js-call nodes :forEach (lambda (node)
             (js-call assert :strictEqual (js-call spans :has node) false "node and span records are disjoint objects")))
           ;; This is a conservative necessary-object lower bound, not a
-          ;; measured managed slot count. It excludes the top-level forms
+          ;; measured managed byte count. It excludes the top-level forms
           ;; array, all property tables, primitive handles and Reader state.
-          (js-call assert :strictEqual ground-limit 1048575)
-          (js-call assert :ok (> object-lower-bound ground-limit)
-            "the unchanged complete runtime AST alone exceeds the ground full-runtime slot limit")
+          (js-call assert :strictEqual (get full-runtime-budget :initialBytes) 67108864)
+          (js-call assert :strictEqual (get full-runtime-budget :maxSlots) undefined)
+          (js-call assert :ok (> object-lower-bound 0))
           (js-call assert :ok (> numeric-count 0))
           (js-call assert :strictEqual sum numeric-count)
           (js-call assert :ok (<= (get numbers :size) numeric-count))
@@ -326,7 +326,7 @@
               :sourceSha256 (sha256-text source "utf16le") :topLevelForms (js-length forms)
               :nodeCount (get nodes :size) :spanCount (get spans :size) :kinds kinds
               :collectionArrayCount (get collection-arrays :size)
-              :necessaryObjectLowerBound object-lower-bound :groundFullRuntimeSlotLimit ground-limit
+              :necessaryObjectLowerBound object-lower-bound :fullRuntimeInitialBytes (get full-runtime-budget :initialBytes)
               :numericLiteralCount numeric-count :distinctNumericValues (get numbers :size)
               :repeatedNumericOccurrences (- numeric-count (get numbers :size))
               :positiveZero zero-count :negativeZero negative-zero-count :one one-count :negativeOne negative-one-count
@@ -824,7 +824,7 @@
   (test "compiler-build keeps the complete full-runtime resource profile and private overrides"
     (lambda ()
       (let* ((expected (js-object
-               :budget (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456)
+               :budget (js-object :initialBytes 67108864 :maxBytes 268435456)
                :memory (js-object :initialPages 2048 :maximumPages 16384) :auto 4194304))
              (profile (get independentCompilerProfiles "full-runtime"))
              (actual (independentCompilerResources (js-object :profile "full-runtime")))
@@ -845,7 +845,7 @@
         (js-call assert :notStrictEqual (get actual :budget) (get profile :budget))
         (js-call assert :notStrictEqual (get actual :memory) (get profile :memory))
         (js-call assert :deepStrictEqual (get overridden :budget)
-          (js-object :maxSlots 1048575 :initialBytes 8388608 :maxBytes 268435456))
+          (js-object :initialBytes 8388608 :maxBytes 268435456))
         (js-call assert :deepStrictEqual (get overridden :memory)
           (js-object :initialPages 2048 :maximumPages 4096))
         (js-call assert :strictEqual (get overridden :auto) 0)
@@ -855,7 +855,7 @@
         (js-call assert :deepStrictEqual profile expected)
         (js-call assert :deepStrictEqual (independentCompilerResources)
           (js-object :profile "small"
-            :budget (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)
+            :budget (js-object :initialBytes 8388608 :maxBytes 67108864)
             :memory (js-object :initialPages 128 :maximumPages 4096) :auto 65536)))))
 
   (test "compiler-build exposes the explicit full-compiler functional capacity profile without changing ground profiles"
@@ -864,7 +864,7 @@
       ;; does not turn earlier ground capacity or performance failures into
       ;; passing evidence under the old resource configuration.
       (let* ((expected (js-object
-                :budget (js-object :maxSlots 8388607 :initialBytes 268435456 :maxBytes 1073741824)
+                :budget (js-object :initialBytes 268435456 :maxBytes 1073741824)
                 :memory (js-object :initialPages 4096 :maximumPages 65535) :auto 16777216))
              (profile (get independentCompilerProfiles "full-compiler"))
              (actual (independentCompilerResources (js-object :profile "full-compiler")))
@@ -880,7 +880,7 @@
         (js-call assert :notStrictEqual (get actual :budget) (get profile :budget))
         (js-call assert :notStrictEqual (get actual :memory) (get profile :memory))
         (js-call assert :deepStrictEqual (get overridden :budget)
-          (js-object :maxSlots 8388607 :initialBytes 67108864 :maxBytes 1073741824))
+          (js-object :initialBytes 67108864 :maxBytes 1073741824))
         (js-call assert :deepStrictEqual (get overridden :memory)
           (js-object :initialPages 4096 :maximumPages 32768))
         (js-call assert :strictEqual (get overridden :auto) 0)
@@ -889,17 +889,10 @@
         (js-call assert :strictEqual (get (get overridden :memory) :maximumPages) 32768)
         (js-call assert :deepStrictEqual profile expected))))
 
-  (test "full-compiler resources reserve the 23-bit slot table while preserving explicit narrower layouts and byte ceilings"
+  (test "full-compiler resources reserve the direct-pointer byte ceilings while preserving explicit narrower budgets"
     (lambda ()
       (let* ((resources (independentCompilerResources (js-object :profile "full-compiler")))
-             (budget (get resources :budget))
-             ;; This is the table's necessary storage, not a measurement of
-             ;; live compiler objects or an excuse to change the byte limit.
-             (slot-table-bytes (* (1+ (get budget :maxSlots)) 24))
-             (minimum-initial (+ slot-table-bytes 32)))
-        (js-call assert :strictEqual slot-table-bytes 201326592)
-        (js-call assert :strictEqual minimum-initial 201326624)
-        (js-call assert :ok (>= (get budget :initialBytes) minimum-initial))
+             (budget (get resources :budget)))
         (js-call assert :strictEqual (get budget :initialBytes) 268435456)
         (js-call assert :strictEqual (get budget :maxBytes) 1073741824)
         (js-call assert :strictEqual (get (get resources :memory) :initialPages) 4096)
@@ -907,17 +900,16 @@
         (js-call assert :strictEqual (get resources :auto) 16777216)
         ;; Resources are declarations. Actual invalid-size rejection stays in
         ;; the existing runtime constructors, covered by their ABI regressions.
-        (let ((layouts (js-array 1048575 2097151 4194303 8388607)) (index 0))
-          (while (< index (js-length layouts))
-            (let* ((input (js-object :maxSlots (aref layouts index) :initialBytes 268435456
-                           :maxBytes 1073741824))
+        (let ((budgets (js-array 67108864 134217728 268435456)) (index 0))
+          (while (< index (js-length budgets))
+            (let* ((input (js-object :initialBytes (aref budgets index) :maxBytes 1073741824))
                    (snapshot (funcall globalThis.structuredClone input))
                    (actual (independentCompilerResources (js-object :profile "full-compiler" :budget input))))
               (js-call assert :deepStrictEqual (get actual :budget) snapshot)
               (js-call assert :notStrictEqual (get actual :budget) input)
-              (put (get actual :budget) :maxSlots 1)
+              (put (get actual :budget) :initialBytes 1)
               (js-call assert :deepStrictEqual input snapshot)
-              (js-call assert :strictEqual (get (get (get independentCompilerProfiles "full-compiler") :budget) :maxSlots) 8388607))
+              (js-call assert :strictEqual (get (get (get independentCompilerProfiles "full-compiler") :budget) :initialBytes) 268435456))
             (setq index (1+ index)))))))
 
   (test "full-compiler declarations reach both binary producer paths and preserve their original first failure"

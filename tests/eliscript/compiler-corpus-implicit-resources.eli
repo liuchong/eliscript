@@ -217,7 +217,7 @@
               (js-call assert :strictEqual (compilerCorpusResourceDeferred record "javascript" options) undefined)
               (js-call assert :strictEqual (compilerCorpusResourceDeferred record "wasm" (js-object)) undefined)
               (js-call assert :strictEqual (compilerCorpusResourceDeferred record "wasm"
-                (Object/assign (js-object) options (js-object :runtimeOptions (js-object :maxSlots 64)))) undefined)
+                (Object/assign (js-object) options (js-object :runtimeOptions (js-object :initialBytes 8192)))) undefined)
               (js-call (js-array "wasm" "native") :forEach (lambda (target)
                 (let ((receipt (compilerCorpusResourceDeferred record target options)))
                   (js-call assert :strictEqual (get receipt :verification) "deferred")
@@ -420,7 +420,7 @@
                                  :moduleGraph graph :projectEntry (get owned-archive :entry)
                                  :moduleBaseURL (get (pathToFileURL (get owned-archive :path)) :href)
                                  :projectModuleBaseURL (get (pathToFileURL (str (get owned-archive :directory) "/")) :href)
-                                 :maxSlots 256 :initialBytes 16384 :maxBytes 262144 :auto 1)))
+                                 :initialBytes 16384 :maxBytes 262144 :auto 1)))
                              (runtime undefined) (failed false) (failure undefined))
                         (try
                           ;; Keep default initialization: the actual registry
@@ -507,7 +507,7 @@
                    (actual (compilerCorpusFunctionalResources record options)))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
               (js-call assert :deepStrictEqual (get actual :originalRuntimeOptions)
-                (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216 :auto 0))
+                (js-object :initialBytes 65536 :maxBytes 16777216 :auto 0))
               (js-call assert :deepStrictEqual (get actual :effectiveRuntimeOptions)
                 (Object/assign (js-object) (get resources :budget) (js-object :auto (get resources :auto))))
               (js-call assert :strictEqual (get actual :resourceAcceptance) "deferred")
@@ -537,7 +537,6 @@
         (lambda (record) (put record :error (js-object :code "ELI-RT0002")))
         (lambda (record) (put (get record :expected) :oracleRequired false))
         (lambda (record) (put (get record :expected) :kind "diagnostic"))
-        (lambda (record) (put (get record :execution) :runtimeOptions (js-object :maxSlots 64)))
         (lambda (record) (put (get record :execution) :runtimeOptions (js-object :initialBytes 4096)))
         (lambda (record) (put (get record :execution) :runtimeOptions (js-object :maxBytes 16384)))
         (lambda (record) (put (get record :execution) :runtimeProfile "compiler"))
@@ -550,7 +549,7 @@
             (setq index (1+ index)))
           (let ((record (await (original-record "macro-generated-names-node"))))
             (js-call assert :strictEqual (compilerCorpusFunctionalResources record
-              (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined)
+              (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined)
             (js-call assert :throws (lambda () (compilerCorpusFunctionalResources record
               (js-object :functionalRuntimeProfile "unrecognized"))) globalThis.TypeError))
           (finally (collect-host-garbage))))))
@@ -570,7 +569,7 @@
                    (before (globalThis.structuredClone record)))
               (js-call assert :strictEqual (get (compilerCorpusFunctionalResources record options) :resourceAcceptance) "deferred")
               (js-call assert :deepStrictEqual record before)
-              (put (get record :execution) :runtimeOptions (js-object :maxSlots 64))
+              (put (get record :execution) :runtimeOptions (js-object :initialBytes 8192))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record options) undefined)
               (Reflect/deleteProperty (get record :execution) "runtimeOptions")
               (put (get record :original) :host "tests/fixtures/other-host.mjs")
@@ -621,7 +620,7 @@
               (let* ((strict-auto (compilerCorpusFunctionalResources record options))
                      (configured-auto (prepareCompilerCorpusRuntimeContext context strict-auto)))
                 (js-call assert :strictEqual (get (get (get (get configured-auto :record) :execution) :runtimeOptions) :auto) 0))
-              (put (get record :execution) :runtimeOptions (js-object :maxSlots 64))
+              (put (get record :execution) :runtimeOptions (js-object :initialBytes 8192))
               (js-call assert :strictEqual (prepareCompilerCorpusRuntimeContext context
                 (compilerCorpusFunctionalResources record options)) context))
             (setq index (1+ index)))
@@ -654,7 +653,7 @@
                   (get resources :memory))))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record
-                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined)
+                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined)
               (js-call assert :strictEqual (JSON/stringify record) before)
               (js-call (js-array
                   (lambda (changed) (put (aref (get changed :modules) 0) :source
@@ -843,7 +842,7 @@
             (js-call assert :strictEqual (compilerCorpusResourceDeferred record "native"
               (js-object :functionalRuntimeProfile "small")) undefined)
             (js-call assert :strictEqual (compilerCorpusResourceDeferred record "native"
-              (Object/assign (js-object) options (js-object :runtimeOptions (js-object :maxSlots 64)))) undefined)
+              (Object/assign (js-object) options (js-object :runtimeOptions (js-object :initialBytes 8192)))) undefined)
             (js-call (js-array "wasm" "native") :forEach (lambda (target)
               (let ((receipt (compilerCorpusResourceDeferred record target options)))
                 (js-call assert :strictEqual (get receipt :id) (get record :id))
@@ -960,7 +959,7 @@
                     (lambda (entry) (= (get entry :id) (get record :id)))) false)
                   (js-call assert :strictEqual (compilerCorpusResourceDeferred record target (js-object)) undefined)
                   (js-call assert :strictEqual (compilerCorpusResourceDeferred record target
-                    (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined))))
+                    (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined))))
               (setq selection undefined strict undefined))
             (collect-host-garbage)))
           (js-call assert :strictEqual (JSON/stringify selected) before)
@@ -1003,7 +1002,7 @@
               (js-call assert :ok record id)
               (js-call assert :strictEqual (get acceptance :effectiveRuntimeProfile) "full-compiler")
               (js-call assert :strictEqual (get acceptance :resourceAcceptance) "deferred")
-              (js-call assert :strictEqual (get (get acceptance :originalRuntimeOptions) :maxSlots) 1024)
+              (js-call assert :strictEqual (get (get acceptance :originalRuntimeOptions) :initialBytes) 65536)
               (js-call assert :deepStrictEqual (get acceptance :effectiveRuntimeOptions)
                 (Object/assign (js-object) (get resources :budget) (js-object :auto (get resources :auto))))
               (js-call assert :deepStrictEqual (get (get configured :options) :memory) (get resources :memory))
@@ -1014,7 +1013,7 @@
                 (js-call assert :strictEqual (compilerCorpusResourceDeferred record target options) undefined)))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record
-                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined)
+                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined)
               (js-call assert :strictEqual (JSON/stringify record) before)
               (let* ((changed (globalThis.structuredClone record))
                      (module (js-call (get changed :modules) :find
@@ -1050,7 +1049,7 @@
                 (Object/assign (js-object) (get resources :budget) (js-object :auto (get resources :auto))))
               (js-call assert :deepStrictEqual (get (get configured :options) :memory) (get resources :memory))
               (js-call assert :deepStrictEqual (get actual :originalRuntimeOptions)
-                (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216 :auto 0))
+                (js-object :initialBytes 65536 :maxBytes 16777216 :auto 0))
               (js-call assert :strictEqual (get bound :modulesSha256) (digest (JSON/stringify (get record :modules))))
               (js-call assert :strictEqual (get bound :requestSha256) (digest (JSON/stringify (get record :request))))
               (js-call assert :strictEqual (get bound :executionSha256) (digest (JSON/stringify (get record :execution))))
@@ -1058,9 +1057,9 @@
                 (js-call assert :strictEqual (compilerCorpusResourceDeferred record target options) undefined)))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record
-                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined)
+                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined)
               (let ((explicit (globalThis.structuredClone record)) (without-oracle (globalThis.structuredClone record)))
-                (put (get explicit :execution) :runtimeOptions (js-object :maxSlots 64))
+                (put (get explicit :execution) :runtimeOptions (js-object :initialBytes 8192))
                 (js-call assert :strictEqual (compilerCorpusFunctionalResources explicit options) undefined)
                 (put (get without-oracle :expected) :oracleRequired false)
                 (js-call assert :strictEqual (compilerCorpusFunctionalResources without-oracle options) undefined))
@@ -1111,7 +1110,7 @@
               (js-call assert :ok record id)
               (js-call assert :strictEqual (get actual :effectiveRuntimeProfile) "full-compiler")
               (js-call assert :strictEqual (get actual :resourceAcceptance) "deferred")
-              (js-call assert :strictEqual (get (get actual :originalRuntimeOptions) :maxSlots) 1024)
+              (js-call assert :strictEqual (get (get actual :originalRuntimeOptions) :initialBytes) 65536)
               (js-call assert :deepStrictEqual (get actual :effectiveRuntimeOptions)
                 (Object/assign (js-object) (get resources :budget) (js-object :auto (get resources :auto))))
               (js-call assert :deepStrictEqual (get (get configured :options) :memory) (get resources :memory))
@@ -1119,7 +1118,7 @@
                 (js-call assert :strictEqual (compilerCorpusResourceDeferred record target options) undefined)))
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record (js-object)) undefined)
               (js-call assert :strictEqual (compilerCorpusFunctionalResources record
-                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :maxSlots 64))) undefined)
+                (js-object :functionalRuntimeProfile "small" :runtimeOptions (js-object :initialBytes 8192))) undefined)
               (js-call assert :strictEqual (JSON/stringify record) before)
               (js-call (js-array "host" "module" "identity") :forEach (lambda (change)
                 (let ((changed (globalThis.structuredClone record)))
@@ -1143,7 +1142,7 @@
                            (get record :execution) (js-object :profile "small") "wasm")))
           (js-call assert :ok selected "an unconstrained ordinary program receives the independent work set")
           (js-call assert :deepStrictEqual (get selected :budget)
-            (js-object :maxSlots 16777215 :initialBytes 8388608 :maxBytes 1073741824))
+            (js-object :initialBytes 8388608 :maxBytes 1073741824))
           (js-call assert :deepStrictEqual (get selected :memory)
             (js-object :initialPages 128 :maximumPages 65535))
           (js-call assert :strictEqual (get selected :auto) 65536)
@@ -1167,13 +1166,13 @@
               (js-call assert :deepStrictEqual (get (compilerCorpusRequest record "wasm" (js-object)) :memory)
                 (get record :memory) id)
               (js-call assert :deepStrictEqual (get declared :runtimeOptions)
-                (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216) id)
+                (js-object :initialBytes 262144 :maxBytes 16777216) id)
               ;; Every original gate stays exactly as retained, not rewritten.
               (js-call assert :strictEqual (get declared :timeoutMs) before-timeout))))
         (let ((record (find-record "stable-compatibility:program:stdlib/json.eli")))
           (js-call (js-array
-              (js-object :runtimeOptions (js-object :maxSlots 4096))
-              (js-object :budget (js-object :maxSlots 4096 :initialBytes 262144 :maxBytes 16777216))
+              (js-object :runtimeOptions (js-object :initialBytes 8192))
+              (js-object :budget (js-object :initialBytes 262144 :maxBytes 16777216))
               (js-object :memory (js-object :initialPages 4 :maximumPages 1024))
               (js-object :auto 0)
               (js-object :functionalRuntimeProfile "small"))
@@ -1187,7 +1186,7 @@
           (put (get changed :execution) :runtimeOptions (js-object :originalHostLifetime "process"))
           (js-call assert :ok (programCorpusResourceSelection changed (get changed :request)
             (get changed :execution) (js-object) "wasm"))
-          (put (get changed :execution) :runtimeOptions (js-object :maxSlots 64))
+          (put (get changed :execution) :runtimeOptions (js-object :initialBytes 8192))
           (js-call assert :strictEqual (programCorpusResourceSelection changed (get changed :request)
             (get changed :execution) (js-object) "wasm") undefined))
         (setq records undefined corpus undefined)))))

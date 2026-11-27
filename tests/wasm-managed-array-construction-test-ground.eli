@@ -232,7 +232,7 @@
       (let* ((c (await (compiled))) (a (get c :a)) (bytes (get c :bytes)))
         (finish a)
         (let* ((exports (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-               (heap (js-call exports "heap-new" 64 8192 65536))
+               (heap (js-call exports "heap-new" 8192 65536))
                (call (lambda (name &rest arguments)
                  (let ((value (funcall normalize-u64 (Reflect/apply (get exports name) exports (js-call (js-array heap) :concat arguments)))))
                    (js-call assert :strictEqual (js-call exports "last-error") 0 name) value)))
@@ -259,7 +259,7 @@
 
   (test "capacity limits and ToLength infinity report allocation failure and recover without leaked private frames"
     (async ()
-      (let* ((c (await (compiled undefined (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 65536))))
+      (let* ((c (await (compiled undefined (js-object :initialBytes 8192 :maxBytes 65536))))
              (a (get c :a)) (values (js-array)))
         (js-call (js-array globalThis.Infinity 9007199254740991 67108855 1000000) :forEach
           (lambda (length)

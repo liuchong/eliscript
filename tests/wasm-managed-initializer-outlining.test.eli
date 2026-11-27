@@ -34,7 +34,7 @@
         (await (rm directory (js-object :recursive t :force t))))))
 
   (defconst resources
-    (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 1048576 :initializeModule false))
+    (js-object :initialBytes 65536 :maxBytes 1048576 :initializeModule false))
 
   (defun nodes (body)
     (let ((found (js-array))
@@ -351,7 +351,7 @@
     (lambda ()
       (let* ((lowered
                (lower "(defconst before (js-array 1 2)) (defconst oversized (js-call \"x\" :repeat 100000)) (defconst after 9) (export before after)"))
-             (a (instance lowered (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)))
+             (a (instance lowered (js-object :initialBytes 8192 :maxBytes 16384)))
              (_ (js-call a :auto 1))
              (keep (js-call a :number -0.0))
              (frame (js-call a :frame 1)))
@@ -506,9 +506,9 @@
                            ;; Scheme B additionally owns 3656 bytes of control /
                            ;; arena headers, a 16-byte bitmap and the 8-byte
                            ;; reserved object offset within the same byte total.
-                           (Object/assign (js-object) resources (js-object :maxSlots 64
+                           (Object/assign (js-object) resources (js-object
                              :initialBytes (+ 4096 3656 16 8) :maxBytes (+ 16384 3656 16 8)))
-                           (Object/assign (js-object) resources (js-object :maxSlots 1024 :initialBytes 65536))))
+                           (Object/assign (js-object) resources (js-object :initialBytes 65536))))
                      (a (instantiateManagedRuntime image configuration)))
                 (try
                   (checkColdArray a reference name)

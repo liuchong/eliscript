@@ -10,7 +10,7 @@
            (instantiateManagedRuntime (get rt-mod :instantiateManagedRuntime))
            (a (funcall instantiateManagedRuntime
                 (readFileSync (aref (get globalThis.process :argv) 3))
-                (js-object :maxSlots 512 :initialBytes 65536 :maxBytes 1048576))))
+                (js-object :initialBytes 65536 :maxBytes 1048576))))
       (js-call a :auto 1)
       (let* ((source (JSON/stringify (Array/from (js-object :length 100) (lambda () (js-object :label "same" :value 42 :items (js-array))))))
              (input (js-call a :string source))

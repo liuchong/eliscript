@@ -73,7 +73,7 @@
           (funcall finish a)
           (let* ((exports (get (new globalThis.WebAssembly.Instance
                              (new globalThis.WebAssembly.Module bytes)) :exports))
-                 (heap (js-call exports "heap-new" 32 8192 8192))
+                 (heap (js-call exports "heap-new" 8192 8192))
                  (call (lambda (name &rest args)
                    (let ((out (funcall normalize-u64 (Reflect/apply (get exports name) exports
                                 (js-call (js-array heap) :concat args)))))

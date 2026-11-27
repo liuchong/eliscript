@@ -423,7 +423,7 @@
                      :modules modules
                      :autos (js-array 65536 1)
                      :memory (js-object :initialPages 4 :maximumPages 1024)
-                     :budget (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216)
+                     :budget (js-object :initialBytes 262144 :maxBytes 16777216)
                      :titles (original-titles original stdlib-suite)
                      :assertions (str (get raw :text) (get assertions :text) (get opaque :text))
                      :regions (js-array raw assertions opaque)
@@ -450,7 +450,7 @@
                    (helper-code (helper-transport helper-program "read_val:read,invoke_val:value,finish_heap:finish,check_identities:identities,check_encounters:encounters,check_heap_isolation:heapIsolation,check_scalars:checkScalars"))
                    (encounters (region original "function check_encounters(a, p) {" "\ntest(\"Given linked modules"))
                    (isolation (region original "function check_heap_isolation(first_inst, second_inst) {" "\ntest(\"Given two heaps"))
-                   (budget (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216))
+                   (budget (js-object :initialBytes 65536 :maxBytes 16777216))
                    (titles-in-source (original-titles original suite))
                    (native-title (js-call titles-in-source :find
                                    (lambda (title) (js-call title :includes "true native module and linked project"))))

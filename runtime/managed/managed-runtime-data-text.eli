@@ -22,11 +22,13 @@
   (defvar whitespace-pattern nil)
   (defvar delimiter-pattern nil)
   (defvar reserved-symbols nil)
-  (defconst TAGGED_LITERAL_TOKEN (Object/freeze (js-object)))
+  (defvar tagged-literal-token nil)
   (defconst TAGGED_LITERAL_HASH_TAG 1456893211)
   (defvar tagged-literal-state nil)
   (defvar default-readers-map EMPTY_MAP)
   (defconst reader-scope-stack (js-array))
+  (defun ensure-tagged-literal-token ()
+    (or tagged-literal-token (setq tagged-literal-token (Object/freeze (js-object)))))
   (defun ensure-tagged-literal-state ()
     (or tagged-literal-state (setq tagged-literal-state (literal-private-weak-map))))
   (defun ensure-number-pattern ()
@@ -195,27 +197,44 @@
       (js-call items :sort compare-text) (str "#{" (js-call items :join " ") "}")))
   (defun print-queue (value context)
     (str "#queue [" (js-call (js-call (iterable-array value) :map (lambda (item) (js-call context :print item))) :join " ") "]"))
+  (defvar tagged-literal-prototype-ready false)
   (defconst TaggedLiteral
     (funcall
       (js* "(implementation, name) => { if (typeof name !== \"string\") throw new TypeError(\"class name must be a string\"); return ({ [name]: class { constructor(...args) { return implementation(this, ...args); } } })[name]; }")
       (lambda (self token tag form)
-        (unless (eq token TAGGED_LITERAL_TOKEN)
+        (unless (and (not (nil? tagged-literal-token)) (eq token tagged-literal-token))
           (fail "TaggedLiteral values must be constructed with taggedLiteral()"))
+        (ensure-tagged-literal-prototype)
         (js-call (ensure-tagged-literal-state) :set self (Object/freeze (js-object :tag tag :form form)))
         (Object/freeze self))
       "TaggedLiteral"))
-  (let ((tproto (get TaggedLiteral :prototype))
-        (make-fn (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }")))
-    (Object/defineProperty tproto "tag"
-      (js-object :get (funcall make-fn (lambda (self) (get (js-call (ensure-tagged-literal-state) :get self) :tag)) "get tag") :configurable t))
-    (Object/defineProperty tproto "form"
-      (js-object :get (funcall make-fn (lambda (self) (get (js-call (ensure-tagged-literal-state) :get self) :form)) "get form") :configurable t))
-    (Object/defineProperty tproto "toString"
-      (js-object :value (funcall make-fn (lambda (self)
-        (let ((st (js-call (ensure-tagged-literal-state) :get self)))
-          (str "#" (print-symbol (get st :tag)) " " (printValue (get st :form))))) "toString") :writable t :configurable t))
-    (Object/defineProperty tproto (get globalThis/Symbol :toStringTag)
-      (js-object :get (funcall make-fn (lambda (_self) "TaggedLiteral") "get [Symbol.toStringTag]") :configurable t)))
+  (defun ensure-tagged-literal-prototype ()
+    (unless tagged-literal-prototype-ready
+      (let ((tproto (get TaggedLiteral :prototype))
+            (make-fn (js* "(fn, name) => { if (typeof name !== \"string\") throw new TypeError(\"method name must be a string\"); return ({ [name](...args) { return Reflect.apply(fn, undefined, [this, ...args]); } })[name]; }")))
+        (Object/defineProperty tproto "tag"
+          (js-object :get (funcall make-fn (lambda (self) (get (js-call (ensure-tagged-literal-state) :get self) :tag)) "get tag") :configurable t))
+        (Object/defineProperty tproto "form"
+          (js-object :get (funcall make-fn (lambda (self) (get (js-call (ensure-tagged-literal-state) :get self) :form)) "get form") :configurable t))
+        (Object/defineProperty tproto "toString"
+          (js-object :value (funcall make-fn (lambda (self)
+            (let ((st (js-call (ensure-tagged-literal-state) :get self)))
+              (str "#" (print-symbol (get st :tag)) " " (printValue (get st :form))))) "toString") :writable t :configurable t))
+        (Object/defineProperty tproto (get globalThis/Symbol :toStringTag)
+          (js-object :get (funcall make-fn (lambda (_self) "TaggedLiteral") "get [Symbol.toStringTag]") :configurable t)))
+      (extendValueType TaggedLiteral
+        (js-object
+          :equal (lambda (left right eq-fn)
+                   (and (isTaggedLiteral right)
+                        (funcall eq-fn (taggedLiteralTag left) (taggedLiteralTag right))
+                        (funcall eq-fn (taggedLiteralForm left) (taggedLiteralForm right))))
+          :hash (lambda (self hash-fn)
+                  (finishHash
+                    (mixHash
+                      (mixHash TAGGED_LITERAL_HASH_TAG (funcall hash-fn (taggedLiteralTag self)))
+                      (funcall hash-fn (taggedLiteralForm self)))
+                    2))))
+      (setq tagged-literal-prototype-ready t)))
   (defun isTaggedLiteral (value)
     (and (not (nullish? value))
          (or (= (js* "typeof value") "object") (= (js* "typeof value") "function"))
@@ -230,19 +249,7 @@
   (defun taggedLiteral (tag form)
     (let* ((normalized (normalize-reader-tag-string tag "taggedLiteral tag"))
            (sym (eliscriptSymbol normalized)))
-      (new TaggedLiteral TAGGED_LITERAL_TOKEN sym form)))
-  (extendValueType TaggedLiteral
-    (js-object
-      :equal (lambda (left right eq-fn)
-               (and (isTaggedLiteral right)
-                    (funcall eq-fn (taggedLiteralTag left) (taggedLiteralTag right))
-                    (funcall eq-fn (taggedLiteralForm left) (taggedLiteralForm right))))
-      :hash (lambda (self hash-fn)
-              (finishHash
-                (mixHash
-                  (mixHash TAGGED_LITERAL_HASH_TAG (funcall hash-fn (taggedLiteralTag self)))
-                  (funcall hash-fn (taggedLiteralForm self)))
-                2))))
+      (new TaggedLiteral (ensure-tagged-literal-token) sym form)))
   (defun print-tagged-literal (value context)
     (str "#" (print-symbol (taggedLiteralTag value)) " " (js-call context :print (taggedLiteralForm value))))
   (defun registerDataReader (tag fn)

@@ -8,7 +8,7 @@
   (defun decoded-number-value (runtime value)
     (if (= (value-type value) "number") value (js-call runtime :readNumber value)))
   (defvar directory undefined) (defvar bytes undefined)
-  (defconst options (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864))
+  (defconst options (js-object :initialBytes 8388608 :maxBytes 67108864))
   (beforeAll (async ()
     (setq directory (await (mkdtemp (resolve root "_worktree/type-construction-"))))
     (let* ((backend (await (buildBackends (js-object :outputRoot directory))))

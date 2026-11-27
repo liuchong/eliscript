@@ -411,7 +411,7 @@
                            "lib.mjs" "(defconst value (js-array (js-object) (js-object) (js-object) (js-object))) (export value)"
                            "main.mjs" "(import \"./lib.mjs\" :as ns) (export ns)"))))
              (bytes (emit-project p))
-             (small (instantiateManagedRuntime bytes (js-object :maxSlots 8 :initialBytes 4096 :maxBytes 8192 :initializeModule false))))
+             (small (instantiateManagedRuntime bytes (js-object :initialBytes 4096 :maxBytes 4096 :initializeModule false))))
         (js-call small :auto 1)
         (let ((keep (js-call small :number 7))
               (frame (js-call small :frame 1)))

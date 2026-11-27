@@ -334,7 +334,7 @@
              (mod (new globalThis.WebAssembly.Module bytes))
              (_ (js-call assert :deepEqual (js-call globalThis.WebAssembly.Module :imports mod) (js-array)))
              (e (get (new globalThis.WebAssembly.Instance mod) :exports))
-             (heap (funcall (get e "heap-new") 128 5296 max-bytes))
+             (heap (funcall (get e "heap-new") 5296 max-bytes))
              (call (lambda (name &rest args)
                      (let ((result (funcall normalize-u64
                                      (Reflect/apply (get e name) e (js-call (js-array heap) :concat args)))))
@@ -403,7 +403,9 @@
           (js-call assert :equal (funcall call "heap-live") 0)
           (let ((c (funcall call "value-function-named" 11)))
             (funcall call "heap-pin" c)
-            (js-call assert :notEqual c a)
+            (js-call assert :equal (funcall call "heap-live") 1)
+            (js-call assert :equal (funcall call "value-function-named" 11) c)
+            (js-call assert :equal (funcall call "value-function-code" c) 11)
             (funcall call "heap-release" c)
             (funcall call "heap-collect")
             (js-call assert :equal (funcall call "heap-live") 0))))))
@@ -686,7 +688,7 @@
       (let* ((bytes (globalThis.Uint8Array.from
                       (js-call (get backends :managed) :emit_managed_wasm program runtime)))
              (heap (instantiateManagedRuntime bytes
-                     (js-object :maxSlots 128 :initialBytes 5296 :maxBytes 16384)))
+                     (js-object :initialBytes 5296 :maxBytes 16384)))
              (_ (js-call heap :auto 1))
              (marker (js-call heap :sourceArray (js-array false)))
              (n (js-call heap :number 10000))

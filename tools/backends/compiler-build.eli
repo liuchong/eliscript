@@ -18,21 +18,15 @@
       (js-object
         :small (Object/freeze
           (js-object
-            :budget (Object/freeze (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864))
+            :budget (Object/freeze (js-object :initialBytes 8388608 :maxBytes 67108864))
             :memory (Object/freeze (js-object :initialPages 128 :maximumPages 4096)) :auto 65536))
         :full-runtime (Object/freeze
           (js-object
-            :budget (Object/freeze (js-object :maxSlots 1048575 :initialBytes 67108864 :maxBytes 268435456))
+            :budget (Object/freeze (js-object :initialBytes 67108864 :maxBytes 268435456))
             :memory (Object/freeze (js-object :initialPages 2048 :maximumPages 16384)) :auto 4194304))
-        ;; Complete compiler source has more distinct AST objects than the
-        ;; original full-runtime slot count can represent. This explicit heap
-        ;; constructor leaves the original resource profiles and their gates
-        ;; intact; its handles retire permanently at their declared generation
-        ;; limit instead of wrapping or aliasing an older live reference.
         :full-compiler (Object/freeze
           (js-object
-            :budget (Object/freeze (js-object :maxSlots 8388607 :initialBytes 268435456
-              :maxBytes 1073741824))
+            :budget (Object/freeze (js-object :initialBytes 268435456 :maxBytes 1073741824))
             :memory (Object/freeze (js-object :initialPages 4096 :maximumPages 65535)) :auto 16777216)))))
 
   (defun build-truth (value) (funcall globalThis.Boolean value))

@@ -295,7 +295,7 @@ emission follows the [WASM binary specification](https://webassembly.github.io/s
 Compile `bootstrap/runtime/memory.eli` with `emit_memory_wasm`. All exported parameters/results are words; restricted
 `load-f64` and `store-f64` additionally allow typed f64 locals and ordered Number
 operations inside the runtime. Implicit Word/f64 conversion is refused.
-`instantiateManagedRuntime(bytes, {maxSlots, initialBytes, maxBytes})` supplies a
+`instantiateManagedRuntime(bytes, {initialBytes, maxBytes})` supplies a
 bulk host bridge. `number`, `string`, `bytes`, `array` and `record` return branded
 handles; `binary` (0 add, 1 subtract, 2 multiply, 3 divide), `negate` and `compare`
 (0 equal, 1 unequal, 2 less, 3 less-or-equal, 4 greater, 5 greater-or-equal) run
@@ -310,9 +310,10 @@ The internal reference record is not the language persistent Record type.
 
 Each returned handle owns one explicit root; `get` owns a new root for the
 returned child. `pin` adds a root and `release` drops one. `collect` marks rooted
-objects and their reference graphs iteratively, then frees unreachable blocks
-and recycles slots. Cyclic and shared graphs are supported. Pool-relative offsets
-survive growth; sorted free blocks coalesce, while resize failure leaves the old
+objects and their reference graphs iteratively, then sweeps unreachable blocks
+and frees their body allocations. Cyclic and shared graphs are supported. Object
+header identities stay non-moving across collection and growth; sorted free blocks
+coalesce, while resize failure leaves the old
 value intact. `stats` reports pool used/capacity bytes and live values, not full
 process peak memory. Values use 12-bit generations and 20-bit slots; slots stop
 recycling at generation 4095 to prevent stale identity reuse. Exhaustion returns

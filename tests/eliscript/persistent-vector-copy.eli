@@ -14,7 +14,7 @@
   (defvar native-path undefined) (defvar lowered undefined) (defvar reference undefined)
   (defconst native-available (and (= (get globalThis.process :arch) "arm64")
     (or (= (get globalThis.process :platform) "darwin") (= (get globalThis.process :platform) "linux"))))
-  (defconst options (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+  (defconst options (js-object :initialBytes 262144 :maxBytes 16777216))
   (beforeAll (async ()
     (setq directory (await (mkdtemp (resolve root "_worktree/vector-copy-"))))
     (let* ((backend (await (buildBackends (js-object :outputRoot directory))))
@@ -219,7 +219,7 @@
           (finally (finish a))))))
   (test "copy allocation failure reports out of memory without returning a partial array"
     (lambda ()
-      (let ((small (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 32768))))
+      (let ((small (instantiateManagedRuntime bytes (js-object :initialBytes 16384 :maxBytes 32768))))
         (js-call small :auto 1)
         (try
           (let ((count (js-call small :number 8000)))

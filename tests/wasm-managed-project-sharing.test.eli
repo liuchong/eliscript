@@ -259,7 +259,7 @@
                  (_1 (js-call assert :deepEqual
                       (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
                       (js-array)))
-                 (a (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+                 (a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 16777216)))
                  (_2 (js-call a :auto 1))
                  (input (js-call a :number -0.0))
                  (text (js-call a :string "held"))
@@ -372,7 +372,7 @@
                  (_1 (js-call assert :deepEqual
                       (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
                       (js-array)))
-                 (a (instantiateManagedRuntime bytes (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+                 (a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 16777216)))
                  (_2 (js-call a :auto 1))
                  (retained (js-array))
                  (keep (lambda (value) (js-call retained :push value) value))
@@ -1146,7 +1146,7 @@
                           "eliscript-managed-control"
                           (JSON/stringify (get lowered :descriptor)))))
                (a (instantiateManagedRuntime bytes
-                    (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 65536 :initializeModule false)))
+                    (js-object :initialBytes 16384 :maxBytes 65536 :initializeModule false)))
                (_1 (js-call a :auto 1))
                (_2 (js-call a :initializeModule))
                (held (js-call a :number -0.0))

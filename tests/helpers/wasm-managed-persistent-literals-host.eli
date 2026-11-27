@@ -37,7 +37,7 @@
            (environment (get process :env))
            (functional (and (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
                             (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")))
-           (original-budget (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216))
+           (original-budget (js-object :initialBytes 65536 :maxBytes 16777216))
            (effective-budget (if functional (get (independentCompilerResources (js-object :profile "small")) :budget) original-budget))
            (options
              (Object/assign (js-object)

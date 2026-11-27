@@ -72,7 +72,7 @@
                (js-object :name "entry" :arity 3 :publicArity 2
                  :parameterTypes (js-array "u32" "v64" "v64") :resultType "v64")))
              :exportSignatures (js-object
-               :heap-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "u32")
+               :heap-new (js-object :arity 2 :parameterTypes (js-array "u32" "u32") :resultType "u32")
                :last-error (js-object :arity 0 :parameterTypes (js-array) :resultType "u32")
                :value-kind (js-object :arity 2 :parameterTypes (js-array "u32" "v64") :resultType "u32")
                :value-table-new (js-object :arity 3 :parameterTypes (js-array "u32" "u32" "u32") :resultType "v64")
@@ -221,7 +221,7 @@
             (Reflect/apply (get pending :push) pending (get node :children))))
         (assert (>= two-arm 6) "the original IR must contain omitted children rather than a fixture-synthesized else")
         (let* ((artifact (emit-control ir runtimeProgram)) (reference (await (reference-module ir)))
-               (a (instantiateManagedRuntime artifact (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576))))
+               (a (instantiateManagedRuntime artifact (js-object :initialBytes 16384 :maxBytes 1048576))))
           (js-call assert :strictEqual (JSON/stringify ir) before)
           (assert (globalThis.WebAssembly.validate artifact))
           (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module artifact)) (js-array))
@@ -310,7 +310,7 @@
                      (js-call definitions :join "\n") " (export internals " (js-call names :join " ") ")"))
                    (ir (compile-control text "random-control.eli")) (artifact (emit-control ir runtimeProgram))
                    (reference (await (reference-module ir)))
-                   (a (instantiateManagedRuntime artifact (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576)))
+                   (a (instantiateManagedRuntime artifact (js-object :initialBytes 16384 :maxBytes 1048576)))
                    (values (js-array nil false t undefined 0 -0 globalThis.NaN "" "中😀\ud800")))
               (js-call a :auto 1)
               (let ((handles (js-call values :map (lambda (value) (box a value)))))
@@ -342,7 +342,7 @@
 
   (test "automatically rooted arguments and temporaries survive first-frame allocation, repeated GC and opaque identity"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 65536))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 4096 :maxBytes 65536))))
         (js-call a :auto 1)
         (let ((object (js-call a :map)) (set (js-call a :setTable)) (text (js-call a :string "😀\ud800")) (index 0))
           (js-call a :tableSet object text set) (js-call a :tableAdd set object)
@@ -361,7 +361,7 @@
 
   (test "managed entry failure restores caller frames, argument roots and the original capacity error"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 8 :initialBytes 4200 :maxBytes 4200))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 4200 :maxBytes 4200))))
         (js-call a :auto 1)
         (let* ((input (js-call a :number -0)) (frame (js-call a :frame 1)))
           (js-call a :frameSet frame 0 input)

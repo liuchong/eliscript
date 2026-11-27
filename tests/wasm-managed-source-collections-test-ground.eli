@@ -534,7 +534,7 @@
 
   (test "source table capacity failures leave committed entries intact and unwind only private roots"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 24576 :maxBytes 24576))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 24576 :maxBytes 24576))))
         (js-call a :auto 1)
         (let ((m (js-call a :invoke "empty-map"))
               (count 0)
@@ -631,7 +631,7 @@
     (lambda ()
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 8192 65536)))
+             (h (funcall (aref e "heap-new") 8192 65536)))
         (js-call
           (js-array
             (js-array "value-source-collection-get"

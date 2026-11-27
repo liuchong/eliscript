@@ -196,7 +196,7 @@
         (js-call assert :equal (js-call a :live) 0)))))
 
   (test "capacity errors preserve caller roots and UTF16 inputs; retry after failure remains usable" (lambda ()
-    (let* ((a (instantiateManagedRuntime (artifact) (js-object :maxSlots 24 :initialBytes 8192 :maxBytes 8192)))
+    (let* ((a (instantiateManagedRuntime (artifact) (js-object :initialBytes 8192 :maxBytes 8192)))
            (_ (js-call a :auto 1))
            (text (js-call a :string "中😀"))
            (outer (js-call a :frame 1))
@@ -229,7 +229,7 @@
 
   (test "bulk raw construction grows memory, seals exact surrogate pairs and validates modes, kinds and lifetime" (lambda ()
     (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (artifact))) :exports))
-           (h (js-call e "heap-new" 128 16384 1048576))
+           (h (js-call e "heap-new" 16384 1048576))
            (call (lambda (name &rest args)
                    (let ((value (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
                      (js-call assert :equal (js-call e "last-error") 0 name)
@@ -303,7 +303,7 @@
 
   (test "unsealed conversion input is rejected without mutating the argument list or escaping private roots" (lambda ()
     (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module (artifact))) :exports))
-           (h (js-call e "heap-new" 64 8192 65536))
+           (h (js-call e "heap-new" 8192 65536))
            (call (lambda (name &rest args)
                    (let ((v (funcall normalize-u64 (Reflect/apply (get e name) e (js-call (js-array h) :concat args)))))
                      (js-call assert :equal (js-call e "last-error") 0 name)

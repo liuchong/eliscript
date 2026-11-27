@@ -209,7 +209,7 @@
            (bytes (get c :bytes)))
       (finish a)
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (heap (js-call e "heap-new" 32 4520 65536))
+             (heap (js-call e "heap-new" 4520 65536))
              (items (globalThis.BigInt.asUintN 64 (js-call e "value-array-new" heap 0)))
              (frame (globalThis.BigInt.asUintN 64 (js-call e "frame-new" heap 1))))
         (js-call e "frame-set" heap frame 0 items)
@@ -222,7 +222,7 @@
 
   (test "Given thousands of duplicate keys, when collecting stable sort runs, then all values agree and comparisons stay within the merge bound" (async ()
     (let* ((c (await (compiled "(defun f (items) (let ((trace (js-object :calls 0))) (js-call items :sort (lambda (a b) (put trace :calls (1+ (get trace :calls))) (- a b))) (js-array items (get trace :calls)))) (export f)"
-                       (js-object :maxSlots 5120 :initialBytes 1048576))))
+                       (js-object :initialBytes 1048576))))
            (a (get c :a))
            (js (get c :js))
            (state 1210149009)
@@ -335,7 +335,7 @@
 
   (test "Given exhausted capacity, when sort cannot create its workspace, then it preserves inputs and recovers after roots are released" (async ()
     (let* ((c (await (compiled "(defun f (items) (js-call items :sort)) (export f)"
-                       (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192))))
+                       (js-object :initialBytes 8192 :maxBytes 8192))))
            (a (get c :a))
            (input (array a (js-array 4 1 3 2)))
            (held (js-array)))

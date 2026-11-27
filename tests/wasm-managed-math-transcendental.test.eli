@@ -99,12 +99,13 @@
           (await (instantiateNativeManagedRuntime native-file lowered
                    (Object/assign (js-object) cfg (js-object :nativeTarget target))))))))
 
-  (defasync each-target (run)
+  (defasync each-target (run &rest __rest_args)
     (let ((kinds (if target (js-array "wasm" "native") (js-array "wasm")))
+          (extra (aref __rest_args 0))
           (idx 0))
       (while (< idx (get kinds :length))
         (let* ((kind (aref kinds idx))
-               (a (await (open-instance kind))))
+               (a (await (open-instance kind extra))))
           (js-call a :auto 1)
           (try
             (await (funcall run a kind))
@@ -217,7 +218,7 @@
                      (finally
                        (js-call fillers :forEach (lambda (handle) (js-call a :release handle)))
                        (js-call a :leaveFrame frame)
-                       (js-call a :release zero))))))))
+                       (js-call a :release zero))))) (js-object :initialBytes 16384 :maxBytes 65536))))
     30000)
 
   (test "Given reproducible random seeds When independent WASM and native heaps generate sequences Then exact replay coexists with ordinary fresh-instance randomness"

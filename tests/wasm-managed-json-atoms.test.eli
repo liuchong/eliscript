@@ -38,7 +38,7 @@
     (js-call assert :equal (get (js-call a :stats) :frameDepth) 0))
 
   (test "fixed-slot parsing shares repeated immutable atoms while retaining each independently mutable container" (lambda ()
-    (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 512 :initialBytes 65536 :maxBytes 1048576)))
+    (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 1048576)))
            (_ (js-call a :auto 1))
            (text (str "[" (js-call (Array/from (js-object :length 100) (lambda () "{\"label\":\"same\",\"value\":42,\"items\":[]}")) :join ",") "]"))
            (input (js-call a :string text))
@@ -140,7 +140,7 @@
           (setq i (1+ i)))))))
 
   (test "unique atoms still exhaust the fixed budget honestly and grammar errors release all cache roots before a valid retry" (lambda ()
-    (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 65536)))
+    (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 16384 :maxBytes 16384)))
            (_ (js-call a :auto 1))
            (held (js-call a :number -0.0))
            (frame (js-call a :frame 1)))

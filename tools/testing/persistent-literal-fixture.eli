@@ -123,7 +123,7 @@
       tail))
   (defconst persistent-host-activation "(funcall (lambda (originalRuntime)\n (setq lowered (js-call (get backend :managed) :lower_managed_project modules \"boundary.mjs\" runtime\n   (js-object :literalModules literal-modules :phased t :foreignEntry t)))\n (js-call assert :deepEqual modules original-modules)\n (js-call assert :deepEqual literal-modules original-library)\n (js-call assert :deepEqual runtime originalRuntime)\n (js-call assert :deepEqual (get (get lowered :descriptor) :hostCapabilities)\n   (js-array (js-object :module \"eliscript.host\" :name \"source-operation\" :arity 2 :abi \"managed-host-call\" :parameterTypes (js-array \"u32\" \"v64\") :resultType \"v64\")))\n (setq wasm-bytes (Uint8Array/from (js-call (get backend :wasm) :append_metadata_section\n   (js-call (get backend :wasm) :emit_typed_memory_wasm (get lowered :typed) memory)\n   \"eliscript-managed-control\" (JSON/stringify (get lowered :descriptor)))))\n (funcall (lambda (imports)\n   (js-call assert :deepStrictEqual (js-call imports :map (lambda (entry)\n     (js-object :module (get entry :module) :name (get entry :name) :kind (get entry :kind))))\n     (js-array (js-object :module \"eliscript.host\" :name \"source-operation\" :kind \"function\")))\n   (js-call imports :forEach (lambda (entry)\n     (when (Object/hasOwn entry \"type\")\n       (js-call assert :deepStrictEqual (get entry :type)\n         (js-object :parameters (js-array \"i32\" \"i64\") :results (js-array \"i64\")))))))\n   (WebAssembly.Module/imports (new globalThis.WebAssembly.Module wasm-bytes))))\n (globalThis.structuredClone runtime))")
   (defun projectPersistentLiteralSource (root source &rest supplied)
-    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") "d87238cafe70c523ac51d1616cdbd8b3ddce2acdb69602ed424a01d780355ca4")
+    (unless (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") "93d4ee500a90f71924858cec84c07b959a67e5b9e2f0ac129ac7ad4e2bb80cc7")
       (throw (new globalThis.TypeError "complete original persistent literal suite source changed")))
     (unless (= (js-call (js-call (createHash "sha256") :update (readFileSync (resolve root "tools/testing/persistent-literal-oracle.eli"))) :digest "hex") "6fada646b540292d8c44d346b4806e651c659489ef6dbe10b0a6df4fc3e031ba")
       (throw (new globalThis.TypeError "complete independent persistent literal expectation source changed")))
@@ -140,7 +140,7 @@
                     (setq kind "root" replacement (str "(defconst root " (JSON/stringify (resolve root)) ")")))
                    ((and (sourceCall node "defconst") (= (get (aref items 1) :name) "budget"))
                     (setq kind "budget" replacement
-                      (if functional "(defconst budget (Object/freeze (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))" (funcall node-text node))))
+                      (if functional "(defconst budget (Object/freeze (js-object :initialBytes 8388608 :maxBytes 67108864)))" (funcall node-text node))))
                    ((and (sourceCall node "defun") (= (get (aref items 1) :name) "assert-original-report"))
                     (setq kind "oracle" replacement "(defun assert-original-report (report) (assertOriginalReport expect report))"))
                    ((and (sourceCall node "defun") (= (get (aref items 1) :name) "host-script"))
@@ -160,9 +160,9 @@
                  replacement)))))
       (unless (= (get seen :size) 6) (throw (new globalThis.TypeError "original persistent literal source boundary changed")))
       (when functional
-        (console/error "persistent literal original 1024-slot capacity DEFERRED / NOT ACCEPTED"
-          (js-object :original (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
-            :effective (js-object :maxSlots 131072 :initialBytes 8388608 :maxBytes 67108864)))
+        (console/error "persistent literal original capacity DEFERRED / NOT ACCEPTED"
+          (js-object :original (js-object :initialBytes 65536 :maxBytes 16777216)
+            :effective (js-object :initialBytes 8388608 :maxBytes 67108864)))
         (console/error "persistent literal original 60000ms host and case deadlines retained"
           (js-object :originalHostDeadlineMs 60000 :originalCaseDeadlineMs 60000 :functionalDeadlineMs 60000)))
       (put projected :original maintained) projected))

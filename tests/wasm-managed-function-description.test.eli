@@ -89,7 +89,7 @@
     (when directory
       (await (rm directory (js-object :recursive t :force t))))))
 
-  (defconst options (js-object :maxSlots 256 :initialBytes 8192 :maxBytes 65536 :maximumPages 32 :initializeModule false))
+  (defconst options (js-object :initialBytes 8192 :maxBytes 65536 :maximumPages 32 :initializeModule false))
 
   (defasync open (nativeHost &rest __host_default_arguments_1)
     (let* ((extra-opts (aref __host_default_arguments_1 0)))
@@ -178,7 +178,7 @@
     (lambda () (pressure t)))
 
   (defasync reflection (nativeHost)
-    (let* ((a (await (open nativeHost (js-object :maxSlots 1024 :initialBytes 32768 :maxBytes 262144))))
+    (let* ((a (await (open nativeHost (js-object :initialBytes 32768 :maxBytes 262144))))
            (f (js-call a :invoke "reference"))
            (roots (js-array f))
            (text (js-call a :invoke "text" (js-array f))))
@@ -270,7 +270,7 @@
                                 (if (= (value-type value) "function")
                                   (lambda (&rest args) (funcall normalize-u64 (Reflect/apply value exports args)))
                                   value)))))))
-           (heap (js-call r :heap_new 64 8192 65536))
+           (heap (js-call r :heap_new 8192 65536))
            (f (js-call r :value_function_new heap 0 0)))
       (assert (> f (funcall globalThis.BigInt 3)))
       (js-call r :heap_pin heap f)

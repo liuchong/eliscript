@@ -41,7 +41,7 @@
       (= (get (get error :eliscriptDiagnostic) :code) code)))
   (test "ordinary Number arithmetic, unary operations and relations exactly match JS IEEE semantics under GC"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 65536))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 8192 :maxBytes 65536))))
         (js-call a :auto 1)
         (js-call numbers :forEach (lambda (x)
           (js-call (js-array "negate" "reciprocal" "increment" "decrement" "unary-add" "unary-multiply") :forEach
@@ -69,7 +69,7 @@
         (js-call assert :strictEqual (get (js-call a :stats) :frameDepth) 0))))
   (test "inline Numbers occupy zero dynamic slots on a full micro heap"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 2 :initialBytes 8192 :maxBytes 65536))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 8192 :maxBytes 65536))))
         (js-call a :auto 1)
         (let ((i 0))
           (while (< i 10000)
@@ -84,7 +84,7 @@
     (lambda ()
       (let* ((a (instantiateManagedRuntime bytes))
              (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (h (call e "heap-new" 32 8192 8192)) (input (rawNumber e h -0)) (frame (call e "frame-new" h 1)))
+             (h (call e "heap-new" 8192 8192)) (input (rawNumber e h -0)) (frame (call e "frame-new" h 1)))
         (js-call a :auto 1)
         (js-call (js-array undefined nil false t "" " " "x" "-0" "0x10" "中\ud800") :forEach (lambda (value)
           (js-call (js-array "increment" "decrement") :forEach (lambda (name) (check a name (js-array value))))))
@@ -102,7 +102,7 @@
   (test "Number steps retain borrowed operands across capacity failure and pool relocation, then recover without a literal allocation"
     (lambda ()
       (let* ((e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)) :exports))
-             (h (call e "heap-new" 4 4800 4800))
+             (h (call e "heap-new" 4180 4180))
              (input (rawString e h "-0")) (held1 (rawString e h "9")) (held2 (rawString e h "8")) (held3 (rawString e h "7")))
         (call e "heap-pin" h input) (call e "heap-pin" h held1) (call e "heap-pin" h held2) (call e "heap-pin" h held3) (call e "heap-auto" h 1)
         (js-call (js-array 0 1) :forEach (lambda (mode)
@@ -123,7 +123,7 @@
             (call e "heap-collect" h)
             (js-call assert :strictEqual (call e "heap-live" h) live)))
         (call e "heap-release" h input) (call e "heap-collect" h) (js-call assert :strictEqual (call e "heap-live" h) 0)
-        (let* ((grown (call e "heap-new" 16 4200 65536))
+        (let* ((grown (call e "heap-new" 12288 65536))
                (minText (globalThis.String globalThis.Number.MIN_VALUE))
                (value (rawString e grown minText)))
           (call e "heap-pin" grown value)
@@ -181,7 +181,7 @@
         (js-call values :forEach (lambda (x) (check a "unary-multiply" (js-array x)))))))
   (test "ordinary numeric loops and recursive calls reclaim expression temporaries and retain caller roots"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 8192 :maxBytes 1048576))))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 8192 :maxBytes 1048576))))
         (js-call a :auto 1)
         (js-call (js-array "sum-to" "recursive-sum") :forEach (lambda (name)
           (js-call (js-array 0 1 8 32) :forEach (lambda (n) (check a name (js-array n))))))
@@ -208,7 +208,7 @@
           (let ((saved (js-call a :frameGet frame 0))) (js-call assert :strictEqual (js-call a :readNumber saved) 2) (js-call a :release saved))
           (js-call a :leaveFrame frame) (js-call a :release text) (js-call a :release n) (js-call a :collect)
           (js-call assert :strictEqual (js-call a :live) 0))
-        (let* ((small (instantiateManagedRuntime bytes (js-object :maxSlots 8 :initialBytes 4200 :maxBytes 4200)))
+        (let* ((small (instantiateManagedRuntime bytes (js-object :initialBytes 4200 :maxBytes 4200)))
                (_auto (js-call small :auto 1)) (input (js-call small :number -0))
                (caller (js-call small :frame 1)) (_root (js-call small :frameSet caller 0 input))
                (padding (js-array (js-call small :array) (js-call small :array) (js-call small :array)

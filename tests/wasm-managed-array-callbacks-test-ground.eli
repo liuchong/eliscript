@@ -417,7 +417,7 @@
       (finish a (js-array object f)))))
 
   (test "actual callback capacity failure preserves earlier effects and unwinds only the entered frames" (lambda ()
-    (let* ((a (instance (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 32768)))
+    (let* ((a (instance (js-object :initialBytes 8192 :maxBytes 32768)))
            (items (array a (js-call (new globalThis.Array 128) :fill t)))
            (log (js-call a :sourceArray (js-array)))
            (f (js-call a :invoke "collect-arguments" (js-array log)))
@@ -467,7 +467,7 @@
           :children (js-array (js-object :kind "reference" :value "value-js-truth" :children (js-array)))))
       (let* ((raw-bytes (Uint8Array/from (js-call (get backend :wasm) :emit_memory_wasm ir)))
              (e (get (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module raw-bytes)) :exports))
-             (heap (js-call e "heap-new" 64 8192 32768))
+             (heap (js-call e "heap-new" 8192 32768))
              (cases (js-array
                       (js-array 0 0 false)
                       (js-array 0 2147483648 false)

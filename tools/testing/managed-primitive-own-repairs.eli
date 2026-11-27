@@ -21,11 +21,11 @@
       (get (emit-expression (aref (get statement :children) 0)) :text)))
 
   (defun operand-setup-capacity-observation ()
-    ;; The original 8KiB pool includes its 3096-byte slot table. Keep that exact
-    ;; failed setup as a cleanup regression; the operation-exhaustion phase
-    ;; below retains 128 slots and all original conversion/recovery assertions.
+    ;; Keep that exact failed 8KiB setup as a cleanup regression; the
+    ;; operation-exhaustion phase below retains 64KiB maxBytes and all
+    ;; original conversion/recovery assertions.
     (let* ((program (compile-ir-string
-             "(let* ((actual (funcall (js* \"instance\") (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192))) (roots (js-array)) (keep (lambda (value) (js-call roots :push value) value))) (try (js-call (js* \"assert\") :throws (lambda () (let* ((empty (funcall keep (js-call actual :string \"\"))) (trace (funcall keep (js-call actual :sourceObject (js-object :events empty))))) (funcall keep (funcall (js* \"hook\") actual trace \"l\" 2 2)) (funcall keep (funcall (js* \"hook\") actual trace \"r\" 3 3)))) (lambda (error) (= (get (get error :eliscriptDiagnostic (js-object)) :code) \"ELI-RT0002\")) \"operand setup byte budget\") (js-call (js* \"assert\") :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call roots :forEach (lambda (value) (js-call actual :release value))) (js-call actual :closeModule) (js-call actual :collect))) (js-call (js* \"assert\") :strictEqual (js-call actual :live) 0))"
+             "(let* ((actual (funcall (js* \"instance\") (js-object :initialBytes 4096 :maxBytes 4096))) (roots (js-array)) (keep (lambda (value) (js-call roots :push value) value))) (try (js-call (js* \"assert\") :throws (lambda () (let* ((empty (funcall keep (js-call actual :string \"\"))) (trace (funcall keep (js-call actual :sourceObject (js-object :events empty))))) (funcall keep (funcall (js* \"hook\") actual trace \"l\" 2 2)) (funcall keep (funcall (js* \"hook\") actual trace \"r\" 3 3)))) (lambda (error) (= (get (get error :eliscriptDiagnostic (js-object)) :code) \"ELI-RT0002\")) \"operand setup byte budget\") (js-call (js* \"assert\") :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call roots :forEach (lambda (value) (js-call actual :release value))) (js-call actual :closeModule) (js-call actual :collect))) (js-call (js* \"assert\") :strictEqual (js-call actual :live) 0))"
              "operand-setup-capacity-observation.eli"))
            (statement (aref (get program :body) 0)))
       (unless (= (get statement :kind) "expression-statement")
@@ -33,11 +33,11 @@
       (get (emit-expression (aref (get statement :children) 0)) :text)))
 
     (defconst symbol-observation-source "(let* ((artifact (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))) (actual (funcall instantiateManagedRuntime artifact)) (value undefined)) (try (setq value (js-call actual :invoke \"unsupported\")) (js-call assert :strictEqual (js-call actual :toHostValue value) globalThis.Symbol.split) (js-call assert :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call actual :release value) (js-call actual :closeModule) (js-call actual :collect))) (js-call assert :strictEqual (js-call actual :live) 0))")
-  (defconst operand-setup-source "(let* ((actual (funcall make-instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192))) (roots (js-array)) (keep (lambda (value) (js-call roots :push value) value))) (try (js-call assert :throws (lambda () (let* ((empty (funcall keep (js-call actual :string \"\"))) (trace (funcall keep (js-call actual :sourceObject (js-object :events empty))))) (funcall keep (funcall make-hook actual trace \"l\" 2 2)) (funcall keep (funcall make-hook actual trace \"r\" 3 3)))) (lambda (error) (= (get (get error :eliscriptDiagnostic (js-object)) :code) \"ELI-RT0002\")) \"operand setup byte budget\") (js-call assert :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call roots :forEach (lambda (value) (js-call actual :release value))) (js-call actual :closeModule) (js-call actual :collect))) (js-call assert :strictEqual (js-call actual :live) 0))")
+  (defconst operand-setup-source "(let* ((actual (funcall make-instance (js-object :initialBytes 4096 :maxBytes 4096))) (roots (js-array)) (keep (lambda (value) (js-call roots :push value) value))) (try (js-call assert :throws (lambda () (let* ((empty (funcall keep (js-call actual :string \"\"))) (trace (funcall keep (js-call actual :sourceObject (js-object :events empty))))) (funcall keep (funcall make-hook actual trace \"l\" 2 2)) (funcall keep (funcall make-hook actual trace \"r\" 3 3)))) (lambda (error) (= (get (get error :eliscriptDiagnostic (js-object)) :code) \"ELI-RT0002\")) \"operand setup byte budget\") (js-call assert :strictEqual (get (js-call actual :stats) :frameDepth) 0) (finally (js-call roots :forEach (lambda (value) (js-call actual :release value))) (js-call actual :closeModule) (js-call actual :collect))) (js-call assert :strictEqual (js-call actual :live) 0))")
   (defun transformOriginalPrimitiveRuntimeSuite (source relative)
     (let* ((primitive (= relative "tests/wasm-managed-primitive-own-runtime.test.mjs"))
            (operand (= relative "tests/wasm-managed-operand-conversion.test.mjs"))
-           (expected (if primitive "42482f3b725afe29092d27caeb9b10a5fc6c0f2e3b8f8fdbe30062c7ce55e777" "9e34b12c2e65f84c65d31a0b5ebd9e2ec30152447aa423a4d92582f112365a51")))
+           (expected (if primitive "9abf84281507480a3fd45861a6734b7befe945e00a66e352f9a4f28d25c34c6a" "807583920e90bc98b2dc35105a14469cb51e58307764b34ff90adc8a0197a24c")))
       (unless (and (or primitive operand) (= (js-call (js-call (createHash "sha256") :update source) :digest "hex") expected))
         (throw (new globalThis.TypeError "complete original primitive runtime source identity changed")))
       (let* ((maintained (maintainedSuiteSource root relative source)) (seen (new globalThis.Set))
@@ -56,11 +56,10 @@
                      ((and operand (sourceCall node "js-call") (js-call text :startsWith "(js-call assert :throws")
                            (js-call text :includes "conversion-protocol.eli"))
                        (setq kind "symbol" replacement symbol-observation-source))
-                     ((and operand (sourceCall node "let*") (js-call text :includes "(a (make-instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192)))")
+                     ((and operand (sourceCall node "let*")
+                           (js-call text :includes "(a (make-instance (js-object :initialBytes 8192 :maxBytes 8192)))")
                            (js-call text :includes "saved"))
-                       (setq kind "capacity" replacement (str "(progn " operand-setup-source " "
-                         (js-call text :replace "(a (make-instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 8192)))"
-                           "(a (make-instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 65536)))") ")"))))
+                       (setq kind "capacity" replacement (str "(progn " operand-setup-source " " text ")"))))
                    (unless (undefined? kind)
                      (when (js-call seen :has kind) (throw (new globalThis.TypeError "primitive repair source is ambiguous")))
                      (js-call seen :add kind))

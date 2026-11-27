@@ -198,7 +198,7 @@
     (lambda ()
       (let* ((inst (new WebAssembly.Instance (new WebAssembly.Module bytes)))
              (e (get inst :exports))
-             (heap (funcall (get e "heap-new") 256 16384 1048576))
+             (heap (funcall (get e "heap-new") 16384 105328))
              (saved (JSON/stringify raw-program))
              (call-raw (lambda (name &rest args)
                          (let* ((raw (apply (get e name) heap args))
@@ -254,15 +254,16 @@
         (funcall call-raw "heap-release" valid)
         (funcall call-raw "heap-collect")
         ;; The raw API starts in manual-GC mode. Matching this complete set visits
-        ;; the emoji alternatives and exhausts 256 slots before reclaiming temporary
-        ;; values; the byte budget is still available. Keep that refusal and prove
-        ;; the identical input recovers with collection under the identical limits.
+        ;; the emoji alternatives and exhausts the bounded heap before reclaiming
+        ;; temporary values. Keep that refusal and prove the identical input
+        ;; recovers with collection under the identical limits.
         (funcall (get e "value-regexp-run") heap regex input 0)
         (js-call assert :equal (funcall (get e "last-error")) 2)
-        (js-call assert :equal (funcall (get e "heap-live") heap) 256)
-        (js-call assert :equal (funcall (get e "frame-depth") heap) 0)
-        (funcall call-raw "heap-collect")
-        (funcall assert (< (funcall call-raw "heap-live") 256))
+        (let ((before-live (funcall (get e "heap-live") heap)))
+          (funcall assert (> before-live 4))
+          (js-call assert :equal (funcall (get e "frame-depth") heap) 0)
+          (funcall call-raw "heap-collect")
+          (funcall assert (< (funcall call-raw "heap-live") before-live)))
         (funcall call-raw "heap-auto" 1)
         (let ((result (funcall call-raw "value-regexp-run" regex input 0)))
           ;; `value-regexp-run` returns `v64`; success is the exact 2n status.

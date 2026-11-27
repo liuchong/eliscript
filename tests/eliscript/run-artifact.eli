@@ -12,7 +12,7 @@
 
   (test "ordinary artifact sequences snapshot the existing runtime options and retain debug false and unchanged defaults"
     (async ()
-      (let ((diagnosed 0) (reads 0) (options (js-object :maxSlots 2048 :initialBytes 65536
+      (let ((diagnosed 0) (reads 0) (options (js-object :initialBytes 65536
                             :maxBytes 4194304 :debug t)))
         (Object/defineProperty options "auto" (js-object :enumerable t :configurable t
           :get (lambda () (setq reads (1+ reads)) 134217728)))
@@ -20,9 +20,9 @@
                          (async () (setq diagnosed (1+ diagnosed)))
                          (async (configuration)
                            (Object/defineProperty options "auto" (js-object :value 0))
-                           (put options :maxSlots 1)
+                           (put options :initialBytes 1)
                            configuration)))))
-          (js-call assert :deepStrictEqual captured (js-object :maxSlots 2048 :initialBytes 65536
+          (js-call assert :deepStrictEqual captured (js-object :initialBytes 65536
             :maxBytes 4194304 :debug false :auto 134217728))
           (js-call assert :strictEqual (Object/isFrozen captured) t))
         (js-call assert :strictEqual reads 1)
@@ -66,12 +66,13 @@
                  (js-call assert :strictEqual actual runtime)
                  (js-call trace :push "snapshot")
                  (Object/freeze (js-object :format "eliscript-managed-allocator-snapshot"
-                   :maxSlots 4194303 :highWater 100 :liveValues 5 :freeReusableSlots 90 :retiredSlots 5
-                   :neverAllocatedSlots 4194203 :slotBits 24 :slotMask 16777215 :generationMax 16777215
+                   :liveValues 5 :liveBytes 1768 :segmentCount 1 :heapId 1
+                   :segmentHead 3600 :segmentTail 3600 :allObjectsHead 3632
+                   :minSegAddr 3632 :maxSegEnd 16384 :objectCapacity 1768 :objectUsed 1768
                    :roBytes 0 :roEntryCount 0 :committedBytes 16384
-                   :usedBytes 1768 :capacityBytes 16384 :maxBytes 1073741824
+                   :usedBytes 16384 :capacityBytes 16384 :maxBytes 1073741824
                    :freeBytes 256 :largestFreeBlock 128 :freeBlockCount 2 :tailCapacityBytes 14360
-                   :byteHeadroomBytes 1073740056 :slotTableBytes 64 :freeSlotsHead 1 :freeSlotsTail 9
+                   :segmentTotalBytes 12784 :byteHeadroomBytes 1073725440 :ffiHandleCount 0
                    :freeTreeRoot 0 :lastError last-error)))))
           (finalize-runtime-diagnostic runtime "state" "lastPhase"
             (js-array "output" "input" "state" "lastPhase") snapshot)
@@ -281,7 +282,7 @@
                    (artifact (await (buildIndependentCompiler (js-object :host "wasm" :session producer
                      :sources (js-object :entry "driver.mjs" :modules (js-array (js-object :id "driver.mjs" :filename "cli-project.eli" :source source))
                        :runtime (js-object :filename "runtime.eli" :source runtime-source))
-                     :outputRoot (resolve directory "artifact") :budget (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 4194304)
+                     :outputRoot (resolve directory "artifact") :budget (js-object :initialBytes 65536 :maxBytes 4194304)
                      :memory (js-object :initialPages 1 :maximumPages 128) :auto 65536))))
                    (steps-path (resolve directory "steps.json")) (input (resolve directory "input.eli")))
               (js-call assert :deepStrictEqual (globalThis.WebAssembly.Module.imports (new globalThis.WebAssembly.Module bytes)) (js-array))

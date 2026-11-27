@@ -1,0 +1,105 @@
+(module tools.testing.reporter
+  (import "node:fs" existsSync mkdirSync renameSync unlinkSync writeFileSync)
+  (import "node:path" basename dirname join resolve)
+  (import "node:crypto" randomUUID)
+
+  ;; Structured suite summary builder and human-readable console reporter.
+  (defconst REPORT_FORMAT "eliscript-test-report-v1")
+
+  (defun mib (bytes)
+    (if (and (Number/isFinite bytes) (> bytes 0))
+      (Math/round (/ bytes (* 1024 1024)))
+      0))
+
+  (defun summarizeSuiteRun (input)
+    (let* ((cfg (or input (js-object)))
+           (suite (or (get cfg :suite) "eliscript-tests"))
+           (results (if (Array/isArray (get cfg :results)) (get cfg :results) (js-array)))
+           (unstarted (if (Array/isArray (get cfg :unstarted)) (get cfg :unstarted) (js-array)))
+           (cancelled (if (Array/isArray (get cfg :cancelled)) (get cfg :cancelled) (js-array)))
+           (wall-ms (if (and (Number/isFinite (get cfg :wallMs)) (>= (get cfg :wallMs) 0)) (Math/round (get cfg :wallMs)) 0))
+           (peak-rss (if (and (Number/isFinite (get cfg :peakAggregateRssBytes)) (>= (get cfg :peakAggregateRssBytes) 0))
+                       (Math/round (get cfg :peakAggregateRssBytes)) 0))
+           (admission-pauses (if (Number/isSafeInteger (get cfg :admissionPauses)) (get cfg :admissionPauses) 0))
+           (passed 0)
+           (failed 0)
+           (cpu-ms 0)
+           (failed-files (js-array))
+           (timed-rows (js-array))
+           (index 0))
+      (while (< index (js-length results))
+        (let ((row (aref results index)))
+          (when row
+            (let* ((file (get row :file))
+                   (elapsed (get row :elapsedMs))
+                   (has-fail (or (/= (get row :exitCode) 0) (funcall globalThis.Boolean (get row :failure)))))
+              (when (and (Number/isFinite elapsed) (> elapsed 0))
+                (setq cpu-ms (+ cpu-ms elapsed))
+                (js-call timed-rows :push (js-object :file file :elapsedMs (Math/round elapsed))))
+              (if has-fail
+                (progn
+                  (setq failed (1+ failed))
+                  (when (= (value-type file) "string") (js-call failed-files :push file)))
+                (setq passed (1+ passed))))))
+        (setq index (1+ index)))
+      (js-call timed-rows :sort (lambda (a b) (- (get b :elapsedMs) (get a :elapsedMs))))
+      (let* ((slowest (js-call timed-rows :slice 0 10))
+             (rounded-cpu (Math/round cpu-ms))
+             (speedup (if (> wall-ms 0) (/ (Math/round (* (/ rounded-cpu wall-ms) 100)) 100) 1)))
+        (js-object
+          :format REPORT_FORMAT
+          :suite suite
+          :total (js-length results)
+          :passed passed
+          :failed failed
+          :unstarted (js-length unstarted)
+          :cancelled (js-length cancelled)
+          :wallMs wall-ms
+          :cpuMs rounded-cpu
+          :speedup speedup
+          :peakAggregateRssBytes peak-rss
+          :peakAggregateRssMiB (mib peak-rss)
+          :admissionPauses admission-pauses
+          :slowest slowest
+          :failedFiles failed-files))))
+
+  (defun formatSuiteSummary (summary)
+    (let* ((s (or summary (js-object)))
+           (lines (js-array
+             (str "[eliscript-test] " (or (get s :suite) "suite")
+                  ": passed=" (or (get s :passed) 0)
+                  " failed=" (or (get s :failed) 0)
+                  " unstarted=" (or (get s :unstarted) 0)
+                  " wall=" (Math/round (/ (or (get s :wallMs) 0) 100)) "e-1s"
+                  " cpu=" (Math/round (/ (or (get s :cpuMs) 0) 100)) "e-1s"
+                  " speedup=" (or (get s :speedup) 1) "x"
+                  " peakRSS=" (or (get s :peakAggregateRssMiB) 0) "MiB"
+                  " admissionPauses=" (or (get s :admissionPauses) 0))))
+           (slowest (get s :slowest))
+           (failed-files (get s :failedFiles)))
+      (when (and (Array/isArray slowest) (> (js-length slowest) 0))
+        (let ((top (js-call (js-call slowest :slice 0 5) :map (lambda (entry)
+                (str (basename (get entry :file)) "=" (get entry :elapsedMs) "ms")))))
+          (js-call lines :push (str "  slowest: " (js-call top :join ", ")))))
+      (when (and (Array/isArray failed-files) (> (js-length failed-files) 0))
+        (js-call lines :push (str "  failed: " (js-call failed-files :join ", "))))
+      (js-call lines :join "\n")))
+
+  (defun writeSuiteReport (source-root summary &optional custom-path)
+    (let* ((target (if (and (= (value-type custom-path) "string") (> (js-length custom-path) 0))
+                     (resolve source-root custom-path)
+                     (resolve source-root ".eliscript-cache/test-results/latest-report.json")))
+           (dir (dirname target))
+           (temp (join dir (str ".report." (get globalThis.process :pid) "." (randomUUID) ".tmp"))))
+      (try
+        (progn
+          (mkdirSync dir (js-object :recursive t))
+          (writeFileSync temp (str (JSON/stringify summary nil 2) "\n") "utf8")
+          (renameSync temp target)
+          target)
+        (catch _error nil)
+        (finally
+          (when (existsSync temp)
+            (try (unlinkSync temp) (catch _cleanup nil)))))))
+
+  (export REPORT_FORMAT summarizeSuiteRun formatSuiteSummary writeSuiteReport))

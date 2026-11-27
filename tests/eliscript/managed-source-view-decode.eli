@@ -441,14 +441,12 @@
     (async ()
       (let* ((graph (createManagedModuleGraph (get lowered :descriptor)))
              (runtime (await (instantiateManagedRuntimeWithHostModules bytes
-               (js-object :moduleGraph graph :initializeModule false
-                 :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))
+               (js-object :moduleGraph graph :initializeModule false :initialBytes 1048576 :maxBytes 16777216)))))
         (exercise runtime graph))))
   (test "actual native factory preserves the same live nested view identities reflection and GC roots without replacing its attached project"
     (js-object :skip (not native-target))
     (async ()
       (let* ((graph (createManagedModuleGraph (get lowered :descriptor)))
              (runtime (await (instantiateNativeManagedRuntime library lowered
-               (js-object :moduleGraph graph :initializeModule false :nativeTarget native-target
-                 :maxSlots 4096 :initialBytes 1048576 :maxBytes 16777216)))))
+               (js-object :moduleGraph graph :initializeModule false :nativeTarget native-target :initialBytes 1048576 :maxBytes 16777216)))))
         (exercise runtime graph)))))

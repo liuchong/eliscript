@@ -72,14 +72,14 @@
   (defconst original-source-sha (js-call (js-call (createHash "sha256") :update
     (readFileSync (resolve root "tests/wasm-managed-wire-test-ground.mjs"))) :digest "hex"))
   (js-call assert :strictEqual original-source-sha
-    "cf74d8b4cc3bfce8e2404a9a3ea0f4282cf2c7b6d2642e43941d63a666e25b00")
+    "98be2541a1f5e46093a9d85a441d68d729c263c321bb64d4f290771f583f4f06")
   (defun functional-settings (settings)
     (let ((selection (wireFixtureRuntimeOptions original-source-sha (get globalThis.process :env) settings)))
       (js-call globalThis.console :error "wire original capacity acceptance"
         (get selection :originalCapacityAcceptance)
-        (js-object :original (js-object :maxSlots (get settings :maxSlots) :initialBytes (get settings :initialBytes) :maxBytes (get settings :maxBytes))
+        (js-object :original (js-object :initialBytes (get settings :initialBytes) :maxBytes (get settings :maxBytes))
           :effective (let ((options (get selection :options)))
-            (js-object :maxSlots (get options :maxSlots) :initialBytes (get options :initialBytes) :maxBytes (get options :maxBytes)))))
+            (js-object :initialBytes (get options :initialBytes) :maxBytes (get options :maxBytes)))))
       (get selection :options)))
   (defasync instantiateManagedRuntimeWithHostModules (bytes settings)
     (let* ((descriptor (readWireProjectDescriptor bytes)) (observer (progress-observer))

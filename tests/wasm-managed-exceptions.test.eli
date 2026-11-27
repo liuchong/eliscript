@@ -296,7 +296,7 @@
   (test "pending source exceptions are heap roots and illegal raw handles remain numeric ABI failures"
     (lambda ()
       (let* ((e (get (new WebAssembly.Instance (new WebAssembly.Module bytes)) :exports))
-             (heap (funcall (get e "heap-new") 64 4096 16384)))
+             (heap (funcall (get e "heap-new") 4096 16384)))
         (funcall assert (globalThis.Boolean heap))
         (funcall (get e "heap-auto") heap 1)
         (let ((value (funcall (get e "value-string") heap 1)))
@@ -323,7 +323,7 @@
              (p (js-call (get b :compiler) :compile_ir_string source "error-capacity.eli"))
              (a (instantiateManagedRuntime
                   (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm p runtime))
-                  (js-object :maxSlots 64 :initialBytes 4096 :maxBytes 16384)))
+                  (js-object :initialBytes 4096 :maxBytes 16384)))
              (_ (js-call a :auto 1))
              (message (js-call a :string "x"))
              (frame (js-call a :frame 1))

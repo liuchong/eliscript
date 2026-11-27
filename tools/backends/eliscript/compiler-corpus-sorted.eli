@@ -210,7 +210,7 @@
             :hostRuntime engine :aliases t :referenceArtifact t :zeroImports (not provider-mode)
             :childProcesses "inherit-selected-artifact" :timeoutMs 30000
             :timeoutByTarget (js-object :javascript 30000 :wasm 30000 :native 120000)
-            :runtimeOptions (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))
+            :runtimeOptions (js-object :initialBytes 262144 :maxBytes 16777216))
           :expected (js-object :kind "seed-program" :oracleRequired t) :original provenance))))
   (defasync addOriginalSortedRecipes (options)
     (let ((records (js-array)))

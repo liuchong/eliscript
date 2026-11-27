@@ -1,0 +1,216 @@
+(module tests.test-framework-selfhosted.test
+  (import "node:test" describe it)
+  (import "node:assert/strict" deepEqual equal notEqual ok)
+  (import "node:fs" existsSync mkdirSync mkdtempSync readFileSync rmSync writeFileSync)
+  (import "node:os" tmpdir)
+  (import "node:path" join)
+  (import "../tools/testing/artifact-cache.mjs"
+    MIN_CACHED_SOURCE_LENGTH irCacheEnabled irCacheKey readCachedIr writeCachedIr
+    pruneIrCache getCompilerCacheStats createCachedCompiler)
+  (import "../tools/testing/profile-store.mjs"
+    PROFILE_FORMAT FAILURES_FORMAT loadTestProfile recordTestProfile
+    estimateTestWeight estimateTestRssBytes loadLastFailures saveLastFailures)
+  (import "../tools/testing/scheduler.mjs" runMemoryAwareLptQueue)
+  (import "../tools/testing/reporter.mjs"
+    REPORT_FORMAT summarizeSuiteRun formatSuiteSummary writeSuiteReport)
+  (import "../tools/testing/resource-supervisor.mjs" startResourceSupervisor)
+  (import "../tools/testing/final-functional-scope.mjs" runFinalFunctionalScope)
+
+  (defun make-temp-dir (prefix)
+    (mkdtempSync (join (tmpdir) prefix)))
+
+  (describe "test framework infrastructure"
+    (it "enforces IR cache env flags, key threshold, mutation isolation, and LRU pruning" (async ()
+      (equal (irCacheEnabled (js-object :ELISCRIPT_TEST_IR_CACHE "1")) t)
+      (equal (irCacheEnabled (js-object :ELISCRIPT_TEST_IR_CACHE "1" :ELISCRIPT_DISABLE_TEST_IR_CACHE "1")) false)
+      (equal (irCacheKey "comp-a" "small.eli" "(+ 1 2)") undefined)
+
+      (let* ((dir (make-temp-dir "eliscript-ir-cache-"))
+             (big-src (js-call "(+ 1 2)\n" :repeat (1+ (Math/ceil (/ MIN_CACHED_SOURCE_LENGTH 8)))))
+             (calls 0)
+             (base-compiler (js-object :compile_ir_string (lambda (source filename)
+                              (setq calls (1+ calls))
+                              (js-object :kind "module" :filename filename :len (js-length source) :nodes (js-array 1 2)))))
+             (cached (createCachedCompiler base-compiler "comp-v1"
+                       (js-object :cacheRoot dir :environment (js-object :ELISCRIPT_TEST_IR_CACHE "1") :maxEntries 2))))
+        (try
+          (let ((first (js-call cached :compile_ir_string big-src "unit/mod-a.eli"))
+                (second nil)
+                (stats nil))
+            (equal calls 1)
+            (js-call (get first :nodes) :push 999)
+            (setq second (js-call cached :compile_ir_string big-src "unit/mod-a.eli"))
+            (equal calls 1)
+            (deepEqual (get second :nodes) (js-array 1 2))
+            (setq stats (getCompilerCacheStats cached))
+            (equal (get stats :hits) 1)
+            (equal (get stats :misses) 1)
+
+            ;; Changing compiler key invalidates cache
+            (let ((bumped (createCachedCompiler base-compiler "comp-v2"
+                            (js-object :cacheRoot dir :environment (js-object :ELISCRIPT_TEST_IR_CACHE "1") :maxEntries 2))))
+              (js-call bumped :compile_ir_string big-src "unit/mod-a.eli")
+              (equal calls 2))
+
+            ;; Frozen null-prototype namespace objects (like ESM Module namespaces) wrap cleanly
+            (let* ((ns (Object/create nil))
+                   (_def (Object/defineProperty ns "compile_ir_string" (js-object
+                           :enumerable t :configurable false
+                           :get (lambda () (lambda (source filename)
+                                             (setq calls (1+ calls))
+                                             (js-object :kind "module" :filename filename :len (js-length source) :nodes (js-array 3)))))))
+                   (_frz (Object/freeze ns))
+                   (wrapped-ns (createCachedCompiler ns "comp-v3"
+                                 (js-object :cacheRoot dir :environment (js-object :ELISCRIPT_TEST_IR_CACHE "1")))))
+              (js-call wrapped-ns :compile_ir_string big-src "unit/mod-b.eli")
+              (js-call wrapped-ns :compile_ir_string big-src "unit/mod-b.eli")
+              (equal calls 3))
+
+            ;; Lossless IR round-trip preserves -0.0, non-finite numbers, BigInt, explicit undefined, and literal tag keys
+            (let* ((sample (js-object
+                             :negZero -0.0
+                             :posZero 0
+                             :nanVal globalThis.Number.NaN
+                             :infVal globalThis.Number.POSITIVE_INFINITY
+                             :negInfVal globalThis.Number.NEGATIVE_INFINITY
+                             :bigVal (globalThis.BigInt "9007199254740993123")
+                             :undefProp undefined
+                             :arr (js-array undefined -0.0 (js-object :__eliIrTag "user" :nested -0.0))))
+                   (_wrote (writeCachedIr dir "k-lossless" sample))
+                   (restored (readCachedIr dir "k-lossless")))
+              (ok (Object/is (get restored :negZero) -0.0))
+              (ok (Object/is (get restored :posZero) 0))
+              (ok (Number/isNaN (get restored :nanVal)))
+              (equal (get restored :infVal) globalThis.Number.POSITIVE_INFINITY)
+              (equal (get restored :negInfVal) globalThis.Number.NEGATIVE_INFINITY)
+              (equal (get restored :bigVal) (globalThis.BigInt "9007199254740993123"))
+              (ok (Object/hasOwn restored "undefProp"))
+              (equal (get restored :undefProp) undefined)
+              (ok (undefined? (aref (get restored :arr) 0)))
+              (ok (Object/is (aref (get restored :arr) 1) -0.0))
+              (equal (get (aref (get restored :arr) 2) :__eliIrTag) "user")
+              (ok (Object/is (get (aref (get restored :arr) 2) :nested) -0.0)))
+
+            ;; Writing additional keys triggers pruning
+            (writeCachedIr dir "k1" (js-object :ok 1))
+            (writeCachedIr dir "k2" (js-object :ok 2))
+            (writeCachedIr dir "k3" (js-object :ok 3))
+            (let ((removed (pruneIrCache dir 2)))
+              (ok (>= removed 1))))
+          (finally
+            (rmSync dir (js-object :recursive t :force t)))))))
+
+    (it "persists EWMA test profiles and last-failed ledgers" (async ()
+      (let ((root (make-temp-dir "eliscript-profile-store-")))
+        (try
+          (let ((empty (loadTestProfile root)))
+            (equal (get empty :format) PROFILE_FORMAT))
+          (recordTestProfile root (js-array
+            (js-object :file "tests/alpha.test.mjs" :exitCode 0 :elapsedMs 1000 :peakRssBytes (* 300 1024 1024))
+            (js-object :file "tests/beta.test.mjs" :exitCode 1 :elapsedMs 2000 :peakRssBytes (* 600 1024 1024))))
+          (let ((updated (recordTestProfile root (js-array
+                  (js-object :file "tests/alpha.test.mjs" :exitCode 0 :elapsedMs 2000 :peakRssBytes (* 400 1024 1024))))))
+            (equal (get (aref (get updated :files) "alpha.test.mjs") :runs) 2)
+            ;; 0.7 * 2000 + 0.3 * 1000 = 1700ms; 0.8 * 1700 + 0.2 * 500 = 1460ms
+            (equal (estimateTestWeight updated "tests/alpha.test.mjs" 500) 1460)
+            (ok (> (estimateTestRssBytes updated "tests/alpha.test.mjs" false) (* 300 1024 1024)))
+            (equal (estimateTestRssBytes updated "tests/unseen.test.mjs" t) (* 1200 1024 1024)))
+          (saveLastFailures root "final-functional-scope" (js-array "tests/beta.test.mjs"))
+          (deepEqual (loadLastFailures root "final-functional-scope") (js-array "tests/beta.test.mjs"))
+          (finally
+            (rmSync root (js-object :recursive t :force t)))))))
+
+    (it "gates new dispatches on live RSS telemetry + cold-start reservations" (async ()
+      (let* ((started (js-array))
+             (live-rss (* 600 1024 1024))
+             (items (js-array
+               (js-object :id "a" :heavy false :weight 1000 :estimatedRssBytes (* 400 1024 1024))
+               (js-object :id "b" :heavy false :weight 500 :estimatedRssBytes (* 400 1024 1024))))
+             ;; 78% of 1000 MiB = 780 MiB. First item leaves cold-start reserve = 400 MiB, plus live 600 MiB -> second must wait.
+             (stats (await (runMemoryAwareLptQueue items
+                      (js-object :maxWorkers 2 :heavyWorkers 1 :aggregateCeilingBytes (* 1000 1024 1024)
+                                 :coldStartGraceMs 4000 :pollMs 20)
+                      (js-object
+                        :getLiveTelemetry (lambda () (js-object :aggregateRssBytes live-rss))
+                        :runItem (async (item)
+                          (js-call started :push (get item :id))
+                          (await (new globalThis.Promise (lambda (resolve-step) (funcall globalThis.setTimeout resolve-step 35))))
+                          (setq live-rss (* 100 1024 1024))))))))
+        (deepEqual started (js-array "a" "b"))
+        (ok (>= (get stats :admissionPauses) 1))
+        (ok (>= (get stats :peakAggregateRssBytes) (* 600 1024 1024))))))
+
+    (it "summarizes suite runs, formats summaries, and writes latest-report.json" (async ()
+      (let* ((root (make-temp-dir "eliscript-reporter-"))
+             (summary (summarizeSuiteRun (js-object
+                        :suite "unit-suite"
+                        :results (js-array
+                          (js-object :file "tests/fast.test.mjs" :exitCode 0 :elapsedMs 1200)
+                          (js-object :file "tests/slow.test.mjs" :exitCode 1 :elapsedMs 4800))
+                        :unstarted (js-array "tests/unstarted.test.mjs")
+                        :wallMs 3000
+                        :peakAggregateRssBytes (* 512 1024 1024)
+                        :admissionPauses 2))))
+        (try
+          (equal (get summary :format) REPORT_FORMAT)
+          (equal (get summary :total) 2)
+          (equal (get summary :passed) 1)
+          (equal (get summary :failed) 1)
+          (equal (get summary :unstarted) 1)
+          (equal (get summary :cpuMs) 6000)
+          (equal (get summary :speedup) 2)
+          (equal (get summary :peakAggregateRssMiB) 512)
+          (deepEqual (get summary :failedFiles) (js-array "tests/slow.test.mjs"))
+          (let ((text (formatSuiteSummary summary))
+                (written (writeSuiteReport root summary)))
+            (ok (js-call text :includes "unit-suite"))
+            (ok (js-call text :includes "peakRSS=512MiB"))
+            (ok (existsSync written))
+            (equal (get (JSON/parse (readFileSync written "utf8")) :suite) "unit-suite"))
+          (finally
+            (rmSync root (js-object :recursive t :force t)))))))
+
+    (it "emits telemetry and peakRssBytes from real resource supervisor" (async ()
+      (let* ((seen-telemetry (js-array))
+             (supervisor (await (startResourceSupervisor (js-object :onTelemetry (lambda (snap) (js-call seen-telemetry :push snap)))))))
+        (try
+          (let ((res (await (js-call supervisor :run (js-object
+                       :id "probe"
+                       :file "probe-rss"
+                       :command (get globalThis.process :execPath)
+                       :args (js-array "-e" "setTimeout(() => {}, 1200)")
+                       :cwd (js-call globalThis.process :cwd)
+                       :env (get globalThis.process :env))))))
+            (equal (get res :exitCode) 0)
+            (ok (> (get res :peakRssBytes) 0))
+            (ok (or (> (js-length seen-telemetry) 0)
+                    (not (nullish? (js-call supervisor :telemetry))))))
+          (finally
+            (await (js-call supervisor :close)))))))
+
+    (it "wires keep-going and rerun-failed flags cleanly in runFinalFunctionalScope" (async ()
+      (let* ((dir (make-temp-dir "eliscript-scope-flags-"))
+             (repo-root (js-call globalThis.process :cwd))
+             (ran (js-array)))
+        (try
+          (saveLastFailures repo-root "final-functional-scope"
+            (js-array "tests/file-workers-selfhosted.test.mjs") (join dir "last-failures.json"))
+          (let ((out (await (runFinalFunctionalScope
+                       (js-array "--keep-going" "--rerun-failed"
+                         "tests/test-framework-selfhosted.test.mjs" "tests/file-workers-selfhosted.test.mjs")
+                       (js-object
+                         :sourceRoot repo-root
+                         :environment (js-object)
+                         :outputDirectory dir
+                         :cacheDirectory dir
+                         :executors (js-object
+                           :ordinary (async (batch _env)
+                             (js-call ran :push (js-call batch :slice))
+                             (js-object
+                               :results (js-call batch :map (lambda (f) (js-object :file f :exitCode 0 :elapsedMs 10)))
+                               :exitCode 0))))))))
+            (equal (get out :exitCode) 0)
+            (deepEqual (get out :inventory) (js-array "tests/file-workers-selfhosted.test.mjs"))
+            (deepEqual ran (js-array (js-array "tests/file-workers-selfhosted.test.mjs"))))
+          (finally
+            (rmSync dir (js-object :recursive t :force t)))))))))

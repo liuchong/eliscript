@@ -72,7 +72,7 @@
       (check (and (Object/is (aref encode-inputs 4) -0.0) (Number/isNaN (aref encode-inputs 5))) "lossless scalar test transport")
       (js-call (js-array 65536 1) :forEach (lambda (threshold)
         (phase "instantiate-start" (js-object :threshold threshold))
-        (let ((runtime (instantiateManagedRuntime bytes (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216))))
+        (let ((runtime (instantiateManagedRuntime bytes (js-object :initialBytes 262144 :maxBytes 16777216))))
           (js-call runtime :auto threshold)
           (phase "instantiate-complete" (js-object :threshold threshold))
           (try

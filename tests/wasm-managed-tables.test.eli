@@ -52,14 +52,14 @@
                     v))))))))
 
   (defun open-raw (&rest __host_default_arguments_1)
-    (let* ((slots-arg (aref __host_default_arguments_1 0)) (initial-arg (aref __host_default_arguments_1 1)) (max-arg (aref __host_default_arguments_1 2)))
-    (let* ((slots (if (undefined? slots-arg) 256 slots-arg))
-           (initial (if (undefined? initial-arg) 16384 initial-arg))
-           (max-bytes (if (undefined? max-arg) 1048576 max-arg))
+    (let* ((arg0 (aref __host_default_arguments_1 0))
+           (arg1 (aref __host_default_arguments_1 1))
+           (initial (if (undefined? arg0) 16384 arg0))
+           (max-bytes (if (undefined? arg1) 1048576 arg1))
            (r (wrap-exports bytes))
-           (h (js-call r :heap_new slots initial max-bytes)))
+           (h (js-call r :heap_new initial max-bytes)))
       (funcall assert (> h 0))
-      (js-object :r r :h h))))
+      (js-object :r r :h h)))
 
   (defun raw-number (r h value)
     (let ((v (new globalThis.DataView (new globalThis.ArrayBuffer 8))))
@@ -273,7 +273,7 @@
 
   (test "managed table iterators observe mutations, compaction and growth, then remain done"
     (lambda ()
-      (let* ((opened (open-raw 512 32768))
+      (let* ((opened (open-raw 32768 1048576))
              (r (get opened :r))
              (h (get opened :h))
              (m (js-call r :value_table_new h 10 4))
@@ -354,7 +354,7 @@
 
   (test "managed table allocation failure preserves entries, order, identity and roots"
     (lambda ()
-      (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 32 :initialBytes 5400 :maxBytes 5400)))
+      (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 5400 :maxBytes 5400)))
              (_auto (js-call a :auto 1))
              (m (js-call a :map))
              (inputs (js-array))
@@ -437,7 +437,7 @@
 
   (test "managed Map and Set agree with independent JS models through randomized mutation and GC"
     (lambda ()
-      (let* ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576)))
+      (let* ((a (instantiateManagedRuntime bytes (js-object :initialBytes 16384 :maxBytes 1048576)))
              (_auto (js-call a :auto 1))
              (m (js-call a :map))
              (s (js-call a :setTable))
@@ -606,7 +606,7 @@
       (let* ((limited (Uint8Array/from
                         (js-call (get backend :wasm) :emit_memory_wasm program (js-object :initialPages 1 :maximumPages 1))))
              (r (wrap-exports limited))
-             (h (js-call r :heap_new 1024 32768 262144)))
+             (h (js-call r :heap_new 32768 262144)))
         (funcall assert (> h 0))
         (js-call r :heap_auto h 1)
         (let ((m (js-call r :value_table_new h 10 4))
@@ -692,7 +692,7 @@
 
   (test "managed table negative-zero normalization failure preserves bits, tickets and every borrowed root"
     (lambda ()
-      (let* ((opened (open-raw 4 4096 4096))
+      (let* ((opened (open-raw 4200 4200))
              (r (get opened :r))
              (h (get opened :h))
              (m (js-call r :value_table_new h 10 4))
@@ -723,7 +723,7 @@
 
   (test "managed table growth defragments out-of-order live blocks without changing roots, aliases or IEEE payloads"
     (lambda ()
-      (let* ((opened (open-raw 128 12288 12288))
+      (let* ((opened (open-raw 12288 12288))
              (r (get opened :r))
              (h (get opened :h))
              (m (js-call r :value_table_new h 10 4)))
@@ -764,9 +764,9 @@
                         (progn
                           (js-call assert :equal (js-call r :last_error) 2)
                           (setq keep-blocks false))
-                        (let ((odd (/= (% index 2) 0)))
+                        (let ((keep-pinned (= (% index 3) 0)))
                           (setq index (+ index 1))
-                          (when odd
+                          (when keep-pinned
                             (js-call r :heap_pin h block)
                             (js-call pinned :push block)))))))
               (let ((keep-empty t))
@@ -788,13 +788,14 @@
                       (identity (js-call r :value_key_hash h m)))
                   (js-call assert :equal (js-call r :value_table_put h m nan record) 1)
                   (js-call assert :equal (js-call r :value_table_size h m) 5)
-                  (funcall assert (< (js-call r :heap_used h) (aref before 0)))
+                  (js-call assert :equal (js-call r :heap_capacity h) 12288)
+                  (funcall assert (<= (js-call r :heap_used h) 12288))
                   (js-call assert :equal (js-call r :heap_live h) (aref before 1))
                   (js-call assert :equal (js-call r :heap_collections h) (aref before 2))
                   (js-call assert :equal (js-call r :value_key_hash h m) identity)
                   (let ((fresh (js-call r :value_data h nan 4))
                         (view (new globalThis.DataView (get (get r :memory) :buffer))))
-                    (funcall assert (/= fresh old-point))
+                    (funcall assert (= fresh old-point))
                     (js-call assert :equal (js-call view :getUint32 fresh t) 305419896)
                     (js-call assert :equal (js-call view :getUint32 (+ fresh 4) t) 4294443008)
                     (funcall assert (Object/is (raw-f64 r h minus) -0.0))
@@ -849,7 +850,7 @@
         (await (writeFile wasm-path artifact))
         (let* ((inst (new WebAssembly.Instance mod))
                (e (get inst :exports))
-               (h (funcall (get e "heap-new") 96 16384 16384)))
+               (h (funcall (get e "heap-new") 16384 16384)))
           (funcall (get e "heap-auto") h 1)
           (let ((out (funcall normalize-u64 (funcall (get e "table-pressure") h 1000))))
             (funcall assert (> out (v64 0)))

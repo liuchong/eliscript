@@ -18,7 +18,7 @@
   (defconst native-target
     (if (= (get process :platform) "linux") "arm64-linux" "arm64-macos"))
   (defconst memory (Object/freeze (js-object :initialPages 128 :maximumPages 4096)))
-  (defconst budget (Object/freeze (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)))
+  (defconst budget (Object/freeze (js-object :initialBytes 65536 :maxBytes 16777216)))
   (defconst entry "sequence-data.mjs")
   (defconst observations
     (js-array "bounded_consumption" "cached_realization" "successful_cache" "early_stop_and_partitions"

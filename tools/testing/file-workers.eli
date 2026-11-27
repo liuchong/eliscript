@@ -9,6 +9,9 @@
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" fixtureChildArguments prepareFixtureEnvironment)
   (import "./final-functional-scope.mjs" runFinalFunctionalScope)
+  (import "./profile-store.mjs" loadTestProfile recordTestProfile estimateTestWeight estimateTestRssBytes saveLastFailures)
+  (import "./scheduler.mjs" runMemoryAwareLptQueue)
+  (import "./reporter.mjs" summarizeSuiteRun formatSuiteSummary)
 
   ;; Compiler-heavy files keep a normal JSC heap under the same real RSS
   ;; supervisor; --smol repeatedly collects their large immutable IR graphs.
@@ -119,7 +122,15 @@
     "release-package-install-selfhosted.test.mjs"
     "compiler-package-execution-selfhosted.test.mjs"
     "compiler-matrix-archive-debug-selfhosted.test.mjs"
-    "reader-program-fuzz-acceptance-selfhosted.test.mjs")))
+    "reader-program-fuzz-acceptance-selfhosted.test.mjs"
+    "wasm-managed-project-linking.test.mjs"
+    "managed-project-zero-imports-selfhosted.test.mjs"
+    "native-managed-runtime.test.mjs"
+    "wasm-managed-core-modules.test.mjs"
+    "wasm-managed-str.test.mjs"
+    "wasm-managed-regexp.test.mjs"
+    "wasm-managed-exceptions.test.mjs"
+    "wasm-managed-callables.test.mjs")))
 
   (defun isHeavyParallelTestFile (file)
     (js-call heavy-parallel-files :has (basename file)))
@@ -171,9 +182,9 @@
                          (and (not (nil? worker-override)) (> worker-override 1))))
            (cpu-count (Math/max 1 (js-length (cpus))))
            (mem-gib (Math/max 1 (Math/floor (/ (totalmem) 1073741824))))
-           (default-workers (Math/min 12 (Math/max 4 (Math/floor (* cpu-count 0.75)))))
-           (default-heavy (Math/min 6 (Math/max 2 (Math/floor (/ mem-gib 10)))))
-           (default-node (Math/min 10 (Math/max 3 (Math/floor (/ cpu-count 2)))))
+           (default-workers (Math/min 8 (Math/max 4 (Math/floor (* cpu-count 0.5)))))
+           (default-heavy (Math/min 4 (Math/max 2 (Math/floor (/ mem-gib 14)))))
+           (default-node (Math/min 8 (Math/max 3 (Math/floor (/ cpu-count 2)))))
            (default-agg (Math/min 21474836480 (Math/max 8589934592 (Math/floor (* (totalmem) 0.65)))))
            (max-workers (if parallel (or worker-override default-workers) FILE_WORKERS))
            (heavy-workers (if parallel (Math/min max-workers (or heavy-override default-heavy)) 1))
@@ -328,6 +339,7 @@
                 (when (worker-truth (get result :resource)) (put row :resource (get result :resource)))
                 (when (worker-truth (get result :message)) (put row :message (get result :message)))
                 (when (Number/isFinite (get result :elapsedMs)) (put row :elapsedMs (get result :elapsedMs)))
+                (when (Number/isFinite (get result :peakRssBytes)) (put row :peakRssBytes (get result :peakRssBytes)))
                 (put results index row))
               (catch error
                 (console/error error) (put results index (js-object :file file :exitCode 1))))))))
@@ -336,12 +348,28 @@
                    (max-workers (Math/max 1 (or parallel-workers-opt (get config :maxWorkers))))
                    (heavy-workers (Math/max 1 (Math/min max-workers
                      (or (parse-positive-int (worker-optional options "heavyWorkers")) (get config :heavyWorkers)))))
-                   (order (lptFileIndices files))
-                   (items (js-call order :map (lambda (index)
-                     (js-object :index index :heavy (isHeavyParallelTestFile (aref files index)))))))
-              (await (runLptQueue items max-workers heavy-workers
-                (lambda () (or (/= signal-code 0) (worker-truth (get supervisor :failure))))
-                (async (entry) (await (funcall run-file (get entry :index)))))))
+                   (profile (get options :profile))
+                   (agg-ceiling (or (get options :aggregateCeilingBytes) (get config :aggregateCeilingBytes)))
+                   (has-telemetry (= (value-type (get supervisor :telemetry)) "function"))
+                   (items (js-call (Array/from (js-object :length (js-length files)) (lambda (unused index)
+                            (let* ((file (aref files index))
+                                   (heavy (isHeavyParallelTestFile file))
+                                   (weight (estimateTestWeight profile file (test-file-weight file))))
+                              (js-object :index index :file file :heavy heavy :weight weight
+                                :estimatedRssBytes (estimateTestRssBytes profile file heavy)))))
+                            :sort (lambda (a b)
+                              (let ((diff (- (get b :weight) (get a :weight))))
+                                (if (/= diff 0) diff (- (get a :index) (get b :index))))))))
+              (if has-telemetry
+                (await (runMemoryAwareLptQueue items
+                  (js-object :maxWorkers max-workers :heavyWorkers heavy-workers :aggregateCeilingBytes agg-ceiling)
+                  (js-object
+                    :shouldStop (lambda () (or (/= signal-code 0) (worker-truth (get supervisor :failure))))
+                    :getLiveTelemetry (lambda () (js-call supervisor :telemetry))
+                    :runItem (async (entry) (await (funcall run-file (get entry :index)))))))
+                (await (runLptQueue items max-workers heavy-workers
+                  (lambda () (or (/= signal-code 0) (worker-truth (get supervisor :failure))))
+                  (async (entry) (await (funcall run-file (get entry :index))))))))
             (while (and (= signal-code 0) (not (worker-truth (get supervisor :failure))) (< cursor (js-length files)))
               (if (isExclusiveTestFile (aref files cursor))
                 (let ((index cursor)) (setq cursor (1+ cursor)) (await (funcall run-file index)))
@@ -366,7 +394,9 @@
     "ELISCRIPT_SUITE_RUN_ID" "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"
     "ELISCRIPT_TEST_SUITE_LEDGER" "ELISCRIPT_DEFER_SUITE_FINALIZE"
     "ELISCRIPT_TEST_PARALLEL" "ELISCRIPT_TEST_WORKERS"
-    "ELISCRIPT_HEAVY_WORKERS" "ELISCRIPT_NODE_WORKERS")))
+    "ELISCRIPT_HEAVY_WORKERS" "ELISCRIPT_NODE_WORKERS"
+    "ELISCRIPT_TEST_IR_CACHE" "ELISCRIPT_DISABLE_TEST_IR_CACHE"
+    "ELISCRIPT_TEST_KEEP_GOING")))
   (defconst bound-env-keys (new globalThis.Set (js-array
     "NATIVE_TARGET" "STAGE3_FUNCTIONAL_RUNTIME_PROFILE" "NODE_OPTIONS"
     "BUN_TEST_RUNNER" "BUN_ARTIFACT_TEST_RUNNER" "EMACS" "BUN" "NODE")))
@@ -425,8 +455,15 @@
   (defasync runTestFiles (files &rest configuration)
     (validate-files files)
     (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
-           (environment (get options :environment (get globalThis.process :env)))
+           (base-environment (get options :environment (get globalThis.process :env)))
            (source-root (get options :sourceRoot (js-call globalThis.process :cwd)))
+           (environment (if (and (/= (worker-optional base-environment "ELISCRIPT_DISABLE_TEST_IR_CACHE") "1")
+                                 (/= (worker-optional options "irCache") false)
+                                 (undefined? (worker-optional base-environment "ELISCRIPT_TEST_IR_CACHE")))
+                          (Object/assign (js-object) base-environment (js-object :ELISCRIPT_TEST_IR_CACHE "1"))
+                          base-environment))
+           (profile (loadTestProfile source-root))
+           (wall-started (Date/now))
            (explicit-parallel (or (= (worker-optional options "parallel") t)
                                   (not (nil? (parse-positive-int (worker-optional options "parallelWorkers"))))))
            (parallel-config (if explicit-parallel (resolveParallelConfig environment options) nil))
@@ -435,12 +472,15 @@
                                (nullish? (worker-optional environment "ELISCRIPT_TEST_TOTAL_RSS_BYTES"))
                                (nullish? (get options :limits nil))
                                (not (nullish? (get parallel-config :aggregateCeilingBytes)))))
-           (schedule-options (if (and explicit-parallel (get parallel-config :parallel))
-                               (Object/assign (js-object) options (js-object
-                                 :parallel t
-                                 :parallelWorkers (get parallel-config :maxWorkers)
-                                 :heavyWorkers (get parallel-config :heavyWorkers)))
-                               options))
+           (schedule-options (Object/assign (js-object) options
+                               (js-object :environment environment :profile profile)
+                               (if (and explicit-parallel (get parallel-config :parallel))
+                                 (js-object
+                                   :parallel t
+                                   :parallelWorkers (get parallel-config :maxWorkers)
+                                   :heavyWorkers (get parallel-config :heavyWorkers)
+                                   :aggregateCeilingBytes (get parallel-config :aggregateCeilingBytes))
+                                 (js-object))))
            (archive (resolve ".eliscript-cache" "test-results"
                      (str "file-workers-" (Date/now) "-" (get globalThis.process :pid) ".json")))
            (explicit-archive (worker-optional environment "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"))
@@ -461,14 +501,28 @@
              (failed-files (js-call (js-call (get result :results) :filter
                              (lambda (row) (or (/= (get row :exitCode) 0) (worker-truth (get row :failure)))))
                              :map (lambda (row) (get row :file))))
+             (unstarted-files (js-call files :filter (lambda (file) (not (js-call completed-set :has file)))))
+             (telemetry-snap (when (and supervisor (= (value-type (get supervisor :telemetry)) "function"))
+                               (js-call supervisor :telemetry)))
+             (summary (summarizeSuiteRun (js-object
+                        :suite "file-workers"
+                        :results (get result :results)
+                        :unstarted unstarted-files
+                        :wallMs (- (Date/now) wall-started)
+                        :peakAggregateRssBytes (when telemetry-snap (get telemetry-snap :aggregateRssBytes)))))
              (record (Object/assign (js-object) result (js-object
                :inventory files
                :failedFiles failed-files
-               :unstarted (js-call files :filter (lambda (file) (not (js-call completed-set :has file))))
+               :unstarted unstarted-files
+               :summary summary
                :passedFileDigests (get digest-outcome :digests)
                :passedFileDigestErrors (get digest-outcome :errors)
                :resourceFailure (let ((failure (worker-optional supervisor "failure")))
                                  (if (nullish? failure) nil failure))))))
+        (try (recordTestProfile source-root (get result :results)) (catch _prof nil))
+        (try (saveLastFailures source-root "file-workers" failed-files) (catch _fail nil))
+        (when (and (> (js-length files) 1) (/= (worker-optional options "quietSummary") t))
+          (js-call globalThis.console :log (formatSuiteSummary summary)))
         (try
           (await (mkdir (resolve ".eliscript-cache" "test-results") (js-object :recursive t)))
           (let ((payload (+ (JSON/stringify record nil 2) "\n")))

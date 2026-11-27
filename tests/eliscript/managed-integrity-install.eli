@@ -8,7 +8,7 @@
   (defconst original (Object/assign (js-object) framework))
   (unless (= (js-call (js-call (createHash "sha256") :update
                (readFileSync (resolve root "tests/wasm-managed-object-integrity-test-ground.mjs"))) :digest "hex")
-             "3082038b9980075518aaeba4af363deea1ee394048351b9af4dc92b1fc3f1f1b")
+             "2af39e8f9b6e77153c2bf89a8c6956760a20fad49c3cf82b662ec842062bb2aa")
     (throw (new globalThis.TypeError "complete original integrity suite source identity changed")))
   (defconst counts (new globalThis.Map))
   (defvar restored false)

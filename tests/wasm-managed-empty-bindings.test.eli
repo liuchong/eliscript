@@ -223,7 +223,7 @@
     (let* ((prog (js-call (get b :compiler) :compile_ir_string
                    "(defconst marker 1) (defun factory () (let (x) (lambda (v) (if (eq v nil) x (progn (setq x v) x))))) (defun invoke (f v) (funcall f v)) (export factory invoke)"
                    "capacity-bindings.eli"))
-           (a (instantiateManagedRuntime (bytes prog) (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 8192)))
+           (a (instantiateManagedRuntime (bytes prog) (js-object :initialBytes 8192 :maxBytes 8192)))
            (_ (js-call a :auto 1))
            (held (js-call a :number -0.0))
            (outer (js-call a :frame 1))

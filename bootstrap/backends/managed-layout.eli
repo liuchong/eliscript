@@ -28,23 +28,50 @@
 
   (defconst RO_BASE_BYTES 256)
   (defconst OUTER_OBJECT_HEADER_BYTES 32)
-  (defconst OBJECT_ARENA_NULL_SENTINEL_BYTES 8)
-  (defconst OBJECT_ARENA_MIN_PAYLOAD_BYTES 64)
-  (defconst SLOT_ENTRY_BYTES 24)
-  (defconst DYNAMIC_SLOT_BITS 24)
-  (defconst DYNAMIC_SLOT_MASK 16777215)
-  (defconst DYNAMIC_GENERATION_MAX 16777215)
-  (defconst MAX_SLOTS_CEILING 16777215)
+  (defconst SEGMENT_HEADER_BYTES 32)
+  (defconst GC_OBJECT_HEADER_BYTES 32)
+  (defconst BODY_BLOCK_HEADER_BYTES 8)
+  (defconst OBJECT_ARENA_MIN_PAYLOAD_BYTES 96)
+  (defconst MIN_MANAGED_HEAP_BYTES 3696)
   (defconst MAX_MANAGED_BYTES 1073741824)
   (defconst HEAP_CONTROL_MAGIC 1212498256)
+  (defconst HEAP_SEGMENT_MAGIC 1212498259)
+  (defconst OBJ_LIVE_MAGIC 1330726989)
+  (defconst BODY_BLOCK_MAGIC 1112491097)
+  (defconst GC_FLAG_LIVE 1)
+  (defconst GC_FLAG_MARK_BIT 2)
+  (defconst GC_FLAG_MARK_MASK 3)
+  (defconst GC_FLAG_EPHEMERON 4)
+  (defconst GC_FLAG_FINALIZE 8)
+  (defconst GC_FLAG_RO 16)
+  (defconst AUX_HEADER_BYTES 24)
+  (defconst AUX_HEADER_WORDS 6)
+  (defconst AUX_OWNED_OVERHEAD_BYTES 56)
+  (defconst WEAK_BUCKETS 512)
+  (defconst WEAK_ENTRY_BYTES 20)
+  (defconst ROOT_SLOTS 32)
+  (defconst WELL_KNOWN_SYMBOL_COUNT 15)
+  (defconst RUNTIME_OBJECT_WORDS 8)
+  (defconst FOREIGN_OBJECT_WORDS 6)
+  (defconst EXTERNAL_REF_WORDS 4)
+  (defconst CALL_RESULT_WORDS 6)
+  (defconst CALL_DESCRIPTOR_WORDS 4)
+  (defconst RECORD_HEADER_WORDS 4)
+  (defconst NAMED_FUNCTION_CACHE_WORDS 4)
+  (defconst MODULE_RECORD_WORDS 8)
+  (defconst ERROR_AGGREGATE_WORDS 12)
+  (defconst REGEXP_OBJECT_WORDS 6)
+  (defconst REGEXP_SOURCE_HEADER_WORDS 4)
+  (defconst STANDARD_LINK_COUNT 24)
 
-  ;; --- 2. Fixed Control Block Layout (882 u32 words = 3,528B payload, 3,560B owned) ---
+  ;; --- 2. Fixed Control Block Layout (888 u32 words = 3,552B payload, 3,584B owned) ---
   ;; Section A: u32 scalars (words 0..35, byte offsets 0..140)
   ;; Section B: u32[256] weak named-function bucket counts (words 36..291, byte offsets 144..1164)
   ;; Section C: 8B-aligned Val64 slots (qwords 0..294, byte offsets 1168..3520):
   ;;   - qwords 0..23  (byte offsets 1168..1352): strong roots, prototypes & caches
   ;;   - qwords 24..38 (byte offsets 1360..1472): 15 weak well-known Symbol handles
   ;;   - qwords 39..294 (byte offsets 1480..3520): 256 weak named-function bucket heads
+  ;; Section D: FFI handle table scalars & rt-scope cache (words 882..891, byte offsets 3528..3564)
   (defconst CONTROL_U32_SCALAR_WORDS 36)
   (defconst CONTROL_WEAK_COUNT_BUCKETS 256)
   (defconst CONTROL_U32_TOTAL_WORDS 292)
@@ -55,17 +82,17 @@
   (defconst CONTROL_V64_WEAK_HEAD_BASE_OFFSET 1480)
   (defconst CONTROL_V64_WEAK_HEAD_BUCKETS 256)
   (defconst CONTROL_V64_TOTAL_QWORDS 295)
-  (defconst FIXED_CONTROL_WORDS 882)
-  (defconst FIXED_CONTROL_PAYLOAD_BYTES 3528)
-  (defconst FIXED_OWNED_BYTES 3560)
+  (defconst FIXED_CONTROL_WORDS 892)
+  (defconst FIXED_CONTROL_PAYLOAD_BYTES 3568)
+  (defconst FIXED_OWNED_BYTES 3600)
 
   (defconst CONTROL_U32_OFFSETS
     (Object/freeze
       (js-object
         :magic 0
-        :objectArena 4
-        :slotArena 8
-        :bitmapArena 12
+        :segmentHead 4
+        :segmentTail 8
+        :allObjectsHead 12
         :auxArena 16
         :roBase 20
         :roDir 24
@@ -74,12 +101,12 @@
         :roBytes 36
         :metaDir 40
         :metaCount 44
-        :slotCapacity 48
-        :maxSlotsCeiling 52
-        :highWater 56
-        :freeSlotHead 60
-        :freeSlotTail 64
-        :objectCursor 68
+        :segmentCount 48
+        :heapId 52
+        :minSegAddr 56
+        :maxSegEnd 60
+        :liveBytes 64
+        :freeBytes 68
         :freeBlockHead 72
         :freeTreeRoot 76
         :liveCount 80
@@ -96,9 +123,13 @@
         :realmDirty 124
         :foreignTokenWatermark 128
         :descriptionInitCode 132
-        :slotBits 136
-        :slotMask 140
-        :weakBucketCountsBase 144)))
+        :pinnedObjectsCount 136
+        :gcStateFlags 140
+        :weakBucketCountsBase 144
+        :ffiHandleTable 3528
+        :ffiHandleCount 3532
+        :ffiFreeHead 3536
+        :rtScopeCache 3544)))
 
   (defconst CONTROL_V64_OFFSETS
     (Object/freeze
@@ -217,15 +248,13 @@
   (defun val64-readable-block-p (raw)
     (or (val64-dynamic-p raw) (val64-ro-p raw)))
 
-  (defun val64-dynamic-slot (raw)
+  (defun val64-dynamic-addr (raw)
     (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
-    (bit-and (js-call f64-scratch-view :getUint32 0 t) DYNAMIC_SLOT_MASK))
+    (js-call f64-scratch-view :getUint32 0 t))
 
-  (defun val64-dynamic-generation (raw)
+  (defun val64-dynamic-heap-id (raw)
     (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
-    (let ((low (js-call f64-scratch-view :getUint32 0 t))
-          (high (js-call f64-scratch-view :getUint32 4 t)))
-      (uint32 (+ (Math/floor (/ low 16777216)) (* (bit-and high 65535) 256)))))
+    (bit-and (js-call f64-scratch-view :getUint32 4 t) 65535))
 
   (defun val64-ro-index (raw)
     (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
@@ -235,61 +264,37 @@
     (js-call f64-scratch-view :setBigUint64 0 (normalize-u64 raw) t)
     (bit-and (js-call f64-scratch-view :getUint32 4 t) 65535))
 
-  ;; --- 4. Scheme B Honest Total Budget & Initial Arena Sizing Formulas ---
+  ;; --- 4. Pure Byte-Budget Initial Heap Sizing Formulas ---
   (defun align8-up (bytes)
     (* (Math/ceil (/ bytes 8)) 8))
 
   (defun align8-down (bytes)
     (* (Math/floor (/ bytes 8)) 8))
 
-  (defun aligned-slot-arena-bytes (slot-capacity)
-    (+ OUTER_OBJECT_HEADER_BYTES (* (+ slot-capacity 1) SLOT_ENTRY_BYTES)))
+  (defconst ALIGNED_MIN_SEGMENT_BYTES
+    (+ SEGMENT_HEADER_BYTES 64))
 
-  (defun aligned-bitmap-arena-bytes (slot-capacity)
-    (+ OUTER_OBJECT_HEADER_BYTES
-       (align8-up (* (Math/ceil (/ (+ slot-capacity 1) 32)) 4))))
+  (defun minimum-managed-heap-bytes ()
+    MIN_MANAGED_HEAP_BYTES)
 
-  (defconst ALIGNED_MIN_OBJECT_ARENA_BYTES
-    (+ OUTER_OBJECT_HEADER_BYTES OBJECT_ARENA_MIN_PAYLOAD_BYTES))
-
-  (defun minimum-managed-heap-bytes (slot-capacity)
-    (+ FIXED_OWNED_BYTES
-       (aligned-slot-arena-bytes slot-capacity)
-       (aligned-bitmap-arena-bytes slot-capacity)
-       ALIGNED_MIN_OBJECT_ARENA_BYTES))
-
-  (defun compute-initial-managed-arenas (slots-ceiling initial-bytes max-bytes)
-    (if (or (not (Number/isInteger slots-ceiling)) (< slots-ceiling 1) (> slots-ceiling MAX_SLOTS_CEILING)
-            (not (Number/isInteger initial-bytes)) (not (Number/isInteger max-bytes))
+  (defun compute-initial-managed-heap (initial-bytes max-bytes)
+    (if (or (not (Number/isInteger initial-bytes)) (not (Number/isInteger max-bytes))
             (< initial-bytes 0) (> initial-bytes max-bytes) (> max-bytes MAX_MANAGED_BYTES)
-            (< initial-bytes (minimum-managed-heap-bytes 1)))
+            (< initial-bytes MIN_MANAGED_HEAP_BYTES))
       nil
-      (let ((low 1) (high (Math/min 1024 slots-ceiling)) (best 1))
-        (while (<= low high)
-          (let ((mid (Math/floor (/ (+ low high) 2))))
-            (if (<= (minimum-managed-heap-bytes mid) initial-bytes)
-              (progn (setq best mid) (setq low (1+ mid)))
-              (setq high (1- mid)))))
-        (let* ((slot-bytes (aligned-slot-arena-bytes best))
-               (bitmap-bytes (aligned-bitmap-arena-bytes best))
-               (remaining (- initial-bytes (+ FIXED_OWNED_BYTES slot-bytes bitmap-bytes)))
-               (object-bytes (align8-down remaining))
-               (owned (+ FIXED_OWNED_BYTES slot-bytes bitmap-bytes object-bytes)))
-          (if (or (< (- object-bytes OUTER_OBJECT_HEADER_BYTES) OBJECT_ARENA_MIN_PAYLOAD_BYTES)
-                  (> owned initial-bytes) (> owned max-bytes))
-            nil
-            (Object/freeze
-              (js-object
-                :initialSlots best
-                :slotsCeiling slots-ceiling
-                :fixedOwnedBytes FIXED_OWNED_BYTES
-                :alignedSlotArenaBytes slot-bytes
-                :alignedBitmapArenaBytes bitmap-bytes
-                :alignedObjectArenaBytes object-bytes
-                :objectArenaPayloadCapacity (- object-bytes OUTER_OBJECT_HEADER_BYTES)
-                :ownedBytes owned
-                :initialBytes initial-bytes
-                :maxBytes max-bytes)))))))
+      (let* ((owned (align8-down initial-bytes))
+             (segment-bytes (- owned FIXED_OWNED_BYTES)))
+        (if (or (< segment-bytes ALIGNED_MIN_SEGMENT_BYTES)
+                (> owned initial-bytes) (> owned max-bytes))
+          nil
+          (Object/freeze
+            (js-object
+              :fixedOwnedBytes FIXED_OWNED_BYTES
+              :initialSegmentBytes segment-bytes
+              :segmentPayloadCapacity (- segment-bytes SEGMENT_HEADER_BYTES)
+              :ownedBytes owned
+              :initialBytes initial-bytes
+              :maxBytes max-bytes))))))
 
   (export
     INSTANCE_HEADER_BYTES LOW_RAW_CURSOR_OFFSET LOW_LIFETIME_EPOCH_OFFSET
@@ -297,9 +302,16 @@
     LOW_RANDOM_SEED_OFFSET LOW_UNICODE_CACHE_OFFSET LOW_HOST_PROPERTY_ORDER_OFFSET
     LOW_RO_BASE_OFFSET LOW_RO_DIR_OFFSET LOW_RO_COUNT_OFFSET LOW_RO_IMAGE_SLOT_OFFSET
     LOW_IMAGE_DATA_END_OFFSET LOW_OUTER_FREE_HEAD_OFFSET LOW_META_DIR_OFFSET LOW_META_COUNT_OFFSET
-    RO_BASE_BYTES OUTER_OBJECT_HEADER_BYTES OBJECT_ARENA_NULL_SENTINEL_BYTES
-    OBJECT_ARENA_MIN_PAYLOAD_BYTES SLOT_ENTRY_BYTES DYNAMIC_SLOT_BITS DYNAMIC_SLOT_MASK
-    DYNAMIC_GENERATION_MAX MAX_SLOTS_CEILING MAX_MANAGED_BYTES HEAP_CONTROL_MAGIC
+    RO_BASE_BYTES OUTER_OBJECT_HEADER_BYTES SEGMENT_HEADER_BYTES
+    GC_OBJECT_HEADER_BYTES BODY_BLOCK_HEADER_BYTES OBJECT_ARENA_MIN_PAYLOAD_BYTES
+    MIN_MANAGED_HEAP_BYTES MAX_MANAGED_BYTES HEAP_CONTROL_MAGIC
+    HEAP_SEGMENT_MAGIC OBJ_LIVE_MAGIC BODY_BLOCK_MAGIC
+    GC_FLAG_LIVE GC_FLAG_MARK_BIT GC_FLAG_MARK_MASK GC_FLAG_EPHEMERON GC_FLAG_FINALIZE GC_FLAG_RO
+    AUX_HEADER_BYTES AUX_HEADER_WORDS AUX_OWNED_OVERHEAD_BYTES WEAK_BUCKETS WEAK_ENTRY_BYTES
+    ROOT_SLOTS WELL_KNOWN_SYMBOL_COUNT RUNTIME_OBJECT_WORDS FOREIGN_OBJECT_WORDS
+    EXTERNAL_REF_WORDS CALL_RESULT_WORDS CALL_DESCRIPTOR_WORDS RECORD_HEADER_WORDS
+    NAMED_FUNCTION_CACHE_WORDS MODULE_RECORD_WORDS ERROR_AGGREGATE_WORDS
+    REGEXP_OBJECT_WORDS REGEXP_SOURCE_HEADER_WORDS STANDARD_LINK_COUNT
     CONTROL_U32_SCALAR_WORDS CONTROL_WEAK_COUNT_BUCKETS CONTROL_U32_TOTAL_WORDS
     CONTROL_V64_BASE_OFFSET CONTROL_V64_NAMED_QWORDS CONTROL_V64_SYMBOL_BASE_OFFSET
     CONTROL_V64_SYMBOL_COUNT CONTROL_V64_WEAK_HEAD_BASE_OFFSET CONTROL_V64_WEAK_HEAD_BUCKETS
@@ -314,6 +326,6 @@
     bits64-u64-to-f64 f64-raw-collides-p encode-inline-f64-words encode-ro-ref-words
     val64-singleton-p val64-inline-number-p val64-decode-inline-number
     val64-dynamic-p val64-ro-p val64-readable-block-p
-    val64-dynamic-slot val64-dynamic-generation val64-ro-index val64-ro-image-slot
-    align8-up align8-down aligned-slot-arena-bytes aligned-bitmap-arena-bytes
-    ALIGNED_MIN_OBJECT_ARENA_BYTES minimum-managed-heap-bytes compute-initial-managed-arenas))
+    val64-dynamic-addr val64-dynamic-heap-id val64-ro-index val64-ro-image-slot
+    align8-up align8-down
+    ALIGNED_MIN_SEGMENT_BYTES minimum-managed-heap-bytes compute-initial-managed-heap))

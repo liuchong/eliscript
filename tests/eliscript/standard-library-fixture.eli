@@ -5,27 +5,27 @@
   (defconst standardLibraryFixturePlans (js-array
 
     (js-object :suite "tests/wasm-managed-transient-state.test.mjs" :resources false
-      :sha256 "8b665959f76da3b71df0d7e805d6770a4401a9fd886e910ea5d37c1704fd7dfc")
+      :sha256 "39ebc5e8b2b141fbf4c0caf1f6366239a03a2c19ca7ca55377cc64714302a3c8")
     (js-object :suite "tests/wasm-managed-core-modules.test.mjs" :resources t
       :deadlineTitle "Given collection at every allocation when standard modules capture constructors callbacks aliases and metadata then original identities and error order survive GC"
       :functionalDeadline 240000
       :nativeDeadlineTitle "Given native code from the same complete typed standard-module graph when the original semantic cases run then Node and Bun results and root cleanup agree"
       :nativeFunctionalDeadline 480000
-      :sha256 "1ea9231db9b585004a437ba047f95e5a2610190f642ed8fcec9812047d3b7003")
+      :sha256 "44afb3c146ac31c61c379eaa260b19943298397dec10264e6e941e700bcba811")
     (js-object :suite "tests/wasm-managed-sorted-core.test.mjs" :resources t
       :deadlineTitle "Given actual provider sorted classes when bulk values cross the real phased WASM boundary then brands comparator metadata identity and pure target AVL updates survive GC"
       :functionalDeadline 360000
       :nativeDeadlineTitle "Given actual provider values when the same phased graph executes native machine code then provider identities and comparator effects are preserved without host sorting"
       :nativeFunctionalDeadline 600000
-      :sha256 "53319f72cbed6ba29dc6d270e81f5664fe40f63f83419c735c96dcbe27460dc3")
+      :sha256 "1c8863bff7a509c2ee7ca76112ae011184d049de39162fe0e90dcdcfd4b0372f")
     (js-object :suite "tests/managed-stdlib-value-json.test.mjs" :resources false
-      :sha256 "17fa8c9f1549f66105627fd924efcbd0bdc3fd1cc292bb44e1bb9ed27a66e519"
+      :sha256 "71e84de6ecc50668f4ee932666dbd352c2b525a078379d9d20c0790dd0ab8255"
       :deadlineTitle "Given collection at every allocation when complete original stdlib modules execute then persistent callbacks identities and error recovery retain their roots"
       :functionalDeadline 240000
       :nativeDeadlineTitle "Given a true native library of the same original stdlib graph when the fixed and seeded semantic corpus runs then every result matches original Node JavaScript"
       :nativeFunctionalDeadline 480000)
     (js-object :suite "tests/wasm-managed-math-transcendental.test.mjs" :resources false
-      :sha256 "8c95e7c46ad88c583005add3009b2ed3dc46a8cb3b2f7657d190013fbc998d99"
+      :sha256 "0c09bbf814151502678933f40a2fd9195dd4022bbd15ae610962c699ea225303"
       :deadlineTitle "Given cold held borrowed bound callback and Reflect Math routes When coerced overridden reflected or constructed Then every original call boundary is preserved"
       :functionalDeadline 120000)))
   (defun standardLibraryFixtureOptions (suite environment input)
@@ -33,7 +33,7 @@
            (enabled (and plan (get plan :resources)
              (= (get environment :ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE) "small")
              (= (get environment :ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE) "1")
-             input (= (get input :maxSlots) 8192) (= (get input :initialBytes) 262144)
+             input (= (get input :initialBytes) 262144)
              (= (get input :maxBytes) 16777216)))
            (resources (when enabled (independentCompilerResources (js-object :profile "small"))))
            (effective (if enabled (Object/assign (js-object) input (get resources :budget)) input)))

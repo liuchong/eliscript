@@ -67,7 +67,7 @@
         ((= mode "wasm-encounters")
          (let* ((bytes (readFileSync (aref (get process :argv) 3)))
                 (expected (JSON/parse (aref (get process :argv) 4)))
-                (options (js-object :maxSlots 2048 :initialBytes 65536 :maxBytes 16777216)))
+                (options (js-object :initialBytes 65536 :maxBytes 16777216)))
            (js-call assert :deepEqual (WebAssembly.Module/imports (new globalThis.WebAssembly.Module bytes)) (js-array))
            (let* ((a (instantiateManagedRuntime bytes options))
                   (x (js-call a :sourceObject (js-object)))

@@ -447,7 +447,7 @@
 
   (test "large UTF16 JSON output grows actual memory and deep or capacity failures preserve caller roots"
     (lambda ()
-      (let* ((a (get (instance (js-object :maxSlots 4096 :initialBytes 131072 :maxBytes 4194304)) :a))
+      (let* ((a (get (instance (js-object :initialBytes 131072 :maxBytes 4194304)) :a))
              (_ (js-call a :auto 4096))
              (unit (str "中😀" (String/fromCharCode 55296) (String/fromCharCode 0) "\n\"\\"))
              (original (js-call unit :repeat 10000))
@@ -471,7 +471,7 @@
           (funcall assert (Object/is (js-call a :readNumber held) -0.0))
           (js-call a :leaveFrame frame)
           (finish a (js-array text held))))
-      (let* ((small (get (instance (js-object :maxSlots 128 :initialBytes 8192 :maxBytes 16384)) :a))
+      (let* ((small (get (instance (js-object :initialBytes 8192 :maxBytes 16384)) :a))
              (nums (Array/from (js-object :length 1000) (lambda (_v i) i)))
              (many (js-call small :string (str "[" (js-call nums :join ",") "]")))
              (saved (js-call small :number -0.0))

@@ -224,7 +224,7 @@
 
   (test "slot exhaustion preserves caller roots and own checks recover without accepting stale foreign or private handles"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 64 :initialBytes 8192 :maxBytes 65536)))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 8192 :maxBytes 16384)))
             (other (instantiateManagedRuntime bytes)))
         (js-call a :auto 1)
         (let ((receiver (js-call a :string "abc"))
@@ -233,11 +233,11 @@
               (frame (js-call a :frame 1))
               (fillers (js-array)))
           (js-call a :frameSet frame 0 held)
-          ;; A real one-slot value per iteration, with a finite bound: an inline
-          ;; number takes no dynamic slot and would never raise `live`.
-          (let ((steps 0))
-            (while (and (< (js-call a :live) 64) (< steps 256))
-              (js-call fillers :push (js-call a :array))
+          ;; Exhaust the bounded heap with pinned 1-slot arrays before checking OOM.
+          (let ((steps 0) (filling t))
+            (while (and filling (< steps 2048))
+              (try (js-call fillers :push (js-call a :array))
+                (catch _ (setq filling false)))
               (setq steps (+ steps 1))))
           (js-call assert :throws
             (lambda () (js-call a :invoke "own" (js-array receiver key)))
@@ -261,7 +261,7 @@
             (finish other (js-array foreign)))))
       (let* ((inst (new globalThis.WebAssembly.Instance (new globalThis.WebAssembly.Module bytes)))
              (e (get inst :exports))
-             (h (funcall (aref e "heap-new") 64 8192 65536))
+             (h (funcall (aref e "heap-new") 8192 65536))
              (raw-call (lambda (name &rest args)
                          (normalize-u64 (js-call (aref e name) :apply nil (js-call (js-array h) :concat args)))))
              (unfinished (funcall raw-call "value-string" 1)))

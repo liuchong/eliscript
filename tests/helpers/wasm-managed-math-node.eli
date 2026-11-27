@@ -896,7 +896,7 @@
         (js-call a :frameSet frame 0 saved)
         (try
           (let ((index 0))
-            (while (and (<= index 1024) (not exhausted))
+            (while (and (<= index 2048) (not exhausted))
               (try
                 (js-call fillers :push (js-call a :array))
                 (catch error
@@ -1273,7 +1273,7 @@
          (js-call assert :deepEqual
            (js-call globalThis.WebAssembly.Module :imports (new globalThis.WebAssembly.Module bytes))
            (js-array))
-         (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 1024))))
+         (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 65536 :maxBytes 81920))))
            (js-call a :auto 1)
            (try
              (check-math-composite a reference frozen-reference "node-wasm")
@@ -1293,7 +1293,10 @@
                     check-sqrt-pressure)
            :forEach
            (lambda (check-fn)
-             (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 1024))))
+             (let ((a (instantiateManagedRuntime bytes
+                        (if (= check-fn check-sqrt-pressure)
+                          (js-object :initialBytes 16384 :maxBytes 65536)
+                          (js-object)))))
                (try
                  (funcall check-fn a)
                  (finally (finish a))))))

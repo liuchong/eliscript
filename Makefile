@@ -490,6 +490,7 @@ test-core: check-contracts
 		./tests/compiler-runtime-scan-selfhosted.test.mjs \
 		./tests/compiler-corpus-host-completion-selfhosted.test.mjs \
 		./tests/final-functional-scope-selfhosted.test.mjs \
+		./tests/test-framework-selfhosted.test.mjs \
 		./tests/independent-cli-fixture-selfhosted.test.mjs \
 		./tests/independent-cli-invocation-selfhosted.test.mjs \
 		./tests/wasm-static-snapshot-fixture-selfhosted.test.mjs \

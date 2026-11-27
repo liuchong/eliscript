@@ -379,7 +379,7 @@
     (let ((checked (get context :checked))
           (raw (get context :raw)) (owner (get context :owner))
           (extended (funcall globalThis.Boolean (get context :ordinaryDefinition)))
-          (methodByFn (new globalThis.WeakMap)) (registered (new globalThis.Set))
+          (methodByFn (new globalThis.WeakMap)) (registered (new globalThis.Map))
           (tokens (new globalThis.Map)) (released false))
       (put context :nativeTokens tokens)
       ;; Authenticate native intrinsics lazily when the host codec first encodes
@@ -415,10 +415,10 @@
               (when (and (Number/isInteger token) (> token 0))
                 (js-call tokens :set token method))
               (when (and (val64-dynamic-p functionRaw)
-                         (not (js-call registered :has functionRaw)))
+                         (/= (js-call registered :get functionRaw) token))
                 (let ((operation (native-runtime-intrinsic-tag context method)))
                   (when (and (/= operation 0) (get context :foreignIntrinsic))
-                    (js-call registered :add functionRaw)
+                    (js-call registered :set functionRaw token)
                     (funcall checked "value-foreign-intrinsic-register" owner functionRaw operation)))))))))
       (let ((dispose (get lifecycle :dispose)))
         (put lifecycle :dispose (lambda ()
@@ -428,9 +428,11 @@
               (setq released t)
               ;; Revoke any still-live foreign callable handles before closing
               ;; the capability so an escaped handle keeps no internal route.
-              (js-call registered :forEach (lambda (function)
+              (js-call registered :forEach (lambda (expectedToken function)
                 (try
-                  (if (= (funcall raw "value-kind" owner function) 35)
+                  (if (and (= (funcall raw "value-kind" owner function) 35)
+                           (= (funcall raw "value-foreign-token" owner function) expectedToken)
+                           (= (funcall raw "last-error") 0))
                     (funcall checked "value-foreign-intrinsic-register" owner function 0)
                     (progn
                       (funcall raw "value-exception-class-set" owner 0)
@@ -599,8 +601,8 @@
             :get (lambda () (get lifecycle :onForeignFunction))
             :set (lambda (value) (put lifecycle :onForeignFunction value))))
           (put forwarded 1 (Object/create (Object/getPrototypeOf lifecycle) locals))
-          (put (get descriptors "heap-new") :value (function-shape (lambda (slots initial maximum)
-            (let ((owner (Reflect/apply new-heap exports (js-array slots initial maximum))))
+          (put (get descriptors "heap-new") :value (function-shape (lambda (initial maximum)
+            (let ((owner (Reflect/apply new-heap exports (js-array initial maximum))))
               (put context :owner owner) owner)) new-heap))
           (setq runtime (Reflect/apply creator undefined (js-call (js-array
             (Object/create (Object/getPrototypeOf exports) descriptors) descriptor memory) :concat forwarded)))

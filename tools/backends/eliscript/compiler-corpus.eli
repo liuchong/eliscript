@@ -378,7 +378,7 @@
 
   (defun resource-budget-specified-p (value)
     (and (not (nullish? value))
-      (js-call (js-array "maxSlots" "initialBytes" "maxBytes") :some
+      (js-call (js-array "initialBytes" "maxBytes") :some
         (lambda (key) (Object/hasOwn value key)))))
   (defun implicit-tool-resource-recipe-p (record)
     ;; This is admission after the matrix's source authentication, not a new
@@ -603,8 +603,7 @@
                  (= (resource-field original "suite") "tests/wasm-managed-sorted-core.test.mjs")
                  (= (resource-field original "fixture") "tests/fixtures/wasm-managed-sorted.eli")
                  (= (resource-field (get original :maintainedAssertions) "sourceSha256")
-                   "ddbb4e210f322eb6ec5a54e16bd699078df073de0d47f15977995cdcfe43757e")
-                 (= (resource-field declared "maxSlots") 8192)
+                   "07440c1e10969d120db8ac51e65bfd823383bb20d177727ba0b9aeac42e038dc")
                  (= (resource-field declared "initialBytes") 262144)
                  (= (resource-field declared "maxBytes") 16777216)
                  (not (resource-budget-specified-p provided))))
@@ -616,7 +615,6 @@
                  (= (resource-field original "suite") "tests/wasm-managed-wire.test.mjs")
                  (= (resource-field original "fixture") "tests/fixtures/wasm-managed-wire.eli")
                  (= (resource-field original "sourceSha256") wireSuiteSha)
-                 (= (resource-field declared "maxSlots") 8192)
                  (= (resource-field declared "initialBytes") 262144)
                  (= (resource-field declared "maxBytes") 16777216)
                  (not (resource-budget-specified-p provided))))
@@ -626,7 +624,6 @@
                  (= (resource-field original "manifest") "stable-compatibility")
                  (= (resource-field original "suite") "tests/wasm-managed-core-modules.test.mjs")
                  (= (resource-field original "fixture") "tests/fixtures/wasm-managed-core-modules.eli")
-                 (= (resource-field declared "maxSlots") 8192)
                  (= (resource-field declared "initialBytes") 262144)
                  (= (resource-field declared "maxBytes") 16777216)
                  (not (resource-budget-specified-p provided))))
@@ -665,7 +662,7 @@
                      (t "small")))
                    (resources (independentCompilerResources (js-object :profile selected-profile)))
                    (before (Object/assign (js-object)
-                     (if sequence (js-object) (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216 :auto 0))
+                     (if sequence (js-object) (js-object :initialBytes 65536 :maxBytes 16777216 :auto 0))
                      provided declared
                      (if (undefined? (resource-field record "auto")) (js-object) (js-object :auto (get record :auto)))))
                    (explicit-auto (or (and provided (Object/hasOwn provided "auto"))

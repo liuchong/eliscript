@@ -3,6 +3,9 @@
   (import "./resource-supervisor.mjs" startResourceSupervisor)
   (import "./fixture-environment.mjs" prepareFixtureEnvironment fixtureChildArguments)
   (import "./wire-call-cases.mjs" wireCallProfile)
+  (import "./profile-store.mjs" loadTestProfile recordTestProfile estimateTestWeight estimateTestRssBytes loadLastFailures saveLastFailures)
+  (import "./scheduler.mjs" runMemoryAwareLptQueue)
+  (import "./reporter.mjs" summarizeSuiteRun formatSuiteSummary writeSuiteReport)
   (import "node:fs/promises" readFile mkdir writeFile)
   (import "node:path" resolve relative basename dirname)
   (import "node:crypto" createHash)
@@ -37,7 +40,7 @@
     (js-array "direct-wasm-backend.test.mjs" 4)
     (js-array "native-managed-behavior.test.mjs" 2))))
   (defconst ingress-sha "f1eebc44b0f38ad4afde8d8a3140468a350944b76f93e3bdd5ff6c8418fd86cb")
-  (defconst package-sha "8463ca604119f8342d1735b11a5ca607d6ab878fd75539ac2d2d4243bd517000")
+  (defconst package-sha "94cdcc46462a0df41059db03cc0d550e9476585777aed3915568bfcb28b5fe2b")
   (defconst tools-sha "8613e99c1b9e50a03b8a3d0296a71326f66cf7451d1e10c5d28b23e08affef11")
   (defconst cancellation-reason
     "The user cancelled WASM/native compiler execution hosts; JS stage3 still emits and executes all user-program targets.")
@@ -207,10 +210,14 @@
                                   (/= (get item :failure) "cancelled"))))))
                (missing (< (js-length ran) shard-count))
                (max-elapsed 0)
+               (max-peak-rss 0)
                (shard-rows (js-call bucket :map (lambda (item idx)
                              (when (and item (Number/isFinite (get item :elapsedMs))
                                         (> (get item :elapsedMs) max-elapsed))
                                (setq max-elapsed (get item :elapsedMs)))
+                             (when (and item (Number/isFinite (get item :peakRssBytes))
+                                        (> (get item :peakRssBytes) max-peak-rss))
+                               (setq max-peak-rss (get item :peakRssBytes)))
                              (if item
                                (js-object :shardIndex (get item :shardIndex idx)
                                  :shardCount shard-count :exitCode (get item :exitCode)
@@ -222,6 +229,8 @@
                       :elapsedMs max-elapsed
                       :shards shard-rows))
                (primary (or failed (aref ran 0))))
+          (when (> max-peak-rss 0)
+            (put row :peakRssBytes max-peak-rss))
           (when (and failed (funcall globalThis.Boolean (get failed :failure))
                      (/= (get failed :failure) "cancelled"))
             (put row :failure (get failed :failure)))
@@ -235,12 +244,50 @@
             (put row :monitor (get primary :monitor)))
           row))))
 
+  (defun parse-scope-cli-flags (arguments)
+    (let ((args (js-array)) (keep-going false) (rerun-failed false) (index 0))
+      (while (< index (js-length arguments))
+        (let ((arg (aref arguments index)))
+          (cond
+            ((= arg "--keep-going") (setq keep-going t))
+            ((= arg "--rerun-failed") (setq rerun-failed t))
+            (t (js-call args :push arg))))
+        (setq index (1+ index)))
+      (js-object :args args :keepGoing keep-going :rerunFailed rerun-failed)))
+
   (defasync runFinalFunctionalScope (arguments &rest configuration)
     (let* ((options (if (> (js-length configuration) 0) (aref configuration 0) (js-object)))
-           (parsed (parseTestFileArgs arguments)) (original (get parsed :files)) (shard (get parsed :shard))
+           (cli-flags (parse-scope-cli-flags arguments))
            (source-root (resolve (option options "sourceRoot" (js-call globalThis.process :cwd))))
            (environment (option options "environment" (get globalThis.process :env)))
-           (files (functionalScopeFiles original shard environment source-root))
+           (real-runner (nullish? (field options "executors")))
+           (cache-dir (field options "cacheDirectory"))
+           (profile-path (when (= (value-type cache-dir) "string") (resolve source-root cache-dir "profile.json")))
+           (failures-path (when (= (value-type cache-dir) "string") (resolve source-root cache-dir "last-failures.json")))
+           (keep-going (or (eq (field options "keepGoing") t)
+                           (get cli-flags :keepGoing)
+                           (= (field environment "ELISCRIPT_TEST_KEEP_GOING") "1")))
+           (rerun-failed (or (eq (field options "rerunFailed") t) (get cli-flags :rerunFailed)))
+           (has-file-args (js-call (get cli-flags :args) :some (lambda (arg)
+                            (and (= (value-type arg) "string") (not (js-call arg :startsWith "-"))))))
+           (failed-prev (when rerun-failed (loadLastFailures source-root "final-functional-scope" failures-path)))
+           (args-for-parse (if (and rerun-failed (not has-file-args) (> (js-length failed-prev) 0))
+                             (js-call (get cli-flags :args) :concat failed-prev)
+                             (get cli-flags :args)))
+           (empty-rerun (and rerun-failed (not has-file-args) (= (js-length failed-prev) 0)))
+           (parsed (if empty-rerun (js-object :files (js-array) :shard nil) (parseTestFileArgs args-for-parse)))
+           (original (get parsed :files))
+           (shard (get parsed :shard))
+           (_filter-rerun (when (and rerun-failed has-file-args)
+                            (let ((failed-set (new globalThis.Set (js-call failed-prev :map (lambda (f) (resolve source-root f))))))
+                              (setq original (js-call original :filter (lambda (f) (js-call failed-set :has (resolve source-root f))))))))
+           (files (if (= (js-length original) 0)
+                    (js-array)
+                    (functionalScopeFiles original shard environment source-root)))
+           (profile (when real-runner (loadTestProfile source-root profile-path)))
+           (wall-started (Date/now))
+           (admission-pauses 0)
+           (peak-aggregate-rss 0)
            (explicit-archive (field environment "ELISCRIPT_TEST_SCOPE_ARCHIVE_OUT"))
            (executors (option options "executors" (js-object)))
            (ordinary (option executors "ordinary" (async (batch env)
@@ -275,6 +322,10 @@
         (+ "Test file shard " (get shard :index) "/" (get shard :count) ": " (js-length files) "/" (js-length original) " selected")))
       (setq fixture (prepareFixtureEnvironment source-root environment))
       (setq environment (get fixture :environment))
+      (when (and (/= (field environment "ELISCRIPT_DISABLE_TEST_IR_CACHE") "1")
+                 (/= (field options "irCache") false)
+                 (undefined? (field environment "ELISCRIPT_TEST_IR_CACHE")))
+        (setq environment (Object/assign (js-object) environment (js-object :ELISCRIPT_TEST_IR_CACHE "1"))))
       (js-call globalThis.process :on "SIGINT" interrupt)
       (js-call globalThis.process :on "SIGTERM" terminate)
       (try
@@ -303,12 +354,18 @@
                                       1)))
                   (if (<= shard-count 1)
                     (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
-                      :shardIndex 0 :shardCount 1 :weight (testFileWeight file)))
-                    (let ((bucket (js-array)) (s 0) (per-weight (Math/floor (/ (testFileWeight file) shard-count))))
+                      :shardIndex 0 :shardCount 1
+                      :weight (if profile (estimateTestWeight profile file (testFileWeight file)) (testFileWeight file))
+                      :estimatedRssBytes (if profile (estimateTestRssBytes profile file heavy) (* 512 1024 1024))))
+                    (let* ((bucket (js-array))
+                           (s 0)
+                           (base-weight (if profile (estimateTestWeight profile file (testFileWeight file)) (testFileWeight file)))
+                           (est-rss (if profile (estimateTestRssBytes profile file heavy) (* 512 1024 1024)))
+                           (per-weight (Math/floor (/ base-weight shard-count))))
                       (while (< s shard-count)
                         (js-call bucket :push nil)
                         (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
-                          :shardIndex s :shardCount shard-count :weight per-weight))
+                          :shardIndex s :shardCount shard-count :weight per-weight :estimatedRssBytes est-rss))
                         (setq s (1+ s)))
                       (js-call shard-buckets :set plan-idx bucket))))))
               (js-call lpt-items :sort (lambda (left right)
@@ -317,12 +374,20 @@
                     (let ((idx-diff (- (get left :index) (get right :index))))
                       (if (/= idx-diff 0) idx-diff
                         (- (get left :shardIndex) (get right :shardIndex))))))))
-              (await (runLptQueue lpt-items (get parallel-config :maxWorkers) (get parallel-config :heavyWorkers)
-                (lambda ()
-                  (or halt
-                      (/= (get cancellation :code) 0)
-                      (and shared-supervisor (funcall globalThis.Boolean (field shared-supervisor "failure")))))
-                (async (entry)
+              (let ((sched-stats (await (runMemoryAwareLptQueue lpt-items
+                                          (js-object
+                                            :maxWorkers (get parallel-config :maxWorkers)
+                                            :heavyWorkers (get parallel-config :heavyWorkers)
+                                            :aggregateCeilingBytes (get parallel-config :aggregateCeilingBytes))
+                                          (js-object
+                                            :shouldStop (lambda ()
+                                              (or halt
+                                                  (/= (get cancellation :code) 0)
+                                                  (and shared-supervisor (funcall globalThis.Boolean (field shared-supervisor "failure")))))
+                                            :getLiveTelemetry (lambda ()
+                                              (when (and shared-supervisor (= (value-type (get shared-supervisor :telemetry)) "function"))
+                                                (js-call shared-supervisor :telemetry)))
+                                            :runItem (async (entry)
                   (let* ((plan-idx (get entry :index))
                          (plan (get entry :plan))
                          (kind (get plan :kind))
@@ -368,6 +433,7 @@
                               (when (funcall globalThis.Boolean (get sup-res :resource)) (put row :resource (get sup-res :resource)))
                               (when (funcall globalThis.Boolean (get sup-res :message)) (put row :message (get sup-res :message)))
                               (when (Number/isFinite (get sup-res :elapsedMs)) (put row :elapsedMs (get sup-res :elapsedMs)))
+                              (when (Number/isFinite (get sup-res :peakRssBytes)) (put row :peakRssBytes (get sup-res :peakRssBytes)))
                               (when (eq (get sup-res :started) false) (put row :started false))
                               (setq outcome row))
                             (catch error
@@ -380,7 +446,12 @@
                           (put (js-call shard-buckets :get plan-idx) shard-index outcome))
                         (put results plan-idx outcome))
                       (when (/= (get outcome :exitCode) 0) (setq exit-code (get outcome :exitCode)))
-                      (when (fatal-scope-failure? (get outcome :failure)) (setq halt t)))))))
+                      (when (and (not keep-going) (fatal-scope-failure? (get outcome :failure))) (setq halt t))))))))))
+                (when sched-stats
+                  (setq admission-pauses (or (get sched-stats :admissionPauses) 0))
+                  (when (and (Number/isFinite (get sched-stats :peakAggregateRssBytes))
+                             (> (get sched-stats :peakAggregateRssBytes) peak-aggregate-rss))
+                    (setq peak-aggregate-rss (get sched-stats :peakAggregateRssBytes)))))
               (js-call shard-buckets :forEach (lambda (bucket plan-idx)
                 (let* ((plan (aref plans plan-idx))
                        (merged (merge-intra-shard-outcomes (get plan :file) (js-length bucket) bucket cancellation)))
@@ -413,6 +484,13 @@
           (js-call globalThis.process :off "SIGINT" interrupt)
           (js-call globalThis.process :off "SIGTERM" terminate)
           (when shared-supervisor
+            (when (= (value-type (get shared-supervisor :telemetry)) "function")
+              (try
+                (let ((snap (js-call shared-supervisor :telemetry)))
+                  (when (and snap (Number/isFinite (get snap :aggregateRssBytes))
+                             (> (get snap :aggregateRssBytes) peak-aggregate-rss))
+                    (setq peak-aggregate-rss (get snap :aggregateRssBytes))))
+                (catch _tel nil)))
             (try (await (js-call shared-supervisor :close)) (catch error nil)))
           (js-call fixture :close)))
       (let* ((completed (new globalThis.Set (js-call
@@ -422,16 +500,30 @@
                              (lambda (item) (and (not (eq (get item :started) false))
                                                  (or (/= (get item :exitCode) 0) (funcall globalThis.Boolean (get item :failure))))))
                              :map (lambda (item) (get item :file))))
+             (unstarted-files (js-call files :filter (lambda (file) (not (js-call completed :has file)))))
+             (summary (summarizeSuiteRun (js-object
+                        :suite "final-functional-scope"
+                        :results results
+                        :unstarted unstarted-files
+                        :cancelled cancelled
+                        :wallMs (- (Date/now) wall-started)
+                        :peakAggregateRssBytes peak-aggregate-rss
+                        :admissionPauses admission-pauses)))
              (digest-outcome (await (collectPassedFileDigests source-root results)))
              (directory (resolve (option options "outputDirectory" (resolve source-root ".eliscript-cache" "test-results"))))
              (archive (resolve directory (+ "final-functional-scope-" (Date/now) "-" (get globalThis.process :pid) ".json")))
              (record (js-object :format "eliscript-final-functional-test-scope"
                :inventory files :originalInventory original :shard shard :results results :cancelled cancelled
                :failedFiles failed-files
+               :summary summary
                :passedFileDigests (get digest-outcome :digests)
                :passedFileDigestErrors (get digest-outcome :errors)
-               :unstarted (js-call files :filter (lambda (file) (not (js-call completed :has file))))
+               :unstarted unstarted-files
                :exitCode (if (/= (get cancellation :code) 0) (get cancellation :code) exit-code) :archive archive)))
+        (when real-runner
+          (try (recordTestProfile source-root results profile-path) (catch _prof nil))
+          (try (saveLastFailures source-root "final-functional-scope" failed-files failures-path) (catch _fail nil))
+          (try (writeSuiteReport source-root summary) (catch _rep nil)))
         (try (await (mkdir directory (js-object :recursive t)))
           (let ((payload (+ (JSON/stringify record nil 2) "\n")))
             (await (writeFile archive payload))
@@ -453,6 +545,8 @@
                 (lambda (item) (not (eq (get item :started) false))))) "/" (js-length (get result :inventory)) " completed; "
              (js-length (js-call (get result :results) :filter (lambda (item) (/= (get item :exitCode) 0)))) " failed; "
              (js-length (get result :cancelled)) " compiler-host cases cancelled (not passed); scope: " (get result :archive)))
+        (when (and (> (js-length (get result :inventory)) 1) (get result :summary))
+          (js-call globalThis.console :log (formatSuiteSummary (get result :summary))))
         (put globalThis.process :exitCode (get result :exitCode)))
       (catch error (js-call globalThis.console :error (+ "Invalid final-functional scope: " (get error :message)))
         (put globalThis.process :exitCode 1))))

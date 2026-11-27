@@ -290,7 +290,7 @@
                               (put exec-obj :runtimeOptions
                                 (globalThis.structuredClone
                                   (let ((v (get plan :budget)))
-                                    (if (nullish? v) (js-object :maxSlots 8192 :initialBytes 262144 :maxBytes 16777216) v))))
+                                    (if (nullish? v) (js-object :initialBytes 262144 :maxBytes 16777216) v))))
                               (funcall add
                                 (js-object
                                   :id (str "original-managed:" (get plan :name) ":" host-runtime ":auto-" auto)
@@ -552,7 +552,7 @@
                           :suite "tests/wasm-managed-sequence-data.test.mjs"
                           :entry "sequence-data.mjs"
                           :memory (js-object :initialPages 128 :maximumPages 4096)
-                          :budget (js-object :maxSlots 1024 :initialBytes 65536 :maxBytes 16777216)
+                          :budget (js-object :initialBytes 65536 :maxBytes 16777216)
                           :timeoutMs 60000)))
           (when (js-call stable-files :has (get sequence :fixture))
             (let* ((source (await (funcall text "tests/wasm-managed-sequence-data-test-ground.mjs")))

@@ -14,7 +14,7 @@
            (fixture (progn (js-call globalThis.process :chdir source-root)
                       (JSON/parse (await (readFile "tests/fixtures/bootstrap-analyzer.json" "utf8")))))
            (cases (js-call (get fixture :valid) :filter (lambda (item) (get item :file))))
-           (configuration (js-object :maxSlots 524288 :initialBytes 16777216 :maxBytes 134217728))
+           (configuration (js-object :initialBytes 16777216 :maxBytes 134217728))
            (memory-options (js-object :maximumPages 4096))
            (auto-bytes 65536)
            (passed 0)

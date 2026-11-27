@@ -110,7 +110,7 @@
           :forEach (lambda (pair)
             (let* ((program (aref pair 0)) (entries (aref pair 1))
                    (bytes (Uint8Array/from (js-call (get b :managed) :emit_managed_wasm program rt)))
-                   (a (instantiateManagedRuntime bytes (js-object :maxSlots 4096 :initialBytes 262144))))
+                   (a (instantiateManagedRuntime bytes (js-object :initialBytes 262144))))
               (js-call assert :deepEqual (js-call (get globalThis.WebAssembly :Module) :imports (new globalThis.WebAssembly.Module bytes)) (js-array))
               (js-call a :auto 1)
               (let ((boxed (js-call names :map (lambda (name) (js-call a :string name)))) (i 0))

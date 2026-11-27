@@ -145,88 +145,62 @@ that `roBase` is 256, that `imageDataEnd` is 8-aligned and at least 288, that th
 byte 284 is zero; a header that disagrees with the descriptor is rejected before
 any allocation.
 
-`heap-new(slotsCeiling, initialBytes, maxBytes)` allocates from `imageDataEnd`
-upward, 8-byte aligned, and never copies the static literals. It validates the
-slot ceiling against 16,777,215, the byte ceiling against 1 GiB, and requires the
-initial size to cover the minimum layout. It then lays out four separate
-regions: a fixed `Control` block of 882 `u32` words (3,528 payload bytes, 3,560
-owned bytes), a slot table of 24-byte entries plus a 32-byte outer header, a
-bitmap of one bit per slot plus a 32-byte outer header, and the elastic object
-arena with a 32-byte outer header and an 8-byte null sentinel at its first
-block. The slot capacity is the largest `k` not exceeding `min(1024,
-slotsCeiling)` whose minimum layout fits the initial size:
-`3560 + (32 + 24*(k+1)) + (32 + align8(ceil((k+1)/32)*4)) + (32 + 64)`. The
-ceiling itself stays recorded separately, and the object arena keeps the
-remainder so slots, bitmap and object blocks can each reserve further bytes from
-the same honest budget. `heap-used`, `heap-capacity`, `heap-live`,
-`heap-collections` and `frame-depth` expose the live counters.
+`heap-new(initialBytes, maxBytes)` allocates from `imageDataEnd` upward, 8-byte
+aligned, and never copies the static literals. It validates the byte ceiling
+against 1 GiB and requires `initialBytes >= 3696` and `initialBytes <= maxBytes`.
+It allocates a single 8-aligned region containing: the fixed `Control` block of
+892 `u32` words (3,568 payload bytes behind a 32-byte outer header, 3,600 owned
+bytes) followed by the initial heap segment (`initialBytes - 3600 >= 96` bytes,
+beginning with a 32-byte segment header `[next, size, cursor, end, magic,
+heapId, reserved0, reserved1]`). Each `heap-new` assigns a monotonic 16-bit
+`heapId` stored in both `Control + 52` and the upper handle word, preventing
+cross-heap aliasing across retirements. `heap-used`, `heap-capacity`,
+`heap-live`, `heap-collections` and `frame-depth` expose the live counters, and
+`ffi-handle-new`, `ffi-handle-get`, `ffi-handle-release` and `ffi-handle-count`
+manage explicit external GC roots for foreign embeds.
 
-The `Control` block holds the four arena directory words at byte offsets 4, 8,
-12 and 16, the slot capacity at 48, the slot ceiling at 52, the high-water mark
-at 56, the free-slot head at 60, the object cursor at 68, the free-block head at
-72, the free-tree root at 76, the live count at 80, owned bytes at 84, the byte
-ceiling at 88, the automatic-collection threshold at 100, the allocation debt at
-104, the collection count at 108, the module status at 112, `exceptionPending`
-at 116, the runtime error kind at 120, the slot width at 136, the slot mask at
-140, and the 256 weak named-function bucket counts from 144. From byte 1168 it
-holds 8-byte-aligned `Val64` slots: 24 named roots and prototypes, 15 weak
-well-known symbol handles from 1360, and 256 weak named-function bucket heads
-from 1480. `pendingException` sits at 1184. The named-function weak cache
-heads live at `1480 + (code & 255) * 8`. The two words at 1352 and 1356 hold
-the realm function-cache busy flag and the cached `AggregateError.prototype`
-slot index. The latter adds no strong root. Lookup validates the live slot
-and its prototype brand before using it.
+The `Control` block holds the segment list `segmentHead`/`segmentTail` at byte
+offsets 4 and 8, `allObjectsHead` at 12, `auxArena` at 16, read-only and
+metadata mirrors at 20..44, `segmentCount` at 48, `heapId` at 52, segment span
+bounds `minSegAddr`/`maxSegEnd` at 56 and 60, `liveBytes` at 64, `freeBytes` at
+68, `freeBlockHead` at 72, the address-ordered AVL `freeTreeRoot` at 76,
+`liveCount` at 80, `ownedBytes` at 84, `maxBytes` at 88, `markGrayHead` at 92,
+`weakTableHead` at 96, `autoThreshold` at 100, `allocDebt` at 104,
+`collectionsCount` at 108, `moduleStatus` at 112, `exceptionPending` at 116,
+`runtimeErrorKind` at 120, `pinnedObjectsCount` at 136, `gcStateFlags` at 140
+(bit 0: mark parity; bit 1: module namespace tag flag), and the 256 weak
+named-function bucket counts from 144. From byte 1168 it holds 8-byte-aligned
+`Val64` slots: 24 named roots and prototypes, 15 weak well-known symbol handles
+from 1360, and 256 weak named-function bucket heads from 1480. `pendingException`
+sits at 1184, the cached `AggregateError.prototype` direct header pointer at
+1356, the `ffiHandleTable`/`ffiHandleCount`/`ffiFreeHead` scalars at 3528..3536,
+and the `rtScopeCache` (`frame`, `owner`, `data`, `idleAnchorHdr`) at 3544..3560.
 
-The byte budget is honest about every outer structure the heap owns. `ownedBytes`
-(`Control + 84`) and `maxBytes` (`Control + 88`) cover everything that belongs to
-the heap from `imageDataEnd` upward: the fixed `Control` block (3,528 payload
-bytes behind a 32-byte outer header, 3,560 owned), the slot table (a 32-byte outer
-header plus `24 * (slotCapacity + 1)` bytes including the reserved `slot 0`), the
-slot bitmap (a 32-byte outer header plus `align8(ceil((slotCapacity + 1) / 32) *
-4)` bytes), the object arena (a 32-byte outer header plus an aligned payload whose
-offset-0 entry is an 8-byte null sentinel, so the minimum 64-byte payload gives a
-fixed base of `3,560 + 32*3 + 64 = 3,720` bytes), and the lazily materialized
-`auxArena`. `Control + 16` reports the auxiliary arena as `0` until an auxiliary
-fixed slot is first written; materialization then charges a 4,592-byte payload
-behind a 32-byte outer header (4,624 owned) to the same budget.
+The byte budget is honest about every byte the heap owns. `ownedBytes`
+(`Control + 84`) and `maxBytes` (`Control + 88`) cover the fixed `Control` block
+(3,600 owned bytes), all active heap segments, the lazily materialized
+`auxArena` (0 until an auxiliary fixed slot is written, then 4,624 owned bytes),
+and the external `ffiHandleTable` when allocated. When the active segment runs
+out of bump and free-tree space (`heap-grow-segment-and-allocate`), if
+`segmentTail` sits directly at the linear-memory growth cursor (byte 0), it
+extends in place via `reserve`/`outer-grow-to` without fragmentation. Otherwise
+it allocates a fresh secondary segment sized to satisfy the request (respecting
+`maxBytes - ownedBytes`) and links it into the segment list. On `heap-collect`,
+unreachable objects are swept directly into the address-ordered free list and
+AVL tree (using `Val64` and header fields directly—no compaction or moving step),
+segment tails are rewound where freed, and completely empty secondary segments
+are returned immediately to the outer allocator via `outer-free`.
 
-`heap-arena-reserve(heap, arena, bytes)` aligns the request to `aligned` and
-compares it with the arena's current capacity `old`. When the arena's data region
-ends exactly at the linear-memory growth cursor (`source + align8(old) == cursor`,
-the instance header word at byte 0), the arena is the tail and extends in place:
-both the transient peak and the committed increase are `aligned - old`. When a
-later allocation already sits above it, the arena cannot be extended in place, so
-the complete new payload must be owned while the old payload is still live for
-copying and rollback; the transient coexistence peak checked against
-`maxBytes - ownedBytes` is then the full `aligned`, and only after the copy
-completes and `outer-free` reclaims the old payload does steady-state
-`ownedBytes` settle at `owned + (aligned - old)`. `heap-grow` clips its geometric
-doubling of the object arena to the coexistence budget that actually exists: the
-limit is `align8_down(capacity + remaining)` for a tail arena and
-`align8_down(remaining)` for a non-tail arena, so a feasible allocation is never
-refused merely because `2 * capacity` exceeds that budget.
-
-Growing the slot table and bitmap is a single transaction. When `heap-try-object`
-needs a slot `> slotCapacity` (and `<= slotCeiling` at `Control + 52`) it computes
-the grown `newSlotBytes` and `newBitBytes` and, while both old arenas are still
-live, requires `temporaryBytes = newSlotBytes + newBitBytes <= maxBytes -
-savedOwned`. The first phase allocates the replacement `new_bit_data` and
-`new_slot_data` from the outer allocator, which reuses the address-ordered
-`outer-free` list headed at instance-header byte 92 and coalesces neighbouring
-blocks before advancing the cursor at byte 0 through `memory-grow`. If
-`new_bit_data` fails, or `new_slot_data` fails after it, the already obtained
-block is `outer-free`d immediately and `ownedBytes` is unchanged. Before the
-second phase calls `heap-allocate-block`, `Control.ownedBytes` is temporarily set
-to `savedOwned + temporaryBytes`, so object-arena growth during the object
-allocation sees both the still-live old tables and the unpublished replacements.
-If that allocation returns `0`, both temporary blocks are `outer-free`d,
-`temporaryBytes` is subtracted from `ownedBytes`, and the published
-`slot_table`/`slot_bitmap` headers remain untouched. Only when all three
-allocations succeed are the replacements committed in order: both new blocks are
-zeroed, the live bytes of the old slot table and bitmap are copied, the two outer
-headers' `data`/`count`/`capacity` and `Control.slotCapacity` (offset 48) are
-updated, and finally `outer-free` reclaims only the replaced slot-table and bitmap
-data blocks while `oldSlotBytes + oldBitBytes` is deducted from `ownedBytes`.
+Every dynamic object uses a **non-moving 32-byte GC object header** immediately
+preceding its `hdr` pointer (`hdr - 32`): `[allObjectsNext, allocSize, gcFlags,
+pinCount, markGrayNext, gcWeakHead, magic=0x4f424a4c, bodyPtr]`. Inline objects
+start immediately at `hdr` (`bodyPtr == hdr`), while resizable objects whose
+capacity grows beyond their inline allocation (arrays, mutable byte buffers,
+strings, tables, function infos) allocate a fresh out-of-line body behind an
+8-byte body header (`[bodyAllocSize, magic=0x424f4459]`) and update `bodyPtr`,
+returning the old inline tail or old out-of-line body to the free list without
+ever moving `hdr`. `Val64` object identity therefore never changes across
+collection, growth, or resizing.
 
 `FunctionStaticMeta` is the static authority for construction capability.
 Instance-header bytes 96 (`metaDir`, mirrored at `Control + 40`) and 100
@@ -272,26 +246,27 @@ Every managed value is one `Val64` word and one encoding:
 - An ordinary `f64` is stored inline as its raw IEEE bits plus the fixed offset
   `0x0001_0000_0000_0000`, giving the inclusive window
   `[0x0001_0000_0000_0000, 0xFFF7_FFFF_FFFF_FFFF]`. Decoding subtracts the same
-  offset. Values stay inline, occupy no dynamic slot, never go stale, and are
+  offset. Values stay inline, occupy no heap object, never go stale, and are
   reclaimed by nothing because they own nothing.
 - A raw bit pattern whose high word is at or above `0xFFF70000` — negative
   `NaN` payloads, where the bits would collide with the tag bands — is boxed
   once as a private raw-number block, and compile-time instances of those bits
   are emitted into the read-only image.
-- A dynamic handle is `0xFFF8` in the high 16 bits: bits 0–23 hold the slot and
-  bits 24–47 hold the generation, so `16,777,215` slots and the same number of
-  generations are addressable. The generation therefore straddles the low and
-  high words rather than fitting in either one alone.
+- A dynamic handle is `0xFFF8` in the high 16 bits, `heapId` (`1..65535`) in
+  high bits `0..15`, and the direct non-moving 32-bit `hdr` address in the low
+  word (`bits 0..31`), so dynamic object count is bounded only by the byte
+  budget (`maxBytes`).
 - A read-only handle is `0xFFF9` in the high 16 bits, carrying the image slot
   and the index within that image's directory.
 
-Handles are resolved through the slot table, and a generation mismatch is a
-`ELI-RT0001` stale-handle failure rather than a wild read. `heap-pin` and
-`heap-release` adjust root counts, `heap-collect` marks from frames, prototypes,
-module bindings, pending exceptions and registered roots, and `retire`
-increments the lifetime epoch at byte 4 while resetting the live-object head at
-byte 12. `retire` deliberately preserves the growth cursor, the static image
-header and every read-only byte.
+Handles are validated directly via `heapId`, segment membership, `OBJ_LIVE_MAGIC`
+(`hdr - 8`), and the allocated bit in `gcFlags` (`hdr - 24`); a stale, freed, or
+cross-heap handle raises `ELI-RT0001`. `heap-pin` and `heap-release` adjust root
+counts (`pinnedObjectsCount`), `heap-collect` marks from frames, prototypes,
+module bindings, pending exceptions, FFI handles and pinned objects, and `retire`
+increments the lifetime epoch at byte 4 while preserving `heapSerial` (`228`) and
+resetting the live-object head at byte 12. `retire` deliberately preserves the
+growth cursor, the static image header and every read-only byte.
 
 ## Compiler-private root scopes
 

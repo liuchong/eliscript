@@ -192,7 +192,7 @@
 
   (test "ordinary mixed primitive arithmetic, word and relational operators exactly implement source conversion semantics under GC"
     (lambda ()
-      (let ((a (instantiateManagedRuntime bytes (js-object :maxSlots 256 :initialBytes 16384 :maxBytes 1048576)))
+      (let ((a (instantiateManagedRuntime bytes (js-object :initialBytes 16384 :maxBytes 1048576)))
             (inputs (js-array nil false t undefined 0 -0.0 1 -1 globalThis.NaN globalThis.Infinity
                               globalThis.Number.MIN_VALUE 0.5 "" "0" "-0" "1.5" " 0x10 " "0b101" "0o77"
                               "invalid" (str "中😀" (String/fromCharCode 55296))))
@@ -753,7 +753,7 @@
                          (let ((out (funcall normalize-u64 (apply (aref e name) args))))
                            (js-call assert :equal (funcall (aref e "last-error")) 0 name)
                            out)))
-             (heap (funcall call-exp "heap-new" 16 4136 65536))
+             (heap (funcall call-exp "heap-new" 4136 65536))
              (retained (funcall call-exp "value-number" heap 0 1079558144))
              (frame (funcall call-exp "frame-new" heap 1)))
         (funcall call-exp "frame-set" heap frame 0 retained)
@@ -778,7 +778,7 @@
           (funcall call-exp "frame-pop" heap frame)
           (funcall call-exp "heap-collect" heap)
           (js-call assert :equal (funcall call-exp "heap-live" heap) 0)))
-      (let ((small (instantiateManagedRuntime bytes (js-object :maxSlots 32 :initialBytes 4576 :maxBytes 4576))))
+      (let ((small (instantiateManagedRuntime bytes (js-object :initialBytes 4576 :maxBytes 4576))))
         (js-call small :auto 1)
         (let* ((s (js-call small :string "1.5"))
                (n (js-call small :number -0.0))
