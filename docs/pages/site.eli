@@ -72,7 +72,7 @@
                 "output" "tail position verified\narguments evaluated once, left to right\nfunction frame reused as a loop\nconstant JavaScript stack")
       "data" (js-object
                "source" "(import \"eliscript/runtime/core/collection\" assoc get)\n\n(defconst before {:name \"Eliscript\" :version \"0.1.3\"})\n(defconst after (assoc before :status :stable))\n\n(print (get before :status :unchanged))\n(print (equal before {:name \"Eliscript\" :version \"0.1.3\"}))"
-               "output" "before remains unchanged (:unchanged)\nafter shares the unchanged 32-way HAMT path\nkeys use Eliscript structural value equality\nreference-identity (===) short-circuits shared roots")
+               "output" "before remains unchanged (:unchanged)\ncompact ArrayMap (<= 8 keys) auto-promoting to 32-way HAMT\nkeys use Eliscript structural value equality\nreference-identity (===) short-circuits shared roots")
       "interop" (js-object
                   "source" "(js-call (js-array 1 2 3)\n  :map\n  (lambda (value)\n    (* value 2)))"
                   "output" "native container requested explicitly\nreceiver-preserving method call\nlossless js-false / js-null / js-undefined sentinels\nstandard ESM host behavior on Node 24+ and Bun 1.4+")

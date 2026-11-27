@@ -63,7 +63,7 @@
         <article class="doc-content">
           <section id="requirements">
             <h2>Requirements &amp; install</h2>
-            <p>Install the published <code>0.1.3</code> compiler and runtime from npm on <strong>Node.js 24+</strong> (<code>&gt;=24.0.0</code>, CI pinned at <code>24.22.3</code>) or <strong>Bun 1.4+</strong> (<code>&gt;=1.4.0</code>)—no Emacs installation is required to run the packaged compiler:</p>
+            <p>Install the published <code>0.1.3</code> compiler and runtime from npm on <strong>Node.js 24+</strong> (<code>&gt;=24.0.0</code>, CI pinned at <code>24.22.3</code>) or <strong>Bun 1.4+</strong> (<code>&gt;=1.4.0</code>, CI pinned at <code>1.4.5</code>)—no Emacs installation is required to run the packaged compiler:</p>
             <pre><code>npm install eliscript@0.1.3
 # or: bun add eliscript@0.1.3
 npx eliscript --help</code></pre>
@@ -74,6 +74,7 @@ node --version</code></pre>
             <p>Install the locked JavaScript dependencies used by optional browser checks (<code>react</code> <code>19.3.1</code>, <code>vite</code> <code>8.3.5</code>, <code>playwright-core</code> <code>1.64.1</code>):</p>
             <pre><code>bun install --frozen-lockfile</code></pre>
             <div class="callout"><p>The Emacs Lisp seed compiler itself has zero JavaScript dependencies; a clean Emacs installation can bootstrap Stage 0 from source.</p></div>
+            <p>Eliscript is licensed under <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0-or-later</a> with the <a href="https://github.com/liuchong/eliscript/blob/master/COPYING.RUNTIME">Eliscript Runtime Library Exception</a>: applications compiled through an eligible compilation process may bundle and distribute covered runtime, standard-library, platform, and browser loader modules under terms of their choice, while the compiler and libraries themselves remain GPLv3.</p>
           </section>
 
           <section id="compile">
@@ -198,7 +199,7 @@ make verify-bootstrap</code></pre>
             <h2>Run the test suite</h2>
             <pre><code>./bin/eliscript-test --root "$PWD"
 bun run test</code></pre>
-            <p><code>eliscript-test</code> runs declarative <code>deftest</code> suites with structural <code>diff</code> and <code>pprint</code> failure diagnostics, while <code>bun run test</code> runs the Emacs test suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
+            <p><code>eliscript-test</code> runs declarative <code>deftest</code> suites with structural <code>diff</code> and <code>pprint</code> failure diagnostics, while <code>bun run test</code> drives the self-hosted parallel test runner and resource supervisor across ERT, Bun and Node suites, contract checks, public CLI fixtures, deterministic snapshots, source-map validation, and separately partitioned application checks.</p>
             <div class="callout callout-coral"><p>The portable standard library and protocol-driven persistent collection core run through the same Eliscript module pipeline. Application adapters are tested separately and contribute no core maturity credit.</p></div>
           </section>
         </article>
@@ -214,6 +215,7 @@ bun run test</code></pre>
         <div class="footer-links">
           <a href="language.html">Language</a>
           <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/COPYING.RUNTIME">Runtime Exception</a>
           <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
           <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>

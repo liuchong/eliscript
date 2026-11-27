@@ -40,7 +40,7 @@
         <div class="doc-hero-inner">
           <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span><span>Language core · Emacs-compatible syntax · v0.1.3</span></p>
           <h1>Emacs Lisp core, persistent data, standard ESM.</h1>
-          <p class="doc-lede">Eliscript 0.1.3 combines an unchanged Emacs Lisp core, unified <code>.el</code>/<code>.eli</code> compilation, and modular extensions for contracts, persistent data, structural destructuring, lexical modules, structured async, and explicit JS interop.</p>
+          <p class="doc-lede">Eliscript combines an unchanged Emacs Lisp core, unified <code>.el</code>/<code>.eli</code> compilation, 56 checked standard-library modules, and modular extensions for contracts, persistent data, structural destructuring, lexical modules, structured async, and explicit JS interop.</p>
         </div>
       </header>
 
@@ -187,7 +187,7 @@
             <pre><code>(import "eliscript/core" map filter reduce range)
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
-            <p>The standard library is exposed both by domain (<code>stdlib/string.eli</code>, <code>regex</code>, <code>math</code>, <code>bit</code>, <code>state</code> with <code>volatile!</code>, <code>tap</code>, <code>diff</code>, <code>pprint</code>, <code>time</code>, <code>uuid</code>, <code>schema</code>, <code>async</code>, <code>test</code>, <code>devtools</code>) and through the single tree-shakeable <code>eliscript/core</code> barrel entry point, with zero-runtime subsets isolated in <code>stdlib/portable/</code>.</p>
+            <p>The 56 checked library modules (1395 exports) are exposed both by domain (<code>stdlib/string.eli</code>, <code>regex</code>, <code>math</code>, <code>bit</code>, <code>state</code> with <code>volatile!</code>, <code>tap</code>, <code>diff</code>, <code>pprint</code>, <code>time</code>, <code>uuid</code>, <code>schema</code>, <code>async</code>, <code>test</code>, <code>devtools</code>) and through the single tree-shakeable <code>eliscript/core</code> barrel entry point, with zero-runtime subsets isolated in <code>stdlib/portable/</code>.</p>
             <p>The maintained <code>stdlib/seq.eli</code> and <code>runtime/core/lazy-sequence.eli</code> pipelines realize sequences in bounded 32-element chunks (<code>IChunk</code> / <code>IChunkedSeq</code> / <code>ArrayChunk</code>), combine O(1) / O(log32 n) indexed fast-paths, and route eager builders through owner-isolated <code>TransientVector</code>, <code>TransientHashMap</code>, and <code>TransientSet</code> instances.</p>
           </section>
 
@@ -243,6 +243,7 @@
           <a href="getting-started.html">Start</a>
           <a href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/COPYING.RUNTIME">Runtime Exception</a>
           <a href="https://www.npmjs.com/package/eliscript/v/0.1.3" data-version-npm>npm</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
           <a href="https://github.com/liuchong/eliscript/releases/tag/v0.1.3" data-version data-version-github>v0.1.3</a>
