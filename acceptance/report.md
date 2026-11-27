@@ -1,9 +1,9 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `675f319b4b57985656a7499ad4d6515f3e16bc91`
-- Source tree: `d7130a52d092b463bf9b93f2003b629c83713eb8`
+- Source commit: `7467dd2c314207a3e89f5e38bf8a08c0e4d45910`
+- Source tree: `d31e8156cbeb13c959532b9766c554acecdb37bf`
 - Contract: `contracts/final-acceptance.json` (`032dc718b8d00fd681b52e889c267ed18e39bfffd0ae10759d2c31ee46a8e58d`)
-- Generated: 2026-11-27T10:31:42.544Z
+- Generated: 2026-11-27T17:45:41.047Z
 - Environment: Darwin 27.2.0; arm64; Bun 1.4.5; Node v24.22.3; Emacs 32.0.50
 - Corpus complete: yes
 - Operational success: yes
@@ -80,22 +80,22 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 1186784.111 | `352c1257305c419b90b9729b82c9f2b705cc78d380a7b7d2511ee29552ddaae0` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 3619.795 | `aa1548c368350af36c74e9b272fa3ffdd33c47c1e30ed761b17fc923c86603f3` |
+| core-suite | `make test-core` | pass | 0 | 754422.096 | `c7fa196b6f91a382f653e3a1ca045502e41864219c65d573205a68b861f0a242` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1874.76 | `aa1548c368350af36c74e9b272fa3ffdd33c47c1e30ed761b17fc923c86603f3` |
 
 ## Artifact Digests
 
 | File | SHA-256 |
 | --- | --- |
-| `.github/workflows/compatibility.yml` | `b035ed3742148fede1c395faa08ec2ff22c151ce0bdc15fe20d6844132fa73b6` |
+| `.github/workflows/compatibility.yml` | `556197b2723127a3e7b76f5b090fa1b9947fa7bb711ac8f3a9cfe20ced1cf199` |
 | `acceptance/defects.json` | `d1868b3aa2fd71385ad40c6ef90825b91007b5ba499184c1a18e8da765513c38` |
-| `acceptance/manifest.json` | `0e01fb084b5b9320f7a7f292b270588e4e0be2945ddf583d99afa44af4ceac20` |
-| `acceptance/report.md` | `68a7171ae24a5b725e00389734e1e41c03d8c8ffb0692b2832318d8ceb78b9b8` |
+| `acceptance/manifest.json` | `69ca87a310848b0a057efb3eda9187c8b8178f2014298cd30a759635a7f1df86` |
+| `acceptance/report.md` | `160bf94a356fd0d2c97cc651893bde30286224a89d9ddc9e027038599e2ad786` |
 | `acceptance/runs/m13-02.json` | `ecc76c13bb518c05fff821251c5c7c4edefe0bd69ebd23bac8e3c5ca36d77b8d` |
 | `acceptance/runs/m13-04.json` | `0171f940378642a14e9fae7499e3388b8923b2bbeee5bc0e5a852300f3da4fb7` |
 | `acceptance/runs/m13-04.md` | `9e6a73d9c16c496659638f4f17b6cc62a260eed12f8d4e33b13f906a3b5ffcd6` |
-| `benchmarks/emacs-analysis-macos-arm64.json` | `91b6a111505b8562b0270ab2f3ec217f0d742eebc44f28a725f2e053448ee4e6` |
-| `benchmarks/transient-builder-macos-arm64.json` | `4a3b25df66999d4ec9beeb762f71951584778ef0b0ac34306408f57cebdcd02c` |
+| `benchmarks/emacs-analysis-macos-arm64.json` | `db5b140ffb60a17466fda23ad9e7fda17cc36e23a6029e81de0fbf41f63f8bed` |
+| `benchmarks/transient-builder-macos-arm64.json` | `498ef191352fd0cd35bb551caa207d43c3e3877cc5a347e1c94ca9121a412a45` |
 | `benchmarks/worker-lifecycle-soak-macos-arm64.json` | `640ee711146b3ac91ae790ead6b3afcb9c66e5303a49c710d26f9265086e5dda` |
 | `benchmarks/worker-value-stream-macos-arm64.json` | `920a5a344385d8e46e76a13ae7f4dedf9997cea8d0f8ad2d454cfe4d93cd85ef` |
 | `contracts/compatibility-baseline.json` | `b46dd6aeb117e4cc44baa16f46873ea711401eb773f8b44131d4da7bd76817ff` |
