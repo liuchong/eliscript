@@ -60,6 +60,46 @@
     (if (nil? zipper-meta-read-key) nil (aref zipper-vector-proto zipper-meta-read-key)))
   (defconst zipper-init-meta-call
     (if (nil? zipper-init-meta-read) nil (aref zipper-init-meta-read "call")))
+  (defun zipper-walk-compact-path (start)
+    (let ((pending (js-array))
+          (cur start)
+          (keep-going t))
+      (while (and (eq keep-going t)
+                  (not (eq cur nil))
+                  (eq (Array/isArray cur) t)
+                  (eq (aref cur "length") 6)
+                  (eq (aref cur 5) t))
+        (let ((parents (aref cur 3)))
+          (if (and (eq (Array/isArray parents) t)
+                   (not (eq (aref parents "length") 0)))
+            (progn
+              (js-call pending :push (aref parents 0))
+              (setq cur (aref cur 2)))
+            (setq keep-going false))))
+      (js-array pending cur)))
+  (defun zipper-fast-root (cur-node cur-path changed single-vec empty-vec empty-list)
+    (let ((keep-going t))
+      (while (and (eq keep-going t)
+                  (not (eq cur-path nil))
+                  (eq (Array/isArray cur-path) t)
+                  (eq (aref cur-path "length") 6)
+                  (eq (aref cur-path 5) t))
+        (let ((parents (aref cur-path 3)))
+          (if (or (eq changed t) (eq (aref cur-path 4) t))
+            (if (and (eq (aref cur-path 0) empty-vec)
+                     (eq (aref cur-path 1) empty-list)
+                     (eq (Array/isArray parents) t)
+                     (eq (aref parents "length") 2))
+              (setq cur-node (funcall single-vec cur-node)
+                    changed t
+                    cur-path (aref cur-path 2))
+              (setq keep-going false))
+            (if (and (eq (Array/isArray parents) t)
+                     (not (eq (aref parents "length") 0)))
+              (setq cur-node (aref parents 0)
+                    cur-path (aref cur-path 2))
+              (setq keep-going false)))))
+      (js-array cur-node cur-path changed)))
   (defun zipper-private-array
     (&rest values)
     (if zipper-has-raw-slot
@@ -355,15 +395,14 @@
           (let ((holder (zipper-slot path-value zipper-parent-nodes-index)))
             (if (js-call zipper-public-path-cache :has holder)
               (js-call zipper-public-path-cache :get holder)
-              (let ((pending (js-array))
-                    (current path-value)
-                    (result EMPTY_VECTOR)
-                    (is-arr zipper-is-array)
-                    (walking t))
-                (while (if walking (not (nil? current)) false)
-                  (if (if (funcall is-arr current)
-                        (if (eq (aref current "length") 6) (eq (aref current 5) t) false)
-                        false)
+              (let* ((walked (zipper-walk-compact-path path-value))
+                     (pending (aref walked 0))
+                     (current (aref walked 1))
+                     (result EMPTY_VECTOR)
+                     (is-arr zipper-is-array)
+                     (walking t))
+                (while (and walking (not (nil? current)))
+                  (if (and (funcall is-arr current) (eq (aref current "length") 6) (eq (aref current 5) t))
                     (let ((parents (aref current 3)))
                       (js-call pending :push
                         (if (funcall is-arr parents)
@@ -426,124 +465,112 @@
                 next-parent-nodes
                 false)
               (meta location)))))))
+  (defun down-raw-fallback (location)
+    (if (and zipper-has-raw-slot
+             (not (nullish? location))
+             (eq (Object/getPrototypeOf location) zipper-vector-proto)
+             (= (aref location "count") 2))
+      (let ((configuration (meta location)))
+        (if (eq configuration zipper-vector-config)
+          (let ((path-value (funcall zipper-raw-slot location 1)))
+            (if (= path-value zipper-end-path)
+              nil
+              (let ((cur (funcall zipper-raw-slot location 0)))
+                (if (and (not (nullish? cur))
+                         (eq (Object/getPrototypeOf cur) zipper-vector-proto)
+                         (nil? (meta cur)))
+                  (let ((child-count (aref cur "count")))
+                    (if (eq child-count 0)
+                      nil
+                      (if (eq child-count 1)
+                        (funcall zipper-pair-with-meta
+                          (funcall zipper-raw-slot cur 0)
+                          (js-array
+                            EMPTY_VECTOR
+                            EMPTY_LIST
+                            path-value
+                            (js-array cur nil)
+                            false
+                            t)
+                          configuration)
+                        (funcall zipper-pair-with-meta
+                          (if (<= child-count 32)
+                            (funcall zipper-raw-slot cur 0)
+                            (Collection/nth cur 0))
+                          (js-array
+                            EMPTY_VECTOR
+                            (zipper-right-list cur 1)
+                            path-value
+                            (js-array cur nil)
+                            false
+                            t)
+                          configuration))))
+                  (down-slow location)))))
+          (down-slow location)))
+      (down-slow location)))
   (defconst down
     (funcall
-      (lambda (state-key meta-key get-proto vec-proto init-meta init-call
-               vec-config end-path pair-with-meta has-raw raw-slot empty-vec empty-list)
-        (lambda (location)
-          (if (if (not (nil? state-key))
-                (if (not (nil? meta-key))
-                  (if (isPersistentVector location)
-                    (if (eq (funcall get-proto location) vec-proto)
-                      (if (eq (aref vec-proto meta-key) init-meta)
-                        (eq (aref init-meta "call") init-call)
-                        false)
-                      false)
-                    false)
-                  false)
-                false)
-            (let ((lstate (aref location state-key)))
-              (if (if (not (undefined? lstate)) (eq (aref lstate "count") 2) false)
-                (let ((configuration (aref lstate "metadata")))
-                  (if (eq configuration vec-config)
-                    (let* ((ltail (aref lstate "tail"))
-                           (path-value (aref ltail 1)))
-                      (if (= path-value end-path)
-                        nil
-                        (let ((node-value (aref ltail 0)))
-                          (if (if (isPersistentVector node-value)
-                                (eq (funcall get-proto node-value) vec-proto)
-                                false)
-                            (let ((nstate (aref node-value state-key)))
-                              (if (if (not (undefined? nstate)) (nil? (aref nstate "metadata")) false)
-                                (let ((child-count (aref nstate "count")))
-                                  (if (eq child-count 0)
-                                    nil
-                                    (if (eq child-count 1)
-                                      (funcall pair-with-meta
-                                        (aref (aref nstate "tail") 0)
-                                        (js-array
-                                          empty-vec
-                                          empty-list
-                                          path-value
-                                          (js-array node-value nil)
-                                          false
-                                          t)
-                                        configuration)
-                                      (funcall pair-with-meta
-                                        (if (<= child-count 32)
+      (lambda (state-key meta-key vec-proto init-meta init-call
+               vec-config end-path pair-with-meta empty-vec empty-list)
+        (if (and (not (nil? state-key)) (not (nil? meta-key)))
+          (lambda (location)
+            (if (and (not (nullish? location))
+                     (eq (Object/getPrototypeOf location) vec-proto)
+                     (eq (aref vec-proto meta-key) init-meta)
+                     (eq (aref init-meta "call") init-call))
+              (let ((lstate (aref location state-key)))
+                (if (and (not (undefined? lstate)) (eq (aref lstate "count") 2))
+                  (let ((configuration (aref lstate "metadata")))
+                    (if (eq configuration vec-config)
+                      (let* ((ltail (aref lstate "tail"))
+                             (path-value (aref ltail 1)))
+                        (if (= path-value end-path)
+                          nil
+                          (let ((cur (aref ltail 0)))
+                            (if (and (not (nullish? cur))
+                                     (eq (Object/getPrototypeOf cur) vec-proto))
+                              (let ((nstate (aref cur state-key)))
+                                (if (and (not (undefined? nstate)) (nil? (aref nstate "metadata")))
+                                  (let ((child-count (aref nstate "count")))
+                                    (if (eq child-count 0)
+                                      nil
+                                      (if (eq child-count 1)
+                                        (funcall pair-with-meta
                                           (aref (aref nstate "tail") 0)
-                                          (Collection/nth node-value 0))
-                                        (js-array
-                                          empty-vec
-                                          (zipper-right-list node-value 1)
-                                          path-value
-                                          (js-array node-value nil)
-                                          false
-                                          t)
-                                        configuration))))
-                                (down-slow location)))
-                            (down-slow location)))))
-                    (down-slow location)))
-                (down-slow location)))
-            (if (if has-raw
-                  (if (isPersistentVector location)
-                    (if (eq (funcall get-proto location) vec-proto)
-                      (= (aref location "count") 2)
-                      false)
-                    false)
-                  false)
-              (let ((configuration (meta location)))
-                (if (eq configuration vec-config)
-                  (let ((path-value (funcall raw-slot location 1)))
-                    (if (= path-value end-path)
-                      nil
-                      (let ((node-value (funcall raw-slot location 0)))
-                        (if (if (isPersistentVector node-value)
-                              (if (eq (funcall get-proto node-value) vec-proto)
-                                (nil? (meta node-value))
-                                false)
-                              false)
-                          (let ((child-count (aref node-value "count")))
-                            (if (eq child-count 0)
-                              nil
-                              (if (eq child-count 1)
-                                (funcall pair-with-meta
-                                  (funcall raw-slot node-value 0)
-                                  (js-array
-                                    empty-vec
-                                    empty-list
-                                    path-value
-                                    (js-array node-value nil)
-                                    false
-                                    t)
-                                  configuration)
-                                (funcall pair-with-meta
-                                  (if (<= child-count 32)
-                                    (funcall raw-slot node-value 0)
-                                    (Collection/nth node-value 0))
-                                  (js-array
-                                    empty-vec
-                                    (zipper-right-list node-value 1)
-                                    path-value
-                                    (js-array node-value nil)
-                                    false
-                                    t)
-                                  configuration))))
-                          (down-slow location)))))
+                                          (js-array
+                                            empty-vec
+                                            empty-list
+                                            path-value
+                                            (js-array cur nil)
+                                            false
+                                            t)
+                                          configuration)
+                                        (funcall pair-with-meta
+                                          (if (<= child-count 32)
+                                            (aref (aref nstate "tail") 0)
+                                            (Collection/nth cur 0))
+                                          (js-array
+                                            empty-vec
+                                            (zipper-right-list cur 1)
+                                            path-value
+                                            (js-array cur nil)
+                                            false
+                                            t)
+                                          configuration))))
+                                  (down-slow location)))
+                              (down-slow location)))))
+                      (down-slow location)))
                   (down-slow location)))
-              (down-slow location)))))
+              (down-raw-fallback location)))
+          down-raw-fallback))
       zipper-vector-state-key
       zipper-meta-read-key
-      zipper-get-proto
       zipper-vector-proto
       zipper-init-meta-read
       zipper-init-meta-call
       zipper-vector-config
       zipper-end-path
       zipper-pair-with-meta
-      zipper-has-raw-slot
-      zipper-raw-slot
       EMPTY_VECTOR
       EMPTY_LIST))
   (defun up
@@ -693,14 +720,16 @@
                (no-proto-meta (if fast-vec (nil? (meta empty-vec)) false))
                (cur-node (zipper-slot location 0))
                (changed false))
+          (when (and fast-vec has-raw no-proto-meta)
+            (let ((step (zipper-fast-root cur-node cur-path changed single-vec empty-vec empty-list)))
+              (setq cur-node (aref step 0)
+                    cur-path (aref step 1)
+                    changed (aref step 2))))
           (while (not (nil? cur-path))
-            (if (if fast-vec
-                  (if (funcall is-arr cur-path)
-                    (if (eq (aref cur-path "length") 6)
-                      (eq (aref cur-path 5) t)
-                      false)
-                    false)
-                  false)
+            (if (and fast-vec
+                     (funcall is-arr cur-path)
+                     (eq (aref cur-path "length") 6)
+                     (eq (aref cur-path 5) t))
               (let* ((parent-path (aref cur-path 2))
                      (parents (aref cur-path 3))
                      (parents-is-arr (funcall is-arr parents))
@@ -714,14 +743,10 @@
                 (if step-changed
                   (let* ((left-vals (aref cur-path 0))
                          (right-vals (aref cur-path 1))
-                         (rebuilt (if (if has-raw
-                                        (if (eq left-vals empty-vec)
-                                          (eq right-vals empty-list)
-                                          false)
-                                        false)
+                         (rebuilt (if (and has-raw (eq left-vals empty-vec) (eq right-vals empty-list))
                                     (funcall single-vec cur-node)
                                     (zipper-rebuild-children left-vals cur-node right-vals)))
-                         (m (if (if no-proto-meta (eq parents-len 2) false)
+                         (m (if (and no-proto-meta (eq parents-len 2))
                               nil
                               (meta parent-node))))
                     (setq cur-node (if (nil? m) rebuilt (withMeta rebuilt m))

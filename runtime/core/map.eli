@@ -49,7 +49,8 @@
     TRANSIENT_ASSOC
     TRANSIENT_CONJ
     TRANSIENT_DISSOC
-    TRANSIENT_PERSISTENT)
+    TRANSIENT_PERSISTENT
+    registerEmptyHashMap)
   (import "./metadata-internals.mjs"
     METADATA_READ
     METADATA_WITH)
@@ -444,6 +445,7 @@
         tmap)))
 
   (registerArrayMapPromoter promote-array-map-to-hamt promote-transient-array-map-to-hamt)
+  (registerEmptyHashMap EMPTY_HASH_MAP)
   (Object/setPrototypeOf (get PersistentArrayMap :prototype) (get PersistentHashMap :prototype))
   (Object/setPrototypeOf (get TransientArrayMap :prototype) (get TransientHashMap :prototype))
 

@@ -113,6 +113,14 @@
     (js-array "native-memory-backend.test.mjs" 25000))))
 
   (defconst heavy-parallel-files (new globalThis.Set (js-array
+    "wasm-managed-sequence-data.test.mjs"
+    "wasm-managed-wire-selfhosted.test.mjs"
+    "compiler-seed-runtime-identity.test.mjs"
+    "compiler-response-events.test.mjs"
+    "record-grid-selfhosted.test.mjs"
+    "native-managed-initializer-outlining.test.mjs"
+    "wasm-managed-sorted-core.test.mjs"
+    "wasm-managed-persistent-literals.test.mjs"
     "compiler-package-session.test.mjs"
     "direct-wasm-backend.test.mjs"
     "native-memory-backend.test.mjs"
@@ -188,8 +196,12 @@
                          (and (not (nil? worker-override)) (> worker-override 1))))
            (cpu-count (Math/max 1 (js-length (cpus))))
            (mem-gib (Math/max 1 (Math/floor (/ (totalmem) 1073741824))))
-           (default-workers (Math/min 8 (Math/max 4 (Math/floor (* cpu-count 0.5)))))
-           (default-heavy (Math/min 4 (Math/max 2 (Math/floor (/ mem-gib 14)))))
+           (default-workers (if (<= cpu-count 4)
+                              (Math/max 2 (1- cpu-count))
+                              (Math/min 8 (Math/max 4 (Math/floor (* cpu-count 0.5))))))
+           (default-heavy (if (<= cpu-count 4)
+                            1
+                            (Math/min 4 (Math/max 2 (Math/floor (/ mem-gib 14))))))
            (default-node (Math/min 8 (Math/max 3 (Math/floor (/ cpu-count 2)))))
            (default-agg (Math/min 21474836480 (Math/max 8589934592 (Math/floor (* (totalmem) 0.65)))))
            (max-workers (if parallel (or worker-override default-workers) FILE_WORKERS))

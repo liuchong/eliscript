@@ -18,6 +18,11 @@
     (setq transient-vector-conj-array operation))
   (defun transientVectorConjArray ()
     transient-vector-conj-array)
+  (defvar empty-hash-map-value undefined)
+  (defun registerEmptyHashMap (value)
+    (setq empty-hash-map-value value))
+  (defun emptyHashMap ()
+    empty-hash-map-value)
   (defconst dispatchEditableTransient (protocolMethod I_EDITABLE "transient"))
   (defconst dispatchTransientConj (protocolMethod I_TRANSIENT_COLLECTION "conj!"))
   (defconst dispatchTransientAssoc (protocolMethod I_TRANSIENT_COLLECTION "assoc!"))
@@ -26,5 +31,5 @@
   (defconst dispatchTransientDisj (protocolMethod I_TRANSIENT_SET "disj!"))
   (export I_EDITABLE I_TRANSIENT_COLLECTION I_TRANSIENT_SET EDITABLE_TRANSIENT TRANSIENT_CONJ TRANSIENT_ASSOC
     TRANSIENT_DISSOC TRANSIENT_PERSISTENT TRANSIENT_DISJ registerTransientVectorConjArray
-    transientVectorConjArray dispatchEditableTransient dispatchTransientConj
+    transientVectorConjArray registerEmptyHashMap emptyHashMap dispatchEditableTransient dispatchTransientConj
     dispatchTransientAssoc dispatchTransientDissoc dispatchTransientPersistent dispatchTransientDisj))

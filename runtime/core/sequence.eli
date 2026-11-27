@@ -172,6 +172,22 @@
     (require-function producer "generate producer")
     (sequenceView (indexed-factory producer length) length))
 
+  (defconst vector-proto (get PersistentVector :prototype))
+  (defconst vector-initial-nth (aref vector-proto "nth"))
+  (defconst vector-state-key
+    (let ((syms (if (= (funcall typeof-value Object/getOwnPropertySymbols) "function")
+                  (Object/getOwnPropertySymbols EMPTY_VECTOR)
+                  (js-array))))
+      (if (= (js-length syms) 1)
+          (let* ((sym (aref syms 0))
+                 (st (aref EMPTY_VECTOR sym)))
+            (if (and (not (nullish? st))
+                     (= (funcall typeof-value st) "object")
+                     (Array/isArray (aref st "tail")))
+                sym
+                nil))
+          nil)))
+
   (defun first-reduced (collection not-found)
     (let ((found false) (found-value nil))
       (reduce collection
@@ -181,13 +197,18 @@
         nil)
       (if found found-value not-found)))
 
-  (defun first (collection &optional not-found)
+  (defun first-slow (collection not-found)
     (cond
       ((persistent-list-p collection)
        (if (get collection :isEmpty) not-found (js-call collection :first not-found)))
       ((persistent-vector-p collection)
        (if (= (get collection :count) 0) not-found (js-call collection :nth 0)))
       (t (first-reduced collection not-found))))
+
+  (defconst first
+    (funcall
+      (js* "(Vec, vecProto, initialNth, stateKey, List, slow) => function first(collection, notFound = null) { if (collection !== null && typeof collection === 'object') { if (stateKey !== null && Object.getPrototypeOf(collection) === vecProto && vecProto.nth === initialNth) { const state = collection[stateKey]; const count = state.count; if (count === 0) return notFound; if (count <= 32) return state.tail[0]; let node = state.root; for (let level = state.shift; level > 0; level -= 5) node = node.slots[0]; return node.slots[0]; } if (collection instanceof List) return collection.isEmpty ? notFound : collection.first(notFound); if (collection instanceof Vec) return collection.count === 0 ? notFound : collection.nth(0); } return slow(collection, notFound); }")
+      PersistentVector vector-proto vector-initial-nth vector-state-key PersistentList first-slow))
 
   (defun nthRest (limit collection)
     (require-nonnegative limit "nthRest limit")

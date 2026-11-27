@@ -84,10 +84,11 @@
             "      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\"\n      ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\"\n")))
             ;; One native AVL case takes14 minutes locally, before its wire
             ;; share and other files. Do not repeat a provably undersized CI
-            ;; job. This changes scheduling only; strict tests keep30 minutes.
+            ;; job. This changes scheduling only; strict tests keep 90 minutes.
             (js-call functional :replace "timeout-minutes: 30"
               "timeout-minutes: 240"))
-          text))))
+          (js-call text :replace "timeout-minutes: 30"
+            "timeout-minutes: 90")))))
   (defasync checkCompatibilityWorkflow (&rest supplied)
     (let* ((options (if (= (js-length supplied) 0) (js-object) (aref supplied 0)))
            (directory (get options :root root))

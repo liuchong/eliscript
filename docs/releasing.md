@@ -123,66 +123,34 @@ pass `allow_local_verified_gate=true` (still rejecting any queued or in-progress
 runs on that commit). The package is publishable in manifest terms; there is no
 `private: true` latch to remove.
 
-The working candidate version is `0.1.3`. Preparing its quality does not authorize npm
+The working candidate version is `0.1.4`. Preparing its quality does not authorize npm
 publication, a GitHub Release or a signed release tag.
 
-### 0.1.3 candidate quality checklist
+### 0.1.4 candidate quality checklist
 
 - [x] Benchmark each version using that version's own source build; reject a
   missing compiler instead of falling back to another checkout.
 - [x] Implement real workload checks before timing, use the same Vector and
   reference-identity inputs in GNU Emacs and Eliscript, and enforce PERF-02 on
   unrounded measurements before producing release assets.
-- [ ] Complete the current candidate's four-dimension benchmark and resolve
-  substantive performance failures. Of the 14 retained performance/capacity
-  reports, nine now have passing measurements authenticated against the final
-  Stage3: compiler runtime scanning, IR-kind decisions, binary comparison
-  emission, HAMT layout, core performance, Emacs analysis, analysis soak,
-  worker lifecycle soak and the full 256 MiB value-stream probe. The probe
-  retains its original 2048/1024/2560 MiB budgets; HAMT retains the measured
-  32/24 thresholds across Bun, Node 24 and Chrome. The four Emacs workloads
-  were measured again after the process-sentinel fix; their real gates and
-  cleanup also pass the artifact-stage regression.
-  Five report units failed numerically under that same final Stage3:
-  Reader complete-compiler speedup 1.030099 against 1.08; SourceMap
-  pipeline/compiler 1.028734/0.982600 against 1.5/1.08; indentation 4.446816
-  against 10; transient Vector 0.772851 against 1.5; mark location 1.091314
-  against 1.75. Transient allocation 0.269549 passes its separate 1/3 bound.
-  Removing redundant loop-control work from the shared indentation and
-  location checksums preserves their checksum values and original parameters.
-  One full measurement per changed harness still fails: indentation 5.374567
-  against 10 and location 1.039105 against 1.75. These are harness-cost
-  reductions, with no production emitter speedup or passing decision claimed.
-  A later native-try emission candidate also failed its original SourceMap
-  gates (1.040186/0.957035 against 1.5/1.08), transient Vector gate
-  (0.830965 against 1.5), and full version comparison (13/18). It was
-  withdrawn. The independent fixes that prevent quoted `await`/`recur` data
-  from changing AST control flow and the public try regressions are retained.
-  Core now passes all 11 original budgets across three independent processes
-  and seven samples per path; clean-build median/maximum/spread are
-  18.573 ms/20.325 ms/1.105. The previous failures remain in the active plan.
-  The five historical passing reports retain their accepted Git bytes and do
-  not establish current acceptance. Their current-source checks still reject
-  the stale evidence; failed fresh measurements are recorded in the checklist.
-  Failed measurements retain their original thresholds; no unchanged failure
-  is rerun to obtain a favorable sample.
-  The latest local comparison isolates every workload in its own process in
-  both languages, retaining the original timed expressions, calibration and
-  sample counts. Each worker has a ten-second deadline; independent failures
-  are collected before the run fails without printing a partial report.
-  The final-Stage3 comparison has all nine medians below native Emacs, and six
-  also pass against 0.1.2. It rejects take-last (0.179785 vs 0.148862
-  microseconds/op), zipper (1.095898 vs 1.057777 ms/op), and numeric scoring
-  (1.506457 vs 1.504721 ms/op), using the unrounded values. Last-element access
-  and reference equality pass this run; their earlier failures remain in the
-  checklist and are not claimed as permanently resolved JIT behavior.
-  The prior major dimension is absent in 0.x. This completed comparison is not
-  final candidate acceptance. Sample variation, clock calibration and process
-  isolation do not waive a slower unrounded median or close the performance gate.
-- [ ] Prepare the final 0.1.3 candidate and validate its clean source build,
-  installed JS/WASM/native package and necessary functional regression.
-- [ ] Complete all four required checks on the final candidate commit, obtain
-  the final independent acceptance, and clean used generated outputs.
+- [x] Verify all 14 source-bound performance/capacity reports against the prepared
+  Stage 3 compiler (`Emacs 32.0.50`, `Bun 1.4.5`, `Node 24.22.3`), complete
+  core acceptance (`acceptance/runs/m13-01.json` & `acceptance/finalize`: 35/35
+  pass, 0 blocking defects), and include `COPYING.RUNTIME` under GPLv3 Section 7.
+- [x] Refresh `benchmarks/core-performance-macos-arm64.json` for `package.json`
+  `0.1.4` and complete the current candidate's four-dimension version comparison
+  benchmark (`bun run benchmark:version-comparison -- --release-dir dist/release-report`)
+  against GNU Emacs 32.0.50 and `v0.1.3` (9/9 workloads pass: 4.94x–1769.21x vs
+  Emacs 32.0.50, 1.00x–22.20x vs `v0.1.3`).
+- [x] Prepare the final `0.1.4` candidate and validate its clean source build,
+  355-file Stage 2/Stage 3 fixed point, `eliscript-0.1.4.tgz` payload
+  (5,516,281 bytes, < 5.8 MB), `dist/browser/compiler.js` (316,018 bytes,
+  < 900 KB), and installed JS/WASM/native consumer execution (8/8 checks pass).
+- [ ] Refresh `acceptance/runs/m13-01.json`, `acceptance/manifest.json` and the
+  local compatibility matrix on the signed candidate commit, complete all four
+  required remote CI workflows (`Compatibility`, `Browser compatibility`,
+  `Compiler bootstrap and final outputs`, `Pages`), and obtain explicit
+  maintainer authorization before tagging `v0.1.4` or publishing to npm.
 
 Already-cased ASCII now returns the identical primitive text; changed ASCII
 and every non-ASCII value still use the selected Unicode 15.1/16/17 tables
@@ -267,20 +235,23 @@ can be accepted after checking duplication, growth proportion and installation
 cost, with actual bytes and the reason documented before adjusting the automated
 budget. Required source and debug assets take priority over shaving a few bytes.
 
-The current clean-build package measures 5,304,081 bytes (734 entries,
-34,482,842 bytes unpacked), an audited +545,709 byte (+11.5%) growth over the
-previous 4,758,372 byte clean-build baseline driven by the complete standard
-library expansion (`async`, `bit`, `data`, `devtools`, `diff`, `fn`, `math`,
-`meta`, `pprint`, `regex`, `schema`, `seq`, `set`, `state`, `string`, `tap`,
-`test`, `time`, `uuid`, `walk`), runtime/compiler modules, and three-target
-performance improvements (`memory.eli`, `managed.eli`, `native.eli`, `wasm.eli`,
-`sha256.eli`). Clean installation and installed JS/WASM/native execution pass
+The current `0.1.4` clean-build package (`eliscript-0.1.4.tgz`) measures
+5,516,281 bytes (794 entries, 35,948,345 bytes unpacked), within the audited
+5.8 MB (`5,800,000` byte) ceiling, while `dist/browser/compiler.js` measures
+316,018 bytes (< 900,000 bytes). The prior step over the older 4,758,372 byte
+baseline (to 5,304,081 bytes / 734 entries / 34,482,842 bytes unpacked) and the
+latest additions reflect the complete standard library expansion (`async`,
+`bit`, `data`, `devtools`, `diff`, `fn`, `math`, `meta`, `pprint`, `regex`,
+`schema`, `seq`, `set`, `state`, `string`, `tap`, `test`, `time`, `uuid`,
+`walk`), runtime/compiler modules (`zipper.eli`, `file-workers.eli`), and
+three-target performance improvements (`memory.eli`, `managed.eli`, `native.eli`,
+`wasm.eli`, `sha256.eli`). Clean installation and installed JS/WASM/native execution pass
 all functional checks. Zero duplicate payloads of at least 1 MB occur, and the
 full Lisp frontend, maintained compiler sources, and certified source maps
 (`dist/**/*.mjs.map`) remain in the package. Rather than stripping required
-sources or source maps, the automated ceiling is adjusted from 5 MB to
-5.8 MB (`5,800,000` bytes). Any future increase still requires a payload audit and
-does not waive version comparison or strict performance/capacity gates.
+sources or source maps, the automated ceiling remains 5.8 MB (`5,800,000`
+bytes). Any future increase still requires a payload audit and does not waive
+version comparison or strict performance/capacity gates.
 
 The browser loader's unbundled `dist/browser/loader.mjs` is a disposable build
 intermediate. `build:browser` removes it after producing `loader.js`, and the

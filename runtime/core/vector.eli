@@ -661,7 +661,7 @@
 
   (defconst bulk-vector-from-array
     (funcall
-      (js* "(Ctor, VecNode, tok, allocTail, recGrowth) => (arr, n) => { const tailOff = ((n - 1) >>> 5) << 5; const numLeaves = tailOff >>> 5; let nodes = []; for (let b = 0; b < numLeaves; b = (b + 1) | 0) nodes.push(new VecNode(allocTail(arr.slice(b << 5, (b + 1) << 5)))); const tail = allocTail(arr.slice(tailOff, n)); let shift = 0; do { shift = (shift + 5) | 0; if (shift > 5) recGrowth(); const pCount = (nodes.length + 31) >>> 5; const parents = []; for (let p = 0; p < pCount; p = (p + 1) | 0) parents.push(new VecNode(nodes.slice(p << 5, (p + 1) << 5))); nodes = parents; } while (nodes.length > 1); return new Ctor(tok, n, shift, nodes[0], tail, null); }")
+      (js* "(Ctor, VecNode, tok, allocTail, recGrowth) => (arr, n) => { const tailOff = ((n - 1) >>> 5) << 5; const numLeaves = tailOff >>> 5; let nodes = new Array(numLeaves); for (let b = 0; b < numLeaves; b = (b + 1) | 0) nodes[b] = new VecNode(allocTail(arr.slice(b << 5, (b + 1) << 5))); const tail = allocTail(arr.slice(tailOff, n)); let shift = 0; do { shift = (shift + 5) | 0; if (shift > 5) recGrowth(); const pCount = (nodes.length + 31) >>> 5; const parents = new Array(pCount); for (let p = 0; p < pCount; p = (p + 1) | 0) parents[p] = new VecNode(nodes.slice(p << 5, (p + 1) << 5)); nodes = parents; } while (nodes.length > 1); return new Ctor(tok, n, shift, nodes[0], tail, null); }")
       PersistentVector VectorNode VECTOR_CONSTRUCTOR_TOKEN allocateTail recordRootGrowth))
 
   (defun vector-from-array (iterable)
@@ -995,12 +995,20 @@
                               (chunk-len (aref chunk "length"))
                               (chunk-end (if (index-less? rem-end chunk-len) rem-end chunk-len))
                               (offset chunk-offset))
-                         (while (index-less? offset chunk-end)
-                           (if (index-less? out-index BRANCH_WIDTH)
+                         (when (index-less? out-index BRANCH_WIDTH)
+                           (let* ((avail (index-subtract chunk-end offset))
+                                  (room (index-subtract BRANCH_WIDTH out-index))
+                                  (take (if (index-less? avail room) avail room))
+                                  (first-limit (index-add offset take)))
+                             (while (index-less? offset first-limit)
                                (put first out-index (aref chunk offset))
-                               (let ((second-idx (index-subtract out-index BRANCH_WIDTH)))
-                                 (put second second-idx (aref chunk offset))))
-                           (setq out-index (index-add out-index 1) offset (index-add offset 1)))
+                               (setq out-index (index-add out-index 1) offset (index-add offset 1)))))
+                         (when (index-less? offset chunk-end)
+                           (let ((second-idx (index-subtract out-index BRANCH_WIDTH)))
+                             (while (index-less? offset chunk-end)
+                               (put second second-idx (aref chunk offset))
+                               (setq second-idx (index-add second-idx 1) offset (index-add offset 1)))
+                             (setq out-index (index-add second-idx BRANCH_WIDTH))))
                          (setq index (index-add chunk-base chunk-end))))
                      (if (index-greater? second-length 0)
                          (make-vector length BRANCH_BITS

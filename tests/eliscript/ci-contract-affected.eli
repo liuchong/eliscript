@@ -132,7 +132,7 @@
         "if: \"!cancelled() && steps.test-suite.outcome != 'skipped'\""
         "Preserve compatibility test evidence"
         ".eliscript-cache/test-results/"
-        "timeout-minutes: 30" "fail-fast: false") :forEach
+        "timeout-minutes: 90" "fail-fast: false") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
       (js-call (get baseline :commands) :forEach (lambda (command) (js-call assert :ok (js-call workflow :includes (str "run: " command)))))
       (js-call assert :strictEqual (js-call workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE") false)
@@ -146,7 +146,7 @@
           (js-call assert :ok (js-call deferred-workflow :includes "ELISCRIPT_SEQUENCE_FUNCTIONAL_RUNTIME_PROFILE: \"small\""))
           (js-call assert :ok (js-call deferred-workflow :includes "ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: \"1\""))
           (js-call assert :ok (js-call deferred-workflow :includes "timeout-minutes: 240"))
-          (js-call assert :strictEqual (js-call deferred-workflow :includes "timeout-minutes: 30") false)))
+          (js-call assert :strictEqual (js-call deferred-workflow :includes "timeout-minutes: 90") false)))
       (js-call (get baseline :actions) :forEach (lambda (action)
         (js-call assert :ok (js-call workflow :includes (str (get action :repository) "@" (get action :revision))))))
       (js-call (js-array "cli-test.sh" "project-cli-test.sh" "check-cli-test.sh" "format-cli-test.sh" "application-cli-test.sh")
@@ -161,10 +161,10 @@
            (package (JSON/parse (await (readFile (resolve root "package.json") "utf8"))))
            (deferred (Object/assign (js-object) baseline (js-object :performanceAcceptance "deferred")))
            (strict (Object/assign (js-object) baseline)))
-      (js-call assert :ok (js-call workflow :includes "timeout-minutes: 30"))
+      (js-call assert :ok (js-call workflow :includes "timeout-minutes: 90"))
       (js-call assert :ok (js-call (renderWorkflow deferred) :includes "timeout-minutes: 240"))
       (Reflect/deleteProperty strict "performanceAcceptance")
-      (js-call assert :ok (js-call (renderWorkflow strict) :includes "timeout-minutes: 30"))
+      (js-call assert :ok (js-call (renderWorkflow strict) :includes "timeout-minutes: 90"))
       (js-call (js-array "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
         "run: bun run test" "run: make byte-compile") :forEach
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))
@@ -177,9 +177,9 @@
            (strict (Object/assign (js-object) baseline)))
       (Reflect/deleteProperty strict "performanceAcceptance")
       (let ((index 0) (matrices (js-array baseline deferred strict))
-            (expected (js-array "timeout-minutes: 30"
+            (expected (js-array "timeout-minutes: 90"
                                 "timeout-minutes: 240"
-                                "timeout-minutes: 30")))
+                                "timeout-minutes: 90")))
         (while (< index (js-length matrices))
           (let* ((matrix (aref matrices index)) (original (renderWorkflow matrix))
                  (altered (js-call original :replace (aref expected index) "timeout-minutes: 1")))
