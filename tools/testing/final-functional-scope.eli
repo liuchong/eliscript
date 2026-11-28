@@ -348,13 +348,18 @@
                        (kind (get plan :kind))
                        (file (get plan :file))
                        (heavy (or (= kind "sequence") (= kind "mixed") (isHeavyParallelTestFile file)))
+                       (small-host-exclusive (and (<= (get parallel-config :maxWorkers) 2)
+                                                  (js-call (js-array "compiler-package-session.test.mjs"
+                                                                     "reader-program-fuzz-acceptance-selfhosted.test.mjs")
+                                                           :includes (basename file))))
+                       (exclusive (or (isSharedBuilderTestFile file) small-host-exclusive))
                        (wire-call-sharded (and shard (wireCallProfile environment) (= (basename file) (basename wire-runtime-file))))
                        (shard-count (if (and can-intra-shard (not wire-call-sharded))
                                       (or (js-call INTRA_FILE_SHARDS :get (basename file)) 1)
                                       1)))
                   (if (<= shard-count 1)
                     (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
-                      :exclusive (isSharedBuilderTestFile file)
+                      :exclusive exclusive
                       :shardIndex 0 :shardCount 1
                       :weight (if profile (estimateTestWeight profile file (testFileWeight file)) (testFileWeight file))
                       :estimatedRssBytes (if profile (estimateTestRssBytes profile file heavy) (* 512 1024 1024))))
@@ -366,7 +371,7 @@
                       (while (< s shard-count)
                         (js-call bucket :push nil)
                         (js-call lpt-items :push (js-object :index plan-idx :plan plan :heavy heavy
-                          :exclusive (isSharedBuilderTestFile file)
+                          :exclusive exclusive
                           :shardIndex s :shardCount shard-count :weight per-weight :estimatedRssBytes est-rss))
                         (setq s (1+ s)))
                       (js-call shard-buckets :set plan-idx bucket))))))

@@ -73,9 +73,9 @@
         (lambda (text) (js-call assert :ok (js-call workflow :includes text))))))
   (defasync runCompatibilityWorkflowCase ()
     (let ((report (await (checkCompatibilityWorkflow (js-object :root root)))))
-      (js-call assert :strictEqual (get report :jobs) 3)
-      (js-call assert :strictEqual (get report :acceptanceJobs) 1)
-      (js-call assert :strictEqual (get report :testFileShards) 1)
+      (js-call assert :strictEqual (get report :jobs) 9)
+      (js-call assert :strictEqual (get report :acceptanceJobs) 3)
+      (js-call assert :strictEqual (get report :testFileShards) 3)
       (js-call assert :deepStrictEqual (js-call (get report :systems) :map (lambda (system) (get system :id)))
         (js-array "linux" "linux-arm64" "macos"))
       (js-call assert :deepStrictEqual (js-call (get report :systems) :find (lambda (system) (= (get system :id) "linux-arm64")))
@@ -93,36 +93,39 @@
            (makefile (await (readFile (resolve root "Makefile") "utf8")))
            (workflow (renderWorkflow baseline)) (validated (validateCompatibilityMatrix baseline))
            (rows (Array/from (js-call workflow :matchAll (new globalThis.RegExp
-             "          - name: ([^\\n]+)\\n            os: ([^\\n]+)\\n            architecture: ([^\\n]+)\\n            emacs: \"([^\"\\n]+)\"\\n            emacsCommit: \"([^\"\\n]+)\"$" "gm"))))
+             "          - name: ([^\\n]+)\\n            os: ([^\\n]+)\\n            architecture: ([^\\n]+)\\n            emacs: \"([^\"\\n]+)\"\\n            emacsCommit: \"([^\"\\n]+)\"\\n            shard: (\\d+)$" "gm"))))
            (inventories (js-call (js-array "test-core" "test-applications") :map (lambda (target)
              (let* ((start (js-call makefile :indexOf (str target ":")))
                     (end (js-call makefile :indexOf "\n\n" start)))
                (Array/from (js-call (js-call makefile :slice start end) :matchAll
                  (new globalThis.RegExp "[.]/tests/[a-z0-9-]+[.]test[.]mjs" "g"))
                  (lambda (match) (aref match 0))))))))
-      (js-call assert :strictEqual (get validated :jobs) 3)
-      (js-call assert :strictEqual (get validated :acceptanceJobs) 1)
-      (js-call assert :strictEqual (get validated :testFileShards) 1)
+      (js-call assert :strictEqual (get validated :jobs) 9)
+      (js-call assert :strictEqual (get validated :acceptanceJobs) 3)
+      (js-call assert :strictEqual (get validated :testFileShards) 3)
       (js-call assert :strictEqual (js-length rows) (get validated :jobs))
       (js-call assert :strictEqual (js-length inventories) 2)
       (js-call inventories :forEach (lambda (files)
-        (js-call assert :ok (> (js-length files) 20))
-        (js-call assert :strictEqual (get (new globalThis.Set files) :size) (js-length files))
-        (js-call assert :deepStrictEqual (partitionTestFiles files 1 1) files)))
+        (let ((sharded (js-call (js-array 1 2 3) :flatMap (lambda (s) (partitionTestFiles files s 3)))))
+          (js-call assert :ok (> (js-length files) 20))
+          (js-call assert :strictEqual (get (new globalThis.Set files) :size) (js-length files))
+          (js-call assert :strictEqual (js-length sharded) (js-length files))
+          (js-call assert :strictEqual (get (new globalThis.Set sharded) :size) (js-length files)))))
       (js-call assert :deepStrictEqual
-        (js-call rows :map (lambda (row) (js-object :name (aref row 1) :os (aref row 2) :arch (aref row 3) :emacs (aref row 4) :emacsCommit (aref row 5))))
-        (js-array
+        (js-call rows :map (lambda (row) (js-object :name (aref row 1) :os (aref row 2) :arch (aref row 3) :emacs (aref row 4) :emacsCommit (aref row 5) :shard (globalThis.Number (aref row 6)))))
+        (js-call (js-array
           (js-object :name "linux-emacs-32.0.50" :os "ubuntu-24.04" :arch "x64" :emacs "32.0.50" :emacsCommit "fd7afced4036fc1a221567d70705d20a2bd64713")
           (js-object :name "linux-arm64-emacs-32.0.50" :os "ubuntu-24.04-arm" :arch "arm64" :emacs "32.0.50" :emacsCommit "fd7afced4036fc1a221567d70705d20a2bd64713")
-          (js-object :name "macos-emacs-32.0.50" :os "macos-15" :arch "arm64" :emacs "32.0.50" :emacsCommit "fd7afced4036fc1a221567d70705d20a2bd64713")))
+          (js-object :name "macos-emacs-32.0.50" :os "macos-15" :arch "arm64" :emacs "32.0.50" :emacsCommit "fd7afced4036fc1a221567d70705d20a2bd64713"))
+          :flatMap (lambda (machine) (js-call (js-array 1 2 3) :map (lambda (s) (Object/assign (js-object) machine (js-object :name (str (get machine :name) "-shard-" s "-of-3") :shard s)))))))
       (js-call (js-array
         "on:\n  workflow_dispatch:\n\n"
         "EMACS_COMMIT: ${{ matrix.emacsCommit }}"
         "git -C \"$RUNNER_TEMP/emacs-src\" fetch --depth 1 origin \"$EMACS_COMMIT\""
         "test \"$(git -C \"$RUNNER_TEMP/emacs-src\" rev-parse HEAD)\" = \"$EMACS_COMMIT\""
         "test \"$(emacs --version | head -n 1)\" = \"GNU Emacs ${{ matrix.emacs }}\""
-        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs"
-        "Run test file shard 1/1"
+        "BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 3"
+        "Run test file shard ${{ matrix.shard }}/3"
         "Build the prepared stage3"
         "run: make bootstrap-release"
         "Prepare the release package"

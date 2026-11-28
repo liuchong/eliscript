@@ -4,7 +4,7 @@
   (import "node:path" resolve)
   (import "../backends/build.mjs" root)
   (import "./render-workflow-ground.mjs" :as ground)
-  (defconst COMPATIBILITY_FILE_SHARDS 1)
+  (defconst COMPATIBILITY_FILE_SHARDS 3)
   (defconst compatibility-artifact-action
     (get (JSON/parse (readFileSync (resolve root "contracts/browser-compatibility.json") "utf8")) :artifactAction))
   (defconst CompatibilityMatrixError (get ground :CompatibilityMatrixError))
@@ -30,8 +30,8 @@
            (pairs (compatibility-job-pairs (get validated :systems) (get validated :emacsVersions) installs))
            (acceptance-pairs (compatibility-job-pairs (get validated :acceptanceSystems) (get validated :emacsVersions) installs)))
       (Object/assign (js-object) validated (js-object :testFileShards COMPATIBILITY_FILE_SHARDS
-        :jobs (js-length pairs)
-        :acceptanceJobs (js-length acceptance-pairs)))))
+        :jobs (* (js-length pairs) COMPATIBILITY_FILE_SHARDS)
+        :acceptanceJobs (* (js-length acceptance-pairs) COMPATIBILITY_FILE_SHARDS)))))
   (defun renderWorkflow (matrix)
     (let* ((validated (validateCompatibilityMatrix matrix)) (original (js-call ground :renderWorkflow matrix))
            (marker "        include:\n") (start (+ (js-call original :indexOf marker) (js-length marker)))
@@ -40,18 +40,21 @@
       (unless (and (>= (js-call original :indexOf marker) 0) (> end start))
         (throw (new CompatibilityMatrixError (js-array "workflow matrix boundaries are missing"))))
       (js-call pairs :forEach (lambda (pair)
-        (let ((system (get pair :system)) (version (get pair :emacs)))
-          (js-call rows :push (str "          - name: " (get system :id) "-emacs-" version
-            "\n            os: " (get system :runner) "\n            architecture: " (get system :architecture)
-            "\n            emacs: \"" version "\""
-            "\n            emacsCommit: \"" (get pair :commit) "\"")))))
+        (let ((system (get pair :system)) (version (get pair :emacs)) (shard 1))
+          (while (<= shard COMPATIBILITY_FILE_SHARDS)
+            (js-call rows :push (str "          - name: " (get system :id) "-emacs-" version "-shard-" shard "-of-" COMPATIBILITY_FILE_SHARDS
+              "\n            os: " (get system :runner) "\n            architecture: " (get system :architecture)
+              "\n            emacs: \"" version "\""
+              "\n            emacsCommit: \"" (get pair :commit) "\""
+              "\n            shard: " shard))
+            (setq shard (+ shard 1))))))
       (let ((text (str (js-call original :slice 0 start) (js-call rows :join "\n") "\n" (js-call original :slice end))))
         (setq text (js-call (js-call (js-call (js-call (js-call text
           :replace "on:\n  push:\n    branches: [master]\n  pull_request:\n  workflow_dispatch:\n\n"
           "on:\n  workflow_dispatch:\n\n")
           :replace "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 2\n"
-          "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs\n")
-          :replace "Run test file shard ${{ matrix.shard }}/2" "Run test file shard 1/1")
+          (str "      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count " COMPATIBILITY_FILE_SHARDS "\n"))
+          :replace "Run test file shard ${{ matrix.shard }}/2" (str "Run test file shard ${{ matrix.shard }}/" COMPATIBILITY_FILE_SHARDS))
           :replace "        run: bun run test\n" "        id: test-suite\n        run: bun run test\n")
           :replace "      - name: Strict byte compilation\n        run: make byte-compile\n"
           (+ "      - name: Strict byte compilation\n"
@@ -67,7 +70,7 @@
              "          if-no-files-found: warn\n")))
         (setq text (js-call text
           :replace (new globalThis.RegExp
-            "      - name: (Run test file shard 1/1(?: \\(performance reacceptance deferred\\))?)\\n        id: test-suite\\n        run: bun run test\\n")
+            "      - name: (Run test file shard \\$\\{\\{ matrix\\.shard \\}\\}/3(?: \\(performance reacceptance deferred\\))?)\\n        id: test-suite\\n        run: bun run test\\n")
           (+ "      - name: Build the prepared stage3\n"
              "        run: make bootstrap-release\n"
              "      - name: Prepare the release package\n"

@@ -196,13 +196,18 @@
                          (and (not (nil? worker-override)) (> worker-override 1))))
            (cpu-count (Math/max 1 (js-length (cpus))))
            (mem-gib (Math/max 1 (Math/floor (/ (totalmem) 1073741824))))
-           (default-workers (if (<= cpu-count 4)
-                              (Math/max 2 (1- cpu-count))
-                              (Math/min 8 (Math/max 4 (Math/floor (* cpu-count 0.5))))))
-           (default-heavy (if (<= cpu-count 4)
+           (low-spec (or (<= cpu-count 3) (<= mem-gib 8)))
+           (default-workers (cond
+                              (low-spec 1)
+                              ((<= cpu-count 4) 2)
+                              (t (Math/min 8 (Math/max 4 (Math/floor (* cpu-count 0.5)))))))
+           (default-heavy (if (or low-spec (<= cpu-count 4))
                             1
                             (Math/min 4 (Math/max 2 (Math/floor (/ mem-gib 14))))))
-           (default-node (Math/min 8 (Math/max 3 (Math/floor (/ cpu-count 2)))))
+           (default-node (cond
+                           (low-spec 1)
+                           ((<= cpu-count 4) 2)
+                           (t (Math/min 8 (Math/max 3 (Math/floor (/ cpu-count 2)))))))
            (default-agg (Math/min 21474836480 (Math/max 8589934592 (Math/floor (* (totalmem) 0.65)))))
            (max-workers (if parallel (or worker-override default-workers) FILE_WORKERS))
            (heavy-workers (if parallel (Math/min max-workers (or heavy-override default-heavy)) 1))
