@@ -350,7 +350,9 @@
                        (heavy (or (= kind "sequence") (= kind "mixed") (isHeavyParallelTestFile file)))
                        (small-host-exclusive (and (<= (get parallel-config :maxWorkers) 2)
                                                   (js-call (js-array "compiler-package-session.test.mjs"
-                                                                     "reader-program-fuzz-acceptance-selfhosted.test.mjs")
+                                                                     "reader-program-fuzz-acceptance-selfhosted.test.mjs"
+                                                                     "wasm-managed-regexp.test.mjs"
+                                                                     "wasm-managed-project-linking.test.mjs")
                                                            :includes (basename file))))
                        (exclusive (or (isSharedBuilderTestFile file) small-host-exclusive))
                        (wire-call-sharded (and shard (wireCallProfile environment) (= (basename file) (basename wire-runtime-file))))
