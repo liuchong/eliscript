@@ -1,9 +1,9 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `7467dd2c314207a3e89f5e38bf8a08c0e4d45910`
-- Source tree: `d31e8156cbeb13c959532b9766c554acecdb37bf`
+- Source commit: `cc5e176e37f2047e679f1eb3f293c197a3704779`
+- Source tree: `164e860cae91b855da06592b796e8d05e5ccaa88`
 - Contract: `contracts/final-acceptance.json` (`032dc718b8d00fd681b52e889c267ed18e39bfffd0ae10759d2c31ee46a8e58d`)
-- Generated: 2026-11-27T17:45:41.047Z
+- Generated: 2026-11-28T04:30:48.459Z
 - Environment: Darwin 27.2.0; arm64; Bun 1.4.5; Node v24.22.3; Emacs 32.0.50
 - Corpus complete: yes
 - Operational success: yes
@@ -80,17 +80,17 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 754422.096 | `c7fa196b6f91a382f653e3a1ca045502e41864219c65d573205a68b861f0a242` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 1874.76 | `aa1548c368350af36c74e9b272fa3ffdd33c47c1e30ed761b17fc923c86603f3` |
+| core-suite | `make test-core` | pass | 0 | 784868.582 | `f36dd2a6e3212eea3172237cdb17819742bf333404808760fb6a5c2d31fe2b27` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 2479.915 | `aa1548c368350af36c74e9b272fa3ffdd33c47c1e30ed761b17fc923c86603f3` |
 
 ## Artifact Digests
 
 | File | SHA-256 |
 | --- | --- |
-| `.github/workflows/compatibility.yml` | `556197b2723127a3e7b76f5b090fa1b9947fa7bb711ac8f3a9cfe20ced1cf199` |
+| `.github/workflows/compatibility.yml` | `2af20fbf73ba6839c9709cede3fcdf395ad27a1fd4bb42c31138b942b253ac38` |
 | `acceptance/defects.json` | `d1868b3aa2fd71385ad40c6ef90825b91007b5ba499184c1a18e8da765513c38` |
-| `acceptance/manifest.json` | `69ca87a310848b0a057efb3eda9187c8b8178f2014298cd30a759635a7f1df86` |
-| `acceptance/report.md` | `160bf94a356fd0d2c97cc651893bde30286224a89d9ddc9e027038599e2ad786` |
+| `acceptance/manifest.json` | `204e70c86dbe231f7335f20ec5c5fdead63744f225b231f16737dfc12130792f` |
+| `acceptance/report.md` | `c28a42344289baa4a6b5388bb4d7a36afd3b00ccd66cefd7267e79f195cc68f1` |
 | `acceptance/runs/m13-02.json` | `ecc76c13bb518c05fff821251c5c7c4edefe0bd69ebd23bac8e3c5ca36d77b8d` |
 | `acceptance/runs/m13-04.json` | `0171f940378642a14e9fae7499e3388b8923b2bbeee5bc0e5a852300f3da4fb7` |
 | `acceptance/runs/m13-04.md` | `9e6a73d9c16c496659638f4f17b6cc62a260eed12f8d4e33b13f906a3b5ffcd6` |
