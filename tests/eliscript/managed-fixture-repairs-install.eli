@@ -124,7 +124,7 @@
           (let ((result (Reflect/apply compile compiler forwarded)))
             (when (and (= kind "native-prototype") (= (aref inputs 1) "native-prototype-callables.eli"))
               (setq native-program result))
-            (when (= (aref inputs 1) "runtime.eli") (setq runtime result))
+            (when (= (aref inputs 1) "runtime.eli") (setq runtime (Object/freeze result)))
             (when (and (= kind "text-error-priority") (= (aref inputs 1) "operand-conversion.eli")) (setq operand-program result)) result))))
       ;; The JS and managed emitters receive the same maintained fixture source.
       (when (= kind "persistent-boundary")
